@@ -177,7 +177,7 @@ flowchart LR
         C4["S2+S3 · bytes readable, then loaded into GPU HBM"]
         C5["S4 · engine init: CUDA ctx, memory profiling,<br/>KV alloc, graph capture"]
         C6["S5 · server ready"]
-        C7["S6 · cold TTFT"]
+        C7["S6+S7 · 10 sequential requests<br/>cold TTFT, then time-to-fast"]
         C1 --> C2
         C2 --> C3A --> C4
         C2 --> C3B --> C4
@@ -205,7 +205,8 @@ the two arms differ, which is what makes this a clean single-variable manipulati
 ### Question
 
 On a serverless GPU platform, how is cold-start latency for an 8B vLLM deployment distributed
-across stages, and how much of it does weight caching actually remove?
+across stages, how much of it does weight caching actually remove, and how long after the
+replica reports healthy does it actually serve at steady-state latency?
 
 ### Platform and configuration
 
@@ -214,7 +215,7 @@ across stages, and how much of it does weight caching actually remove?
 | Platform | RunPod serverless | Cheapest per GPU-second, so the budget buys hundreds of cold starts rather than dozens — which is what makes distribution reporting possible instead of mean reporting. Full control of the container image. |
 | GPU | One pinned 24 GB SKU (A10-class or L4-class) | Cheapest tier holding 16 GB of weights with KV-cache headroom. Selection rule: cheapest 24 GB SKU with adequate serverless availability in a single region; frozen once selected and stated in the post. |
 | Region | One, pinned | Removes region as a variance source. |
-| Model | Qwen3-8B instruct, fp16, ~16 GB, exact revision hash pinned and published | Ungated weights: a reader can reproduce without a license-approval step. Gated checkpoints would quietly break the reproducibility claim, which is load-bearing. 8B is where weight fetch is a real multi-tens-of-seconds term and is representative of latency-sensitive deployments. |
+| Model | Qwen3-8B instruct, **checkpoint-native dtype (bf16, not fp16)**, ~16 GB, exact revision hash pinned and published | Ungated weights: a reader can reproduce without a license-approval step. Gated checkpoints would quietly break the reproducibility claim, which is load-bearing. 8B is where weight fetch is a real multi-tens-of-seconds term and is representative of latency-sensitive deployments. **Dtype must match the checkpoint.** Qwen ships bf16; loading it as fp16 inserts a conversion pass *inside the stage being measured*, contaminating the primary metric with work that exists only because of a configuration mistake. |
 | Framework | vLLM, version pinned | Most widely deployed and most recognizable to the target audience. Emits timestamped startup phases, so much of the waterfall is instrumentation to *verify* rather than invent. Readers can grep their own logs for the same phase names. |
 
 Platform caveat accepted deliberately: serverless platforms hide some stage boundaries behind
@@ -250,12 +251,30 @@ was not retrofitted to the result.
 | `S3` HBM load | load begins | weights resident on GPU | clock B |
 | `S4` engine init | post-load | CUDA context, memory profiling, KV alloc, graph capture complete | clock B + vLLM logs |
 | `S5` ready | engine up | server reports healthy | clock B |
-| `S6` cold TTFT | request dispatched | first token emitted | clock B |
+| `S6` cold TTFT | request 1 dispatched | first token of request 1 emitted | clock B |
+| `S7` warmup curve | request 1 dispatched | request 10 complete | clock B |
 
 **Primary comparison unit is `T_weights = S2 + S3`, not `S2` alone.** In the cached arm,
 weights may be memory-mapped from the volume rather than copied, fusing acquisition and HBM
 load into one lazy operation with no clean boundary. Comparing `S2` across arms would measure
 an artifact of how each arm happens to be structured rather than the thing intervened on.
+
+**One request measures readiness; ten measure competence.** A single `max_tokens=1` request
+answers "when did the first token appear," which is not the question an operator has. The
+operational question is **time-to-ready versus time-to-fast**: a replica that passes its health
+check but serves its first several requests at multiples of steady-state latency is a replica
+that will damage p99 during exactly the scale-up event cold start exists to describe — and the
+load balancer routing to it cannot tell. So `S6` is the cold first-token measurement and `S7`
+records the full per-request latency curve across ten sequential identical requests, from which
+time-to-fast is derived. The marginal cost is a few seconds per run on GPU time already paid
+for.
+
+**Engine init has already run a forward pass — `S6` is not a cold execution path.** vLLM's
+memory profiling executes a dummy forward pass during `S4` to determine how many KV cache
+blocks fit in available HBM. By the time the first real request arrives, allocator state,
+kernel selection, and some caches are already warm. `S6` therefore measures first *served*
+token, not first-ever execution, and the post must say so. This also means any warmup curve
+observed in `S7` is a floor on the true cold-execution penalty rather than the whole of it.
 
 ### Variables
 
@@ -263,12 +282,15 @@ an artifact of how each arm happens to be structured rather than the thing inter
 network volume.
 
 **Held fixed:** GPU SKU, region, vLLM version, model revision hash, container image digest,
-`max_model_len`, `gpu_memory_utilization`, dtype fp16, tensor parallel = 1, graph capture on,
-identical warmup prompt, `max_tokens=1` for the TTFT measurement, one cold start in flight at
-a time.
+`max_model_len`, `gpu_memory_utilization`, dtype = checkpoint-native bf16, tensor parallel = 1,
+graph capture on, one identical fixed prompt, a fixed sequence of ten sequential requests with
+fixed `max_tokens` (small but greater than 1, so decode behavior is observable and not only
+prefill), one cold start in flight at a time.
 
 **Recorded per run:** host identifier, GPU model, driver version, timestamp, arm, run index,
-and whether this host has been seen before.
+whether this host has been seen before, **KV cache blocks allocated and the resulting token
+capacity** (reported by vLLM at startup), and **per-request latency and TTFT for all ten
+warmup requests**.
 
 ### Deliberate exclusion — the baked-image arm
 
@@ -316,12 +338,20 @@ overstate it.
 
 All four outcomes are publishable, which is what makes pre-registration safe:
 
-- **Cache wins big** — clean, actionable result.
-- **Cache barely helps** — more interesting; contradicts common intuition and implies the
-  bottleneck is elsewhere.
-- **Engine init dominates both arms** — the intervention has a hard ceiling; report the bound.
 - **Residual dominates** — strongest SLO takeaway available: on rented serverless GPU, most of
-  cold start is not the operator's to fix.
+  cold start is not the operator's to fix, so scale-up SLOs have a floor set by the provider.
+- **Cache barely helps** — contradicts common intuition and implies the bottleneck is elsewhere.
+- **Engine init dominates both arms** — the intervention has a hard ceiling; report the bound.
+- **Cache wins big** — clean, actionable result, but the narrowest in scope.
+
+**Headline selection rule, fixed in advance.** The intervention result is not automatically the
+headline. If weight caching wins, the honest generalization is "this provider's volume beats
+this hub's CDN" — a fact about two vendors, with weak transfer to a reader on different
+infrastructure. The residual finding and the time-to-fast finding both generalize further,
+because they describe structural properties of serving on rented elastic capacity rather than
+properties of two storage endpoints. Whichever result carries the most transferable claim leads
+the post; the others follow. Committing to this rule before seeing the data prevents choosing
+the headline by what flatters the effort spent.
 
 ### Stopping rule
 
@@ -437,6 +467,8 @@ schema_version, run_id, run_index, arm
 clock_A: { t_submit, t_result }
 clock_C: { queued_at, started_at, completed_at }   # if exposed by the API
 clock_B: { t0, marks: [{stage, t_mono}], log_phases: [...] }
+warmup:  [ {req_index, ttft, end_to_end} × 10 ]
+engine:  { kv_cache_blocks, block_size, kv_capacity_tokens, dtype_loaded }
 host:    { host_id, gpu_model, driver_version, first_touch }
 config:  { image_digest, vllm_version, model_revision, engine_flags }
 status:  { outcome, failure_class, failure_detail }
@@ -493,17 +525,32 @@ is fully exercised against synthetic data before the first real run.
 
 | Metric | Definition |
 |---|---|
-| `T_total` | clock A, submit → first token |
-| `T_process` | clock B, `t0` → first token |
+| `T_total` | clock A, submit → first token of request 1 |
+| `T_process` | clock B, `t0` → first token of request 1 |
 | `T_platform` | residual, `T_total − T_process` |
 | `T_weights` | `S2 + S3`, the primary comparison unit |
 | stage shares | each stage as a fraction of `T_process` |
 | ceiling bound | best case achievable if `T_weights` went to zero |
+| steady-state latency | median end-to-end latency of warmup requests 8–10 |
+| `T_fast` | clock A, submit → first request within 10% of steady-state latency |
+| warmup penalty | request-1 latency ÷ steady-state latency |
+| KV capacity | allocated cache blocks converted to tokens |
 
 The ceiling bound keeps the intervention honest. If weight handling is 40% of `T_process` and
 `T_process` is 60% of `T_total`, perfect weight caching removes at most ~24% of cold start.
 Stating that bound before reporting the measured improvement prevents overselling in either
 direction.
+
+`T_fast` is the operationally meaningful number and it is always ≥ `T_total`. The gap between
+them is the interval during which a replica is receiving traffic it cannot yet serve at full
+speed. If that gap is large, cold start is worse than the headline figure suggests for anyone
+whose load balancer adds replicas on readiness — which is nearly everyone. The thresholds are
+fixed here, before data, so the definition cannot be tuned to produce a preferred result.
+
+**KV capacity connects startup to throughput.** vLLM reports allocated cache blocks at startup;
+converting that to tokens states what concurrency the configuration actually supports. Without
+it a cold-start number floats free of the capacity it buys, and a platform reader cannot use it
+for sizing.
 
 ### Statistical treatment
 
@@ -526,15 +573,19 @@ exploratory, in those words, and is never promoted to a headline claim.
 
 ### Figures
 
-Four at most, because the post has one argument.
+Four in the body, because the post has one argument. Anything else goes in an appendix.
 
 1. **The waterfall** — stacked horizontal bars, one per arm, median stage durations, platform
-   residual visually distinct from measured stages. Carries the entire argument and is the one
+   residual visually distinct from measured stages. Carries the main argument and is the one
    thing a skimming reader will look at.
-2. **ECDF of `T_total`, both arms overlaid** — distributions and tails rather than collapsed
+2. **The warmup curve** — per-request latency for requests 1–10, both arms, with the
+   steady-state band marked and `T_fast` annotated. This is the figure that shows readiness and
+   competence are different events.
+3. **ECDF of `T_total`, both arms overlaid** — distributions and tails rather than collapsed
    numbers.
-3. **Per-host medians** — the H3 evidence, showing heterogeneity directly.
-4. **Within-host paired deltas** — if the paired subset is large enough to be worth showing.
+4. **Per-host medians** — the H3 evidence, showing heterogeneity directly.
+
+Appendix: within-host paired deltas, if the paired subset is large enough to be worth showing.
 
 Constraints: no truncated axes, N stated on every figure, failure rate reported adjacent to
 latency numbers, legible on a phone, residual never colored to blend with measured stages.
@@ -556,18 +607,25 @@ running a single GPU.
 
 Ordered for two reading depths, hiring-reader payload first:
 
-1. **Lead** — the finding and the number, two sentences.
+1. **Lead** — the finding and the number, two sentences. Which finding leads is set by the
+   headline selection rule in §5, not by which result took the most effort.
 2. **The waterfall chart.**
-3. **Why this matters for a scale-up SLO** — short, concrete.
-4. **What I measured and what I cannot attribute** — the residual, stated plainly and early.
+3. **Why this matters for a scale-up SLO** — short, concrete, and including the capacity the
+   configuration buys (KV cache tokens → supported concurrency), so the number is usable for
+   sizing rather than just interesting.
+4. **Ready is not fast** — the warmup curve and `T_fast`, with the interval during which a
+   replica serves traffic below steady speed stated explicitly.
+5. **What I measured and what I cannot attribute** — the residual, stated plainly and early.
    Placing the limitation above the method is deliberate: it signals a measurement designed by
    someone who thought about it rather than defended after the fact.
-5. **Method** — platform, model, framework, arms, controls, N, link to the pre-registration commit.
-6. **Results** — distributions, host stratification, paired subset, failure rates.
-7. **Limits** — version specificity, one GPU class, one region, N supports p95 not p99, and the
-   standing storage cost of the cached arm.
-8. **Reproduce it** — repo, runbook, honest cost estimate.
-9. **What I am measuring next** — one line pointing at artifact 2. Not a promise with a date.
+6. **Method** — platform, model, framework, arms, controls, N, link to the pre-registration commit.
+7. **Results** — distributions, host stratification, warmup behavior, paired subset, failure rates.
+8. **Limits** — version specificity, one GPU class, one region, N supports p95 not p99, the
+   standing storage cost of the cached arm, the fact that memory profiling has already run a
+   forward pass before `S6` so cold TTFT is not a cold execution path, and that all measurements
+   are single-replica with no contention (see §9).
+9. **Reproduce it** — repo, runbook, honest cost estimate.
+10. **What I am measuring next** — one line pointing at artifact 2. Not a promise with a date.
 
 ### Pre-publish gate
 
@@ -614,6 +672,20 @@ Not tracked, deliberately: impressions, followers, upvotes.
 | Intervention shows no effect | Pre-registered as a publishable outcome; arguably the more interesting post. |
 | Employer-boundary contamination | Mechanical pre-publish gate (§8). |
 
+### Known limitation, stated not solved — cold-start contention
+
+Every measurement is single-replica: one cold start in flight at a time. That is the correct
+choice for isolating the intervention, and it is *not* the operationally dangerous scenario.
+The scenario that hurts is many replicas cold-starting simultaneously during a spike and
+contending for the same weight source — precisely the condition under which a shared network
+volume may saturate and the cached arm's advantage could narrow or invert.
+
+This is deliberately **not** measured here. Adding a contention dimension would double the run
+matrix, introduce a second independent variable, and violate the scope discipline in §2. It is
+named in the post as a limitation and flagged as the natural sequel, so the artifact
+demonstrates awareness of the question without attempting it. It also sits close to artifact 2's
+territory, and the decision on where it belongs should be made when artifact 2 is specified.
+
 ### Open decision — deferred, out of scope for this spec
 
 Audience is set to hiring readers, so the plan does not include practitioner-community
@@ -630,9 +702,12 @@ artifact 1; it can be added to the distribution track at any point without desig
 - `docs/experiment.md` with hypotheses and analysis plan committed **before** the first paid run.
 - Harness passes end-to-end against stubs with no GPU.
 - ~100 runs per arm collected across at least three time windows, interleaved and randomized.
+- Each run issues ten sequential requests; per-request latency and TTFT recorded for all ten.
+- KV cache blocks and derived token capacity recorded per run and reported in the post.
+- Dtype verified to match the checkpoint's native precision, with no conversion at load.
 - Consistency checks applied; discards and failures recorded with reasons and reported.
 - Analysis reproduces every published number from the stored JSONL.
-- Four figures rendered and visually inspected.
+- Four body figures rendered and visually inspected, including the warmup curve.
 - Post published at a permanent slug with byline and date, linking the repo.
 - Repo published with raw data, analysis code, figure code, and runbook.
 - Pre-publish boundary gate completed.
