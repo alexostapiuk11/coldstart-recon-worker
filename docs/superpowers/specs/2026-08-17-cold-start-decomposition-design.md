@@ -816,13 +816,17 @@ named in the post as a limitation and flagged as the natural sequel, so the arti
 demonstrates awareness of the question without attempting it. It also sits close to artifact 2's
 territory, and the decision on where it belongs should be made when artifact 2 is specified.
 
-### Open decision — deferred, out of scope for this spec
+### Resolved — peer validation and practitioner-community distribution
 
-Audience is set to hiring readers, so the plan does not include practitioner-community
-distribution. Those communities are where technical credibility gets validated by unaffiliated
-engineers, and plausibly a source of the 100–150 engineer network. This is recorded as an
-explicit decision to make separately rather than a gap in the design. It does not block
-artifact 1; it can be added to the distribution track at any point without design changes.
+Audience is set to hiring readers, so this spec's *publication* plan does not include
+practitioner-community distribution. Those communities are where technical credibility gets
+validated by unaffiliated engineers, and plausibly a source of the 100–150 engineer network.
+
+**Resolved in [the distribution and network track](2026-08-17-distribution-and-network-track-design.md).**
+Technical exchange in practitioner spaces — upstream contribution to the projects being measured,
+repo threads, and light community presence — is budgeted there as the primary channel, precisely
+because it is where strong advocacy comes from. The audience decision for the posts stands
+unchanged; the exchange happens where practitioners are.
 
 ---
 
