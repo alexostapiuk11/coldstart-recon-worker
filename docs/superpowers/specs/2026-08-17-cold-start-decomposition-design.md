@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-17
 **Status:** Approved design, ready for implementation planning
-**Artifact:** 1 of 3
+**Artifact:** 1 of 4
 **Working post title:** *What a vLLM replica actually does before it can serve a token.* Exact
 wording is set at publication; the engine-centric framing is the decision, not the phrasing.
 "Cold-start decomposition" is accurate but generic, and generic titles do not signal domain
@@ -42,7 +42,7 @@ documentation, architecture diagrams, or production metrics.
 ### In scope for this spec
 
 - Artifact 1: cold-start decomposition for LLM serving — waterfall plus one intervention.
-- The portfolio contract shared by all three artifacts: venue, structure, naming, sequence,
+- The portfolio contract shared by all artifacts: venue, structure, naming, sequence,
   the two through-line claims.
 - The documentation layer that supports understanding and later reuse.
 
@@ -101,10 +101,11 @@ Small task, roughly a few hours and ~$12/year.
 
 ### The two claims
 
-**Claim 1 — what elastic LLM serving actually costs, measured.** Artifacts 1 and 2 together.
-Artifact 1 establishes where cold-start time goes and what the obvious fix is worth. Artifact
-2 shows what scale-up lag does to p99 under a spike and which scaling signal minimizes the
-damage. Cold start is the cost; autoscaling signal choice determines how often you pay it.
+**Claim 1 — what elastic LLM serving actually costs, measured.** Artifacts 1, 2 and 4 together,
+as a trilogy: *what does a replica cost to start* (1), *when should you add one* (2), *should you
+share one* (4). Cold start is the cost; autoscaling signal choice determines how often you pay it;
+placement strategy determines whether you pay it at all. Artifact 4 is the one that reads as
+platform rather than serving, because it is about allocating finite GPUs across competing demands.
 
 Note on percentiles across the two artifacts: artifact 2's p99 is taken over the thousands of
 *requests* generated during a spike, which supports that percentile comfortably. Artifact 1's
@@ -121,6 +122,9 @@ Different populations, different achievable resolution — not an inconsistency.
 3. **Artifact 2** — autoscaling signal comparison. Substantially cheaper; harness, deployment,
    and analysis pipeline already exist. Design finalized *after* artifact 1's numbers land.
 4. **Artifact 3** — tool-calling reliability harness. No GPU, no budget, independent.
+5. **Artifact 4** — multi-model serving economics. Provisional: composes on artifacts 1 and 2, but
+   is **not funded by the $200 envelope**. The decision to run it is deferred until artifact 3
+   completes and the actual burn rate is known.
 
 Strictly sequential. The timeline does not require a hedge artifact.
 

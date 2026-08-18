@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-17
 **Status:** Approved design, ready for implementation planning
-**Artifact:** 3 of 3
+**Artifact:** 3 of 4
 **Depends on:** nothing. No GPU, no shared harness, no dependency on artifacts 1 or 2.
 
 **Working post title:** *How your tool schema changes your failure rate.* Exact wording set at
@@ -32,7 +32,7 @@ This matters because the portfolio's entire mechanism is *measurement is scarce*
 measures tool-calling reliability across models is honestly described as a smaller
 reimplementation of a public leaderboard, which is the **worst outcome available** for a
 positioning artifact: it demonstrates diligence while signalling unfamiliarity with the field. Of
-the three artifacts, this is the one whose naive version produces negative signal.
+the artifacts, this is the one whose naive version produces negative signal.
 
 **The differentiation is the independent variable.** Existing benchmarks vary the model and hold
 the prompt fixed; they answer "which model should I pick," a decision made rarely. This varies the
@@ -50,7 +50,7 @@ keep generating inbound after promotion stops.
 
 ### The portfolio through-line
 
-All three artifacts share one methodological signature: **point estimates hide the thing you care
+Every artifact shares one methodological signature: **point estimates hide the thing you care
 about.**
 
 - Artifact 1 refuses to report p99 from 100 samples, publishes ECDFs, treats host variance as a
@@ -58,7 +58,7 @@ about.**
 - Artifact 2 compares achievable frontiers rather than tuned operating points.
 - Artifact 3 reports outcome distributions across repetitions rather than pass rates.
 
-All three also correct for the same statistical error — the unit of independent variation is not
+All of them also correct for the same statistical error — the unit of independent variation is not
 the unit of observation — clustering on host, on replayed trace, and on scenario respectively.
 Three artifacts arguing one consistent thing about measurement is a materially stronger body of
 work than three unrelated results.
