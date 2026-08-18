@@ -114,6 +114,18 @@ Different populations, different achievable resolution — not an inconsistency.
 
 **Claim 2 — how you know your agent works.** Artifact 3, standalone.
 
+### Findings are stated in two units
+
+**Every artifact states its headline finding twice: once in systems units, once in money.** The
+conversion assumptions — GPU hourly rate, request volume, event frequency — are published in each
+post so a reader can substitute their own and re-derive.
+
+This costs no additional measurement. Every artifact already computes GPU-seconds and token counts;
+the money view is arithmetic on numbers already collected. What it buys is the difference between a
+systems result and a decision: "the cache saves 18 seconds" is a fact, "above N scale-ups per day
+the cache pays for itself" is something a platform lead can act on, and only the second one gets
+forwarded to someone with a budget.
+
 ### Sequence
 
 1. **Prerequisite** — domain, site skeleton, repo conventions.
@@ -651,6 +663,23 @@ and cost are denominated in, and translating between them is what makes the numb
 someone deciding how aggressively to scale. Reported alongside the seconds figure, never
 instead of it.
 
+### Business framing — required
+
+The systems findings convert to money through three published assumptions: GPU hourly rate for the
+pinned SKU, scale-up events per day, and measured steady-state throughput.
+
+| Quantity | Definition |
+|---|---|
+| cost per scale-up event | `T_fast` × GPU hourly rate, plus the value of foregone tokens |
+| annual cost of cold start | cost per event × events per day × 365 |
+| **cache break-even volume** | the scale-up frequency at which latency saved exceeds the standing cost of keeping a cache warm |
+
+**The break-even is the answer a platform lead actually wants.** Both caches carry standing costs —
+the weight cache rents a volume, the compile cache must be re-warmed on every version change. So
+the honest question is not "does caching help" but "at what request volume does each cache pay for
+itself." That number is derivable from the measurements plus published assumptions, requires no
+additional runs, and is the sentence that travels to someone who owns a budget.
+
 ### Statistical treatment
 
 **Non-parametric throughout.** Cold-start distributions are right-skewed with a heavy tail;
@@ -855,4 +884,6 @@ unchanged; the exchange happens where practitioners are.
 - All four required explanations (§8) present in the post.
 - Post published at a permanent slug with byline and date, linking the repo.
 - Repo published with raw data, analysis code, figure code, and runbook.
+- Headline finding stated in **both systems units and money**, with all conversion assumptions
+  published so a reader can substitute their own.
 - Pre-publish boundary gate completed.

@@ -311,6 +311,21 @@ one additional parameterization of an already-built simulator.
 
 ---
 
+### Business framing — required
+
+The frontier is reported in money as well as in replica-seconds. Published assumptions: GPU hourly
+rate, spikes per week, and either the cost of an SLO breach or the p99 budget one consumes.
+
+| Quantity | Definition |
+|---|---|
+| cost per spike | replica-seconds × hourly rate, per signal |
+| **annual delta between signals** | cost-per-spike difference × spike frequency |
+| p99 damage in tokens | excess-latency-seconds × measured steady-state throughput |
+
+**Both slices come from the same frontier, and the second is the one a budget owner reads.** At
+equal spend, choosing one signal over another costs N ms of p99. Held at equal p99, it costs $X per
+year more. Same data, two audiences, and the frontier is what makes either defensible.
+
 ## 10. Validation protocol
 
 The gate. Nothing publishes until it passes or its failure is characterized.
@@ -527,4 +542,6 @@ detectable and stoppable rather than discovered at the end.
 - Four figures rendered and visually inspected, with the validated operating point marked.
 - All four required explanations present in the post.
 - Post published at a permanent slug, linking the shared repo.
+- Headline finding stated in **both systems units and money**, with all conversion assumptions
+  published so a reader can substitute their own.
 - Pre-publish boundary gate completed.

@@ -237,6 +237,22 @@ answer is not simply "swap is cheaper" even in the regimes where it is.
 
 ---
 
+### Business framing — required
+
+The crossover is stated in monthly dollars, not only in cost units. Published assumptions: GPU
+hourly rate, fleet size, request volume, and the SLO tail tenants are held to.
+
+| Quantity | Definition |
+|---|---|
+| monthly fleet cost by strategy | GPU-seconds × hourly rate at stated volume |
+| **crossover in dollars** | "below skew X, dedicating costs $Y/month more than swapping" |
+| **tail-tenant SLO cost** | fraction of cold-tail requests breaching SLO, and what that means per tenant |
+
+**The tail-tenant figure is where the business framing and the fairness finding meet.** A strategy
+that cuts fleet cost 40% while pushing the bottom decile of tenants outside SLO is not cheaper — it
+has moved cost from the GPU bill to the support queue and the churn rate. Reporting both is the
+difference between a cost analysis and a platform decision.
+
 ## 9. Validation
 
 Same gate structure as artifact 2, scaled down.
@@ -352,4 +368,6 @@ the portfolio not funded by the original constraint.
 - Four figures rendered and visually inspected, with the validated point marked.
 - All four required explanations present, plus the adapter-exclusion discussion.
 - Post published at a permanent slug, linking the shared repo.
+- Headline finding stated in **both systems units and money**, with all conversion assumptions
+  published so a reader can substitute their own.
 - Pre-publish boundary gate completed.

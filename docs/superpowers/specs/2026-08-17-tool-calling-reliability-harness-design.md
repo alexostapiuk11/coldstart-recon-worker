@@ -353,6 +353,27 @@ findings are scoped to those snapshots on those dates.
 
 ---
 
+### Business framing — required
+
+Reliability rates convert to money through tokens, and the conversion contains a real tradeoff
+rather than a restatement.
+
+Richer descriptions and larger tool sets cost more input tokens on **every** call. If they fail less
+often, they may still be cheaper overall — because failures cost retries, and identical-retry loops
+burn tokens for nothing.
+
+| Quantity | Definition |
+|---|---|
+| **cost per successful tool call** | total tokens spent, including failed attempts and retries, ÷ successful calls |
+| retry waste | tokens consumed by calls that failed and were retried |
+| formulation overhead | additional input tokens per call from richer descriptions or larger tool sets |
+| **break-even** | the failure-rate reduction at which a richer formulation pays for its own token overhead |
+
+**This is the artifact's most practically useful number and it is nearly free** — token counts are
+already in every API response, so it requires no additional calls. "Rich descriptions cut wrong-tool
+failures by X%" is an eval result. "Rich descriptions cost Y% more per call and pay for themselves
+once failure rate exceeds Z%" is an engineering decision. The second is unpublished.
+
 ## 6. Budget
 
 | Component | Scale |
@@ -497,4 +518,6 @@ number are both publishable findings independent of whether anyone runs the harn
   suite.
 - Post published at a permanent slug; repo published with scenarios, harness, fixtures, raw
   results, analysis, and figure code.
+- Headline finding stated in **both systems units and money**, with all conversion assumptions
+  published so a reader can substitute their own.
 - Pre-publish boundary gate completed.
