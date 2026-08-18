@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-17
 **Status:** Approved design
-**Type:** Ongoing track, not an artifact. Runs in parallel with artifacts 1–4.
+**Type:** Ongoing track, not an artifact. Runs in parallel with artifacts 1–5.
 
 ---
 
