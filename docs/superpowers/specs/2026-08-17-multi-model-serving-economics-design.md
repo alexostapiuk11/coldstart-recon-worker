@@ -149,6 +149,24 @@ flowchart TB
 
 Everything else is inherited, derived, or simulated. These are the only new contacts with hardware.
 
+### 5.0 Reconnaissance — the swap mechanism must be discovered, not assumed
+
+"Swap" is ambiguous in vLLM, and **which mechanisms the pinned version actually offers cannot be
+determined locally.** Following artifact 1 §6.8, a cheap capture-only run establishes:
+
+- Whether an in-process model swap path exists in the pinned version, or whether swapping means
+  tearing down and reinitializing the engine.
+- Whether co-location of two engines on one card behaves as expected at the intended memory split,
+  and what the actual usable split is.
+- Whether the chosen ~3B model class genuinely allows all three strategies on one 24 GB card — the
+  constraint the entire artifact rests on (§3).
+
+That last item is a **go/no-go check and it runs before anything else is built.** If three strategies
+do not fit the card, the model class is wrong and the design changes rather than the measurement.
+
+Nothing from reconnaissance is published as a result. The simulator extension, placement policies,
+and analysis are all built and tested offline against synthetic inputs regardless.
+
 ### 5.1 Swap latency distribution
 
 Model A resident to model B serving, on already-provisioned hardware.
@@ -363,6 +381,8 @@ the portfolio not funded by the original constraint.
 
 - Artifacts 1 and 2 complete; stage taxonomy, KV capacity, service curve, and simulator available.
 - Budget decision made explicitly, with the chosen option recorded.
+- Reconnaissance completed: swap mechanism established for the pinned version, co-location memory
+  split confirmed, and the three-strategies-fit-one-card go/no-go check passed.
 - Model set selected and verified to fit all three strategies on one 24 GB card.
 - Pre-registration extended with artifact 4's hypotheses, traffic bindings, and validation tolerance
   construction — committed before the first sweep.

@@ -133,6 +133,24 @@ flowchart TB
     style B fill:#fdf3e6,stroke:#c88a2e,stroke-width:2px
 ```
 
+### Reconnaissance — what must be discovered on hardware first
+
+This is the **least** offline-buildable artifact in the portfolio, and for a good reason: it is pure
+measurement, so there is no simulator to develop against synthetic inputs. Synthetic adapter
+generation and the analysis path are local; almost everything else is the measurement itself.
+
+Following artifact 1 §6.8, a capture-only run establishes:
+
+- **The in-batch adapter cap** in the pinned version — its default, its maximum, and whether it can
+  be raised enough for the spread regime to reach high active counts. If the cap is low, the
+  observable heterogeneity effect is bounded, and the sweep range must be designed around it.
+- **Whether registered-adapter count is itself bounded**, which sets the top of the sweep.
+- **That synthetic adapters load and serve at all** — a shape-compatibility check on the pinned
+  version before generating 64 of them.
+
+The last item is a go/no-go: if synthetically generated adapters are rejected by the loader, the
+equivalence gate is moot and the artifact reverts to public adapters from the start.
+
 ### The sweep
 
 | | |
@@ -330,6 +348,8 @@ funded.
 - Base model, GPU class, rank, target modules, and concentration parameter fixed and published
   before any paid run.
 - Knee threshold stated in advance.
+- Reconnaissance completed: in-batch adapter cap and registered-count bounds established, synthetic
+  adapter shape-compatibility confirmed.
 - Harness, analysis, and figures exercised against fixtures with no GPU.
 - **Equivalence gate passed**, or its failure characterized and the fallback executed.
 - Sweep completed 1 → 64 registered adapters at both regimes, with repeats.

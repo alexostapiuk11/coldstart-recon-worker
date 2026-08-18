@@ -392,6 +392,19 @@ high-tool-count arm is the expensive one by construction — and from choosing a
 primary model. The cost model is expressed in the repo as a formula over N, so the repetition
 count is chosen from measured per-call cost after the pilot rather than guessed in advance.
 
+**The fixture bootstrap, and a local option the GPU artifacts do not have.**
+
+Fixtures can be **hand-authored from documented response schemas**, so unlike the GPU artifacts this
+harness can be built end to end — grader, taxonomy, normalization, statistics, figures — with zero
+spend and no reconnaissance. Roughly 95% of it is offline work.
+
+There is also a smoke test the other artifacts cannot run: point the harness at a **small local
+model with tool-calling support** on the development machine. Output quality will be poor, which is
+exactly what makes it useful — a weak model produces genuinely malformed calls, exercising the
+grader's `MALFORMED` path and the precedence boundaries with real model output rather than fixtures
+written to match one's own expectations. That is a stronger test of the grader than synthetic data,
+and it costs nothing.
+
 **Dry-run mode is a build requirement.** The full harness runs against a recorded-response fixture
 set with no API calls, so grading, analysis, and figures are exercised for free before any paid
 run. Same role the GPU-free loop plays in artifacts 1 and 2 — and here it doubles as the test suite
@@ -506,7 +519,9 @@ number are both publishable findings independent of whether anyone runs the harn
   written, all candidates present in the repo.
 - Pilot run at baseline formulation; baseline difficulty recorded for every candidate;
   include/exclude decisions published with their rates.
-- Dry-run fixture mode passes end to end with zero API calls.
+- Dry-run fixture mode passes end to end with zero API calls, fixtures hand-authored from documented
+  schemas.
+- Grader smoke-tested against a small local model's real output, including genuinely malformed calls.
 - Grader verified against hand-labelled cases covering all six categories, including the
   precedence boundaries between them.
 - Full factorial run: 8 cells × included scenarios × N repetitions, at or above the repetition

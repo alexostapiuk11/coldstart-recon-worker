@@ -355,6 +355,24 @@ flowchart LR
     style D fill:#fdf3e6,stroke:#c88a2e,stroke-width:2px
 ```
 
+### Reconnaissance — what must be discovered on hardware first
+
+Artifact 2 is the most cloud-independent of the GPU artifacts: the simulator, policy module, sweep,
+and every analysis path run against **synthetic** cold-start distributions and service curves long
+before real ones exist. Roughly nine tenths of it is buildable and testable offline.
+
+Two things still require hardware before the real runs, and they inherit artifact 1's
+reconnaissance discipline (artifact 1 §6.8):
+
+- **Whether the platform API exposes what the closed-loop driver needs** — scale-up and scale-down
+  actions, their acknowledgement semantics, and their latency. The real-API driver cannot be written
+  against a guess.
+- **The concurrency range the service sweep should cover**, which depends on where the measured
+  latency curve actually bends. A short pilot sweep sets the range for the full one.
+
+Both are capture-only: raw API responses committed as fixtures, pilot sweep not published as a
+result. The full service curve is measurement and runs only after the analysis path is proven.
+
 ### Primary gate — open-loop trace replay
 
 Fix replica count. Drive a real transient load. Compare the simulator's predicted latency
@@ -532,6 +550,8 @@ detectable and stoppable rather than discovered at the end.
 - Service curve measured, including GPU utilization at each concurrency level.
 - `docs/experiment.md` extended with artifact 2's hypotheses, binding rules, validation tolerance
   construction, and disclosure rule — committed **before** the first sweep.
+- Reconnaissance completed: platform scale-action API semantics captured as fixtures, service-sweep
+  concurrency range set by a short pilot.
 - Simulator and sweep exercised end to end against synthetic inputs with no GPU.
 - Controller arithmetic unit-tested against hand-computed scenarios.
 - Open-loop validation run three times; reality band established; simulator inside it, or the

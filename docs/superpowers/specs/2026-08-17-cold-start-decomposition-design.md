@@ -282,11 +282,12 @@ H2 and H3 is the most interesting result available in this experiment.** If warm
 cache buys more than caching 16 GB of weights, that inverts the intuition nearly every reader
 brings, and it is a fact only obtainable by measuring.
 
-**Version dependency, to be resolved in the local loop before any paid run:** whether the
-pinned vLLM version compiles at startup, and where it caches those artifacts, varies by version
-and configuration. This gets verified first. If the pinned version does not compile at startup,
-H3 and its arm are dropped, the experiment reverts to the two-arm design with nothing else
-changed, and the spec records that this is what happened.
+**Version dependency, resolved by the reconnaissance run (§6.8):** whether the pinned vLLM
+version compiles at startup, and where it caches those artifacts, varies by version and
+configuration. **This cannot be determined locally** — it requires running the engine on a GPU, so
+it is answered by reconnaissance rather than by the GPU-free loop. If the pinned version does not
+compile at startup, H3 and its arm are dropped, the experiment reverts to the two-arm design with
+nothing else changed, and the post records that this is what happened.
 
 **Pre-registration mechanism:** hypotheses and the full analysis plan are committed to
 `docs/experiment.md` before the first paid run. The git timestamp then proves the hypothesis
@@ -612,9 +613,40 @@ A stub weight source and a stub engine emitting realistic stage marks with confi
 delays. This exercises scheduler, submitter, recorder, store, consistency checks, statistics,
 and plots end to end for free.
 
-Paid GPU time then only ever runs code paths already proven correct. It also means the
-analysis code is finished and tested *before* the first real number arrives, removing the
+Paid GPU time then only ever runs *measurement* code paths already proven correct. It also means
+the analysis code is finished and tested *before* the first real number arrives, removing the
 temptation to tune analysis after seeing results.
+
+### 6.8 Reconnaissance run — discovery before measurement
+
+The GPU-free loop has a bootstrap problem, and pretending otherwise would make the schedule
+dishonest. **Three things cannot be known without hardware:**
+
+| Unknown | Why local work cannot answer it |
+|---|---|
+| Engine startup log format and phase names | The `S4` sub-decomposition parses them. vLLM's CPU backend has a materially different startup path — no HBM load, no graph capture, different memory profiling — so its logs would not contain the phases being measured |
+| Platform API lifecycle fields | Whether queued-at and started-at are exposed determines whether the residual can be split (§6.5). Discovered, not designed |
+| Compile-at-startup behavior and cache location | Determines whether H3 and arm C exist at all (§5) |
+
+So **step one is a deliberately cheap reconnaissance run** whose only purpose is capture, not
+measurement:
+
+- A handful of cold starts at the pinned image, version, and configuration.
+- Save raw engine log output verbatim, as fixtures committed to the repo.
+- Save raw platform API responses verbatim, as fixtures.
+- Record whether compilation happens at startup and where artifacts land.
+
+Budget: a few dollars. Nothing from it is published as a result — the sample is far too small and
+the configuration is not yet frozen.
+
+The parser, the API client, and the residual logic are then built and tested offline against those
+fixtures. **The discipline survives intact, restated precisely: discovery comes first, and paid
+measurement runs only code already proven against real captures.** Committing the fixtures also
+means a reader can run the parser's tests without a GPU, which is part of the reproducibility claim.
+
+**On the absence of a local GPU path:** development happens on macOS, so there is no CUDA and no
+meaningful local vLLM. There is no middle ground between laptop and rented hardware, which is what
+makes the fixture-and-stub discipline load-bearing rather than a nicety.
 
 ---
 
@@ -869,7 +901,9 @@ unchanged; the exchange happens where practitioners are.
 
 - Domain, site skeleton, and repo conventions exist.
 - `docs/experiment.md` with hypotheses and analysis plan committed **before** the first paid run.
-- Harness passes end-to-end against stubs with no GPU.
+- Reconnaissance run completed; engine log output and platform API responses committed as fixtures;
+  compile-at-startup behavior recorded and H3's arm confirmed or dropped.
+- Harness passes end-to-end against stubs and captured fixtures with no GPU.
 - Compile-at-startup behaviour of the pinned vLLM version verified in the local loop, and arm C
   either confirmed viable or dropped with the decision recorded.
 - ~100 runs per arm across three arms (~300 total), spread over at least three time windows,
