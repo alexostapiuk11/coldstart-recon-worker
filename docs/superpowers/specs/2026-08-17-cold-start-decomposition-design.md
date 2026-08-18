@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-17
 **Status:** Approved design, ready for implementation planning
-**Artifact:** 1 of 4
+**Artifact:** 1 of 5
 **Working post title:** *What a vLLM replica actually does before it can serve a token.* Exact
 wording is set at publication; the engine-centric framing is the decision, not the phrasing.
 "Cold-start decomposition" is accurate but generic, and generic titles do not signal domain
@@ -101,11 +101,13 @@ Small task, roughly a few hours and ~$12/year.
 
 ### The two claims
 
-**Claim 1 — what elastic LLM serving actually costs, measured.** Artifacts 1, 2 and 4 together,
-as a trilogy: *what does a replica cost to start* (1), *when should you add one* (2), *should you
-share one* (4). Cold start is the cost; autoscaling signal choice determines how often you pay it;
-placement strategy determines whether you pay it at all. Artifact 4 is the one that reads as
-platform rather than serving, because it is about allocating finite GPUs across competing demands.
+**Claim 1 — what elastic LLM serving actually costs, measured.** Artifacts 1, 2, 4 and 5, as one
+arc: *what does a replica cost to start* (1), *when should you add one* (2), *should you share one
+across models* (4), *should you share one across adapters* (5). Cold start is the cost; autoscaling
+signal choice determines how often you pay it; placement strategy determines whether you pay it at
+all. Artifacts 4 and 5 are the ones that read as platform rather than serving, because they are
+about allocating finite GPUs across competing demands — and together they produce the portfolio's
+strongest business number, cost per tenant per month three ways.
 
 Note on percentiles across the two artifacts: artifact 2's p99 is taken over the thousands of
 *requests* generated during a spike, which supports that percentile comfortably. Artifact 1's
@@ -133,10 +135,14 @@ forwarded to someone with a budget.
    one inherits.
 3. **Artifact 2** — autoscaling signal comparison. Substantially cheaper; harness, deployment,
    and analysis pipeline already exist. Design finalized *after* artifact 1's numbers land.
-4. **Artifact 3** — tool-calling reliability harness. No GPU, no budget, independent.
-5. **Artifact 4** — multi-model serving economics. Provisional: composes on artifacts 1 and 2, but
-   is **not funded by the $200 envelope**. The decision to run it is deferred until artifact 3
-   completes and the actual burn rate is known.
+4. **Artifact 4** — multi-model serving economics. Composes on artifacts 1 and 2. **Not funded by
+   the original $200 envelope**; see artifact 4 §11. The funding decision covers artifacts 4 and 5
+   together, since they are one story.
+5. **Artifact 5** — multi-LoRA serving. Cheapest GPU artifact of the set and the lowest complexity;
+   requires artifact 4's base model, GPU class, and swap-cost reference line.
+6. **Artifact 3** — tool-calling reliability harness. **Last and optional.** No GPU, no budget,
+   independent. Weakest of the set for the $250k+ target band; retained as the agent-positioning
+   hedge, built only if hours remain.
 
 Strictly sequential. The timeline does not require a hedge artifact.
 

@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-17
 **Status:** Approved design, ready for implementation planning
-**Artifact:** 2 of 4
+**Artifact:** 2 of 5
 **Depends on:** [Artifact 1 — What a vLLM Replica Does Before It Can Serve](2026-08-17-cold-start-decomposition-design.md)
 
 **Working post title:** *Which autoscaling signal survives a cold start.* Exact wording set at

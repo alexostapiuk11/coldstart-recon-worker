@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-17
 **Status:** Approved design. **Provisional — not funded by the original $200 envelope; see §11.**
-**Artifact:** 4 of 4
+**Artifact:** 4 of 5
 **Depends on:** [Artifact 1 — cold-start decomposition](2026-08-17-cold-start-decomposition-design.md),
 [Artifact 2 — autoscaling signal comparison](2026-08-17-autoscaling-signal-comparison-design.md)
 
@@ -14,18 +14,23 @@ the method.
 
 ## 1. Position in the portfolio
 
-This completes **Claim 1** as a trilogy with a clean arc:
+This is the third step in **Claim 1**'s arc:
 
 | Artifact | Question |
 |---|---|
 | 1 | What does a replica cost to start? |
 | 2 | When should you add one? |
-| 4 | Should you share one? |
+| **4** | **Should you share one across models?** |
+| 5 | Should you share one across adapters? |
 
-The third question is the one that reads as **platform** rather than serving. Artifacts 1 and 2
-describe a single-tenant system well. Artifact 4 is about allocating finite GPUs across competing
-demands, which is the actual job of an ML platform team and the layer where cost decisions get
-made.
+The sharing questions are the ones that read as **platform** rather than serving. Artifacts 1 and 2
+describe a single-tenant system well. Artifacts 4 and 5 are about allocating finite GPUs across
+competing demands, which is the actual job of an ML platform team and the layer where cost decisions
+get made.
+
+Artifact 5 depends on this one for its base model, GPU class, and swap-cost reference line, and the
+two together produce the portfolio's strongest business number: **cost per tenant per month,
+dedicated versus swapped versus adapter.**
 
 ### Why this composes rather than sprawls
 
@@ -80,6 +85,9 @@ ranking change?
   multi-model fleets do not satisfy, and comparing "serve 20 models" against "serve 20 variants of
   one model" is a different business situation. Naming the exclusion and its precondition is the
   same play as artifact 1's baked-image exclusion — command of the space rather than a gap in it.
+  **Answered by [artifact 5](2026-08-17-multi-lora-serving-design.md)**, which measures adapter
+  serving on this artifact's base model and GPU class and consumes this artifact's swap cost as a
+  reference line. The exclusion stands for this comparison; the question does not go unanswered.
 - Heterogeneous model sizes. Realistic, confounded, and the natural thing an adopter runs on their
   own fleet.
 - Models spanning multiple GPUs.
@@ -283,7 +291,7 @@ point marked on the crossover chart — inherited discipline from artifact 2.
 3. **Measured co-location interference curve** — the primitive that makes the third strategy real
    rather than assumed.
 4. **Swap cost decomposed onto artifact 1's stage taxonomy** — which stages a swap pays and which it
-   skips. This figure does portfolio work as well as artifact work: it makes the trilogy visibly one
+   skips. This figure does portfolio work as well as artifact work: it makes the arc visibly one
    body of research.
 
 Same constraints as the other artifacts: intervals shown, N stated, no truncated axes, legible on a
@@ -331,7 +339,7 @@ it. Artifact 4 needs an increment of about $30–50, plus debugging headroom.
 
 That is a decision to make, not something to absorb silently. Options: raise the envelope, cut
 skew-sweep resolution and validation repeats to fit the residual, or run artifact 4 only if
-artifacts 1–3 land near the low end. **Recommendation: decide when artifact 3 finishes and the
+artifacts 1–3 land near the low end. **Recommendation: decide once artifacts 1-2 finish and the
 actual burn rate is known**, rather than now. This spec records that artifact 4 is the first item in
 the portfolio not funded by the original constraint.
 

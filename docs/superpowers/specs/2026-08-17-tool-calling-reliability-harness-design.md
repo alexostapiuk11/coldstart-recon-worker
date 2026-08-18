@@ -1,8 +1,10 @@
 # How Your Tool Schema Changes Your Failure Rate — Design
 
 **Date:** 2026-08-17
-**Status:** Approved design, ready for implementation planning
-**Artifact:** 3 of 4
+**Status:** Approved design. **Sequenced last and optional** — weakest of the set for the
+$250k+ target band (irrelevant to quant finance, partial for the labs). Build only if hours
+remain after artifacts 1, 2, 4, and 5. Retained as the agent-positioning hedge.
+**Artifact:** 3 of 5 — **last and optional**
 **Depends on:** nothing. No GPU, no shared harness, no dependency on artifacts 1 or 2.
 
 **Working post title:** *How your tool schema changes your failure rate.* Exact wording set at
