@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import threading
 import time
 
 import requests
@@ -32,18 +33,18 @@ def handler(job):
         text=True,
         bufsize=1,
     )
+
+    def drain():
+        for line in proc.stdout:
+            lines.append(line.rstrip("\n"))
+
+    drain_thread = threading.Thread(target=drain, daemon=True)
+    drain_thread.start()
+
     healthy = False
+    completion = None
     try:
-        import threading
-
-        def drain():
-            for line in proc.stdout:
-                lines.append(line.rstrip("\n"))
-
-        t = threading.Thread(target=drain, daemon=True)
-        t.start()
         healthy = _wait_healthy()
-        completion = None
         if healthy:
             r = requests.post(
                 f"http://127.0.0.1:{PORT}/v1/completions",
@@ -57,11 +58,16 @@ def handler(job):
             proc.wait(timeout=30)
         except subprocess.TimeoutExpired:
             proc.kill()
+            proc.wait(timeout=10)
+        # stdout reaches EOF only once the process is gone; join so the drain
+        # thread finishes appending before we read `lines`.
+        drain_thread.join(timeout=15)
 
     return {
         "healthy": healthy,
         "log_lines": lines,
         "completion": completion,
+        "drain_completed": not drain_thread.is_alive(),
         "env": {
             "MODEL_ID": MODEL,
             "VLLM_CACHE_ROOT": os.environ.get("VLLM_CACHE_ROOT"),
