@@ -734,8 +734,12 @@ requests
 `worker/Dockerfile`:
 
 ```dockerfile
-ARG VLLM_TAG=latest
-FROM vllm/vllm-openai:${VLLM_TAG}
+# Pinned by digest rather than tag. The artifact's reproducibility claim requires that
+# a reader rebuilding this image gets the same engine, and `latest` drifts. Resolved
+# 2026-08-19 from vllm/vllm-openai:latest; the vLLM version inside is recorded by the
+# reconnaissance run and published alongside the results.
+ARG VLLM_DIGEST=sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967
+FROM vllm/vllm-openai@${VLLM_DIGEST}
 
 ENV HF_HOME=/runpod-volume/hf
 ENV VLLM_CACHE_ROOT=/root/.cache/vllm
@@ -771,6 +775,13 @@ something Task 6 learns for free.
 
 If the Docker daemon is not running, record the Dockerfile as **unvalidated** and move on rather
 than starting Docker. The first real build in Task 6 will surface any syntax error, cheaply.
+
+**Pin the base image by digest, not by tag.** `latest` moves, and the artifact claims a pinned
+engine version — a reader who rebuilds this image months later must get the same vLLM. Resolve the
+digest with `docker buildx imagetools inspect vllm/vllm-openai:latest` and use the multi-platform
+manifest-list digest, which selects the right architecture under `--platform`. The vLLM version
+*inside* that image is then read from the reconnaissance capture and published with the results;
+the digest guarantees the image, the capture identifies what it contains.
 
 **On the draining thread.** The handler starts the drain thread *before* the `try` block and
 joins it in `finally`, after the process has exited. This is not stylistic. `proc.stdout` reaches
