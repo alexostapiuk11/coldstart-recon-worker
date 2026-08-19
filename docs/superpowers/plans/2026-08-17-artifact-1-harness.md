@@ -258,7 +258,9 @@ git commit -m "feat: stage recorder with monotonic clock B marks"
 `tests/test_store.py`:
 
 ```python
-from coldstart.schema import RunRecord, SCHEMA_VERSION
+import json
+
+from coldstart.schema import SCHEMA_VERSION, RunRecord
 from coldstart.store import JsonlStore
 
 
@@ -278,13 +280,27 @@ def make_record(run_id="r1", run_index=0, arm="A"):
     )
 
 
-def test_roundtrip_preserves_fields(tmp_path):
-    store = JsonlStore(tmp_path / "runs.jsonl")
+def test_every_field_survives_the_round_trip(tmp_path):
+    path = tmp_path / "runs.jsonl"
+    store = JsonlStore(path)
     store.append(make_record())
-    got = store.read_all()
-    assert len(got) == 1
-    assert got[0].arm == "A"
-    assert got[0].schema_version == SCHEMA_VERSION
+
+    on_disk = json.loads(path.read_text().strip())
+    assert on_disk["run_id"] == "r1"
+    assert on_disk["run_index"] == 0
+    assert on_disk["arm"] == "A"
+    assert on_disk["clock_A"] == {"t_submit": 1000.0, "t_result": 1090.0}
+    assert on_disk["clock_B"] == {"t0_wall": 1000.4, "marks": [{"stage": "S1", "t_mono": 2.0}]}
+    assert on_disk["clock_C"] == {}
+    assert on_disk["warmup"] == []
+    assert on_disk["engine"] == {}
+    assert on_disk["host"] == {"host_id": "h1", "first_touch": True}
+    assert on_disk["config"] == {"vllm_version": "0.0.0"}
+    assert on_disk["status"] == {"outcome": "ok", "failure_class": None, "failure_detail": None}
+    assert on_disk["schema_version"] == SCHEMA_VERSION
+    assert set(on_disk) == set(RunRecord.__dataclass_fields__)
+
+    assert store.read_all()[0].to_dict() == on_disk
 
 
 def test_append_is_additive(tmp_path):
@@ -304,7 +320,46 @@ def test_unknown_schema_version_is_rejected(tmp_path):
         assert "999" in str(e)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_missing_file_reads_as_empty(tmp_path):
+    assert JsonlStore(tmp_path / "nope.jsonl").read_all() == []
+
+
+def test_fields_from_a_newer_build_are_ignored(tmp_path):
+    path = tmp_path / "runs.jsonl"
+    rec = make_record().to_dict()
+    rec["field_from_the_future"] = 42
+    path.write_text(json.dumps(rec) + "\n")
+    got = JsonlStore(path).read_all()
+    assert len(got) == 1
+    assert got[0].run_id == "r1"
+
+
+def test_parent_directories_are_created(tmp_path):
+    store = JsonlStore(tmp_path / "deep" / "nested" / "runs.jsonl")
+    store.append(make_record())
+    assert len(store.read_all()) == 1
 ```
+
+**On the round-trip assertion, and a trap worth understanding.** `RunRecord` is the contract
+between four components that never share memory — a probe in a container, a driver on a laptop,
+the store, and the analysis layer. A serialization bug there surfaces as inexplicable analysis
+results, not a failing test, so this assertion has to be thorough.
+
+The obvious form is `assert got.to_dict() == original.to_dict()`, and **it does not work.** If
+`to_dict()` is itself broken, both sides are corrupted identically and compare equal — the test
+uses the very method it is trying to verify. It was written that way first and a mutation
+corrupting `run_index` passed it.
+
+The fix is to break the symmetry: assert the **on-disk JSON against literal expected values**, so
+nothing under test appears on both sides of the comparison. `set(on_disk) == set(RunRecord.__dataclass_fields__)`
+then catches a silently dropped field, and the final line confirms the read path reproduces what
+was written. This is the same principle as the harness itself — compare against an independent
+reference, not against another output of the thing you are measuring.
+
+The other three cover paths the driver will exercise on its very first call: reading before any
+run exists, reading a record written by a newer build, and creating a nested output directory.
 
 - [ ] **Step 2: Run and confirm it fails**
 
@@ -316,11 +371,11 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'coldstart.schema'`
 `coldstart/schema.py`:
 
 ```python
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 
 from coldstart import SCHEMA_VERSION
 
-__all__ = ["RunRecord", "SCHEMA_VERSION"]
+__all__ = ["SCHEMA_VERSION", "RunRecord"]
 
 
 @dataclass
@@ -391,7 +446,7 @@ class JsonlStore:
 - [ ] **Step 5: Run and confirm pass**
 
 Run: `.venv/bin/pytest tests/test_store.py -v`
-Expected: PASS — 3 passed
+Expected: PASS — 6 passed
 
 - [ ] **Step 6: Commit**
 
@@ -2476,7 +2531,7 @@ These are charts, not UI. Verification is: generate from synthetic data, open th
 ```python
 from pathlib import Path
 
-from coldstart.analysis.figures import ecdf_plot, per_host_medians, waterfall, warmup_curve
+from coldstart.analysis.figures import ecdf_plot, per_host_medians, warmup_curve, waterfall
 
 
 def rows(n=30):
