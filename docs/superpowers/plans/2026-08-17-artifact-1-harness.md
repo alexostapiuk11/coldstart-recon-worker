@@ -641,6 +641,7 @@ This container exists only to capture reality. It starts `vllm serve`, saves eve
 
 import os
 import subprocess
+import threading
 import time
 
 import requests
@@ -671,18 +672,17 @@ def handler(job):
         text=True,
         bufsize=1,
     )
+    def drain():
+        for line in proc.stdout:
+            lines.append(line.rstrip("\n"))
+
+    drain_thread = threading.Thread(target=drain, daemon=True)
+    drain_thread.start()
+
     healthy = False
+    completion = None
     try:
-        import threading
-
-        def drain():
-            for line in proc.stdout:
-                lines.append(line.rstrip("\n"))
-
-        t = threading.Thread(target=drain, daemon=True)
-        t.start()
         healthy = _wait_healthy()
-        completion = None
         if healthy:
             r = requests.post(
                 f"http://127.0.0.1:{PORT}/v1/completions",
@@ -696,11 +696,16 @@ def handler(job):
             proc.wait(timeout=30)
         except subprocess.TimeoutExpired:
             proc.kill()
+            proc.wait(timeout=10)
+        # stdout reaches EOF only once the process is gone; join so the drain
+        # thread finishes appending before we read `lines`.
+        drain_thread.join(timeout=15)
 
     return {
         "healthy": healthy,
         "log_lines": lines,
         "completion": completion,
+        "drain_completed": not drain_thread.is_alive(),
         "env": {
             "MODEL_ID": MODEL,
             "VLLM_CACHE_ROOT": os.environ.get("VLLM_CACHE_ROOT"),
@@ -754,10 +759,26 @@ printf '# filled in Task 12\n' > worker/probe.py
 printf '# filled in Task 13\n' > worker/handler.py
 ```
 
-- [ ] **Step 4: Build locally to catch Dockerfile errors before pushing**
+- [ ] **Step 4: Validate the Dockerfile without building it**
 
-Run: `docker build --platform linux/amd64 -t coldstart-recon:dev worker/`
-Expected: build succeeds. It will not run on macOS — that is fine, this only checks the image assembles.
+Run: `docker build --check --platform linux/amd64 -t coldstart-recon:dev worker/`
+Expected: syntax validated, warnings reported, nothing executed.
+
+**Do not run a full build here.** The vLLM base image is many gigabytes, cross-building for
+`linux/amd64` on Apple Silicon is slow, and the image has to be built for real when it is pushed
+to a registry in Task 6 anyway. A full build now spends significant time and disk to learn
+something Task 6 learns for free.
+
+If the Docker daemon is not running, record the Dockerfile as **unvalidated** and move on rather
+than starting Docker. The first real build in Task 6 will surface any syntax error, cheaply.
+
+**On the draining thread.** The handler starts the drain thread *before* the `try` block and
+joins it in `finally`, after the process has exited. This is not stylistic. `proc.stdout` reaches
+EOF only once the process is gone, so terminating without joining can drop the tail of the log —
+and this container's whole purpose is capturing a complete startup log to commit as fixtures.
+A dropped line would produce a fixture that silently omits a phase, and every downstream parser
+is built against that capture. `drain_completed` is returned so a truncated capture announces
+itself instead of being trusted.
 
 - [ ] **Step 5: Commit**
 
