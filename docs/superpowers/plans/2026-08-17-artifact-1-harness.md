@@ -457,6 +457,25 @@ git commit -m "feat: versioned run record schema and append-only JSONL store"
 
 ---
 
+### Deferred from Task 3 — partial-write handling
+
+Two review findings were deliberately not fixed in Task 3, recorded here so they are not lost:
+
+- `read_all` raises a bare `JSONDecodeError` with no line number when a record is malformed.
+- Blank or truncated lines are skipped silently rather than reported.
+
+Both are the same underlying gap: the store has no story for a **partially written final line**,
+which is a real possibility for an append-only file being written during a long GPU campaign that
+gets interrupted. The right fix is not a `try/except` bolted onto `read_all` — it is deciding
+whether a truncated tail line should be dropped with a warning or should fail the load outright,
+which is a data-integrity decision, not an ergonomics one.
+
+Address it in Task 15, where the driver's failure handling is specified and the answer becomes
+obvious in context. Until then the campaign is small enough that a corrupt file would be noticed
+immediately.
+
+---
+
 ## Task 4: Scheduler — interleaved randomized triples
 
 **TEACH — grounds §9b Module 9 (confounding and interleaving).** After this task, print a blocked sequence (`AAA...BBB...CCC...`) next to the interleaved one and have the user say what a platform slowdown at 3pm would do to each.
