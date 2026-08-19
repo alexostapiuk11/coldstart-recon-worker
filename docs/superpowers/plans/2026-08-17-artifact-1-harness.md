@@ -70,11 +70,24 @@ dependencies = ["matplotlib", "requests"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
 target-version = "py313"
 ```
+
+`pythonpath = ["."]` is what makes `from coldstart import ...` work. Without it, `.venv/bin/pytest`
+does not put the repo root on `sys.path` — pytest inserts `tests/` instead, since `tests/` has no
+`__init__.py` — and every import of the package fails.
+
+**Do not solve this by installing the package.** `pip install -e .` would work locally but puts the
+import mechanism in undeclared venv state rather than in a committed file, so a fresh clone breaks.
+It also drags in `[build-system]` and `[tool.setuptools]` sections to satisfy setuptools flat-layout
+discovery, and leaves an untracked `coldstart.egg-info/`. For a project whose entire claim is
+reproducibility, the import path must be committed. `pythonpath` requires pytest ≥ 7.0 (core, not a
+plugin) and is resolved relative to rootdir, so it holds regardless of the directory tests are run
+from.
 
 - [ ] **Step 3: Create package dirs and a failing smoke test**
 
