@@ -11,6 +11,8 @@ as a reference line)
 publication; the decision is that the title names the capacity question a platform team arrives
 with.
 
+**Learning guide:** §12b — concepts to work through before building, with self-check questions.
+
 ---
 
 ## 1. Position in the portfolio
@@ -342,7 +344,93 @@ funded.
 
 ---
 
+## 12b. Learning guide
+
+**How this is used.** Before each build stage we work through the relevant modules together —
+you ask questions until each one is solid, then we build that part. The modules are ordered so each
+depends only on the ones above it. The self-check questions at the end are for you to answer out
+loud or in writing; if any answer feels vague, that module needs another pass before the code does.
+
+### Module 1 — What LoRA is, in one paragraph
+
+Fine-tuning normally updates every weight, producing a whole new model. LoRA freezes the original
+and trains a small pair of low-rank matrices that get added alongside specific layers. The result is
+an *adapter* of a few megabytes instead of a few gigabytes, and one base model can host many.
+
+**Why it matters here:** the size difference is the entire reason this is a distinct serving
+strategy rather than a variant of model swapping.
+
+### Module 2 — Rank, and what it controls
+
+The "low-rank" part is a size knob. A higher rank means more trainable parameters, more capacity to
+change behavior, and a larger adapter. Rank 8 and rank 64 are both common.
+
+**Why it matters here:** rank is held fixed and published. It changes adapter size and therefore
+compute, so letting it vary would confound the sweep.
+
+### Module 3 — Registered versus active, the distinction the artifact rests on
+
+**Registered** adapters are loaded and available — they consume memory. **Active** adapters are the
+distinct ones appearing among requests being processed right now — they consume compute, because the
+kernel must apply different adapters to different rows of the same batch.
+
+These are different costs with different causes, and most benchmarks conflate them.
+
+**Why it matters here:** it is the whole methodological design. The two concentration regimes exist
+to separate them by subtraction.
+
+### Module 4 — Why a mixed batch costs more
+
+A batch where every request uses the same adapter applies one adapter once. A batch spanning eight
+adapters must apply eight different ones to different rows. The batch is the same size; the work is
+not.
+
+**Why it matters here:** this is the hypothesis. If it holds, "how many can I load" is the wrong
+question and "how many are active at once" is the right one.
+
+### Module 5 — Why the adapter's contents do not matter
+
+Serving cost is determined by shape — rank, which layers, how many — not by the values inside. The
+same multiplications happen whether the weights were trained on legal documents or drawn from a
+random number generator.
+
+**Why it matters here:** it licenses synthetic adapters, which removes the sourcing problem. But
+"licenses" only after the equivalence check demonstrates it rather than asserting it.
+
+### Module 6 — Equivalence checking
+
+Proving two things are the same is different from failing to prove they differ. The check here is
+practical: measure real adapters and synthetic ones at matched shape, and show the serving cost is
+indistinguishable within measurement noise.
+
+**Why it matters here:** it is the artifact's only gate, and the whole sweep depends on it passing.
+
+### Module 7 — Reading a knee
+
+A curve with a knee has a region where the cost of one more unit is nearly free, and a region where
+it is not. Locating the bend is often more useful than any single point on the curve.
+
+**Why it matters here:** "how many adapters fit" is really "where is the knee," and that number
+converts directly into tenants per GPU.
+
+### Self-check questions
+
+1. Explain LoRA to someone who understands fine-tuning but has never heard of adapters.
+2. Why is an adapter measured in megabytes when the model is measured in gigabytes?
+3. Distinguish registered from active adapters. Which one do you expect to cost more, and why?
+4. Why does a batch spanning eight adapters cost more than a batch using one, given the same number of requests?
+5. Why can synthetic adapters substitute for real ones here — and what would make that reasoning invalid?
+6. The equivalence check fails. What do you do?
+7. Why is rank fixed rather than swept?
+8. Predict: the curve is flat to 32 adapters then rises sharply. What do you tell a team building a per-customer fine-tune product?
+9. How does this artifact's answer combine with artifact 4's to produce cost per tenant per month?
+
+---
+
 ## 13. Definition of done
+
+- Learning-guide modules (§12b) worked through and self-check questions answered before the
+  corresponding build stage.
 
 - Artifact 4 complete, with full-model swap cost available on matching base model and GPU class.
 - Base model, GPU class, rank, target modules, and concentration parameter fixed and published

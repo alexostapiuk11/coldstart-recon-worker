@@ -10,6 +10,8 @@
 Exact wording set at publication; the decision is that the title names the platform decision, not
 the method.
 
+**Learning guide:** §12b — concepts to work through before building, with self-check questions.
+
 ---
 
 ## 1. Position in the portfolio
@@ -377,7 +379,90 @@ the portfolio not funded by the original constraint.
 
 ---
 
+## 12b. Learning guide
+
+**How this is used.** Before each build stage we work through the relevant modules together —
+you ask questions until each one is solid, then we build that part. The modules are ordered so each
+depends only on the ones above it. The self-check questions at the end are for you to answer out
+loud or in writing; if any answer feels vague, that module needs another pass before the code does.
+
+### Module 1 — A swap is a cold start minus the expensive parts
+
+Swapping models on a machine that is already running skips provisioning, image pull, and interpreter
+startup. It still pays weight fetch, HBM load, and engine init. Artifact 1's stage taxonomy tells you
+exactly which lines of the bill you still owe.
+
+**Why it matters here:** it is why this artifact composes cheaply instead of starting over.
+
+### Module 2 — What sharing a GPU actually contends for
+
+Two models on one card do not politely split it in half. They share compute units and memory
+bandwidth, and each gets a slice of memory — which shrinks each one's KV cache and therefore each
+one's concurrency ceiling. The interference is not a clean 2× slowdown in either direction.
+
+**Why it matters here:** the interference curve has to be measured because it cannot be reasoned to.
+
+### Module 3 — Zipf, or why a few models get most of the traffic
+
+Real request traffic across many models is rarely even. A small number are hot; a long tail is cold.
+Zipf is the standard shape for that, with one parameter controlling how extreme the concentration is.
+
+**Why it matters here:** it is the swept axis. Whether swapping works at all depends almost entirely
+on this shape.
+
+### Module 4 — Frequency is not locality
+
+Two workloads can send the same *fraction* of requests to each model and behave completely
+differently. If a model's requests arrive in bursts, you load it once and serve many. If they are
+scattered, you load it, evict it, load it again.
+
+**Cache behavior follows locality, not frequency.**
+
+**Why it matters here:** it is why skew alone is not enough, and why there are two locality regimes.
+
+### Module 5 — LRU, and how caches thrash
+
+Least-recently-used eviction drops whatever has gone longest without use. It works well when
+recently-used things are likely to be used again. When the working set is larger than the cache,
+LRU can thrash — every load immediately evicts something that is about to be needed.
+
+**Why it matters here:** thrashing is the failure mode swap has, and the low-skew end of the sweep is
+where it shows up.
+
+### Module 6 — Averages hide tenants
+
+Hot models dominate the request count, so they dominate any aggregate. A strategy can post an
+excellent overall p99 while the bottom decile of models is unusable — and the aggregate will never
+show it.
+
+**Why it matters here:** it is why p99 is reported per popularity decile. It is the portfolio's
+"point estimates hide things," applied across tenants rather than across time.
+
+### Module 7 — Crossovers as deliverables
+
+The useful output is not "swap is better." It is "below this skew, dedicate; above it, swap" — a
+line someone can locate their own workload against.
+
+**Why it matters here:** it is the difference between a benchmark and a decision rule.
+
+### Self-check questions
+
+1. Which cold-start stages does a swap pay, and which does it skip? Why?
+2. Why is co-locating two models not simply "half the throughput each"?
+3. Explain Zipf skew to someone who has never seen it, using a real example.
+4. Two workloads have identical Zipf parameters but very different swap rates. How?
+5. What is thrashing, and at which end of the skew sweep do you expect it?
+6. Aggregate p99 is 800 ms and looks fine. Why might you still have a serious problem?
+7. Why is eviction policy held fixed instead of compared?
+8. Predict: the crossover moves substantially between bursty and spread traffic. What is the headline?
+9. A strategy cuts fleet cost 40% and pushes the bottom decile outside SLO. Is it cheaper? Defend your answer.
+
+---
+
 ## 13. Definition of done
+
+- Learning-guide modules (§12b) worked through and self-check questions answered before the
+  corresponding build stage.
 
 - Artifacts 1 and 2 complete; stage taxonomy, KV capacity, service curve, and simulator available.
 - Budget decision made explicitly, with the chosen option recorded.

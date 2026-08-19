@@ -11,6 +11,8 @@ remain after artifacts 1, 2, 4, and 5. Retained as the agent-positioning hedge.
 publication; the decision is that the title names the engineer-controlled variable, not the
 models.
 
+**Learning guide:** §9b — concepts to work through before building, with self-check questions.
+
 ---
 
 ## 1. Claim and differentiation
@@ -511,7 +513,104 @@ number are both publishable findings independent of whether anyone runs the harn
 
 ---
 
+## 9b. Learning guide
+
+**How this is used.** Before each build stage we work through the relevant modules together —
+you ask questions until each one is solid, then we build that part. The modules are ordered so each
+depends only on the ones above it. The self-check questions at the end are for you to answer out
+loud or in writing; if any answer feels vague, that module needs another pass before the code does.
+
+### Module 1 — What a tool call actually is
+
+You hand the model a list of tools, each with a name, a description, and a schema for its arguments.
+The model does not execute anything — it emits a structured request saying "call `X` with these
+arguments," and *your code* decides what to do with it. The model's only job is choosing correctly
+and filling the fields.
+
+**Why it matters here:** every failure is a failure of that choice or those fields, which is why the
+taxonomy is structural and why grading needs no judgment about meaning.
+
+### Module 2 — The six ways it goes wrong
+
+Not a valid call at all (`MALFORMED`). Called something when nothing was needed (`SPURIOUS`). Needed
+a tool and answered from memory instead (`MISSING`). Picked the wrong tool among similar ones
+(`WRONG_TOOL`). Right tool, wrong arguments (`WRONG_PARAMS`). Or correct.
+
+**Why it matters here:** each points at a *different fix.* An aggregate accuracy number tells you
+nothing about what to change; a taxonomy does.
+
+### Module 3 — Factorial designs and the thing OFAT misses
+
+Change one factor at a time and you learn each factor's average effect. You do not learn whether
+factors *interact* — whether one matters more when another is set high. A factorial runs every
+combination, so interactions become visible.
+
+**Why it matters here:** H1 predicts exactly such an interaction — that rich descriptions barely
+matter with few tools and matter a lot with many. One-factor-at-a-time would report two bland main
+effects and miss the actual finding.
+
+### Module 4 — The unit of independent variation
+
+You run 20 scenarios × 20 repetitions = 400 observations. Those are **not 400 independent facts.** A
+scenario the model finds confusing fails over and over for the same reason. Treating them as
+independent makes your error bars far too narrow and manufactures significance.
+
+The fix: resample *scenarios*, not individual calls.
+
+**Why it matters here:** it is the same correction artifact 1 makes by clustering on host and
+artifact 2 by replaying traces. Same idea, three settings.
+
+### Module 5 — Why proportions need special error bars
+
+The usual formula for uncertainty around a proportion breaks near 0 and 1 — it will happily produce
+a confidence interval extending below zero. Failure rates live near those edges. Wilson intervals
+behave correctly there.
+
+**Why it matters here:** most of the interesting numbers in this artifact are small proportions.
+
+### Module 6 — Temperature 0 is not determinism
+
+Setting temperature to 0 means "always pick the most likely token." It does not mean identical
+outputs. Hosted inference batches your request with others, and floating-point arithmetic is not
+associative — change the batch and sums change in the last bits, which can change which token wins.
+
+**Why it matters here:** this is H5, and it is the result most likely to surprise readers who assume
+a parameter made their agent deterministic.
+
+### Module 7 — Ceiling effects
+
+If a model already succeeds 97% of the time on your tasks, no change you make can show much
+improvement — not because nothing helps, but because your instrument has no room to move.
+
+**Why it matters here:** it is why scenarios are selected into a difficulty band, and why that
+selection uses only baseline data and is published in full.
+
+### Module 8 — Pre-registration, and what it protects against
+
+Write the hypotheses and the analysis plan down, commit them, *then* collect data. It stops the very
+human move of finding a pattern and describing it as though you predicted it.
+
+**Why it matters here:** it costs nothing and is the cheapest credibility available.
+
+### Self-check questions
+
+1. Explain what a tool call is to someone who thinks the model "runs" the tool.
+2. Give a concrete example of each of the five failure categories.
+3. Your failures are 70% `WRONG_TOOL`. What do you change? What if they were 70% `MALFORMED`?
+4. Why would one-factor-at-a-time have missed H1?
+5. You have 400 observations per cell. Why are your error bars not based on 400?
+6. Why not use the standard proportion formula when the failure rate is 3%?
+7. A colleague says "we set temperature to 0 so it's deterministic." What do you tell them?
+8. Why are scenarios selected by baseline difficulty, and why is that not cherry-picking?
+9. Why would grading with an LLM judge break this specific experiment, more than it would break a normal eval?
+10. Predict: rich descriptions cut failures 30% but cost 40% more input tokens. Is that a good trade? What do you need to know to answer?
+
+---
+
 ## 10. Definition of done
+
+- Learning-guide modules (§9b) worked through and self-check questions answered before the
+  corresponding build stage.
 
 - Pre-registration committed to the repo — five hypotheses, selection rule and band, normalization
   rules, repetition floor — **before** the pilot runs.

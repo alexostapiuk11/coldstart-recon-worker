@@ -8,6 +8,8 @@ wording is set at publication; the engine-centric framing is the decision, not t
 "Cold-start decomposition" is accurate but generic, and generic titles do not signal domain
 before the click.
 
+**Learning guide:** §9b — concepts to work through before building, with self-check questions.
+
 ---
 
 ## 1. Context and goal
@@ -897,7 +899,138 @@ unchanged; the exchange happens where practitioners are.
 
 ---
 
+## 9b. Learning guide
+
+**How this is used.** Before each build stage we work through the relevant modules together —
+you ask questions until each one is solid, then we build that part. The modules are ordered so each
+depends only on the ones above it. The self-check questions at the end are for you to answer out
+loud or in writing; if any answer feels vague, that module needs another pass before the code does.
+
+### Module 1 — What lives in GPU memory
+
+A GPU has a fixed pool of fast memory (HBM). Three things compete for it: the model weights, the
+scratch space a forward pass needs, and the KV cache. Weights are the easy part to size — an 8B
+model at 2 bytes per parameter is about 16 GB. Whatever is left after weights and scratch is what
+you have for the cache.
+
+**Why it matters here:** the whole artifact is about time, but nearly every time cost traces back to
+moving those 16 GB or deciding how to divide what remains.
+
+### Module 2 — The KV cache, and why it *is* your concurrency limit
+
+When a model generates text, it re-reads everything written so far. Rather than recompute that each
+step, it stores intermediate values — keys and values — for every token. That store is the KV cache.
+Each active request holds cache proportional to its length, so **the cache size divides into a
+number of concurrent requests.** Run out of cache and new requests queue instead of running.
+
+**Why it matters here:** this is why "how much memory is left" and "how many users can I serve" are
+the same question, and why artifact 1 reports KV capacity alongside latency.
+
+### Module 3 — Why the engine runs the model before serving anyone
+
+vLLM cannot know how much scratch memory a forward pass needs until it tries one. So at startup it
+runs a **dummy forward pass**, watches peak memory, subtracts, and gives the remainder to the KV
+cache. That is the memory-profiling stage.
+
+**Why it matters here:** it costs real startup time, it explains where the KV number comes from, and
+it means the first *real* request is not the first execution — some warmup already happened. That is
+why `S6` is "first served token," not "first ever token."
+
+### Module 4 — CUDA graphs: paying at startup to be faster later
+
+Generating one token launches many tiny GPU operations. The CPU-side cost of launching them can
+dominate. A CUDA graph records the launch sequence once so it can be replayed as a unit. Recording
+costs startup time; replaying saves time on every token afterward.
+
+**Why it matters here:** it is a pure startup-versus-steady-state trade, it is a visible chunk of
+`S4`, and it is the clearest example of why "make startup faster" is not automatically good.
+
+### Module 5 — Compilation, and the cache you did not know you had
+
+Modern vLLM compiles parts of the model at startup to produce faster code, then caches the result on
+disk. On a fresh container that cache is empty, so the compile happens again. On a warm one it is
+skipped.
+
+**Why it matters here:** this is arm C and hypothesis H3 — the second cold cache almost nobody talks
+about, and the artifact's best chance at a genuinely new number.
+
+### Module 6 — What happens before your code exists
+
+On a serverless platform, a request goes into a queue, a machine is found, a container is created,
+and an image is pulled — all before your process starts. **You cannot instrument any of it**, because
+nothing of yours is running yet.
+
+**Why it matters here:** this is `T_platform`, the residual. It is obtained by subtraction only, and
+being honest about that is the artifact's credibility hinge.
+
+### Module 7 — Why you cannot just subtract timestamps
+
+A wall clock can jump — clocks sync, drift, get corrected. A monotonic clock only ever moves forward
+and is meaningless as a date, which makes it the right tool for measuring *durations*. Two different
+machines' clocks are never exactly aligned.
+
+**Why it matters here:** it is why durations stay inside one clock domain, why exactly one
+cross-domain subtraction is allowed, and why every run gets a consistency check.
+
+### Module 8 — Why the average is the wrong summary
+
+Cold-start times are skewed: most are near some typical value, a few are much worse, none are much
+better. An average sits between and describes nothing real. Percentiles describe the actual shape —
+p50 is the middle, p95 means 95% were faster. An ECDF shows the whole distribution at once.
+
+**A percentile needs enough samples to exist.** With 100 runs, p99 is one or two observations —
+noise, not a measurement. That is why this artifact publishes p95 and refuses p99.
+
+**Why it matters here:** it is the portfolio's signature and the most-repeated methodological point.
+
+### Module 9 — Confounding, and why arms are interleaved
+
+If you run 100 of arm A this morning and 100 of arm B tonight, and the platform is busier tonight,
+you have measured *time of day* and labeled it *arm*. Alternating A, B, A, B spreads any such drift
+evenly across both.
+
+**Why it matters here:** it is the single most important validity decision in the design, and the
+first thing a sharp reader checks.
+
+### Module 10 — Bootstrap confidence intervals, plainly
+
+You have one sample and want to know how much your estimate would wobble if you ran again. The
+bootstrap answers this by resampling your own data thousands of times with replacement and watching
+how much the answer moves. No formula, no assumption about the distribution's shape.
+
+**Why it matters here:** skewed data breaks the usual formulas; the bootstrap does not care.
+
+### Module 11 — Why a retry can lie to you
+
+If a run fails and you silently retry until it succeeds, you have quietly deleted your slow and
+unlucky runs. Your distribution now looks better than reality. This is survivorship bias.
+
+**Why it matters here:** it is why failures are recorded as their own records and never retried in
+place, and why the failure rate is published next to the latency numbers.
+
+### Self-check questions
+
+Answer these before the results arrive. If you can answer them, the numbers will mean something when
+they land.
+
+1. Explain in two sentences why a bigger KV cache means more concurrent users.
+2. Why does the engine run the model once before it will serve anyone? What would break if it did not?
+3. If CUDA graph capture takes 20 seconds, why might disabling it be a *bad* idea?
+4. A colleague says "cold start is just how long it takes to download the weights." Name two stages they are ignoring.
+5. Why can `T_platform` only be obtained by subtraction? What would it take to measure it directly?
+6. You see a run where `T_process` is larger than `T_total`. What happened, and what should the harness do?
+7. Your 100 runs give p50 = 90s and p95 = 210s. A reader asks for p99. What do you say and why?
+8. Predict: if the compile cache turns out to matter more than the weight cache, what does that tell you about where cold-start time actually goes?
+9. Predict: if arm B and arm C are nearly identical, what are two different explanations, and how would you tell them apart?
+10. Why does the design refuse to bake weights into the container image, even though it would probably look fastest?
+11. You are asked to cut the experiment in half to save money. What do you cut, and what claim do you lose?
+
+---
+
 ## 10. Definition of done for artifact 1
+
+- Learning-guide modules (§9b) worked through and self-check questions answered before the
+  corresponding build stage.
 
 - Domain, site skeleton, and repo conventions exist.
 - `docs/experiment.md` with hypotheses and analysis plan committed **before** the first paid run.

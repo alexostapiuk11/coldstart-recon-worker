@@ -8,6 +8,8 @@
 **Working post title:** *Which autoscaling signal survives a cold start.* Exact wording set at
 publication; the decision is that the title names the mechanism, not the method.
 
+**Learning guide:** §13b — concepts to work through before building, with self-check questions.
+
 ---
 
 ## 1. Context and relationship to artifact 1
@@ -544,7 +546,123 @@ detectable and stoppable rather than discovered at the end.
 
 ---
 
+## 13b. Learning guide
+
+**How this is used.** Before each build stage we work through the relevant modules together —
+you ask questions until each one is solid, then we build that part. The modules are ordered so each
+depends only on the ones above it. The self-check questions at the end are for you to answer out
+loud or in writing; if any answer feels vague, that module needs another pass before the code does.
+
+### Module 1 — Continuous batching, the thing that makes LLM serving different
+
+A traditional server handles a request and finishes it. An LLM server keeps a *running batch*: new
+requests join it mid-flight, finished ones leave, and every step generates one token for everyone in
+the batch at once. More requests in the batch means better GPU efficiency — until the KV cache is
+full, at which point new arrivals wait.
+
+**Why it matters here:** every behavior in this artifact follows from this. It is why throughput
+rises with load, why latency bends sharply at a specific point, and why the three signals behave so
+differently.
+
+### Module 2 — Why latency explodes rather than degrades
+
+Below saturation, work arrives about as fast as it is served and queues stay short. As arrival rate
+approaches service rate, small fluctuations no longer drain — they pile up. Wait time does not grow
+gently; it grows toward a wall. This is why systems feel fine, then suddenly do not.
+
+**Why it matters here:** the whole artifact is about what happens when demand crosses that line
+before capacity arrives.
+
+### Module 3 — Little's Law, the one formula worth memorizing
+
+**In-flight requests = arrival rate × average time in system.** That is all. If 10 requests arrive
+per second and each takes 2 seconds, roughly 20 are in flight.
+
+**Why it matters here:** it links the three signals. Concurrency is arrival rate times latency, so
+watching concurrency is watching both at once — which is the argument for it being the informative
+signal.
+
+### Module 4 — Why GPU utilization stops telling you anything
+
+GPU utilization roughly means "was the GPU doing something." Under continuous batching, a batch of 4
+and a batch of 40 can both keep it busy essentially all the time. The number pins near its maximum
+and stays there while load keeps climbing.
+
+**Why it matters here:** this is hypothesis H2 — the metric everyone reaches for first is
+structurally blind in the region where you most need it.
+
+### Module 5 — Dead time, and why cold start makes control hard
+
+Control loops assume that when you act, something happens. Cold start inserts **dead time**: you
+decide to add capacity, and nothing changes for a minute or more. Dead time is the classic cause of
+overshoot and oscillation — you keep asking for more because nothing has responded yet, then
+everything arrives at once.
+
+**Why it matters here:** this is precisely why the signal choice matters. With no dead time, all
+three signals would work acceptably.
+
+### Module 6 — Cooldowns, and what they cost
+
+A cooldown stops the controller from acting again immediately. It prevents oscillation, and it also
+guarantees you respond more slowly than you could. It is a deliberate trade.
+
+**Why it matters here:** cooldowns are in the simulated policies on purpose. Without them the
+frontiers would be unreachable by any real controller.
+
+### Module 7 — Discrete-event simulation, plainly
+
+Rather than simulating every millisecond, you keep a list of *events* — request arrives, request
+finishes, replica becomes ready — ordered by time, and jump from one to the next, updating state.
+Fast, exact for this class of problem, and easy to inspect.
+
+**Why it matters here:** it is how the sweep runs thousands of configurations that could never be
+afforded live.
+
+### Module 8 — Pareto frontiers and dominance
+
+Each policy setting gives a (cost, damage) pair. A setting is *dominated* if another is better on
+both. The ones left over form the frontier — the achievable trade-offs. Comparing frontiers compares
+what each signal can do at its best, instead of comparing two arbitrary tunings.
+
+**Why it matters here:** it is the answer to "you tuned your favorite and hobbled the others."
+
+### Module 9 — Why validation replays the exact trace
+
+If the real run and the simulated run each draw their own random arrivals, any disagreement might be
+model error or might be luck, and you cannot tell. Feed the simulator the *exact* arrival timestamps
+the real run saw, and the randomness is held fixed — the only thing left that can differ is the
+model.
+
+**Why it matters here:** it turns a vague comparison into an actual test.
+
+### Module 10 — Integrated excess versus peak
+
+Two incidents: one hits 10 seconds of p99 for 5 seconds; another sits at 2 seconds for 5 minutes.
+Peak says the first is worse. Integrated excess — area above the SLO line — says the second is. The
+second is usually the one users notice.
+
+**Why it matters here:** the primary metric is integrated excess for exactly this reason.
+
+### Self-check questions
+
+1. Explain continuous batching to someone who knows web servers but not LLMs.
+2. Using Little's Law, if 20 requests per second arrive and average latency is 3 seconds, how many are in flight?
+3. Why does GPU utilization saturate before the system does? Draw the shape you would expect.
+4. A colleague proposes scaling on queue depth. Give the strongest argument for it, then the strongest against.
+5. What is dead time, and why does it make an autoscaler oscillate?
+6. Why is a cooldown both a fix and a cost?
+7. Two policies produce (cost, damage) of (100, 50) and (120, 40). Is either dominated? Explain.
+8. Why must the validation run replay the exact arrival trace rather than the same arrival *distribution*?
+9. Predict: if the ranking of the three signals flips between the step and the ramp, what have you learned?
+10. Predict: if the simulator matches reality at 3 replicas but the sweep explores 30, what can and cannot be claimed?
+11. Why is the closed-loop validation deliberately run with the signal you expect to lose?
+
+---
+
 ## 14. Definition of done
+
+- Learning-guide modules (§13b) worked through and self-check questions answered before the
+  corresponding build stage.
 
 - Artifact 1 complete, with cold-start distribution and warmup curve available as inputs.
 - Service curve measured, including GPU utilization at each concurrency level.
