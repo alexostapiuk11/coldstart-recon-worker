@@ -6,7 +6,7 @@
 
 **Architecture:** A driver on macOS submits jobs to a RunPod serverless endpoint and times them on its own monotonic clock (A). A probe inside the container brackets `vllm serve` with its own monotonic clock (B), parses the engine's log output for `S4` sub-phases, drives ten warmup requests, and returns a stage bundle as the job result. RunPod's API supplies lifecycle timestamps (clock C). Everything lands in append-only JSONL, and a pure offline analysis layer computes the residual, the derived metrics, and the figures. A reconnaissance run happens early and cheaply to capture real engine logs and API responses as fixtures, which then back both the parser tests and a stub engine that replays them — so all later development is free.
 
-**Tech Stack:** Python 3.13, pytest, ruff, numpy, matplotlib, Docker, RunPod serverless, vLLM, Qwen3-8B.
+**Tech Stack:** Python 3.13 (stdlib `statistics` and `random` for all analysis), pytest, ruff, matplotlib, Docker, RunPod serverless, vLLM, Qwen3-8B.
 
 **Scope of this plan:** Tasks 1–19 below. The measurement campaign itself (pre-registration commit, ~300 paid runs, real-data analysis, the post) is a separate plan written once this harness is proven — it is execution, not software.
 
@@ -55,7 +55,7 @@
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
-.venv/bin/pip install pytest numpy matplotlib requests ruff
+.venv/bin/pip install pytest matplotlib requests ruff
 ```
 
 - [ ] **Step 2: Write `pyproject.toml`**
@@ -65,7 +65,7 @@ python3 -m venv .venv
 name = "coldstart"
 version = "0.1.0"
 requires-python = ">=3.13"
-dependencies = ["numpy", "matplotlib", "requests"]
+dependencies = ["matplotlib", "requests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
