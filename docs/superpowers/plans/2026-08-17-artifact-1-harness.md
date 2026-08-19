@@ -237,7 +237,7 @@ class StageRecorder:
 - [ ] **Step 4: Run and confirm pass**
 
 Run: `.venv/bin/pytest tests/test_recorder.py -v`
-Expected: PASS — 4 passed
+Expected: PASS — 7 passed
 
 - [ ] **Step 5: Commit**
 
@@ -517,7 +517,60 @@ def test_same_seed_is_reproducible_and_different_seed_is_not():
 def test_arms_are_balanced_overall():
     sched = build_schedule(["A", "B", "C"], 30, seed=3)
     assert Counter(s.arm for s in sched) == {"A": 30, "B": 30, "C": 30}
+
+
+def test_arm_order_varies_between_triples():
+    sched = build_schedule(["A", "B", "C"], 30, seed=5)
+    first_of_each_triple = [sched[i].arm for i in range(0, 90, 3)]
+    assert len(set(first_of_each_triple)) == 3, "every triple began with the same arm"
+
+
+def test_all_six_permutations_occur_about_equally():
+    """Non-degeneracy is not randomization.
+
+    A cyclic rotation, a first-position bias, and a naive Fisher-Yates all pass every
+    other test in this file while destroying the property interleaving exists to give.
+    Only uniformity over all six permutations catches them.
+    """
+    n = 30000
+    sched = build_schedule(["A", "B", "C"], n, seed=11)
+    counts = Counter("".join(s.arm for s in sched[i : i + 3]) for i in range(0, 3 * n, 3))
+    assert len(counts) == 6, f"only {len(counts)} of 6 permutations occurred"
+    expected = n / 6
+    tolerance = 5 * (n * (1 / 6) * (5 / 6)) ** 0.5  # 5 standard deviations
+    for perm, got in sorted(counts.items()):
+        assert abs(got - expected) < tolerance, f"{perm}: {got}, expected ~{expected:.0f}"
+
+
+def test_a_fixed_seed_reproduces_a_known_schedule():
+    """The pre-registered seed must reproduce the published schedule across refactors."""
+    sched = build_schedule(["A", "B", "C"], 4, seed=5)
+    assert [s.arm for s in sched] == ["A", "B", "C", "A", "B", "C", "B", "A", "C", "C", "A", "B"]
 ```
+
+**Why four tests are not enough here, and this matters more than anywhere else in the plan.**
+Interleaving is the single most important validity decision in the experiment, and the obvious
+tests pin the wrong thing. Mutation testing found three changes that pass composition, balance,
+seed-reproducibility, and first-position non-degeneracy while destroying randomization:
+
+| Mutation | Detection by the first five tests | Damage |
+|---|---|---|
+| Cyclic rotation only | **0%** across 20,000 seeds | Only 3 of 6 permutations. First position stays uniform, so nothing fires — but arm B follows arm A 78% of the time versus 44% correct. On rented hardware where run 1 may warm the host for runs 2 and 3, that confounds carryover with arm |
+| First-position bias (A ~93%) | 59% of seeds, **and seed 5 survives** | Biases the dependent variable directly, since position-within-triple is where cold-start time lives |
+| Naive Fisher-Yates | **0%** | The most likely real implementation error of the three |
+
+Only uniformity over all six permutations catches them. Verified: the correct implementation
+deviates by at most 36 against a tolerance of 323, so the test is deterministic rather than
+flaky, and the whole suite still runs in under a tenth of a second.
+
+The golden-schedule test exists for the reproducibility claim — nothing else pins the concrete
+seed-to-schedule mapping, so a refactor of the shuffle call would silently change which schedule
+a published seed produces.
+
+**Deferred deliberately:** behaviour outside the 3-arm case is unconstrained, `triple_index`
+computed as `idx // 3` survives (identical for 3 arms, wrong for any other count), and negative
+`triples` silently returns an empty schedule rather than erroring. Add the guard when `driver.py`
+lands in Task 15 and a real caller exists.
 
 - [ ] **Step 2: Run and confirm it fails**
 
@@ -561,7 +614,7 @@ def build_schedule(arms: list[str], triples: int, seed: int) -> list[ScheduledRu
 - [ ] **Step 4: Run and confirm pass**
 
 Run: `.venv/bin/pytest tests/test_scheduler.py -v`
-Expected: PASS — 4 passed
+Expected: PASS — 7 passed
 
 - [ ] **Step 5: Commit**
 
@@ -1536,7 +1589,7 @@ def run_probe(recorder, model: str, health_timeout: float = 900.0) -> dict:
 - [ ] **Step 4: Run and confirm pass**
 
 Run: `.venv/bin/pytest tests/test_probe_units.py -v`
-Expected: PASS — 4 passed
+Expected: PASS — 7 passed
 
 - [ ] **Step 5: Commit**
 
