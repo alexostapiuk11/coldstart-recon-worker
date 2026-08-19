@@ -27,3 +27,9 @@ def test_same_seed_is_reproducible_and_different_seed_is_not():
 def test_arms_are_balanced_overall():
     sched = build_schedule(["A", "B", "C"], 30, seed=3)
     assert Counter(s.arm for s in sched) == {"A": 30, "B": 30, "C": 30}
+
+
+def test_arm_order_varies_between_triples():
+    sched = build_schedule(["A", "B", "C"], 30, seed=5)
+    first_of_each_triple = [sched[i].arm for i in range(0, 90, 3)]
+    assert len(set(first_of_each_triple)) == 3, "every triple began with the same arm"
