@@ -3,6 +3,8 @@
 **Date:** 2026-08-17
 **Status:** Approved design
 **Type:** Ongoing track, not an artifact. Runs in parallel with artifacts 1–5.
+**Geography:** NYC-primary; §7b carries the verified Bay Area and Seattle view and the channel-mix
+changes if geography opens.
 
 ---
 
@@ -273,6 +275,122 @@ directly.
 
 ---
 
+## 7b. Beyond NYC — the multi-hub view
+
+The target list above is NYC-specific. The **artifacts are not.** Roughly: the artifacts are 100%
+portable, the strategy around them is about 40%.
+
+| Component | Portable? |
+|---|---|
+| The artifacts themselves | **Completely.** A published URL does not know where the reader is |
+| The methodological signature | Completely |
+| Upstream contribution channel | Completely. A merged vLLM PR is location-independent |
+| Target list | No — selected for NYC presence |
+| Finance weighting (§7) | No — that was explicitly an *NYC structural advantage* argument |
+| In-person channel, the October conference | No |
+| The 100–150 network | No. Local networks do not relocate |
+
+### The finding that reframes every hub
+
+**Across public career boards in August 2026, the entire visible open market for dedicated
+"inference engineer" roles is roughly 58 positions nationally**, and there is no standard title —
+*inference engineer, performance engineer, kernel engineer, model serving,* and *inference runtime*
+are used interchangeably. Fireworks, a $17.5B company, listed zero dedicated inference-performance
+openings.
+([Data Gravity](https://www.datagravity.dev/p/the-rise-of-inference-engineering))
+
+Two consequences, and the second is the important one:
+
+**The dedicated-title market is thin in every hub, NYC included.** No geography solves this.
+
+**Title fragmentation makes published work more valuable, not less.** When reqs are called five
+different things, job-title search fails in both directions — you cannot find them, and their
+keyword filters cannot find you. A hiring manager writing a "performance engineer" req who reads a
+cold-start decomposition does not care what the posting is called. **In a fragmented market, legible
+work is the matching mechanism that titles fail to provide.**
+
+### Bay Area — verified
+
+**Baseten** is the standout: 63 open roles, 23 in engineering, including **Applied AI Inference
+Engineer in San Francisco**; powers inference for Cursor and Notion.
+([McCoy tracker](https://tracker.mccoy.io/baseten), [startup.jobs](https://startup.jobs/company/baseten))
+
+Fireworks, Together, Modal, and Anyscale form the rest of the inference-cloud category — the
+companies whose product *is* what these artifacts measure. Hiring volume varies sharply and
+Fireworks specifically showed none in this specialty.
+
+**These were Tier 3 in the NYC list purely because NYC presence could not be confirmed. In the Bay
+Area or remote they are Tier 1** — the best topical fit in the entire target list.
+
+### Seattle — verified, and the closest posting-to-portfolio match found anywhere
+
+**AWS Annapurna Labs** is hiring multiple named Seattle inference roles on the AWS Neuron stack for
+Trainium and Inferentia: Senior SDE AI/ML Model Inference; ML Acceleration / Framework Engineer,
+Distributed Training & Inference; SDE Multimodal Inference; ML Engineer Neuron Inference; SDE ML
+Systems.
+
+Qualifications state that *experience optimizing LLM inference performance for both latency and
+throughput is highly desired*, and that **experience with distributed inference libraries such as
+vLLM is a bonus**.
+([Amazon Jobs](https://www.amazon.jobs/en/jobs/3147714/machine-learning-engineer-aws-neuron-inference-annapurna-ml),
+[Glassdoor](https://www.glassdoor.com/job-listing/senior-software-development-engineer-ai-ml-aws-neuron-model-inference-amazon-web-services-JV_IC1150505_KO0,69_KE70,89.htm?jl=1009891607932))
+
+**Caveat, same as NVIDIA's.** Annapurna work is silicon-adjacent — compiler, runtime, kernel tuning
+against custom accelerators. That is *inside* the engine, and these artifacts deliberately stop at
+its boundary. The vLLM familiarity gets the application read; kernel depth is what the loop would
+probe. Strong partial fit, not a bullseye.
+
+**Microsoft AI** lists Member of Technical Staff roles for **LLM Inference** and **Pre-Training
+Infrastructure** on the MAI Superintelligence team. **Location unconfirmed** — may not be Seattle.
+([Microsoft AI](https://microsoft.ai/job/member-of-technical-staff-llm-inference-mai-superintelligence-team/))
+
+### Compensation across hubs
+
+| Market | Data |
+|---|---|
+| SF | ML Engineer average total comp **$291,430**; AI Engineer median base $213k, 75th percentile $250k; Lead/Principal base to $355k |
+| Seattle | Inference-infrastructure posting base range $129,960–$246,240; senior FAANG ML reaching $350k+ total |
+| Cross-market | *Infrastructure, inference, and GPU specialists can earn $300k–500k+* |
+| NYC finance | Senior quant ML routinely $312k+; $300–500k+ |
+
+**All three hubs support the $250k+ target.**
+([Built In](https://builtin.com/salaries/us/san-francisco-ca/machine-learning-engineer),
+[Recruiting from Scratch](https://www.recruitingfromscratch.com/blog/ai-engineer-san-francisco-salary-in-2026-real-data-from-1-9-million-job-postings),
+[Signify](https://www.signifytechnology.com/news/machine-learning-engineer-salary-benchmarks-us-market-2025-2026/))
+
+**Treat these figures with suspicion.** They are mutually inconsistent — one aggregator reports
+$144k average for "ML inference" in SF while another reports $291k total comp for ML engineers in
+the same city. They measure different populations with different definitions of compensation. The
+directional read is sound; the specific numbers are not comparable to each other.
+
+### Channel mix if geography opens
+
+The weighting in §5 changes:
+
+| Channel | NYC-only | Multi-hub or remote |
+|---|---|---|
+| Upstream contribution | 15–20 hrs | **Increase — becomes the primary channel** |
+| Publication-linked outreach | 12–15 hrs | Unchanged; target list widens |
+| In-person | 10–15 hrs | **Drops toward zero** |
+| Community presence | 5–10 hrs | Slight increase, replacing in-person |
+
+**Artifacts matter more in a non-local search, not less.** A local candidate can lean on referrals,
+meetups, and coincidence. Someone applying from another city has none of that — the work carries the
+whole load. Upstream contribution becomes the single most valuable channel because it is the only
+one that reaches the right people regardless of where anyone lives: a merged vLLM PR is seen at
+Baseten, Annapurna, and Anthropic simultaneously, whatever their reqs happen to be called.
+
+### Research status
+
+NYC was researched in depth. **Bay Area and Seattle were verified at the level above and no
+further** — company and role existence, not team structure, hiring velocity, or remote policy.
+Chicago (quant: Citadel, Jump, DRW, Optiver, IMC) is structural reasoning only, unverified.
+
+If geography opens beyond these two, a per-hub pass on the same pattern is the prerequisite before
+the target list can be trusted.
+
+---
+
 ## 8. AI Engineer New York 2026 — October 12–14
 
 In your metro, with your target audience in the room, roughly eight weeks out.
@@ -344,7 +462,28 @@ budgeted here rather than left out. The audience decision for the *posts* stands
 
 ---
 
+## 12b. Geography decision — open
+
+Geography is **not decided**. The track is executable NYC-primary today, and §7b is written so that
+opening to Bay Area, Seattle, or remote is a channel-reweighting rather than a redesign.
+
+Two things force the decision eventually, neither urgently:
+
+- **In-person spend.** The October conference and NYC meetups are only worth their hours if NYC is
+  the primary market. Decide before committing to the conference ticket.
+- **Outreach targeting.** The first publication-linked outreach round needs a target list, and the
+  list differs by hub. That is the first artifact's publication at the earliest — months out.
+
+Until then the correct posture is **geography-agnostic work**: upstream contribution, the artifacts
+themselves, and light community presence all pay off in every hub, so none of the effort is stranded
+by deciding later.
+
+---
+
 ## 13. Definition of done
+
+- Geography posture confirmed (NYC-primary, multi-hub, or remote) before conference spend and
+  before the first outreach round.
 
 This track has no completion state, but it has checkpoints:
 
