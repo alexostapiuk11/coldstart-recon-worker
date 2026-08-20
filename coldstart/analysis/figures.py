@@ -212,16 +212,33 @@ def waterfall(rows, out_path) -> Path:
             _draw(i, platform, "T_platform (not attributable)", RESIDUAL_COLOR)
             _draw(i, process, "S2 to ready (phases merged by engine)", "#7f8fa6")
 
-    ax.set_yticks(ys, labels)
-    ax.set_xlabel("seconds (median)")
+    ax.set_yticks(ys, labels, fontsize=11)
+    ax.set_xlabel("seconds (median)", fontsize=12)
+    ax.tick_params(axis="x", labelsize=11)
     ax.set_xlim(left=0)
     # Placed outside the axes (to the right) rather than in a corner: with
     # every stage now individually labelled there can be a dozen legend
     # entries, more than any in-plot corner has room for without covering a
     # bar. `bbox_inches="tight"` on save (below) expands the saved canvas to
-    # include it rather than clipping it off.
-    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8, borderaxespad=0.0)
-    ax.set_title("Cold start decomposition")
+    # include it rather than clipping it off. Font sizes here are larger
+    # than the other three figures' legends (fontsize=8) specifically
+    # because this chart is wider in absolute pixels now that it carries up
+    # to a dozen entries -- what determines legibility once a reader
+    # displays the PNG at a fixed width (e.g. a phone screen) is
+    # `font_pt / figure_width_in`, not the font's absolute point size, so a
+    # wider chart needs correspondingly larger fonts to hold the same
+    # rendered size after downscaling. `labelspacing`/`handlelength` are
+    # trimmed so the wider font doesn't blow the legend column out further.
+    ax.legend(
+        loc="upper left",
+        bbox_to_anchor=(1.01, 1.0),
+        fontsize=10,
+        borderaxespad=0.0,
+        labelspacing=0.4,
+        handlelength=1.5,
+        handletextpad=0.5,
+    )
+    ax.set_title("Cold start decomposition", fontsize=15)
     fig.tight_layout()
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)

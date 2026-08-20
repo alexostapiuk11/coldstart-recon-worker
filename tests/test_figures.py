@@ -229,6 +229,22 @@ def test_waterfall_xlim_starts_at_zero(tmp_path):
     assert ax.get_xlim()[0] == 0
 
 
+def test_waterfall_text_sizes_are_large_enough_to_survive_downscaling(tmp_path):
+    """With up to a dozen legend entries now (versus five before), the chart
+    is wider in absolute pixels; unless the font sizes scale up to match,
+    the *relative* size of every label shrinks once the PNG is displayed at
+    a fixed width (e.g. a 390px-wide phone screen) -- pins a floor so a
+    future edit can't silently let this regress back to illegible."""
+    _fig, ax = _call_capturing_axes(waterfall, rows(), tmp_path / "w.png")
+    assert ax.title.get_fontsize() >= 13
+    assert ax.xaxis.label.get_fontsize() >= 11
+    for tick_label in ax.get_xticklabels() + ax.get_yticklabels():
+        assert tick_label.get_fontsize() >= 10
+    legend = ax.get_legend()
+    for text in legend.get_texts():
+        assert text.get_fontsize() >= 9
+
+
 def test_waterfall_merged_branch_draws_two_segments_labeled_merged(tmp_path):
     """The plan's given fixture never sets t_weights=None, so it never
     exercises the merged-phase branch metrics.py's derive() produces when
