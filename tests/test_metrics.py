@@ -50,12 +50,33 @@ def test_t_process_is_t0_to_first_token():
     assert d["t_process"] == 102.0
 
 
-def test_t_total_is_submit_to_result():
-    assert derive(make())["t_total"] == 150.0
+def test_t_total_job_is_the_raw_uncorrected_submit_to_result_span():
+    """`t_total_job` is real data (the driver's submit-to-job-return span) and
+    must be published even though it is not T_total — see B1."""
+    assert derive(make())["t_total_job"] == pytest.approx(150.0)
+
+
+def test_t_total_is_corrected_by_subtracting_the_warmup_tail():
+    """B1: `t_result` is stamped after all ten warmup requests (S7), not at
+    first token (S6) — the spec's T_total boundary. derive() must correct
+    for that by subtracting the clock-B warmup-tail duration
+    (S7_warmup_done - S6_first_token = 130.0 - 102.0 = 28.0) from the raw
+    clock-A span (150.0), landing on 122.0.
+
+    This fixture's marks (S5_ready/S6_request1_dispatch = 100.0 vs.
+    S6_first_token = 102.0) are deliberately distinct, so a mutant that
+    subtracts the wrong pair of marks (e.g. S7 - S5_ready = 30.0, or
+    S7 - S6_request1_dispatch = 30.0) would land on 120.0, not 122.0, and a
+    mutant that drops the correction entirely would land on 150.0, and a
+    mutant that flips the sign would land on 178.0. All three are wrong
+    against this literal.
+    """
+    assert derive(make())["t_total"] == pytest.approx(122.0)
 
 
 def test_residual_is_the_difference():
-    assert derive(make())["t_platform"] == pytest.approx(48.0)
+    # t_platform = t_total(122.0, corrected) - t_process(102.0) = 20.0.
+    assert derive(make())["t_platform"] == pytest.approx(20.0)
 
 
 def test_kv_capacity_is_blocks_times_block_size():
@@ -85,9 +106,14 @@ def test_inconsistent_run_is_flagged_not_silently_kept():
 
 
 def test_residual_below_rtt_floor_is_flagged_inconsistent():
-    # t_process=102.0 (default marks), t_result=102.03 -> residual=0.03,
-    # below the 0.05 rtt floor.
-    d = derive(make(t_result=102.03))
+    # t_process=102.0 (default marks), warmup-tail correction=28.0 (default
+    # marks), so t_total = (t_result - 0.0) - 28.0. Setting t_result=130.03
+    # lands t_total at 102.03 -> residual=0.03, below the 0.05 rtt floor.
+    # (Before the B1 fix this fixture used t_result=102.03 directly against
+    # the uncorrected t_total; that value now lands t_total at 74.03, which
+    # trips PROCESS_EXCEEDS_TOTAL instead — recalibrated here for the
+    # correction.)
+    d = derive(make(t_result=130.03))
     assert d["consistent"] is False
     assert d["t_platform"] is None
     assert d["discard_reason"] == DiscardReason.RESIDUAL_BELOW_RTT_FLOOR
@@ -219,6 +245,43 @@ def test_missing_process_mark_raises_with_run_identity():
         derive(rec)
     message = str(exc_info.value)
     assert "run-42" in message
+    assert "A" in message
+
+
+def test_missing_s7_warmup_done_leaves_t_total_uncorrected_and_flagged():
+    """A run that reached first token (S6) and then failed or was cut off
+    mid-warmup, before S7_warmup_done was marked, is a real, expected state
+    (not a defect to paper over). Falling back to the raw, uncorrected span
+    here would silently reintroduce B1 for exactly the runs most likely to
+    be anomalous, so this must not compute t_total at all -- it must be
+    flagged, not guessed.
+    """
+    marks = [m for m in make().clock_B["marks"] if m["stage"] != "S7_warmup_done"]
+    d = derive(make(marks=marks))
+    assert d["t_total"] is None
+    assert d["t_total_job"] == pytest.approx(150.0)  # raw span still published
+    assert d["consistent"] is False
+    assert d["t_platform"] is None
+    assert d["inconsistency_reason"] is not None
+    assert d["discard_reason"] == DiscardReason.MISSING_WARMUP_END
+
+
+def test_negative_correction_term_raises_loudly():
+    """S7_warmup_done preceding S6_first_token is impossible on a monotonic
+    clock B -- corrupted data, not a borderline measurement. It must not be
+    folded quietly into "just another inconsistent run": it raises, the same
+    way a missing required mark does.
+    """
+    marks = [
+        {"stage": "S6_first_token", "t_mono": 102.0},
+        {"stage": "S7_warmup_done", "t_mono": 90.0},
+    ]
+    rec = make(marks=marks)
+    rec.run_id = "run-99"
+    with pytest.raises(ValueError) as exc_info:
+        derive(rec)
+    message = str(exc_info.value)
+    assert "run-99" in message
     assert "A" in message
 
 

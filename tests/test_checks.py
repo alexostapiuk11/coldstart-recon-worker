@@ -202,7 +202,14 @@ def test_discard_reasons_are_distinct_enum_members():
     exceeds = check_consistency(t_total=60.0, t_process=70.0, rtt_floor=0.5)
     below_floor = check_consistency(t_total=70.2, t_process=70.0, rtt_floor=0.5)
     assert exceeds.discard_reason is not below_floor.discard_reason
-    assert {exceeds.discard_reason, below_floor.discard_reason} == set(DiscardReason)
+    # check_consistency itself only ever produces these two — DiscardReason
+    # also has MISSING_WARMUP_END, produced directly by metrics.derive() for
+    # a run that never reaches check_consistency at all (see coldstart/checks.py).
+    assert {exceeds.discard_reason, below_floor.discard_reason} == {
+        DiscardReason.PROCESS_EXCEEDS_TOTAL,
+        DiscardReason.RESIDUAL_BELOW_RTT_FLOOR,
+    }
+    assert {exceeds.discard_reason, below_floor.discard_reason} < set(DiscardReason)
 
 
 # --- I8: ConsistencyResult must be falsy exactly when the run is invalid,

@@ -2283,6 +2283,15 @@ class StubSubmitter:
         )
 ```
 
+**`t_result` is not `T_total`.** It is stamped here after `endpoint.run()` returns, which for a
+serverless request/response worker is after all ten warmup requests (S7) complete — not at first
+token of request 1 (S6), the spec's `T_total` boundary (spec 7). Do not treat
+`t_result - t_submit` as `T_total` anywhere downstream. `derive()` (Task 16 / `coldstart/analysis/metrics.py`)
+applies the documented correction — subtracting the clock-B warmup-tail duration
+(`S7_warmup_done - S6_first_token`) from this raw span — to recover the spec-defined `T_total`.
+See B1 under "Blocking defects found by the final integration review" for the full rationale and
+the fix as built.
+
 - [ ] **Step 4: Run and confirm pass**
 
 Run: `.venv/bin/pytest tests/test_submitter.py -v`
@@ -6222,6 +6231,25 @@ clock-B duration from first token to end of job:
 `T_total = (t_result − t_submit) − (S7_warmup_done − S6_first_token)`. That is a *duration*
 correction across clocks, not a timestamp comparison, so it stays inside the three-clock rules.
 Record the raw span too, and say in the post which is which.
+
+**Fixed.** `derive()` (`coldstart/analysis/metrics.py`) now computes the raw span as
+`t_total_job` and keeps it in the published row unconditionally, and computes `T_total` as
+`t_total_job − (S7_warmup_done − S6_first_token)`. `t_platform` and `ceiling_bound` consume the
+corrected `T_total`, not the raw span. The consistency check (`t_process` must not exceed
+`t_total` less the RTT floor) now runs against the corrected value, which makes it meaningfully
+tighter than before: previously `t_total` was inflated by the full warmup tail, so `t_process`
+could never realistically approach it and the check almost never fired; now `t_total` is
+`t_process` plus only the true platform residual, so the same check catches clock skew and
+submit/result bookkeeping bugs the inflated value was masking.
+
+Two states get explicit, non-silent handling rather than falling back to the uncorrected value:
+a run missing `S7_warmup_done` (reached first token, then failed or was cut off mid-warmup) gets
+`t_total = None`, `consistent = False`, and a dedicated `DiscardReason.MISSING_WARMUP_END` so it
+is tabulatable separately from the other two consistency violations — instead of silently
+publishing the wrong, still-inflated number for exactly the runs most likely to be anomalous. A
+negative correction term (`S7_warmup_done` preceding `S6_first_token`, impossible on a monotonic
+clock B) raises `ValueError` with the run's id and arm, the same way a missing required stage
+mark does, rather than being clamped or absorbed into the consistency flag.
 
 **B2 — the waterfall's "unattributed within S4" is neither unattributed nor within S4, and the
 compile result is hiding inside it.** `figures.py` computes it as

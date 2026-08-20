@@ -24,10 +24,19 @@ class FailureClass(StrEnum):
 class DiscardReason(StrEnum):
     """Mirrors FailureClass: a closed taxonomy so a downstream reader can
     tabulate discards by class instead of substring-matching the free-form
-    `reason` string that check_consistency also returns."""
+    `reason` string that check_consistency also returns.
+
+    The first two values are produced by check_consistency below.
+    MISSING_WARMUP_END is produced directly by metrics.derive(): a run
+    missing S7_warmup_done can't even have a T_total correction computed
+    (spec 6.5 / B1), so it never reaches check_consistency at all — it needs
+    its own tabulatable reason rather than silently falling into one of the
+    other two.
+    """
 
     PROCESS_EXCEEDS_TOTAL = "process_exceeds_total"
     RESIDUAL_BELOW_RTT_FLOOR = "residual_below_rtt_floor"
+    MISSING_WARMUP_END = "missing_warmup_end"
 
 
 class _Needle:

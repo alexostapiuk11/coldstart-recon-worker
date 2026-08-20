@@ -20,7 +20,8 @@ class DerivedRow(TypedDict, total=False):
     host_id: str | None
     triple_index: int | None
     failure_class: str | None
-    t_total: float
+    t_total: float | None
+    t_total_job: float
     t_process: float
     t_platform: float | None
     t_weights: float | None
@@ -118,12 +119,73 @@ def derive(record: RunRecord) -> DerivedRow:
 
     m = _marks(record)
     t_process = _require_mark(m, "S6_first_token", record)
-    t_total = record.clock_A["t_result"] - record.clock_A["t_submit"]
-    checked = check_consistency(t_total=t_total, t_process=t_process)
-    # Carry all three ConsistencyResult fields through: discard_reason is a
-    # closed enum specifically so a downstream reader can tabulate discards
-    # by class instead of substring-matching the free-form `reason` string.
-    consistent, reason, discard_reason = checked.ok, checked.reason, checked.discard_reason
+
+    # `t_result` is stamped by the driver after the worker job returns — that
+    # is after all ten warmup requests (S7), not at first token (S6), the
+    # spec's T_total boundary (spec 7: "T_total | clock A, submit -> first
+    # token of request 1"). Left uncorrected, T_platform silently absorbs
+    # requests 2-10 plus the result round trip: this was B1. `t_total_job` is
+    # that raw span; it is real data and stays in the published row, but it
+    # is not T_total.
+    t_total_job = record.clock_A["t_result"] - record.clock_A["t_submit"]
+
+    # Correct it by subtracting the clock-B duration from first token to end
+    # of job: T_total = (t_result - t_submit) - (S7_warmup_done -
+    # S6_first_token). Spec 6.5 rule 1 forbids subtracting a clock-B
+    # *timestamp* from a clock-A *timestamp* to obtain a duration — that is
+    # an absolute cross-clock comparison, and it is what the rule and rule
+    # 2's single named exception (T_platform) are guarding. This is a
+    # different operation: both operands here are *durations*, each already
+    # computed from timestamps within one clock domain (t_total_job from
+    # clock A alone; the warmup tail from clock B alone), combined only
+    # after that. It does not compare absolute readings across clocks and
+    # does not add a second cross-domain subtraction — T_platform is still
+    # computed exactly once below, from this corrected T_total.
+    t_warmup_end = m.get("S7_warmup_done")
+    if t_warmup_end is None:
+        # A run that reached first token and then failed or was cut off
+        # mid-warmup, before S7 was marked, is a real, expected state — not
+        # a defect to paper over. Falling back to the uncorrected
+        # t_total_job here would silently reintroduce B1 for exactly the
+        # runs most likely to be anomalous, so instead: no T_total is
+        # computed at all, the run is flagged inconsistent with a
+        # tabulatable, dedicated discard reason, and t_total_job (still
+        # real) is the only span published for it.
+        t_total: float | None = None
+        consistent = False
+        reason: str | None = (
+            f"run {record.run_id!r} (arm {record.arm!r}): S7_warmup_done missing, "
+            "cannot compute the T_total warmup-tail correction"
+        )
+        discard_reason: DiscardReason | None = DiscardReason.MISSING_WARMUP_END
+    else:
+        warmup_tail = t_warmup_end - t_process
+        if warmup_tail < 0:
+            # S7 preceding S6 is impossible on a monotonic clock B — this is
+            # corrupted data, not a borderline measurement, so (like a
+            # missing required mark above) it must not be folded quietly
+            # into "just another inconsistent run".
+            raise ValueError(
+                f"run {record.run_id!r} (arm {record.arm!r}): negative T_total "
+                f"correction term {warmup_tail}: S7_warmup_done precedes S6_first_token, "
+                "which is impossible on a monotonic clock"
+            )
+        t_total = t_total_job - warmup_tail
+        checked = check_consistency(t_total=t_total, t_process=t_process)
+        # Carry all three ConsistencyResult fields through: discard_reason is
+        # a closed enum specifically so a downstream reader can tabulate
+        # discards by class instead of substring-matching the free-form
+        # `reason` string.
+        #
+        # This check is now *tighter* than before the B1 fix. Uncorrected,
+        # t_total included the full warmup tail (tens of seconds in these
+        # fixtures), so t_process could never realistically approach it and
+        # "t_process must not exceed t_total" was nearly impossible to trip.
+        # With the correction applied, t_total is t_process plus only the
+        # true platform residual, so this same check now actually catches
+        # clock skew and submit/result bookkeeping bugs that the inflated
+        # t_total was masking.
+        consistent, reason, discard_reason = checked.ok, checked.reason, checked.discard_reason
 
     # T_weights = S2 + S3 (spec, stage taxonomy). The volume arms may memory-map
     # weights, fusing acquisition and HBM load with no clean boundary between
@@ -181,6 +243,7 @@ def derive(record: RunRecord) -> DerivedRow:
         "host_id": record.host.get("host_id"),
         "triple_index": record.host.get("triple_index"),
         "t_total": t_total,
+        "t_total_job": t_total_job,
         "t_process": t_process,
         "t_platform": compute_residual(t_total, t_process) if consistent else None,
         "t_weights": t_weights,
