@@ -6501,36 +6501,64 @@ imports both). Its `partition(rows, required=())` is the one function meant to s
 "Publishable" is not one hardcoded predicate: `required` is a tuple of field names the caller
 states for the analysis at hand. `"consistent"` is checked as `is True` (it is a bool present on
 every ok row, so a bare not-None check would never fire); every other name is checked the
-ordinary way, present and not `None`. Four presets cover this plan's actual call sites:
-`REQUIRED_FOR_WARMUP = ()` (`warmup_curve` needs only a successful run), `REQUIRED_FOR_T_TOTAL =
-("consistent",)` (`waterfall`, `ecdf_plot`, `per_host_medians` — both `t_total` and `t_platform`
-are `None` exactly when a row failed the clock-consistency check), `REQUIRED_FOR_T_WEIGHTS =
-("consistent", "t_weights")`, and `REQUIRED_FOR_T_FAST = ("consistent", "t_fast_seconds")` (the
-A→B / B→C contrast and the business-framing figures respectively).
+ordinary way, present and not `None`. Consistency is a floor every preset shares — `"consistent"`
+appears in all four tuples below — and each tuple's remaining entries are what that metric needs
+*in addition to* the floor: `REQUIRED_FOR_WARMUP = ("consistent",)` (`warmup_curve` needs nothing
+beyond the floor), `REQUIRED_FOR_T_TOTAL = ("consistent",)` (`waterfall`, `ecdf_plot`,
+`per_host_medians` — same floor, nothing extra: both `t_total` and `t_platform` are `None`
+exactly when a row failed the clock-consistency check, so requiring it names both fields'
+condition in one place), `REQUIRED_FOR_T_WEIGHTS = ("consistent", "t_weights")`, and
+`REQUIRED_FOR_T_FAST = ("consistent", "t_fast_seconds")` (the A→B / B→C contrast and the
+business-framing figures respectively). Consistency being universal does not collapse the case
+for a per-metric `required` tuple in the first place — `t_weights` and `t_fast_seconds` still
+have their own, genuinely different nullity conditions (a merged phase; a missing dispatch
+offset) layered on top of the shared floor.
 
-**Correction made during review, recorded here because it changed a design decision, not just a
-bug fix.** The first draft of `REQUIRED_FOR_T_WEIGHTS` was `("t_weights",)` — deliberately
-*without* `"consistent"` — on the reasoning that `t_weights` (S2+S3) is validated independently
-of the T_total/T_process reconciliation, so a clock-inconsistent run could still carry a
-perfectly good one. That reasoning is technically true and was still the wrong conclusion: spec
-6.5 rule 3 is unconditional ("Every run gets a consistency check ... Violations are discarded ...
-never silently"), and a failed consistency check is a statement about the run — its clocks or
-platform behavior are not trustworthy — not a per-field verdict. Publishing `t_weights` from a
-run already declared broken is exactly the selective inclusion pre-registration exists to
-prevent. **Ruling: consistency is a baseline requirement for every published quantity, not a
-per-metric option**, applied to both `REQUIRED_FOR_T_WEIGHTS` and `REQUIRED_FOR_T_FAST` (the
-same bug existed there: `t_fast_seconds` is likewise computed independent of the T_total/
-T_process check). `REQUIRED_FOR_WARMUP` is the one deliberate exception, and stays `()`: the
-warmup list is ten raw clock-B, intra-process latency measurements with no cross-clock
-reconciliation step of their own, so there is nothing in the T_total/T_process check for them to
-fail in the first place — they are not "a published quantity" the discard rule has an opinion on.
-The fixture row that exposed the original gap (host `h4` in `tests/test_pipeline.py`: clock-
-inconsistent, but with a plausible, non-`None` `t_weights`) is pinned landing in `discarded` for
-`REQUIRED_FOR_T_WEIGHTS`, by name, not merely absent from `publishable` — see
-`test_partition_t_weights_preset_excludes_the_merged_row_and_the_inconsistent_row`. The
-equivalent interaction for `t_fast_seconds` (a run with a real `t_dispatch_mono` offset that is
-also clock-inconsistent) does not occur naturally anywhere in the main mixed-campaign fixture, so
-it gets its own small, dedicated fixture built specifically to express it —
+**Two corrections made during review, recorded here in order because the wrong-then-right
+history is worth more than a clean final statement — both are the same principle applied one
+step too narrowly, twice.**
+
+**Correction 1.** The first draft of `REQUIRED_FOR_T_WEIGHTS` was `("t_weights",)` —
+deliberately *without* `"consistent"` — on the reasoning that `t_weights` (S2+S3) is validated
+independently of the T_total/T_process reconciliation, so a clock-inconsistent run could still
+carry a perfectly good one. That reasoning is technically true and was still the wrong
+conclusion: spec 6.5 rule 3 is unconditional ("Every run gets a consistency check ... Violations
+are discarded ... never silently"), and a failed consistency check is a statement about the run —
+its clocks or platform behavior are not trustworthy — not a per-field verdict. Publishing
+`t_weights` from a run already declared broken is exactly the selective inclusion
+pre-registration exists to prevent. **Ruling: consistency is a baseline requirement for every
+published quantity, not a per-metric option**, applied to both `REQUIRED_FOR_T_WEIGHTS` and
+`REQUIRED_FOR_T_FAST` (the same bug existed there: `t_fast_seconds` is likewise computed
+independent of the T_total/T_process check). At this point `REQUIRED_FOR_WARMUP` was left at
+`()`, reasoned as a deliberate exception: the warmup list is ten raw clock-B, intra-process
+latency measurements with no cross-clock reconciliation step of their own, so there is nothing in
+the T_total/T_process check for them to fail in the first place.
+
+**Correction 2 — the exception carved out for `REQUIRED_FOR_WARMUP` in correction 1 was itself an
+instance of the same mistake, and was overruled next.** The warmup list genuinely has no
+cross-clock step of its own to fail — that part was correct. What doesn't follow is that a
+consistency violation *elsewhere* in the run leaves the warmup data untouched: "clock A
+misbehaved (e.g. a slow result return) and the in-container data is fine" and "this run is
+anomalous in a way nobody understands" are indistinguishable from the analysis side — that
+indistinguishability is precisely why the discard rule exists and is unconditional. Deciding
+after the fact that the warmup list in particular still looks trustworthy is the identical
+post-hoc selective inclusion correction 1 rejected for `t_weights`, and exempting it would have
+made that ruling arbitrary — `t_weights` is also a pure clock-B quantity, and the same argument
+was available for it and was not accepted. **`REQUIRED_FOR_WARMUP` is now `("consistent",)`. Every
+preset requires consistency; there is no exception.** This does not erase the case for a
+per-metric `required` tuple — `t_weights` and `t_fast_seconds` still carry their own nullity
+conditions on top of the shared floor, and `T_TOTAL`/`WARMUP` needing nothing beyond the floor is
+itself a real, distinguishing fact about those two analyses, not a sign the axis is redundant.
+
+Both corrections are pinned by the same fixture row (host `h4` in `tests/test_pipeline.py`:
+clock-inconsistent, but with a plausible, non-`None` `t_weights` and a warmup list that "looks
+fine"), asserted landing in `discarded` by name for each preset it now fails, not merely absent
+from `publishable` — see
+`test_partition_t_weights_preset_excludes_the_merged_row_and_the_inconsistent_row` and
+`test_partition_warmup_preset_excludes_the_failed_run_and_the_inconsistent_row`. The equivalent
+interaction for `t_fast_seconds` (a run with a real `t_dispatch_mono` offset that is also
+clock-inconsistent) does not occur naturally anywhere in the main mixed-campaign fixture, so it
+gets its own small, dedicated fixture built specifically to express it —
 `test_partition_t_fast_preset_also_excludes_an_inconsistent_row_with_a_valid_t_fast_seconds`.
 
 The two required tables: `failure_rate_by_arm(rows)` takes the full, unpartitioned campaign (a

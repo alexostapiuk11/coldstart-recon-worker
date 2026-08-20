@@ -213,11 +213,29 @@ def test_fixture_sanity_exactly_one_row_has_t_fast_seconds():
 # ---------------------------------------------------------------------------
 
 
-def test_partition_warmup_preset_only_excludes_the_failed_run():
+def test_partition_warmup_preset_excludes_the_failed_run_and_the_inconsistent_row():
+    """Second ruling on the same principle as the t_weights case below:
+    warmup latencies are pure clock-B measurements with no cross-clock step
+    of their own, which argues an inconsistent run's warmup data should
+    still be trustworthy -- that argument was made and overruled (see
+    REQUIRED_FOR_WARMUP's docstring): "clock A misbehaved, the rest is fine"
+    and "this run is anomalous in ways nobody understands" are
+    indistinguishable after the fact, so h4 is discarded here too, not kept
+    because its warmup list still looks plausible. Same treatment as h4
+    under REQUIRED_FOR_T_WEIGHTS: pinned landing in `discarded`, by name,
+    with its reason -- not merely absent from `publishable`."""
     result = partition(_campaign(), required=REQUIRED_FOR_WARMUP)
-    assert len(result.publishable) == 11
-    assert len(result.discarded) == 0
+    assert len(result.publishable) == 10
+    assert len(result.discarded) == 1
     assert len(result.failed) == 1
+
+    (row,) = result.discarded
+    assert row["host_id"] == "h4"
+    assert row["arm"] == "C"
+    assert row["warmup"] is not None  # the data that "looks fine" -- discarded anyway
+    assert row["exclusion_reason"] == DiscardReason.PROCESS_EXCEEDS_TOTAL.value
+    assert row["exclusion_labels"] == (DiscardReason.PROCESS_EXCEEDS_TOTAL.value,)
+    assert "h4" not in {r["host_id"] for r in result.publishable}
 
 
 def test_partition_t_total_preset_excludes_the_inconsistent_row_only():

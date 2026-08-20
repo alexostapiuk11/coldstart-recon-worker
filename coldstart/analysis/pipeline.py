@@ -7,11 +7,12 @@ recorded as B4 in the plan.
 
 `partition()` is the one function meant to sit between `[derive(r) for r in
 store.read_all()]` and everything downstream. It does not hardcode one notion of
-"publishable": the spec's clock-consistency discard rule, T_weights nullity, and
-T_fast nullity are three different, independent reasons a row might not suit a given
-analysis (an inconsistent run can still have a perfectly good `t_weights`; a merged
-run can still have a perfectly good `t_total`), so the caller states which fields the
-analysis at hand actually needs via `required` rather than this module guessing.
+"publishable": clock consistency is a floor every published quantity shares (spec
+6.5 rule 3 — a failed consistency check is a verdict on the run, not on any one
+field of it), but T_weights nullity and T_fast nullity are separate, per-metric
+reasons stacked on top of that floor (a merged phase; a missing dispatch offset),
+so the caller states which fields the analysis at hand actually needs via `required`
+rather than this module guessing.
 
 No imports from the rest of `coldstart.analysis` — `metrics.py` already imports
 `stats.py`, and `figures.py` imports both, so keeping this module import-free avoids
@@ -26,30 +27,39 @@ from dataclasses import dataclass, field
 # figures / the T_weights contrast can't quietly drift from each other on what they
 # require.
 #
-# CONSISTENCY IS A BASELINE, NOT A PER-METRIC OPTION. Spec 6.5 rule 3 is
-# unconditional: "Every run gets a consistency check ... Violations are
-# discarded ... never silently" (and spec 6, line 484: "discard inconsistent
-# runs for a stated, recorded reason"). A failed consistency check does not
-# say "this one field looks wrong" — it says this run's clocks or platform
-# behavior are not trustworthy, full stop. That is a statement about the run,
-# not about any single field of it, so every preset below that publishes a
-# quantity derived from this run's timing MUST include `"consistent"`, even
-# when the specific field it also requires (e.g. `t_weights`) is computed
-# from a clock domain that did not itself fail the check. Selectively
-# keeping the parts of a discarded run that still look plausible is exactly
-# the quiet selective inclusion pre-registration exists to prevent — do not
-# re-litigate this by adding a fifth preset that omits `"consistent"`.
-# REQUIRED_FOR_WARMUP is the one deliberate exception: see its docstring for
-# why it is not "a published quantity this rule concerns" at all.
-REQUIRED_FOR_WARMUP: tuple[str, ...] = ()
-"""`warmup_curve` needs only a successful run. This is the one preset that does
-NOT require `"consistent"`, and that is deliberate, not an oversight the
-comment above forgot: the warmup list is ten raw clock-B, intra-process
-latency measurements with no cross-clock reconciliation step of their own —
-there is nothing in the T_total/T_process consistency check for them to fail
-in the first place. They are not "a published quantity" the discard rule
-(spec 6.5 rule 3, about the T_total/T_process clock pairing specifically)
-has an opinion on."""
+# CONSISTENCY IS THE SHARED FLOOR EVERY PRESET STANDS ON, NOT ONE AXIS AMONG
+# SEVERAL. Spec 6.5 rule 3 is unconditional: "Every run gets a consistency
+# check ... Violations are discarded ... never silently" (and spec 6, line
+# 484: "discard inconsistent runs for a stated, recorded reason"). A failed
+# consistency check does not say "this one field looks wrong" — it says this
+# run's clocks or platform behavior are not trustworthy, full stop. That is a
+# statement about the run, not about any single field of it. It is tempting
+# to reason that a given field was measured on a clock domain the check
+# didn't touch and so must still be trustworthy — that reasoning was tried
+# twice while this module was built (once for `t_weights`, once for the
+# warmup list) and overruled both times: "clock A misbehaved and everything
+# else is fine" and "this run is anomalous in a way nobody understands"
+# produce identical evidence, and choosing the first reading after the fact
+# is exactly the post-hoc selective inclusion pre-registration exists to
+# prevent. So EVERY preset below includes `"consistent"` — there is no
+# exception, deliberate or otherwise. What the tuples express instead is what
+# each metric needs *in addition to* that floor: `t_weights` and
+# `t_fast_seconds` have their own, genuinely different nullity conditions
+# (a merged phase; a missing dispatch offset) that have nothing to do with
+# consistency, and `T_TOTAL`'s consumers need nothing beyond the floor
+# itself. That per-metric layer is the reason `required` is a tuple a caller
+# states rather than one hardcoded predicate — consistency being universal
+# doesn't collapse that design, it just means every tuple below starts with
+# `"consistent"`. Do not re-litigate this by adding a fifth preset that
+# omits it.
+REQUIRED_FOR_WARMUP: tuple[str, ...] = ("consistent",)
+"""`warmup_curve` needs a clock-consistent, successful run. The warmup list is
+ten raw clock-B, intra-process latency measurements with no cross-clock
+reconciliation step of their own, which argues a consistency violation
+elsewhere shouldn't taint them — but that argument was tried and overruled
+(see the block comment above): whether the rest of an inconsistent run's data
+is untouched is exactly what cannot be established after the fact, so it is
+discarded with everything else from that run rather than selectively kept."""
 
 REQUIRED_FOR_T_TOTAL: tuple[str, ...] = ("consistent",)
 """`waterfall`, `ecdf_plot`, and `per_host_medians` all read `t_total` and/or
