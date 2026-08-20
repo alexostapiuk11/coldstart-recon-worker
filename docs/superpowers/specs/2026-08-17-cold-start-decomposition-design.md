@@ -758,6 +758,16 @@ it is a secondary analysis with wider intervals — but it is the strongest caus
 the dataset and cross-checks the unpaired estimates. Disagreement between the two is itself a
 finding about host heterogeneity.
 
+**The two analyses require two different bootstraps, and using one for the other is an error.**
+The pooled estimate resamples individual runs, which is correct because runs across the whole
+campaign are the independent units there. The within-host estimate must resample **whole
+triples**, because the runs inside a triple are paired by construction — that pairing is the
+entire reason the subset is worth reporting. Resampling individual runs from within-host triples
+would treat an arm-A run from one triple as interchangeable with an arm-A run from another
+triple on a different host, reintroducing exactly the host variation the subset was selected to
+remove, and reporting an interval of the wrong width. The paired statistic is also different in
+kind: the median of the within-triple deltas, not the difference of two medians.
+
 **For H4:** per-host medians, plus the share of total variance attributable to host as a
 grouping factor.
 
