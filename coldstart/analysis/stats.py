@@ -158,19 +158,23 @@ def _percentile_interval(draws: list[float], alpha: float) -> tuple[float, float
 
     Also the one place the lo <= hi invariant is enforced. With too few
     draws for how extreme `alpha` is, the naive index arithmetic can put the
-    "lo" index above the "hi" index (or push the "hi" index negative, which
-    silently wraps to the wrong end of the sorted list via Python's
-    negative indexing) and return a backwards interval instead of raising.
+    "lo" index above the "hi" index and return a backwards interval instead
+    of raising. `lo_idx > hi_idx` alone is sufficient: lo_idx = int((alpha/2)
+    * n) is always >= 0, so a negative hi_idx (which would otherwise wrap
+    around to the end of the sorted list via Python's negative indexing) is
+    already > it, and `alpha < 1` (enforced by every caller) keeps lo_idx
+    below n. Checking those cases separately would just be the same
+    condition twice — see the M1-class cleanup this module already does.
     """
     xs = sorted(draws)
     n = len(xs)
     lo_idx = int((alpha / 2) * n)
     hi_idx = int((1 - alpha / 2) * n) - 1
-    if lo_idx > hi_idx or hi_idx < 0 or lo_idx >= n:
+    if lo_idx > hi_idx:
         raise ValueError(
             f"iterations={n} is too few for alpha={alpha}: the percentile-method "
-            f"endpoints would invert or fall out of range (lo index {lo_idx}, hi "
-            f"index {hi_idx}); increase iterations"
+            f"endpoints would invert (lo index {lo_idx}, hi index {hi_idx}); "
+            "increase iterations"
         )
     return xs[lo_idx], xs[hi_idx]
 

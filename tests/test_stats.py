@@ -125,10 +125,13 @@ def test_percentile_at_the_upper_extreme_for_each_floor():
 
 
 def test_percentiles_rejects_non_finite_values():
-    with pytest.raises(ValueError):
-        percentiles([1.0, float("nan")] + list(range(30)))
-    with pytest.raises(ValueError):
-        percentiles([1.0, float("inf")] + list(range(30)))
+    """NEW-4: `want=("p50",)` only, so the p90/p95 sample-size floors (which
+    this 32-element fixture is below) can't fire and mask the non-finite
+    check — the only guard that can raise here is the one under test."""
+    with pytest.raises(ValueError, match="non-finite"):
+        percentiles([1.0, float("nan")] + list(range(30)), want=("p50",))
+    with pytest.raises(ValueError, match="non-finite"):
+        percentiles([1.0, float("inf")] + list(range(30)), want=("p50",))
 
 
 def test_percentiles_rejects_unknown_want_name():
@@ -365,7 +368,7 @@ def test_bootstrap_median_diff_uses_median_not_mean_on_skewed_data():
 
 def test_bootstrap_median_diff_rejects_below_the_bootstrap_sample_floor():
     """I3: the reviewer's exact failing example — a "95% CI" from n=1."""
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="at least"):
         bootstrap_median_diff([100.0], [70.0])
 
 
@@ -377,25 +380,40 @@ def test_bootstrap_median_diff_allows_exactly_at_the_bootstrap_sample_floor():
 
 
 def test_bootstrap_rejects_empty_sample():
-    with pytest.raises(ValueError):
-        bootstrap_median_diff([], [1.0, 2.0])
+    """NEW-3: `b` is padded above MIN_BOOTSTRAP_SAMPLES so only `a`'s
+    emptiness can raise; `match=` pins which guard fired."""
+    with pytest.raises(ValueError, match="empty"):
+        bootstrap_median_diff([], [1.0] * MIN_BOOTSTRAP_SAMPLES)
 
 
 def test_bootstrap_rejects_non_positive_iterations():
-    with pytest.raises(ValueError):
-        bootstrap_median_diff([1.0, 2.0], [3.0, 4.0], iterations=0)
+    """NEW-3: the original 2-element fixtures are below MIN_BOOTSTRAP_SAMPLES,
+    so deleting the iterations check entirely still raises via the sample
+    floor and this test can't tell the difference. Arrays are padded above
+    the floor, and `match=` pins the iterations-specific message."""
+    a = [1.0] * MIN_BOOTSTRAP_SAMPLES
+    b = [3.0] * MIN_BOOTSTRAP_SAMPLES
+    with pytest.raises(ValueError, match="must be positive"):
+        bootstrap_median_diff(a, b, iterations=0)
 
 
 def test_bootstrap_rejects_alpha_out_of_range():
-    with pytest.raises(ValueError):
-        bootstrap_median_diff([1.0, 2.0], [3.0, 4.0], alpha=0.0)
-    with pytest.raises(ValueError):
-        bootstrap_median_diff([1.0, 2.0], [3.0, 4.0], alpha=1.0)
+    """NEW-3: same masking concern as the iterations test above."""
+    a = [1.0] * MIN_BOOTSTRAP_SAMPLES
+    b = [3.0] * MIN_BOOTSTRAP_SAMPLES
+    with pytest.raises(ValueError, match="alpha"):
+        bootstrap_median_diff(a, b, alpha=0.0)
+    with pytest.raises(ValueError, match="alpha"):
+        bootstrap_median_diff(a, b, alpha=1.0)
 
 
 def test_bootstrap_rejects_non_finite_values():
-    with pytest.raises(ValueError):
-        bootstrap_median_diff([1.0, float("nan")], [3.0, 4.0])
+    """NEW-4: `a` is padded to exactly MIN_BOOTSTRAP_SAMPLES so the floor
+    can't fire instead of the non-finite check."""
+    a = [1.0, float("nan")] + [2.0] * (MIN_BOOTSTRAP_SAMPLES - 2)
+    b = [3.0] * MIN_BOOTSTRAP_SAMPLES
+    with pytest.raises(ValueError, match="non-finite"):
+        bootstrap_median_diff(a, b)
 
 
 # ---------------------------------------------------------------------------
@@ -443,12 +461,12 @@ def test_contrast_difference_uses_median_not_mean_on_skewed_data():
 
 
 def test_contrast_difference_rejects_empty_sample():
-    with pytest.raises(ValueError):
-        bootstrap_contrast_difference([], [1.0], [1.0])
+    with pytest.raises(ValueError, match="empty"):
+        bootstrap_contrast_difference([], [1.0] * MIN_BOOTSTRAP_SAMPLES, [1.0] * MIN_BOOTSTRAP_SAMPLES)
 
 
 def test_contrast_difference_rejects_below_the_bootstrap_sample_floor():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="at least"):
         bootstrap_contrast_difference([1.0] * 5, [1.0] * 5, [1.0] * 5)
 
 
@@ -578,6 +596,23 @@ def test_within_host_triples_rejects_mixed_hosts():
     assert within_host_triples(rows, arms=("A", "B", "C")) == []
 
 
+def test_within_host_triples_rejects_an_extra_duplicate_arm():
+    """NEW-5: a set comparison would wrongly accept this group — the SET of
+    arms present is {A, B, C}, matching `arms` — but there are 4 rows, not
+    3 (A appears twice). This is the exact multiset-vs-set distinction the
+    docstring cites to justify dropping the separate arm-count check (M2),
+    so it should be the one thing that is actually pinned. The existing
+    rejection tests ([A, A, C] and [A, B]) both also fail a set comparison,
+    so they can't tell a multiset check from a set check apart."""
+    rows = [
+        {"triple_index": 0, "arm": "A", "host_id": "h1"},
+        {"triple_index": 0, "arm": "A", "host_id": "h1"},
+        {"triple_index": 0, "arm": "B", "host_id": "h1"},
+        {"triple_index": 0, "arm": "C", "host_id": "h1"},
+    ]
+    assert within_host_triples(rows, arms=("A", "B", "C")) == []
+
+
 def test_within_host_triples_output_is_sorted_by_triple_index():
     """M8: rows arrive with triple 2 before triple 0 before triple 1; the
     kept groups must come back ordered by triple_index, not input order."""
@@ -624,6 +659,19 @@ def test_paired_contrast_difference_point_is_median_of_per_triple_contrasts():
     assert res["point"] == pytest.approx(statistics.median(contrasts))
 
 
+def test_paired_contrast_difference_uses_the_correct_contrast_formula():
+    """NEW-1 (critical): every other test of this statistic uses
+    `_value_triples`, whose B=C=0 construction makes (A-B)-(B-C) and
+    (A-B)-(C-B) collapse to the same value (A), so a sign-flip mutation on
+    the second term is invisible to them. B=70, C=60 here are distinct and
+    non-zero, so the correct formula (A-B)-(B-C) = 30-10 = 20 is
+    distinguishable from the wrong one (A-B)-(C-B) = 30-(-10) = 40, which
+    is also just A-C."""
+    triples = _const_triples(20, 100.0, 70.0, 60.0)
+    res = bootstrap_paired_contrast_difference(triples, iterations=10, seed=1)
+    assert res["point"] == pytest.approx(20.0)
+
+
 def test_paired_median_diff_accepts_a_callable_value_extractor():
     """value can be a key name (the default) or a callable — both t_total and
     t_weights get this treatment, so it must not be hardcoded to one field."""
@@ -659,6 +707,38 @@ def test_paired_bootstrap_resamples_whole_triples_and_an_outlier_widens_it():
     with_outlier = _value_triples([30.0] * 14 + [300.0] * 7)
     res_with = bootstrap_paired_median_diff(with_outlier, "A", "B", iterations=3000, seed=9)
     assert (res_with["hi"] - res_with["lo"]) > 0.0
+
+
+def test_paired_median_diff_matches_an_independent_replay_of_the_resample_loop():
+    """NEW-2, mirroring the unpaired replay tests: the same reasoning
+    ('a point estimate alone cannot catch a wrong resample size') applies
+    to the paired engine, which is exactly where the "resample the whole
+    triple" claim lives — and it was not covered. `for _ in range(1)`
+    (resample of size 1) and `rng.randrange(n - 1)` (the last triple never
+    drawn) both previously passed the whole suite. Replay the documented
+    algorithm by hand (same seed, one randrange draw per position in the
+    deltas list) and assert lo/hi equal the exact order statistics of the
+    independently-replayed draws."""
+    rng = random.Random(50)
+    deltas = [rng.gauss(30.0, 15.0) for _ in range(25)]
+    triples = _value_triples(deltas)
+    iterations, seed, alpha = 40, 316, 0.5
+
+    replay_rng = random.Random(seed)
+    n = len(deltas)
+    replayed_draws = []
+    for _ in range(iterations):
+        resample = [deltas[replay_rng.randrange(n)] for _ in range(n)]
+        replayed_draws.append(statistics.median(resample))
+    replayed_sorted = sorted(replayed_draws)
+    expected_lo = replayed_sorted[int((alpha / 2) * iterations)]
+    expected_hi = replayed_sorted[int((1 - alpha / 2) * iterations) - 1]
+
+    res = bootstrap_paired_median_diff(
+        triples, "A", "B", iterations=iterations, seed=seed, alpha=alpha
+    )
+    assert res["lo"] == expected_lo
+    assert res["hi"] == expected_hi
 
 
 def test_paired_median_diff_same_seed_reproducible_different_seed_is_not():
@@ -767,23 +847,23 @@ def test_paired_median_diff_rejects_below_the_bootstrap_sample_floor():
     the data, so this is the path most likely to be called with too few
     units."""
     triples = _const_triples(5, 100.0, 70.0, 60.0)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="at least"):
         bootstrap_paired_median_diff(triples, "A", "B")
 
 
 def test_paired_contrast_difference_rejects_below_the_bootstrap_sample_floor():
     triples = _const_triples(5, 100.0, 70.0, 60.0)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="at least"):
         bootstrap_paired_contrast_difference(triples)
 
 
 def test_paired_median_diff_rejects_empty_triples():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="at least"):
         bootstrap_paired_median_diff([], "A", "B")
 
 
 def test_paired_contrast_difference_rejects_empty_triples():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="at least"):
         bootstrap_paired_contrast_difference([])
 
 
@@ -793,7 +873,7 @@ def test_paired_median_diff_rejects_a_triple_missing_an_arm():
     triples = _const_triples(19, 100.0, 70.0, 60.0) + [
         [{"triple_index": 19, "arm": "A", "host_id": "h19", "t_total": 100.0}]
     ]
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="missing arm"):
         bootstrap_paired_median_diff(triples, "A", "B")
 
 
@@ -804,7 +884,7 @@ def test_paired_contrast_difference_rejects_a_triple_missing_an_arm():
             {"triple_index": 19, "arm": "B", "host_id": "h19", "t_total": 70.0},
         ]
     ]
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="missing arm"):
         bootstrap_paired_contrast_difference(triples)
 
 
@@ -812,25 +892,30 @@ def test_paired_functions_reject_non_finite_values():
     """19 well-formed triples clear the floor; the 20th carries the NaN
     this test is actually checking for."""
     triples = _const_triples(19, 100.0, 70.0, 60.0) + [_triple(19, "h19", float("nan"), 70.0, 60.0)]
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="non-finite"):
         bootstrap_paired_median_diff(triples, "A", "B")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="non-finite"):
         bootstrap_paired_contrast_difference(triples)
 
 
 def test_paired_functions_reject_non_positive_iterations():
-    triples = [_triple(0, "h1", 100.0, 70.0, 60.0)]
-    with pytest.raises(ValueError):
+    """NEW-3 (same masking class, applied here proactively): a 1-triple
+    fixture is below MIN_BOOTSTRAP_SAMPLES, so deleting the iterations
+    check entirely would still raise via the floor and this test couldn't
+    tell. 20 triples clear the floor; `match=` pins the right message."""
+    triples = _const_triples(20, 100.0, 70.0, 60.0)
+    with pytest.raises(ValueError, match="must be positive"):
         bootstrap_paired_median_diff(triples, "A", "B", iterations=0)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="must be positive"):
         bootstrap_paired_contrast_difference(triples, iterations=0)
 
 
 def test_paired_functions_reject_alpha_out_of_range():
-    triples = [_triple(0, "h1", 100.0, 70.0, 60.0)]
-    with pytest.raises(ValueError):
+    """NEW-3: same masking concern as the iterations test above."""
+    triples = _const_triples(20, 100.0, 70.0, 60.0)
+    with pytest.raises(ValueError, match="alpha"):
         bootstrap_paired_median_diff(triples, "A", "B", alpha=0.0)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="alpha"):
         bootstrap_paired_contrast_difference(triples, alpha=1.0)
 
 
@@ -860,7 +945,7 @@ def test_paired_median_diff_rejects_a_triple_with_a_duplicate_arm():
             {"triple_index": 19, "arm": "C", "host_id": "h19", "t_total": 60.0},
         ]
     ]
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="duplicate arm"):
         bootstrap_paired_median_diff(triples, "A", "C")
 
 
@@ -873,7 +958,7 @@ def test_paired_contrast_difference_rejects_a_triple_with_a_duplicate_arm():
             {"triple_index": 19, "arm": "C", "host_id": "h19", "t_total": 60.0},
         ]
     ]
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="duplicate arm"):
         bootstrap_paired_contrast_difference(triples)
 
 
