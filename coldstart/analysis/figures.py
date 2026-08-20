@@ -111,7 +111,11 @@ def waterfall(rows, out_path) -> Path:
     ax.set_yticks(ys, labels)
     ax.set_xlabel("seconds (median)")
     ax.set_xlim(left=0)
-    ax.legend(loc="lower right", fontsize=8)
+    # Arm A (the longest bar) sits at the bottom of the chart, so a
+    # lower-right legend sits directly on top of its tail. Arm C (the
+    # shortest bar, drawn last) is at the top, leaving the upper-right
+    # corner clear regardless of how long arm A's bar grows.
+    ax.legend(loc="upper right", fontsize=8)
     ax.set_title("Cold start decomposition")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
