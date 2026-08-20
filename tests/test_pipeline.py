@@ -229,17 +229,38 @@ def test_partition_t_total_preset_excludes_the_inconsistent_row_only():
     assert result.discarded[0]["arm"] == "C"
 
 
-def test_partition_t_weights_preset_excludes_the_merged_row_only():
+def test_partition_t_weights_preset_excludes_the_merged_row_and_the_inconsistent_row():
+    """Ruling on B4's original design note: consistency is a baseline
+    requirement for every published quantity, not a per-metric option (see
+    REQUIRED_FOR_T_WEIGHTS's docstring). A run that failed the T_total/
+    T_process consistency check is not trustworthy, full stop -- keeping the
+    parts of it that still look plausible (here, a perfectly good t_weights
+    on host h4) is exactly the selective inclusion pre-registration exists
+    to prevent. h4 must land in `discarded`, specifically, not merely be
+    absent from `publishable` -- this is the test that pins the ruling."""
     result = partition(_campaign(), required=REQUIRED_FOR_T_WEIGHTS)
-    assert len(result.publishable) == 10
-    assert len(result.discarded) == 1
+    assert len(result.publishable) == 9
+    assert len(result.discarded) == 2
     assert len(result.failed) == 1
-    assert result.discarded[0]["host_id"] == "h5"
-    assert result.discarded[0]["arm"] == "A"
-    # The inconsistent row (h4) has a perfectly good t_weights and must NOT be
-    # excluded by this preset -- the orthogonality this fixture exists to prove.
-    assert "h4" not in {r["host_id"] for r in result.discarded}
-    assert any(r["host_id"] == "h4" for r in result.publishable)
+
+    discarded_by_host = {r["host_id"]: r for r in result.discarded}
+    assert set(discarded_by_host) == {"h4", "h5"}
+
+    # h4: clock-inconsistent, t_weights otherwise valid -- excluded on
+    # consistency alone, not on t_weights.
+    h4 = discarded_by_host["h4"]
+    assert h4["arm"] == "C"
+    assert h4["t_weights"] == pytest.approx(50.0)  # still a real, plausible value
+    assert h4["exclusion_labels"] == (DiscardReason.PROCESS_EXCEEDS_TOTAL.value,)
+
+    # h5: the engine-merged run -- excluded on t_weights alone, still
+    # clock-consistent.
+    h5 = discarded_by_host["h5"]
+    assert h5["arm"] == "A"
+    assert h5["consistent"] is True
+    assert h5["exclusion_labels"] == ("missing_t_weights",)
+
+    assert "h4" not in {r["host_id"] for r in result.publishable}
 
 
 def test_partition_t_fast_preset_keeps_only_the_dispatch_enabled_row():
@@ -248,6 +269,33 @@ def test_partition_t_fast_preset_keeps_only_the_dispatch_enabled_row():
     assert result.publishable[0]["host_id"] == "h7"
     assert len(result.discarded) == 10
     assert len(result.failed) == 1
+
+
+def test_partition_t_fast_preset_also_excludes_an_inconsistent_row_with_a_valid_t_fast_seconds():
+    """Same ruling as the t_weights case above, applied to REQUIRED_FOR_T_FAST:
+    t_fast_seconds is computed independently of the T_total/T_process check
+    too, so a clock-inconsistent run can still carry a perfectly plausible
+    t_fast_seconds -- and it must still be discarded. `_CAMPAIGN` has no row
+    expressing "dispatch-enabled AND inconsistent" at once (every dispatch-
+    enabled row there, h7, happens to be consistent), so this is its own
+    small, dedicated fixture built specifically to exercise the interaction
+    -- a fixture of all-consistent-or-all-dispatchless rows could not."""
+    consistent = derive(
+        _record("A", "r-fast-ok", "h20", 20, marks=_A5_MARKS, warmup=_A5_WARMUP, t_result=203.0)
+    )
+    inconsistent = derive(
+        _record("A", "r-fast-bad", "h21", 21, marks=_A5_MARKS, warmup=_A5_WARMUP, t_result=100.0)
+    )
+    assert consistent["consistent"] is True
+    assert consistent["t_fast_seconds"] is not None
+    assert inconsistent["consistent"] is False
+    assert inconsistent["t_fast_seconds"] is not None  # valid despite the flag
+
+    result = partition([consistent, inconsistent], required=REQUIRED_FOR_T_FAST)
+    assert result.publishable == [consistent]
+    assert len(result.discarded) == 1
+    assert result.discarded[0]["host_id"] == "h21"
+    assert DiscardReason.PROCESS_EXCEEDS_TOTAL.value in result.discarded[0]["exclusion_labels"]
 
 
 def test_partition_different_presets_disagree_on_the_same_row():
@@ -269,10 +317,15 @@ def test_discarded_rows_carry_their_exclusion_reason():
     assert row["exclusion_reason"] == DiscardReason.PROCESS_EXCEEDS_TOTAL.value
     assert row["exclusion_labels"] == (DiscardReason.PROCESS_EXCEEDS_TOTAL.value,)
 
+    # REQUIRED_FOR_T_WEIGHTS now discards for two distinct reasons (the
+    # consistency ruling above) -- look up each row by its own reason rather
+    # than assuming there is exactly one discarded row.
     result = partition(_campaign(), required=REQUIRED_FOR_T_WEIGHTS)
-    (row,) = result.discarded
-    assert row["exclusion_reason"] == "missing_t_weights"
-    assert row["exclusion_labels"] == ("missing_t_weights",)
+    by_host = {r["host_id"]: r for r in result.discarded}
+    assert by_host["h5"]["exclusion_reason"] == "missing_t_weights"
+    assert by_host["h5"]["exclusion_labels"] == ("missing_t_weights",)
+    assert by_host["h4"]["exclusion_reason"] == DiscardReason.PROCESS_EXCEEDS_TOTAL.value
+    assert by_host["h4"]["exclusion_labels"] == (DiscardReason.PROCESS_EXCEEDS_TOTAL.value,)
 
 
 def test_partition_does_not_mutate_the_original_rows():

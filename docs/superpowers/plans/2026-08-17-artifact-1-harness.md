@@ -6505,13 +6505,33 @@ ordinary way, present and not `None`. Four presets cover this plan's actual call
 `REQUIRED_FOR_WARMUP = ()` (`warmup_curve` needs only a successful run), `REQUIRED_FOR_T_TOTAL =
 ("consistent",)` (`waterfall`, `ecdf_plot`, `per_host_medians` — both `t_total` and `t_platform`
 are `None` exactly when a row failed the clock-consistency check), `REQUIRED_FOR_T_WEIGHTS =
-("t_weights",)` (the A→B / B→C contrast — deliberately does *not* also require `"consistent"`,
-since `t_weights` is validated independently of the T_total/T_process reconciliation and an
-inconsistent row can still carry a perfectly good one), and `REQUIRED_FOR_T_FAST =
-("t_fast_seconds",)` (the business-framing figures — `None` on every run recorded before Task
-11's probe emits `t_dispatch_mono`, which today is every real run; this preset legitimately
-discards most of a pre-Task-11 campaign, which is the honest state of the harness, not a bug in
-the gate).
+("consistent", "t_weights")`, and `REQUIRED_FOR_T_FAST = ("consistent", "t_fast_seconds")` (the
+A→B / B→C contrast and the business-framing figures respectively).
+
+**Correction made during review, recorded here because it changed a design decision, not just a
+bug fix.** The first draft of `REQUIRED_FOR_T_WEIGHTS` was `("t_weights",)` — deliberately
+*without* `"consistent"` — on the reasoning that `t_weights` (S2+S3) is validated independently
+of the T_total/T_process reconciliation, so a clock-inconsistent run could still carry a
+perfectly good one. That reasoning is technically true and was still the wrong conclusion: spec
+6.5 rule 3 is unconditional ("Every run gets a consistency check ... Violations are discarded ...
+never silently"), and a failed consistency check is a statement about the run — its clocks or
+platform behavior are not trustworthy — not a per-field verdict. Publishing `t_weights` from a
+run already declared broken is exactly the selective inclusion pre-registration exists to
+prevent. **Ruling: consistency is a baseline requirement for every published quantity, not a
+per-metric option**, applied to both `REQUIRED_FOR_T_WEIGHTS` and `REQUIRED_FOR_T_FAST` (the
+same bug existed there: `t_fast_seconds` is likewise computed independent of the T_total/
+T_process check). `REQUIRED_FOR_WARMUP` is the one deliberate exception, and stays `()`: the
+warmup list is ten raw clock-B, intra-process latency measurements with no cross-clock
+reconciliation step of their own, so there is nothing in the T_total/T_process check for them to
+fail in the first place — they are not "a published quantity" the discard rule has an opinion on.
+The fixture row that exposed the original gap (host `h4` in `tests/test_pipeline.py`: clock-
+inconsistent, but with a plausible, non-`None` `t_weights`) is pinned landing in `discarded` for
+`REQUIRED_FOR_T_WEIGHTS`, by name, not merely absent from `publishable` — see
+`test_partition_t_weights_preset_excludes_the_merged_row_and_the_inconsistent_row`. The
+equivalent interaction for `t_fast_seconds` (a run with a real `t_dispatch_mono` offset that is
+also clock-inconsistent) does not occur naturally anywhere in the main mixed-campaign fixture, so
+it gets its own small, dedicated fixture built specifically to express it —
+`test_partition_t_fast_preset_also_excludes_an_inconsistent_row_with_a_valid_t_fast_seconds`.
 
 The two required tables: `failure_rate_by_arm(rows)` takes the full, unpartitioned campaign (a
 rate needs the total run count as its denominator, which the `failed` bucket alone doesn't
@@ -6551,11 +6571,13 @@ engine-merged run with `t_weights is None`, and a run with no `t_dispatch_mono` 
 pre-Task-11 state B5 describes). It pins the partition counts under each preset (including one
 row, the engine-merged run, that `partition()` correctly rules opposite ways under
 `REQUIRED_FOR_T_TOTAL` vs. `REQUIRED_FOR_T_WEIGHTS` — direct evidence publishable is not one
-predicate), a fixture where the failure rate (arm B) and the discard rate (arm C) are non-zero on
-different arms and neither shows up in the other's table, that `within_host_triples` now excludes
-the triple containing the failed run, and — at the scale where `bootstrap_median_diff`'s sample
-floor actually engages — that the Task 19 pooling pattern completes successfully on a campaign
-containing a merged run.
+predicate; and, since the consistency ruling above, a second row — the clock-inconsistent one —
+that lands in `discarded` under `REQUIRED_FOR_T_WEIGHTS` by name, with its own exclusion reason
+kept separate from the merged row's), a fixture where the failure rate (arm B) and the discard
+rate (arm C) are non-zero on different arms and neither shows up in the other's table, that
+`within_host_triples` now excludes the triple containing the failed run, and — at the scale where
+`bootstrap_median_diff`'s sample floor actually engages — that the Task 19 pooling pattern
+completes successfully on a campaign containing a merged run.
 
 **B5 — `T_fast` in seconds has no producer, and it is the spine of the business framing.**
 `metrics` yields `time_to_fast_index`, a request *index*. Every economics function consumes

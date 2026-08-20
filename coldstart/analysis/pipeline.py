@@ -25,9 +25,31 @@ from dataclasses import dataclass, field
 # reads "what this analysis needs" rather than a bare tuple literal, and so the four
 # figures / the T_weights contrast can't quietly drift from each other on what they
 # require.
+#
+# CONSISTENCY IS A BASELINE, NOT A PER-METRIC OPTION. Spec 6.5 rule 3 is
+# unconditional: "Every run gets a consistency check ... Violations are
+# discarded ... never silently" (and spec 6, line 484: "discard inconsistent
+# runs for a stated, recorded reason"). A failed consistency check does not
+# say "this one field looks wrong" — it says this run's clocks or platform
+# behavior are not trustworthy, full stop. That is a statement about the run,
+# not about any single field of it, so every preset below that publishes a
+# quantity derived from this run's timing MUST include `"consistent"`, even
+# when the specific field it also requires (e.g. `t_weights`) is computed
+# from a clock domain that did not itself fail the check. Selectively
+# keeping the parts of a discarded run that still look plausible is exactly
+# the quiet selective inclusion pre-registration exists to prevent — do not
+# re-litigate this by adding a fifth preset that omits `"consistent"`.
+# REQUIRED_FOR_WARMUP is the one deliberate exception: see its docstring for
+# why it is not "a published quantity this rule concerns" at all.
 REQUIRED_FOR_WARMUP: tuple[str, ...] = ()
-"""`warmup_curve` needs only a successful run — the warmup list lives on every ok
-row regardless of whether the T_total/T_process clocks reconciled."""
+"""`warmup_curve` needs only a successful run. This is the one preset that does
+NOT require `"consistent"`, and that is deliberate, not an oversight the
+comment above forgot: the warmup list is ten raw clock-B, intra-process
+latency measurements with no cross-clock reconciliation step of their own —
+there is nothing in the T_total/T_process consistency check for them to fail
+in the first place. They are not "a published quantity" the discard rule
+(spec 6.5 rule 3, about the T_total/T_process clock pairing specifically)
+has an opinion on."""
 
 REQUIRED_FOR_T_TOTAL: tuple[str, ...] = ("consistent",)
 """`waterfall`, `ecdf_plot`, and `per_host_medians` all read `t_total` and/or
@@ -35,20 +57,32 @@ REQUIRED_FOR_T_TOTAL: tuple[str, ...] = ("consistent",)
 6.5 rule 3), so both need the row's `consistent` flag to be `True`, not merely
 present."""
 
-REQUIRED_FOR_T_WEIGHTS: tuple[str, ...] = ("t_weights",)
-"""The primary A→B / B→C contrast (spec 7, Task 19). Deliberately does NOT also
-require `"consistent"`: `t_weights` is S2+S3, computed and validated independently
-of the T_total/T_process reconciliation, so a clock-skewed run can still carry a
-perfectly good `t_weights` and there is no reason to discard it from this contrast
-specifically."""
+REQUIRED_FOR_T_WEIGHTS: tuple[str, ...] = ("consistent", "t_weights")
+"""The primary A→B / B→C contrast (spec 7, Task 19). Also requires
+`"consistent"` — ruling on B4's original design note, which argued `t_weights`
+(S2+S3) is computed and validated independently of the T_total/T_process
+reconciliation and so a clock-skewed run's `t_weights` could still be trusted.
+That is technically true and still the wrong conclusion: a failed consistency
+check means this run's clocks or platform behavior are not trustworthy, not
+that only the T_total/T_platform fields are suspect. Publishing `t_weights`
+from a run already declared broken is exactly the selective inclusion spec
+6.5 rule 3 ("discarded ... never silently") exists to prevent. The fixture row
+that exposed this (host `h4`: inconsistent, but with a perfectly plausible
+`t_weights`) is pinned in tests/test_pipeline.py landing in `discarded` here,
+specifically because of this ruling."""
 
-REQUIRED_FOR_T_FAST: tuple[str, ...] = ("t_fast_seconds",)
-"""The T_fast / business-framing figures (economics.py). `t_fast_seconds` is
-`None` on every run recorded before the Task 11 probe emits `t_dispatch_mono` on
-its warmup records (see metrics.t_fast_seconds's docstring, B5) — today that is
-every real run, so this preset legitimately discards most of a pre-Task-11
-campaign, which is the honest state of the harness rather than a bug in this gate.
-"""
+REQUIRED_FOR_T_FAST: tuple[str, ...] = ("consistent", "t_fast_seconds")
+"""The T_fast / business-framing figures (economics.py). Also requires
+`"consistent"`, same reasoning as REQUIRED_FOR_T_WEIGHTS above —
+`t_fast_seconds` is likewise computed independent of the T_total/T_process
+check and must not be published from a run that check rejected.
+`t_fast_seconds` is `None` on every run recorded before the Task 11 probe
+emits `t_dispatch_mono` on its warmup records (see metrics.t_fast_seconds's
+docstring, B5) — today that is every real run, so THIS preset is expected to
+discard nearly an entire pre-Task-11 campaign on that basis alone, before
+`"consistent"` ever enters into it. A reader who sees this preset's discard
+count dwarf every other preset's should read that as the known, honest
+pre-B5 state of the harness, not as a bug in this gate."""
 
 
 class NotPublishableError(ValueError):
