@@ -24,6 +24,23 @@ chart:
 
 None of the four functions mutate their input rows.
 
+B4: a row from a failed run, an inconsistent run, or a merged run does not
+raise a clean error on its own — a bare `r["t_platform"]` inside a
+comprehension either `KeyError`s (failed rows don't have the key at all) or
+feeds `None` to `median()`/`ecdf()`, which fails with a context-free
+`TypeError` from inside `math.isfinite`. `_required_field` below replaces
+every such dereference this module makes with a check that names the row
+(by `arm`/`host_id`, the identity these hand-built and derive()-shaped rows
+both reliably carry) and the field, and raises
+`coldstart.analysis.pipeline.NotPublishableError`. This does not make these
+functions require `"ok"`/`"consistent"` on every row -- that would break the
+"pure consumer of whatever fields a row happens to carry" policy above and
+this module's own tests, which hand-build rows without either key. A caller
+that has already gated rows through `pipeline.partition()` for the fields a
+given figure needs (see the `REQUIRED_FOR_*` constants there) can hand the
+result straight through; a caller that has not gets a clear error instead of
+a crash three stack frames into a library call.
+
 ``warmup_curve``'s steady-state band and ``T_fast`` annotation import
 ``FAST_TOLERANCE``, ``steady_state_latency`` and ``time_to_fast_index``
 directly from ``coldstart.analysis.metrics`` — the pre-registered tolerance
@@ -48,6 +65,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from coldstart.analysis.metrics import FAST_TOLERANCE, steady_state_latency, time_to_fast_index
+from coldstart.analysis.pipeline import NotPublishableError
 from coldstart.analysis.stats import ecdf, median
 
 ARMS = ["A", "B", "C"]
@@ -73,6 +91,33 @@ _SUBPHASE_COLOR = {
     "S4d": "#8a6d3b",
     "S4e": "#c88a2e",
 }
+
+
+def _row_identity(row: dict) -> str:
+    return f"arm={row.get('arm')!r} host_id={row.get('host_id')!r}"
+
+
+def _required_field(row: dict, key: str):
+    """B4: raise `NotPublishableError`, naming the row and `key`, in place of
+    the bare `KeyError` (key absent -- a failed run's short row) or
+    `TypeError` (key present but `None` -- an inconsistent or merged run)
+    that dereferencing `row[key]` directly would produce deep inside
+    `median()`/`ecdf()`. See the module docstring."""
+    if key not in row:
+        raise NotPublishableError(
+            f"row ({_row_identity(row)}) has no {key!r} field -- route rows "
+            "through coldstart.analysis.pipeline.partition() with that field "
+            "in `required` before calling this figure"
+        )
+    val = row[key]
+    if val is None:
+        raise NotPublishableError(
+            f"row ({_row_identity(row)}) has {key!r} = None -- not publishable "
+            "for this figure; route rows through "
+            "coldstart.analysis.pipeline.partition() with that field in "
+            "`required` first"
+        )
+    return val
 
 
 def _validate_rows(rows) -> list[dict]:
@@ -144,8 +189,8 @@ def waterfall(rows, out_path) -> Path:
         rs = by[arm]
         labels.append(f"{ARM_LABEL[arm]}\n(n={len(rs)})")
         ys.append(i)
-        platform = median([r["t_platform"] for r in rs])
-        process = median([r["t_process"] for r in rs])
+        platform = median([_required_field(r, "t_platform") for r in rs])
+        process = median([_required_field(r, "t_process") for r in rs])
 
         # derive() returns t_weights=None when the engine did not delineate the
         # load boundary. Drawing a merged span as if it were T_weights would be
@@ -265,7 +310,7 @@ def warmup_curve(rows, out_path) -> Path:
     by = _by_arm(rows)
     all_rows = [r for rs in by.values() for r in rs]
 
-    lengths = {len(r["warmup"]) for r in all_rows}
+    lengths = {len(_required_field(r, "warmup")) for r in all_rows}
     if len(lengths) != 1:
         raise ValueError(
             f"warmup lists have mismatched lengths across rows: {sorted(lengths)}; "
@@ -369,7 +414,7 @@ def ecdf_plot(rows, out_path) -> Path:
     fig, ax = plt.subplots(figsize=(8, 4.5))
     for arm in ARMS:
         rs = by[arm]
-        xs, ys = ecdf([r["t_total"] for r in rs])
+        xs, ys = ecdf([_required_field(r, "t_total") for r in rs])
         ax.step(xs, ys, where="post", label=f"{ARM_LABEL[arm]} (n={len(rs)})")
     ax.set_xlabel("T_total (s)")
     ax.set_ylabel("fraction of runs ≤ x")
@@ -387,7 +432,9 @@ def per_host_medians(rows, out_path) -> Path:
     rows = _validate_rows(rows)
     hosts = sorted({r["host_id"] for r in rows})
     fig, ax = plt.subplots(figsize=(8, 4.5))
-    meds = [median([r["t_total"] for r in rows if r["host_id"] == h]) for h in hosts]
+    meds = [
+        median([_required_field(r, "t_total") for r in rows if r["host_id"] == h]) for h in hosts
+    ]
     counts = [sum(1 for r in rows if r["host_id"] == h) for h in hosts]
     ax.bar(range(len(hosts)), meds)
     ax.set_xticks(range(len(hosts)), [f"{h}\n(n={c})" for h, c in zip(hosts, counts, strict=True)])

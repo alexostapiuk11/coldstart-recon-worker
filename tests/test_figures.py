@@ -30,6 +30,7 @@ from coldstart.analysis.figures import (
     waterfall,
 )
 from coldstart.analysis.metrics import steady_state_latency
+from coldstart.analysis.pipeline import NotPublishableError
 
 # Distinct per-arm warmup shape (different plateau and different initial
 # spike): a fixture where all three arms shared one warmup curve — the
@@ -295,6 +296,26 @@ def test_waterfall_rejects_an_arm_with_no_rows(tmp_path):
         waterfall(data, tmp_path / "w.png")
 
 
+def test_waterfall_raises_not_publishable_when_t_platform_is_missing(tmp_path):
+    """B4: a row from a failed run (metrics.derive()'s 6-key row) has no
+    `t_platform` key at all. Before the fix this was a bare KeyError from
+    inside `median()`; it must now name the row and the field instead."""
+    data = rows()
+    del data[0]["t_platform"]
+    with pytest.raises(NotPublishableError, match=r"has no 't_platform'"):
+        waterfall(data, tmp_path / "w.png")
+
+
+def test_waterfall_raises_not_publishable_when_t_platform_is_none(tmp_path):
+    """B4: an inconsistent run's `t_platform` is `None`, not absent. Before
+    the fix this reached `median()` and failed with a bare, context-free
+    TypeError from inside math.isfinite."""
+    data = rows()
+    data[0]["t_platform"] = None
+    with pytest.raises(NotPublishableError, match=r"'t_platform' = None"):
+        waterfall(data, tmp_path / "w.png")
+
+
 def test_waterfall_uses_the_shared_median_helper(tmp_path):
     """The required fix beyond the plan text: figures.py must call
     stats.median, not statistics.median, or a chart median could silently
@@ -473,6 +494,14 @@ def test_warmup_curve_rejects_empty_rows(tmp_path):
 def test_warmup_curve_rejects_an_arm_with_no_rows(tmp_path):
     data = [r for r in rows() if r["arm"] != "B"]
     with pytest.raises(ValueError, match="B"):
+        warmup_curve(data, tmp_path / "w.png")
+
+
+def test_warmup_curve_raises_not_publishable_when_warmup_is_missing(tmp_path):
+    """B4: a failed run's row has no `warmup` key at all."""
+    data = rows()
+    del data[0]["warmup"]
+    with pytest.raises(NotPublishableError, match="warmup"):
         warmup_curve(data, tmp_path / "w.png")
 
 
@@ -707,6 +736,15 @@ def test_ecdf_plot_rejects_an_arm_with_no_rows(tmp_path):
         ecdf_plot(data, tmp_path / "e.png")
 
 
+def test_ecdf_plot_raises_not_publishable_when_t_total_is_none(tmp_path):
+    """B4: an inconsistent or warmup-incomplete run's `t_total` is `None`;
+    before the fix this reached `ecdf()` and failed with a bare TypeError."""
+    data = rows()
+    data[0]["t_total"] = None
+    with pytest.raises(NotPublishableError, match=r"'t_total' = None"):
+        ecdf_plot(data, tmp_path / "e.png")
+
+
 # ---------------------------------------------------------------------------
 # per_host_medians
 # ---------------------------------------------------------------------------
@@ -762,6 +800,14 @@ def test_per_host_medians_uses_the_shared_median_helper(tmp_path):
     with patch("coldstart.analysis.figures.median", wraps=figures_module.median) as spy:
         per_host_medians(rows(), tmp_path / "h.png")
     assert spy.called
+
+
+def test_per_host_medians_raises_not_publishable_when_t_total_is_missing(tmp_path):
+    """B4: a failed run's row has no `t_total` key at all."""
+    data = rows()
+    del data[0]["t_total"]
+    with pytest.raises(NotPublishableError, match=r"has no 't_total'"):
+        per_host_medians(data, tmp_path / "h.png")
 
 
 # ---------------------------------------------------------------------------

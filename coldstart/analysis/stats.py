@@ -50,12 +50,23 @@ MIN_BOOTSTRAP_SAMPLES = MIN_SAMPLES["p50"]
 def _validate_samples(values: list[float], name: str) -> list[float]:
     """Fail loudly on the input domains a percentile/bootstrap silently
     mishandles: empty sequences (division by zero, IndexError, or an empty
-    `random.randrange` range) and non-finite values (a NaN or inf corrupting
-    a sort or a median without raising anywhere)."""
+    `random.randrange` range), a `None` slipping in (e.g. an unfiltered
+    `t_weights` from an engine-merged run — `math.isfinite(None)` raises a
+    context-free `TypeError` with no indication which value or position was
+    the problem; B4), and non-finite values (a NaN or inf corrupting a sort
+    or a median without raising anywhere)."""
     xs = list(values)
     if not xs:
         raise ValueError(f"{name} must not be empty")
-    for v in xs:
+    for i, v in enumerate(xs):
+        if v is None:
+            raise ValueError(
+                f"{name}[{i}] is None -- likely an unfiltered optional field from "
+                "metrics.derive() (e.g. t_weights on an engine-merged run, or "
+                "t_platform on an inconsistent run); route rows through "
+                "coldstart.analysis.pipeline.partition() with that field in "
+                "`required` before pooling values into a sample"
+            )
         if not math.isfinite(v):
             raise ValueError(f"{name} contains a non-finite value: {v!r}")
     return xs
@@ -257,7 +268,22 @@ def within_host_triples(rows, arms=("A", "B", "C")) -> list[list[dict]]:
     check. `sorted()` on `groups.items()` makes the output order
     deterministic by triple_index, rather than incidental to dict iteration
     order.
+
+    B4: a failed run still carries `arm`, `host_id`, and `triple_index` (see
+    metrics.derive()'s 6-key row for a failed run), so before this filter it
+    could land in a group and be counted as part of a valid triple even
+    though it was never measured -- the published triple count would be
+    wrong before anything downstream raised. Filtered out before grouping,
+    not after: once removed, a triple that only *looked* complete because a
+    failed run stood in for the missing arm is correctly rejected by the
+    existing arm-count check below, with no separate case needed. Checked
+    as `is not False` rather than requiring `row["ok"] is True`, so rows
+    that were never routed through `metrics.derive()` at all (hand-built
+    triples in tests, which don't carry an `"ok"` key) are not silently
+    dropped by a filter they were never meant to satisfy -- only a row
+    `derive()` itself marked failed is excluded.
     """
+    rows = [r for r in rows if r.get("ok") is not False]
     groups: dict[int, list[dict]] = {}
     for r in rows:
         groups.setdefault(r["triple_index"], []).append(r)
@@ -285,8 +311,22 @@ def _arm_lookup(triple: list[dict]) -> dict[str, dict]:
 
 def _row_value(row: dict, value) -> float:
     """`value` is a key name or a callable(row) -> float — both t_total and
-    t_weights get this treatment, so it is never hardcoded to one field."""
+    t_weights get this treatment, so it is never hardcoded to one field.
+
+    B4: `math.isfinite(None)` raises a bare `TypeError` with no indication
+    which row or field was the problem -- the same failure mode
+    `_validate_samples` guards against for the pooled bootstraps, needed
+    here too because `within_host_triples` groups by host/triple/arm only
+    and does not itself guarantee any particular field (e.g. `t_weights` on
+    an engine-merged run inside an otherwise-complete triple) is non-None."""
     v = value(row) if callable(value) else row[value]
+    if v is None:
+        raise ValueError(
+            f"row is missing a value for this paired contrast (got None): {row!r} "
+            "-- route rows through coldstart.analysis.pipeline.partition() with "
+            "the field in `required` before building triples with "
+            "within_host_triples"
+        )
     if not math.isfinite(v):
         raise ValueError(f"non-finite value in row {row!r}: {v!r}")
     return v

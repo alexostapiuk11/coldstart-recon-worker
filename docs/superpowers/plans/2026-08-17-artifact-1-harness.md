@@ -35,6 +35,7 @@
 | `coldstart/stubs/stub_endpoint.py` | in-process stand-in for the RunPod endpoint |
 | `coldstart/analysis/metrics.py` | derived metrics |
 | `coldstart/analysis/stats.py` | percentiles, ECDF, bootstrap |
+| `coldstart/analysis/pipeline.py` | the publishability gate — partitions `derive()` output into publishable / discarded / failed, and the failure-rate / discard-count tables |
 | `coldstart/analysis/figures.py` | the four figures |
 | `worker/probe.py` | in-container probe: brackets `vllm serve`, drives warmup |
 | `worker/handler.py` | RunPod serverless handler |
@@ -6298,6 +6299,7 @@ Proves the whole pipeline recovers a known answer before any paid measurement ru
 
 ```python
 from coldstart.analysis.metrics import derive
+from coldstart.analysis.pipeline import REQUIRED_FOR_T_WEIGHTS, partition
 from coldstart.analysis.stats import bootstrap_median_diff, within_host_triples
 from coldstart.driver import run_campaign
 from coldstart.store import JsonlStore
@@ -6315,10 +6317,16 @@ def test_pipeline_recovers_the_stubs_known_ordering(tmp_path):
         seed=42,
     )
     rows = [derive(r) for r in store.read_all()]
-    ok = [r for r in rows if r.get("ok") and r["consistent"]]
-    assert len(ok) > 100
+    # B4: `ok = [r for r in rows if r.get("ok") and r["consistent"]]` was this
+    # snippet's own bug -- a single engine-merged run anywhere in the campaign
+    # still has `t_weights is None` even though it's ok and consistent, and
+    # pooling it below died with a context-free TypeError from inside
+    # math.isfinite. partition() is the gate that closes that hole: it also
+    # requires t_weights specifically, not just ok+consistent.
+    result = partition(rows, required=REQUIRED_FOR_T_WEIGHTS)
+    assert len(result.publishable) > 100
 
-    by = {a: [r["t_weights"] for r in ok if r["arm"] == a] for a in "ABC"}
+    by = {a: [r["t_weights"] for r in result.publishable if r["arm"] == a] for a in "ABC"}
     ab = bootstrap_median_diff(by["A"], by["B"], iterations=400, seed=1)
     assert ab["lo"] > 0, "weight caching effect must be recovered with a positive interval"
 
@@ -6332,7 +6340,10 @@ def test_within_host_triples_are_found(tmp_path):
         triples=40,
         seed=7,
     )
-    rows = [derive(r) for r in store.read_all() if r.status["outcome"] == "ok"]
+    # No `if r.status["outcome"] == "ok"` filter needed here any more --
+    # within_host_triples itself now refuses to let a failed run stand in for
+    # a missing arm (B4).
+    rows = [derive(r) for r in store.read_all()]
     kept = within_host_triples(rows)
     assert kept, "with only 2 hosts some triples must land on one host"
 ```
@@ -6472,6 +6483,79 @@ engine-merged run — and `t_weights` is the spec's designated primary compariso
 Add the missing stage: one function partitioning derived rows into publishable / discarded /
 failed, owning the failure-rate and discard tables the spec requires reported separately, and
 being the only input figures and stats accept.
+
+**Fixed.** New module `coldstart/analysis/pipeline.py`, with no imports from the rest of
+`coldstart.analysis` (avoids a cycle: `metrics.py` already imports `stats.py`, and `figures.py`
+imports both). Its `partition(rows, required=())` is the one function meant to sit between
+`[derive(r) for r in store.read_all()]` and everything downstream:
+
+- `failed` — `row["ok"] is False`. Never folded into `discarded`, which is exactly the
+  conflation the plan named: `derive()` sets `consistent=False` on a failed run's 6-key row too
+  (it never reached a state where consistency could be evaluated), so `not consistent` cannot
+  separate "this run failed" from "this run was discarded."
+- `discarded` — `ok`, but missing something `required` demands. Each row is a shallow copy of
+  the original with `exclusion_reason` (and `exclusion_labels`, its tuple form) added, so the
+  reason travels with the row instead of being silently dropped.
+- `publishable` — `ok`, and every name in `required` is satisfied.
+
+"Publishable" is not one hardcoded predicate: `required` is a tuple of field names the caller
+states for the analysis at hand. `"consistent"` is checked as `is True` (it is a bool present on
+every ok row, so a bare not-None check would never fire); every other name is checked the
+ordinary way, present and not `None`. Four presets cover this plan's actual call sites:
+`REQUIRED_FOR_WARMUP = ()` (`warmup_curve` needs only a successful run), `REQUIRED_FOR_T_TOTAL =
+("consistent",)` (`waterfall`, `ecdf_plot`, `per_host_medians` — both `t_total` and `t_platform`
+are `None` exactly when a row failed the clock-consistency check), `REQUIRED_FOR_T_WEIGHTS =
+("t_weights",)` (the A→B / B→C contrast — deliberately does *not* also require `"consistent"`,
+since `t_weights` is validated independently of the T_total/T_process reconciliation and an
+inconsistent row can still carry a perfectly good one), and `REQUIRED_FOR_T_FAST =
+("t_fast_seconds",)` (the business-framing figures — `None` on every run recorded before Task
+11's probe emits `t_dispatch_mono`, which today is every real run; this preset legitimately
+discards most of a pre-Task-11 campaign, which is the honest state of the harness, not a bug in
+the gate).
+
+The two required tables: `failure_rate_by_arm(rows)` takes the full, unpartitioned campaign (a
+rate needs the total run count as its denominator, which the `failed` bucket alone doesn't
+carry) and returns per-arm total/failed/rate/`by_class`. `discard_table(discarded_rows)` takes
+`partition()`'s `discarded` bucket specifically and returns per-arm total/`by_reason`, where
+`reason` is the row's `discard_reason` (the existing `checks.DiscardReason` enum) when excluded
+for failing consistency, or `"missing_<field>"` when excluded for a `None` field. Disjoint row
+populations by construction — a failed run can never appear in `discard_table`'s output, and a
+discarded row can never appear in `failure_rate_by_arm`'s `failed` count — so the two rates
+cannot be confused the way `consistent=False` used to allow.
+
+`within_host_triples` (`coldstart/analysis/stats.py`) now filters `row.get("ok") is not False`
+before grouping — a failed run still carries `arm`/`host_id`/`triple_index`, so before this fix
+it could stand in for a missing arm and make an incomplete triple look complete, silently
+inflating the published triple count. Checked as `is not False` rather than requiring
+`row["ok"] is True` so hand-built rows that never went through `derive()` (existing tests) and
+don't carry an `"ok"` key at all are not dropped by a filter they were never meant to satisfy.
+
+`figures.py` and `stats.py` are hardened at the point of failure rather than restructured to
+require `partition()`'s output shape — `figures.py`'s rows are deliberately "a pure consumer of
+whatever fields a row happens to carry" (its own module docstring, predating this fix), and
+forcing every row to carry `ok`/`consistent` would have broken that policy along with the
+existing test suite built on hand-shaped rows. Instead, every dereference the bug table named
+(`t_platform`, `t_process` in `waterfall`; `t_total` in `ecdf_plot`/`per_host_medians`; `warmup`
+in `warmup_curve`) now goes through a new `_required_field(row, key)` that raises
+`pipeline.NotPublishableError`, naming the row (`arm`/`host_id`) and the field, instead of a bare
+`KeyError` (key absent) or `TypeError` (key present but `None`, surfacing three frames deep
+inside `math.isfinite`). `stats.py`'s `_validate_samples` (backing `percentiles`, `ecdf`, and
+both pooled bootstraps) and `_row_value` (backing the paired bootstraps `within_host_triples`
+feeds) got the equivalent guard: a `None` in the pooled sample now raises a `ValueError` naming
+its index and pointing at `pipeline.partition()`, not a bare `TypeError` from `math.isfinite`.
+
+`tests/test_pipeline.py` builds one realistic mixed campaign — through real `RunRecord` ->
+`derive()` round trips, never hand-typed derived dicts — containing successful runs across all
+three arms (two complete within-host triples), a failed run, a clock-inconsistent run, an
+engine-merged run with `t_weights is None`, and a run with no `t_dispatch_mono` offset (the
+pre-Task-11 state B5 describes). It pins the partition counts under each preset (including one
+row, the engine-merged run, that `partition()` correctly rules opposite ways under
+`REQUIRED_FOR_T_TOTAL` vs. `REQUIRED_FOR_T_WEIGHTS` — direct evidence publishable is not one
+predicate), a fixture where the failure rate (arm B) and the discard rate (arm C) are non-zero on
+different arms and neither shows up in the other's table, that `within_host_triples` now excludes
+the triple containing the failed run, and — at the scale where `bootstrap_median_diff`'s sample
+floor actually engages — that the Task 19 pooling pattern completes successfully on a campaign
+containing a merged run.
 
 **B5 — `T_fast` in seconds has no producer, and it is the spine of the business framing.**
 `metrics` yields `time_to_fast_index`, a request *index*. Every economics function consumes

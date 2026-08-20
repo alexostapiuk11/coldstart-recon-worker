@@ -135,6 +135,16 @@ def test_percentiles_rejects_non_finite_values():
         percentiles([1.0, float("inf")] + list(range(30)), want=("p50",))
 
 
+def test_percentiles_rejects_none_with_a_clear_message_not_a_bare_typeerror():
+    """B4: `math.isfinite(None)` raises a context-free TypeError with no
+    indication of which value or position was the problem — the exact
+    failure mode an unfiltered `t_weights`/`t_platform` produces when it
+    slips into a pooled sample. Must raise ValueError naming the index
+    instead."""
+    with pytest.raises(ValueError, match=r"values\[1\] is None"):
+        percentiles([1.0, None] + list(range(30)), want=("p50",))
+
+
 def test_percentiles_rejects_unknown_want_name():
     with pytest.raises(ValueError):
         percentiles(list(range(30)), want=("p50", "p42"))
@@ -463,6 +473,17 @@ def test_bootstrap_rejects_non_finite_values():
         bootstrap_median_diff(a, b)
 
 
+def test_bootstrap_median_diff_rejects_none_with_a_clear_message_not_a_bare_typeerror():
+    """B4, the plan's own worst-case scenario: pooling an unfiltered
+    `t_weights` (None on an engine-merged run) into a bootstrap used to die
+    with a context-free TypeError from inside math.isfinite. Padded to
+    MIN_BOOTSTRAP_SAMPLES so the sample-size floor can't fire instead."""
+    a = [1.0, None] + [2.0] * (MIN_BOOTSTRAP_SAMPLES - 2)
+    b = [3.0] * MIN_BOOTSTRAP_SAMPLES
+    with pytest.raises(ValueError, match=r"a\[1\] is None"):
+        bootstrap_median_diff(a, b)
+
+
 # ---------------------------------------------------------------------------
 # bootstrap_contrast_difference
 # ---------------------------------------------------------------------------
@@ -658,6 +679,38 @@ def test_within_host_triples_rejects_an_extra_duplicate_arm():
         {"triple_index": 0, "arm": "C", "host_id": "h1"},
     ]
     assert within_host_triples(rows, arms=("A", "B", "C")) == []
+
+
+def test_within_host_triples_excludes_a_row_explicitly_marked_failed():
+    """B4: a failed run's row (metrics.derive()'s 6-key row) still carries
+    `arm`/`host_id`/`triple_index`, so before this fix it could stand in for
+    a missing arm and make an incomplete triple look complete. Triple 0
+    looks complete by triple_index/host_id/arm alone (A, B, C all present,
+    same host) but B's row is `"ok": False` — it must not count."""
+    rows = [
+        {"triple_index": 0, "arm": "A", "host_id": "h1", "ok": True},
+        {"triple_index": 0, "arm": "B", "host_id": "h1", "ok": False},
+        {"triple_index": 0, "arm": "C", "host_id": "h1", "ok": True},
+        {"triple_index": 1, "arm": "A", "host_id": "h2", "ok": True},
+        {"triple_index": 1, "arm": "B", "host_id": "h2", "ok": True},
+        {"triple_index": 1, "arm": "C", "host_id": "h2", "ok": True},
+    ]
+    kept = within_host_triples(rows, arms=("A", "B", "C"))
+    assert [t[0]["triple_index"] for t in kept] == [1]
+
+
+def test_within_host_triples_still_accepts_rows_with_no_ok_key_at_all():
+    """The filter is `is not False`, not `is True`: rows that never went
+    through metrics.derive() (every hand-built fixture in this file, and
+    every existing test above this one) don't carry an `"ok"` key and must
+    not be silently dropped by a filter they were never meant to satisfy."""
+    rows = [
+        {"triple_index": 0, "arm": "A", "host_id": "h1"},
+        {"triple_index": 0, "arm": "B", "host_id": "h1"},
+        {"triple_index": 0, "arm": "C", "host_id": "h1"},
+    ]
+    kept = within_host_triples(rows, arms=("A", "B", "C"))
+    assert [t[0]["triple_index"] for t in kept] == [0]
 
 
 def test_within_host_triples_output_is_sorted_by_triple_index():
@@ -942,6 +995,18 @@ def test_paired_functions_reject_non_finite_values():
     with pytest.raises(ValueError, match="non-finite"):
         bootstrap_paired_median_diff(triples, "A", "B")
     with pytest.raises(ValueError, match="non-finite"):
+        bootstrap_paired_contrast_difference(triples)
+
+
+def test_paired_functions_reject_none_with_a_clear_message_not_a_bare_typeerror():
+    """B4: within_host_triples groups by host/triple/arm only — it does not
+    guarantee any particular field is non-None (e.g. t_weights on an
+    engine-merged run inside an otherwise-complete triple). math.isfinite(None)
+    would otherwise raise a context-free TypeError deep inside _row_value."""
+    triples = _const_triples(19, 100.0, 70.0, 60.0) + [_triple(19, "h19", None, 70.0, 60.0)]
+    with pytest.raises(ValueError, match="missing a value"):
+        bootstrap_paired_median_diff(triples, "A", "B")
+    with pytest.raises(ValueError, match="missing a value"):
         bootstrap_paired_contrast_difference(triples)
 
 
