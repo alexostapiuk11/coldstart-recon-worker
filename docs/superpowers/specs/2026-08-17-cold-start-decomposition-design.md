@@ -705,14 +705,33 @@ instead of it.
 
 ### Business framing — required
 
-The systems findings convert to money through three published assumptions: GPU hourly rate for the
-pinned SKU, scale-up events per day, and measured steady-state throughput.
+The systems findings convert to money through published assumptions: GPU hourly rate for the
+pinned SKU, scale-up events per day, measured steady-state throughput, and — only where a
+priced figure is reported — an output token price.
 
 | Quantity | Definition |
 |---|---|
-| cost per scale-up event | `T_fast` × GPU hourly rate, plus the value of foregone tokens |
+| GPU cost per scale-up event | `T_fast` × GPU hourly rate |
+| foregone tokens | `T_fast` × steady-state tokens/sec, reported as a count |
+| value of foregone tokens | foregone tokens × published output token price, **omitted unless a price is published** |
+| total cost per scale-up event | GPU cost + value of foregone tokens |
 | annual cost of cold start | cost per event × events per day × 365 |
-| **cache break-even volume** | the scale-up frequency at which latency saved exceeds the standing cost of keeping a cache warm |
+| **weight-cache break-even volume** | the scale-up frequency at which latency saved exceeds the *monthly rental* of the volume |
+| **compile-cache break-even volume** | the scale-up frequency at which latency saved exceeds the *re-warming cost per version change* |
+
+**The two caches do not have the same cost shape, and one break-even formula cannot express
+both.** The weight cache is a rental: a standing monthly charge independent of how often you
+scale. The compile cache is not rented at all — it is re-warmed, and it is invalidated by any
+change to engine version, model, hardware, or flags, so its standing cost is paid per version
+change rather than per month. Reporting both against a single monthly-cost formula would
+misstate the compile cache, which is the arm with the more interesting result.
+
+**Where the token price is not published, the GPU share is reported alone and named as such.**
+An earlier version of this table defined cost per scale-up as the GPU rental "plus the value of
+foregone tokens" while publishing no token price anywhere, which made the quantity
+uncomputable as specified and invited a partial figure to be reported under a total's name.
+Foregone tokens are reported as a count regardless; the priced version is additional, not a
+replacement.
 
 **The break-even is the answer a platform lead actually wants.** Both caches carry standing costs —
 the weight cache rents a volume, the compile cache must be re-warmed on every version change. So
