@@ -6200,6 +6200,68 @@ git commit -m "test: end-to-end synthetic validation recovers known effect order
 
 ---
 
+## Blocking defects found by the final integration review
+
+These were invisible to per-file review: every module was individually hardened, and each of
+these lives in the seam *between* modules. Three of the four must be fixed before the paid
+campaign, because they require worker-side changes that cannot be applied retroactively to
+stored data.
+
+**B1 — `T_total` is stamped at the wrong event, silently inflating the residual.** The spec
+defines `T_total` as clock A, *submit → first token of request 1*. Task 14's submitter stamps
+`t_result` after `endpoint.run()` returns — that is after all ten warmup requests. So
+`T_platform = T_total − T_process` absorbs requests 2–10 plus the result round trip: roughly
+eighteen seconds of *measured, in-container* time published as "time I cannot attribute from
+inside the container." Nothing crashes and the consistency check passes more comfortably, not
+less. This is the artifact's credibility centrepiece corrupted by a mechanical error, in a post
+whose argument is that other people's waterfalls quietly attribute time they cannot see.
+
+The fix cannot be "stamp `t_result` earlier" — a serverless request/response worker cannot
+signal the driver at first token. Correct `T_total` instead, in `derive()`, by subtracting the
+clock-B duration from first token to end of job:
+`T_total = (t_result − t_submit) − (S7_warmup_done − S6_first_token)`. That is a *duration*
+correction across clocks, not a timestamp comparison, so it stays inside the three-clock rules.
+Record the raw span too, and say in the post which is which.
+
+**B2 — the waterfall's "unattributed within S4" is neither unattributed nor within S4, and the
+compile result is hiding inside it.** `figures.py` computes it as
+`t_process − t_weights − (S4c + S4e)`. Since `t_process` spans S1 through S6, the remainder also
+contains S1 imports, S4a device init, **S4b compilation**, S4d KV allocation, S5 and S6 — all
+named, measured stages. The bar shrinks between arms B and C, which *is* the H3 effect, drawn
+under the label "unattributed". The spec's quantity is different arithmetic entirely:
+`S4_bracket − Σ identified sub-phases`, and `derive()` never computes an S4 bracket. As a
+side-effect the waterfall now sums to exactly `t_total` by construction, inverting the spec's
+"the waterfall never sums to a suspiciously exact 100%" honesty claim.
+
+**B3 — `S4b` has no producer anywhere.** `grep s4b` across `coldstart/` and `worker/` returns
+only `economics.compile_cache_term`'s two parameters and their tests. `derive()` passes
+`s4_subphases` through as an opaque dict and computes nothing from it. H3 — the hypothesis the
+spec calls the most interesting result available in this experiment, and the entire reason arm C
+exists — currently has no measurement.
+
+**B4 — no stage decides which rows are publishable, so each consumer invented its own error
+policy.** `derive()` returns a 6-key row for failures and a 20-key row for successes, with `None`
+for `t_platform` and `t_weights` on inconsistent or merged runs. There is no filter or gate.
+Measured on a synthetic campaign: `waterfall` raises `KeyError: 't_platform'` on unfiltered rows
+and `TypeError` on merged ones; `ecdf_plot` and `per_host_medians` raise `KeyError: 't_total'`;
+`within_host_triples` accepts failed runs into the paired analysis, so the published triple count
+is wrong before anything raises. Worst: **Task 19's own end-to-end snippet**, pooling
+`r["t_weights"]`, dies with a context-free `TypeError` on any campaign containing a single
+engine-merged run — and `t_weights` is the spec's designated primary comparison unit.
+
+Add the missing stage: one function partitioning derived rows into publishable / discarded /
+failed, owning the failure-rate and discard tables the spec requires reported separately, and
+being the only input figures and stats accept.
+
+**B5 — `T_fast` in seconds has no producer, and it is the spine of the business framing.**
+`metrics` yields `time_to_fast_index`, a request *index*. Every economics function consumes
+`t_fast` in *seconds*. The warmup records carry `{req_index, ttft, end_to_end}` and no absolute
+offset, so `T_fast` is not reconstructible from a stored row. **This one requires a worker-side
+change and therefore cannot be fixed after the campaign runs.** Relatedly, the figure's
+steady-state band and the tabulated `T_fast` threshold use two different estimators — pooled
+median across rows versus median-of-medians per run — so a reader can see a point inside the band
+while the table says the replica was not yet fast.
+
 ## Definition of done for this plan
 
 - [ ] All 19 tasks complete, full suite green, ruff clean.
