@@ -6212,9 +6212,9 @@ git commit -m "test: end-to-end synthetic validation recovers known effect order
 ## Blocking defects found by the final integration review
 
 These were invisible to per-file review: every module was individually hardened, and each of
-these lives in the seam *between* modules. Three of the four must be fixed before the paid
-campaign, because they require worker-side changes that cannot be applied retroactively to
-stored data.
+these lives in the seam *between* modules. Two of the five require worker-side changes and
+therefore cannot be applied retroactively to stored data, so they must land before the paid
+campaign rather than after it.
 
 **B1 — `T_total` is stamped at the wrong event, silently inflating the residual.** The spec
 defines `T_total` as clock A, *submit → first token of request 1*. Task 14's submitter stamps
