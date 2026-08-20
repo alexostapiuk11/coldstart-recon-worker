@@ -1290,6 +1290,7 @@ git commit -m "feat: cache configuration as the single inter-arm difference"
 import pytest
 
 from coldstart.checks import (
+    _SIGNATURES,
     FailureClass,
     check_consistency,
     classify_failure,
@@ -1328,7 +1329,22 @@ def test_failure_classification():
     assert classify_failure("CUDA out of memory") is FailureClass.OOM
     assert classify_failure("health check timed out") is FailureClass.HEALTH_TIMEOUT
     assert classify_failure("could not download weights") is FailureClass.WEIGHT_ACQUISITION
+    assert classify_failure("image pull backoff") is FailureClass.IMAGE_PULL
+    assert classify_failure("no workers available") is FailureClass.PROVISIONING_TIMEOUT
+    assert classify_failure("failed to initialize") is FailureClass.ENGINE_INIT
+    assert classify_failure("first token timed out") is FailureClass.TTFT_TIMEOUT
+    assert classify_failure("submit failed") is FailureClass.SUBMIT_ERROR
     assert classify_failure("something nobody predicted") is FailureClass.UNKNOWN
+
+
+def test_every_failure_class_except_unknown_is_reachable():
+    """A taxonomy with unreachable members is a taxonomy that lies about coverage.
+
+    Without this, deleting a signature row is invisible: the deleted class simply
+    stops being produced and every other test still passes.
+    """
+    reachable = {classify_failure(n) for _, needles in _SIGNATURES for n in needles}
+    assert reachable == set(FailureClass) - {FailureClass.UNKNOWN}
 ```
 
 - [ ] **Step 2: Run and confirm it fails**
@@ -1406,7 +1422,7 @@ def check_consistency(
 - [ ] **Step 4: Run and confirm pass**
 
 Run: `.venv/bin/pytest tests/test_checks.py -v`
-Expected: PASS — 6 passed
+Expected: PASS — 7 passed
 
 - [ ] **Step 5: Commit**
 
@@ -1562,6 +1578,7 @@ def run_probe(recorder, model: str, health_timeout: float = 900.0) -> dict:
     recorder.mark("S1_imports_done")
 
     log_lines: list[str] = []
+    seen_load = False
     recorder.mark("S2_acquisition_start")
     proc = subprocess.Popen(
         ["vllm", "serve", model, "--port", str(PORT)],
@@ -1573,8 +1590,18 @@ def run_probe(recorder, model: str, health_timeout: float = 900.0) -> dict:
     )
 
     def drain():
+        nonlocal seen_load
         for line in proc.stdout:
             log_lines.append(line.rstrip("\n"))
+            # S3_load_done marks "weights resident on GPU" — the end of T_weights
+            # (S2+S3). It is observable only from the engine's own log stream, so
+            # the exact predicate comes from Task 7's fixtures and is filled in
+            # there. Do NOT approximate it with S5_ready: S5 is on the far side of
+            # all of S4, and folding the compile term into the weights term would
+            # credit weight caching with the compile-cache saving.
+            if _is_load_complete(line) and not seen_load:
+                recorder.mark("S3_load_done")  # mark() rejects duplicates; guard first
+                seen_load = True
 
     threading.Thread(target=drain, daemon=True).start()
 
@@ -1850,6 +1877,7 @@ class StubEndpoint:
         marks = [
             {"stage": "S1_imports_done", "t_mono": s1},
             {"stage": "S2_acquisition_start", "t_mono": s1},
+            {"stage": "S3_load_done", "t_mono": s1 + t_weights},
             {"stage": "S5_ready", "t_mono": s1 + t_weights + s4b + s4_other},
             {"stage": "S6_request1_dispatch", "t_mono": t_process},
             {"stage": "S6_first_token", "t_mono": t_process + warmup[0]["ttft"]},
@@ -2141,6 +2169,7 @@ def make(arm="A", t_submit=0.0, t_result=150.0, marks=None, warmup=None):
     marks = marks or [
         {"stage": "S1_imports_done", "t_mono": 4.0},
         {"stage": "S2_acquisition_start", "t_mono": 4.0},
+        {"stage": "S3_load_done", "t_mono": 54.0},
         {"stage": "S5_ready", "t_mono": 100.0},
         {"stage": "S6_request1_dispatch", "t_mono": 100.0},
         {"stage": "S6_first_token", "t_mono": 102.0},
@@ -2193,8 +2222,31 @@ def test_inconsistent_run_is_flagged_not_silently_kept():
     assert d["t_platform"] is None
 
 
+def test_t_weights_is_s2_plus_s3_and_stops_at_the_load_boundary():
+    """T_weights is S2+S3 (spec, stage taxonomy) — it must NOT run to S5_ready.
+
+    S5_ready is on the far side of all of S4: device init, compilation, memory
+    profiling, KV allocation, graph capture. Measuring to S5 would fold the
+    compile term into the weights term, and arms B and C differ *only* in the
+    compile term — so the harness would credit weight caching with the entire
+    compile-cache saving. That is the one confusion this experiment exists to
+    prevent, so it gets a test.
+    """
+    d = derive(make())
+    assert d["t_weights"] == pytest.approx(50.0)  # 54.0 - 4.0, not 100.0 - 4.0
+
+
+def test_t_weights_is_none_when_the_load_boundary_was_not_delineated():
+    """Merged phases are reported merged, never guessed apart — spec, stage taxonomy."""
+    marks = [m for m in make().clock_B["marks"] if m["stage"] != "S3_load_done"]
+    d = derive(make(marks=marks))
+    assert d["t_weights"] is None
+    assert d["t_s2_to_ready"] == pytest.approx(96.0)
+    assert "S3" in d["merged_phases"]
+
+
 def test_ceiling_bound_is_the_share_removable():
-    assert ceiling_bound(t_weights=40.0, t_process=100.0, t_total=200.0) == pytest.approx(0.20)
+    assert ceiling_bound(t_weights=40.0, t_total=200.0) == pytest.approx(0.20)
 ```
 
 - [ ] **Step 2: Run and confirm it fails**
@@ -2209,7 +2261,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'coldstart.analysis.met
 ```python
 import statistics
 
-from coldstart.checks import check_consistency
+from coldstart.checks import check_consistency, compute_residual
 from coldstart.schema import RunRecord
 
 FAST_TOLERANCE = 0.10  # fixed before data — see spec 7
@@ -2219,9 +2271,15 @@ def _marks(record: RunRecord) -> dict[str, float]:
     return {m["stage"]: m["t_mono"] for m in record.clock_B.get("marks", [])}
 
 
-def ceiling_bound(t_weights: float, t_process: float, t_total: float) -> float:
-    """Largest fraction of T_total removable if T_weights went to zero."""
-    return (t_weights / t_process) * (t_process / t_total)
+def ceiling_bound(t_weights: float, t_total: float) -> float:
+    """Largest fraction of T_total removable if T_weights went to zero.
+
+    Conceptually this is (weights share of T_process) x (T_process share of
+    T_total), but T_process cancels, so it is written in the reduced form. The
+    unreduced version took a T_process argument that could not affect the
+    result — a parameter no test could ever pin.
+    """
+    return t_weights / t_total
 
 
 def derive(record: RunRecord) -> dict:
@@ -2243,6 +2301,25 @@ def derive(record: RunRecord) -> dict:
                 fast_index = w["req_index"]
                 break
 
+    # T_weights = S2 + S3 (spec, stage taxonomy). The volume arms may memory-map
+    # weights, fusing acquisition and HBM load with no clean boundary between
+    # them, which is exactly why the pair is the primary unit rather than S2
+    # alone. If the engine did not delineate the load boundary at all, the phase
+    # is reported merged rather than silently widened to S5_ready — widening it
+    # would swallow the whole of S4, including the compile term.
+    t_acq_start = m.get("S2_acquisition_start")
+    t_load_done = m.get("S3_load_done")
+    t_ready = m.get("S5_ready")
+    merged = []
+    if t_acq_start is not None and t_load_done is not None:
+        t_weights = t_load_done - t_acq_start
+    else:
+        t_weights = None
+        merged.append("S3")
+    t_s2_to_ready = (
+        t_ready - t_acq_start if t_acq_start is not None and t_ready is not None else None
+    )
+
     blocks = record.engine.get("kv_cache_blocks")
     block_size = record.engine.get("block_size")
     kv_tokens = blocks * block_size if blocks and block_size else None
@@ -2254,8 +2331,10 @@ def derive(record: RunRecord) -> dict:
         "triple_index": record.host.get("triple_index"),
         "t_total": t_total,
         "t_process": t_process,
-        "t_platform": (t_total - t_process) if consistent else None,
-        "t_weights": m.get("S5_ready", 0.0) - m.get("S2_acquisition_start", 0.0),
+        "t_platform": compute_residual(t_total, t_process) if consistent else None,
+        "t_weights": t_weights,
+        "t_s2_to_ready": t_s2_to_ready,
+        "merged_phases": merged,
         "s4_subphases": record.engine.get("s4_subphases", {}),
         "warmup": warmup,
         "steady_state_latency": steady,
@@ -2271,7 +2350,7 @@ def derive(record: RunRecord) -> dict:
 - [ ] **Step 4: Run and confirm pass**
 
 Run: `.venv/bin/pytest tests/test_metrics.py -v`
-Expected: PASS — 7 passed
+Expected: PASS — 9 passed
 
 - [ ] **Step 5: Commit**
 
@@ -2447,9 +2526,12 @@ git commit -m "feat: business-framing metrics including cache break-even volume"
 `tests/test_stats.py`:
 
 ```python
+import random
+
 import pytest
 
 from coldstart.analysis.stats import (
+    bootstrap_contrast_difference,
     bootstrap_median_diff,
     ecdf,
     percentiles,
@@ -2489,13 +2571,35 @@ def test_bootstrap_interval_brackets_a_known_difference():
 
 
 def test_contrast_difference_interval_brackets_a_known_gap():
-    from coldstart.analysis.stats import bootstrap_contrast_difference
-
     # A-B is 30, B-C is 10, so the contrast difference is 20.
     a, b, c = [100.0] * 40, [70.0] * 40, [60.0] * 40
     res = bootstrap_contrast_difference(a, b, c, iterations=400, seed=2)
     assert res["point"] == pytest.approx(20.0)
     assert res["lo"] <= 20.0 <= res["hi"]
+
+
+def test_bootstrap_actually_resamples():
+    """Constant inputs make every resample identical, so they cannot prove the
+    bootstrap resamples at all — a version that skipped resampling entirely would
+    pass. Spread inputs give the interval something to be wider than the point."""
+    rng = random.Random(11)
+    a = [rng.gauss(100.0, 15.0) for _ in range(60)]
+    b = [rng.gauss(70.0, 15.0) for _ in range(60)]
+    res = bootstrap_median_diff(a, b, iterations=800, seed=3)
+    assert res["lo"] < res["point"] < res["hi"]
+    assert res["lo"] > 0.0  # the real 30s gap survives resampling
+
+
+def test_smaller_samples_give_wider_intervals():
+    """The sample floor exists because small n buys a wide interval, not a wrong
+    one. This pins that relationship instead of asserting it in prose."""
+    rng = random.Random(12)
+    big_a = [rng.gauss(100.0, 15.0) for _ in range(200)]
+    big_b = [rng.gauss(70.0, 15.0) for _ in range(200)]
+    small_a, small_b = big_a[:12], big_b[:12]
+    wide = bootstrap_median_diff(small_a, small_b, iterations=800, seed=4)
+    narrow = bootstrap_median_diff(big_a, big_b, iterations=800, seed=4)
+    assert (wide["hi"] - wide["lo"]) > (narrow["hi"] - narrow["lo"])
 
 
 def test_within_host_triples_keeps_only_complete_same_host_groups():
@@ -2541,7 +2645,7 @@ def percentiles(values, want=("p50", "p90", "p95")) -> dict[str, float]:
                 "reporting it would be an observation, not a measurement"
             )
         q = int(name[1:]) / 100.0
-        idx = min(n - 1, max(0, int(round(q * (n - 1)))))
+        idx = min(n - 1, max(0, round(q * (n - 1))))
         out[name] = xs[idx]
     return out
 
@@ -2610,7 +2714,7 @@ def within_host_triples(rows, arms=("A", "B", "C")) -> list[list[dict]]:
 - [ ] **Step 4: Run and confirm pass**
 
 Run: `.venv/bin/pytest tests/test_stats.py -v`
-Expected: PASS — 6 passed
+Expected: PASS — 9 passed
 
 - [ ] **Step 5: Commit**
 
@@ -2686,7 +2790,9 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
+
+from coldstart.analysis.stats import ecdf
 
 ARMS = ["A", "B", "C"]
 ARM_LABEL = {"A": "A — nothing cached", "B": "B — weights cached", "C": "C — weights + compile"}
@@ -2709,22 +2815,35 @@ def waterfall(rows, out_path) -> Path:
         labels.append(f"{ARM_LABEL[arm]}\n(n={len(rs)})")
         ys.append(i)
         platform = statistics.median(r["t_platform"] for r in rs)
-        weights = statistics.median(r["t_weights"] for r in rs)
-        sub = {}
-        for k in ("S4c", "S4e"):
-            vals = [r["s4_subphases"].get(k, 0.0) for r in rs]
-            sub[k] = statistics.median(vals)
         process = statistics.median(r["t_process"] for r in rs)
-        unattributed = max(0.0, process - weights - sum(sub.values()))
+
+        # derive() returns t_weights=None when the engine did not delineate the
+        # load boundary. Drawing a merged span as if it were T_weights would be
+        # the chart telling a story the data does not support, so the merge is
+        # drawn as one explicitly-labelled bar instead — spec, stage taxonomy.
+        measured = [r["t_weights"] for r in rs if r["t_weights"] is not None]
+        if measured:
+            weights = statistics.median(measured)
+            sub = {
+                k: statistics.median([r["s4_subphases"].get(k, 0.0) for r in rs])
+                for k in ("S4c", "S4e")
+            }
+            unattributed = max(0.0, process - weights - sum(sub.values()))
+            segments = [
+                (platform, "T_platform (not attributable)", RESIDUAL_COLOR),
+                (weights, "T_weights (S2+S3)", "#2f6fd0"),
+                (sub["S4c"], "S4c memory profiling", "#4a8a4a"),
+                (sub["S4e"], "S4e graph capture", "#c88a2e"),
+                (unattributed, "unattributed within S4", "#d9c8a9"),
+            ]
+        else:
+            segments = [
+                (platform, "T_platform (not attributable)", RESIDUAL_COLOR),
+                (process, "S2 to ready (phases merged by engine)", "#7f8fa6"),
+            ]
 
         left = 0.0
-        for value, label, color in [
-            (platform, "T_platform (not attributable)", RESIDUAL_COLOR),
-            (weights, "T_weights (S2+S3)", "#2f6fd0"),
-            (sub["S4c"], "S4c memory profiling", "#4a8a4a"),
-            (sub["S4e"], "S4e graph capture", "#c88a2e"),
-            (unattributed, "unattributed within S4", "#d9c8a9"),
-        ]:
+        for value, label, color in segments:
             ax.barh(i, value, left=left, color=color, label=label if i == 0 else None)
             left += value
 
@@ -2763,8 +2882,6 @@ def warmup_curve(rows, out_path) -> Path:
 
 
 def ecdf_plot(rows, out_path) -> Path:
-    from coldstart.analysis.stats import ecdf
-
     by = _by_arm(rows)
     fig, ax = plt.subplots(figsize=(8, 4.5))
     for arm in ARMS:
