@@ -771,6 +771,16 @@ kind: the median of the within-triple deltas, not the difference of two medians.
 **For H4:** per-host medians, plus the share of total variance attributable to host as a
 grouping factor.
 
+**Conventions stated, because readers will recompute.** Percentiles are nearest-order-statistic
+(equivalent to `numpy.percentile(..., method="nearest")`), which is *not* numpy's default of
+`linear`; on right-skewed samples at n≈100 the two differ by up to about two percent at p95.
+Intervals are percentile-method bootstrap intervals, which are first-order accurate and known to
+be biased for skewed statistics — no bias correction is applied, and that limitation is stated
+rather than hidden. The same quantile function produces the reported percentiles and every
+median inside the bootstrap, so the p50 in the table and the point estimate of a contrast cannot
+disagree about what the median is. None of these choices is the only defensible one; publishing
+which one was made is what lets a reader reproduce the number instead of arriving near it.
+
 **No fishing.** Four pre-registered hypotheses. Anything else discovered is labeled
 exploratory, in those words, and is never promoted to a headline claim.
 
