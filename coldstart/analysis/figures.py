@@ -161,14 +161,29 @@ def warmup_curve(rows, out_path) -> Path:
     for arm in ARMS:
         rs = by[arm]
         med = [median([r["warmup"][i]["end_to_end"] for r in rs]) for i in range(n_req)]
-        ax.plot(range(1, n_req + 1), med, marker="o", label=f"{ARM_LABEL[arm]} (n={len(rs)})")
+        (line,) = ax.plot(
+            range(1, n_req + 1), med, marker="o", label=f"{ARM_LABEL[arm]} (n={len(rs)})"
+        )
 
-    # Steady state is drawn from every row across every arm, not just
-    # `rows[0]` (the plan's original computation): a band anchored to one
-    # arbitrary row is one outlier row away from being a misleading anchor
-    # for curves compared across all three arms.
-    steady = median([r["warmup"][k]["end_to_end"] for r in all_rows for k in (-3, -2, -1)])
-    ax.axhspan(steady * 0.9, steady * 1.1, color="#eeeeee", label="steady-state band (±10%)")
+        # Steady state is per-arm, not pooled across all three arms. Each
+        # arm converges to its own plateau -- a band computed by pooling
+        # every arm's rows together would sit near the middle arm's
+        # plateau and be flatly wrong for the other two (e.g. the slowest
+        # arm would look like it never reaches "steady state" and the
+        # fastest arm would look like it beats steady state from request 2
+        # on). Drawn from all of *that arm's* rows, not just its first row
+        # (same one-outlier-row concern as before, now scoped per arm), in
+        # that arm's own line color so the band is unambiguously "this
+        # curve's" rather than a third, disconnected element.
+        steady = median([r["warmup"][k]["end_to_end"] for r in rs for k in (-3, -2, -1)])
+        ax.axhspan(
+            steady * 0.9,
+            steady * 1.1,
+            color=line.get_color(),
+            alpha=0.15,
+            label=f"{ARM_LABEL[arm]} steady-state band (±10%)",
+        )
+
     ax.set_xlabel("request index")
     ax.set_ylabel("end-to-end latency (s)")
     ax.set_ylim(bottom=0)

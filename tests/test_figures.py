@@ -11,6 +11,7 @@ being an ugly PNG nobody looked at closely enough.
 """
 
 import copy
+import statistics
 from pathlib import Path
 from unittest.mock import patch
 
@@ -312,9 +313,14 @@ def test_warmup_curve_series_are_visually_distinct_not_identical(tmp_path):
 def test_warmup_curve_legend_labels_carry_each_arms_n(tmp_path):
     _fig, ax = _call_capturing_axes(warmup_curve, rows(), tmp_path / "w.png")
     _handles, labels = ax.get_legend_handles_labels()
-    arm_labels = [lbl for lbl in labels if lbl != "steady-state band (±10%)"]
+    # Curve labels carry "(n=..)"; the per-arm band labels don't repeat it
+    # (the band belongs to the curve right next to it in the legend), so
+    # filtering on "n=" isolates just the three curve entries.
+    arm_labels = [lbl for lbl in labels if "n=10" in lbl]
     assert len(arm_labels) == 3
-    assert all("n=10" in lbl for lbl in arm_labels)
+    band_labels = [lbl for lbl in labels if "steady-state band" in lbl]
+    assert len(band_labels) == 3
+    assert len(labels) == 6
 
 
 def test_warmup_curve_ylim_starts_at_zero(tmp_path):
@@ -351,21 +357,63 @@ def test_warmup_curve_rejects_mismatched_warmup_lengths(tmp_path):
         warmup_curve(data, tmp_path / "w.png")
 
 
-def test_warmup_curve_steady_state_band_uses_all_rows_not_just_the_first(tmp_path):
-    """Steady state is computed from every row across every arm, not just
-    `rows[0]` — a single row is one outlier away from anchoring the band
-    incorrectly for curves compared across all three arms. Give row 0 (arm
-    A) a wildly different tail; a rows[0]-only computation would center the
-    band near 999, but the cross-row median must stay well below that."""
+def test_warmup_curve_steady_state_band_is_per_arm_not_pooled(tmp_path):
+    """Each arm converges to its own plateau (A ~3.0, B ~2.0, C ~1.2 in this
+    fixture) -- a single band pooled across all three arms would sit only
+    near the middle arm's plateau, making the slowest arm look like it
+    never reaches "steady state" and the fastest arm look permanently
+    faster than it. A pooled-band implementation draws exactly one band
+    (this asserts three, at three independently-verified levels) and fails
+    this test."""
     data = rows()
-    data[0] = dict(data[0])
-    data[0]["warmup"] = [dict(w) for w in data[0]["warmup"]]
-    for w in data[0]["warmup"][-3:]:
-        w["end_to_end"] = 999.0
+    _fig, ax = _call_capturing_axes(warmup_curve, data, tmp_path / "w.png")
+
+    bands = [p for p in ax.patches if "steady-state band" in (p.get_label() or "")]
+    assert len(bands) == 3  # one band per arm, not one pooled across all three
+
+    by_arm = {a: [r for r in data if r["arm"] == a] for a in figures_module.ARMS}
+    for arm, band in zip(figures_module.ARMS, bands, strict=True):
+        vals = [r["warmup"][k]["end_to_end"] for r in by_arm[arm] for k in (-3, -2, -1)]
+        expected = statistics.median(vals)
+        assert band.get_y() == pytest.approx(expected * 0.9)
+        assert band.get_y() + band.get_height() == pytest.approx(expected * 1.1)
+
+
+def test_warmup_curve_steady_state_bands_are_colored_like_their_own_line(tmp_path):
+    """A band drawn in the wrong arm's color (or a neutral gray shared by
+    all three, the original pooled design) would be ambiguous about which
+    curve it belongs to now that there are three. Each band's color must
+    match its own arm's line color exactly."""
+    _fig, ax = _call_capturing_axes(warmup_curve, rows(), tmp_path / "w.png")
+    arm_lines = [ln for ln in ax.lines if ln.get_marker() == "o"]
+    bands = [p for p in ax.patches if "steady-state band" in (p.get_label() or "")]
+    assert len(arm_lines) == len(bands) == 3
+    for line, band in zip(arm_lines, bands, strict=True):
+        assert mcolors.to_rgb(band.get_facecolor()[:3]) == mcolors.to_rgb(line.get_color())
+
+
+def test_warmup_curve_per_arm_band_uses_all_of_that_arms_rows_not_just_the_first(tmp_path):
+    """Same one-outlier-row concern as before, now scoped per arm: arm A's
+    band must reflect all of arm A's rows, not just its first row. Give
+    only arm A's first row a wildly different tail; a first-row-only
+    computation would center arm A's band near 999, but the median across
+    all of arm A's rows must stay well below that -- and arm B/C's bands,
+    unaffected by an arm-A row, must stay near their own normal plateaus."""
+    data = rows()
+    for idx, r in enumerate(data):
+        if r["arm"] == "A":
+            data[idx] = dict(r)
+            data[idx]["warmup"] = [dict(w) for w in r["warmup"]]
+            for w in data[idx]["warmup"][-3:]:
+                w["end_to_end"] = 999.0
+            break
 
     _fig, ax = _call_capturing_axes(warmup_curve, data, tmp_path / "w.png")
-    band = next(p for p in ax.patches if p.get_label() == "steady-state band (±10%)")
-    assert band.get_y() + band.get_height() < 500.0
+    bands = [p for p in ax.patches if "steady-state band" in (p.get_label() or "")]
+    arm_a_band, arm_b_band, arm_c_band = bands  # ARMS order is A, B, C
+    assert arm_a_band.get_y() + arm_a_band.get_height() < 500.0
+    assert arm_b_band.get_y() + arm_b_band.get_height() < 10.0
+    assert arm_c_band.get_y() + arm_c_band.get_height() < 10.0
 
 
 def test_warmup_curve_uses_the_shared_median_helper(tmp_path):
