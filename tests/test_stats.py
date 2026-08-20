@@ -7,6 +7,8 @@ from coldstart.analysis.stats import (
     MIN_SAMPLES,
     bootstrap_contrast_difference,
     bootstrap_median_diff,
+    bootstrap_paired_contrast_difference,
+    bootstrap_paired_median_diff,
     ecdf,
     percentiles,
     within_host_triples,
@@ -267,3 +269,254 @@ def test_within_host_triples_rejects_mixed_hosts():
         {"triple_index": 0, "arm": "C", "host_id": "h2"},
     ]
     assert within_host_triples(rows, arms=("A", "B", "C")) == []
+
+
+# ---------------------------------------------------------------------------
+# bootstrap_paired_median_diff / bootstrap_paired_contrast_difference
+#
+# within_host_triples produces *paired* data: the three runs in a triple are
+# correlated (same host), not independent draws. bootstrap_median_diff and
+# bootstrap_contrast_difference resample arms independently, which is correct
+# for the pooled, unpaired analysis but wrong here — it would silently
+# reintroduce the host confound the pairing exists to remove. These two
+# functions resample whole triples with replacement instead, and report the
+# median of per-triple deltas rather than a difference of two medians.
+# ---------------------------------------------------------------------------
+
+
+def _triple(idx, host, a, b, c, field="t_total"):
+    return [
+        {"triple_index": idx, "arm": "A", "host_id": host, field: a},
+        {"triple_index": idx, "arm": "B", "host_id": host, field: b},
+        {"triple_index": idx, "arm": "C", "host_id": host, field: c},
+    ]
+
+
+def test_paired_median_diff_point_is_median_of_per_triple_deltas():
+    # A-B deltas: 30, 20, 70 -> median 30
+    triples = [
+        _triple(0, "h1", 100.0, 70.0, 60.0),
+        _triple(1, "h2", 110.0, 90.0, 50.0),
+        _triple(2, "h3", 130.0, 60.0, 40.0),
+    ]
+    res = bootstrap_paired_median_diff(triples, "A", "B", iterations=200, seed=1)
+    assert res["point"] == pytest.approx(30.0)
+
+
+def test_paired_contrast_difference_point_is_median_of_per_triple_contrasts():
+    # (A-B)-(B-C) per triple: 20, -20, 50 -> median 20
+    triples = [
+        _triple(0, "h1", 100.0, 70.0, 60.0),
+        _triple(1, "h2", 110.0, 90.0, 50.0),
+        _triple(2, "h3", 130.0, 60.0, 40.0),
+    ]
+    res = bootstrap_paired_contrast_difference(triples, iterations=200, seed=1)
+    assert res["point"] == pytest.approx(20.0)
+
+
+def test_paired_median_diff_accepts_a_callable_value_extractor():
+    """value can be a key name (the default) or a callable — both t_total and
+    t_weights get this treatment, so it must not be hardcoded to one field."""
+    triples = [_triple(0, "h1", 100.0, 70.0, 60.0)]
+    res = bootstrap_paired_median_diff(
+        triples, "A", "B", value=lambda r: r["t_total"] * 2, iterations=10, seed=1
+    )
+    assert res["point"] == pytest.approx(60.0)  # (200 - 140)
+
+
+def test_paired_bootstrap_resamples_whole_triples_and_an_outlier_widens_it():
+    """The unit of resampling is the triple, not the delta list flattened by
+    coincidence. Five triples share the same delta (a degenerate interval on
+    their own); adding one outlier triple must widen the interval, because
+    the outlier can now be drawn 0, 1, 2... times per resample. A version
+    that dropped the outlier's leverage (e.g. sampling without replacement,
+    or capping each triple to appear once) would keep this degenerate."""
+    normal = [_triple(i, f"h{i}", 100.0, 70.0, 60.0) for i in range(5)]  # delta 30
+    without_outlier = bootstrap_paired_median_diff(normal, "A", "B", iterations=3000, seed=9)
+    assert without_outlier["lo"] == without_outlier["hi"] == pytest.approx(30.0)
+
+    with_outlier = normal + [_triple(5, "h5", 300.0, 0.0, 0.0)]  # delta 300
+    res = bootstrap_paired_median_diff(with_outlier, "A", "B", iterations=3000, seed=9)
+    assert (res["hi"] - res["lo"]) > 0.0
+
+
+def test_paired_median_diff_same_seed_reproducible_different_seed_is_not():
+    rng = random.Random(30)
+    triples = [
+        _triple(i, f"h{i}", 100.0 + rng.gauss(0, 10), 70.0 + rng.gauss(0, 10), 60.0)
+        for i in range(40)
+    ]
+    r1 = bootstrap_paired_median_diff(triples, "A", "B", iterations=500, seed=11)
+    r2 = bootstrap_paired_median_diff(triples, "A", "B", iterations=500, seed=11)
+    assert r1 == r2
+
+    r3 = bootstrap_paired_median_diff(triples, "A", "B", iterations=500, seed=12)
+    assert r3 != r1
+
+
+def test_paired_median_diff_wider_alpha_gives_narrower_interval():
+    rng = random.Random(31)
+    triples = [
+        _triple(i, f"h{i}", 100.0 + rng.gauss(0, 10), 70.0 + rng.gauss(0, 10), 60.0)
+        for i in range(40)
+    ]
+    narrow_conf = bootstrap_paired_median_diff(triples, "A", "B", iterations=800, seed=15, alpha=0.20)
+    wide_conf = bootstrap_paired_median_diff(triples, "A", "B", iterations=800, seed=15, alpha=0.01)
+    assert (narrow_conf["hi"] - narrow_conf["lo"]) < (wide_conf["hi"] - wide_conf["lo"])
+
+
+def test_paired_contrast_difference_same_seed_reproducible_different_seed_is_not():
+    rng = random.Random(32)
+    triples = [
+        _triple(
+            i,
+            f"h{i}",
+            100.0 + rng.gauss(0, 10),
+            70.0 + rng.gauss(0, 10),
+            60.0 + rng.gauss(0, 10),
+        )
+        for i in range(40)
+    ]
+    r1 = bootstrap_paired_contrast_difference(triples, iterations=500, seed=16)
+    r2 = bootstrap_paired_contrast_difference(triples, iterations=500, seed=16)
+    assert r1 == r2
+
+    r3 = bootstrap_paired_contrast_difference(triples, iterations=500, seed=17)
+    assert r3 != r1
+
+
+def test_paired_contrast_difference_wider_alpha_gives_narrower_interval():
+    rng = random.Random(33)
+    triples = [
+        _triple(
+            i,
+            f"h{i}",
+            100.0 + rng.gauss(0, 10),
+            70.0 + rng.gauss(0, 10),
+            60.0 + rng.gauss(0, 10),
+        )
+        for i in range(40)
+    ]
+    narrow_conf = bootstrap_paired_contrast_difference(triples, iterations=800, seed=18, alpha=0.20)
+    wide_conf = bootstrap_paired_contrast_difference(triples, iterations=800, seed=18, alpha=0.01)
+    assert (narrow_conf["hi"] - narrow_conf["lo"]) < (wide_conf["hi"] - wide_conf["lo"])
+
+
+def test_paired_interval_is_tighter_than_unpaired_when_host_effect_dominates():
+    """The spec's own claim: disagreement between the paired and unpaired
+    estimates is itself a finding, so the two must actually be *capable* of
+    disagreeing. Build triples where a large per-host offset is common to
+    all three arms within a triple (so it cancels in the paired delta) but
+    is not accounted for by the unpaired bootstrap, which pools all A-values
+    and all B-values and resamples them independently of which host/triple
+    they came from. If a paired function were implemented by just calling
+    the unpaired one on the pooled per-arm lists (losing the pairing), this
+    assertion would fail: the widths would come out equal."""
+    rng = random.Random(99)
+    triples = []
+    a_vals, b_vals = [], []
+    for i in range(30):
+        host_offset = rng.gauss(0.0, 50.0)  # dominant, shared within a triple
+        a = 100.0 + host_offset + rng.gauss(0.0, 2.0)
+        b = 70.0 + host_offset + rng.gauss(0.0, 2.0)
+        c = 60.0 + host_offset + rng.gauss(0.0, 2.0)
+        triples.append(_triple(i, f"h{i}", a, b, c))
+        a_vals.append(a)
+        b_vals.append(b)
+
+    paired = bootstrap_paired_median_diff(triples, "A", "B", iterations=1500, seed=7)
+    unpaired = bootstrap_median_diff(a_vals, b_vals, iterations=1500, seed=7)
+
+    paired_width = paired["hi"] - paired["lo"]
+    unpaired_width = unpaired["hi"] - unpaired["lo"]
+    assert paired_width < unpaired_width
+
+
+def test_paired_median_diff_rejects_empty_triples():
+    with pytest.raises(ValueError):
+        bootstrap_paired_median_diff([], "A", "B")
+
+
+def test_paired_contrast_difference_rejects_empty_triples():
+    with pytest.raises(ValueError):
+        bootstrap_paired_contrast_difference([])
+
+
+def test_paired_median_diff_rejects_a_triple_missing_an_arm():
+    triples = [[{"triple_index": 0, "arm": "A", "host_id": "h1", "t_total": 100.0}]]
+    with pytest.raises(ValueError):
+        bootstrap_paired_median_diff(triples, "A", "B")
+
+
+def test_paired_contrast_difference_rejects_a_triple_missing_an_arm():
+    triples = [
+        [
+            {"triple_index": 0, "arm": "A", "host_id": "h1", "t_total": 100.0},
+            {"triple_index": 0, "arm": "B", "host_id": "h1", "t_total": 70.0},
+        ]
+    ]
+    with pytest.raises(ValueError):
+        bootstrap_paired_contrast_difference(triples)
+
+
+def test_paired_functions_reject_non_finite_values():
+    triples = [_triple(0, "h1", float("nan"), 70.0, 60.0)]
+    with pytest.raises(ValueError):
+        bootstrap_paired_median_diff(triples, "A", "B")
+    with pytest.raises(ValueError):
+        bootstrap_paired_contrast_difference(triples)
+
+
+def test_paired_functions_reject_non_positive_iterations():
+    triples = [_triple(0, "h1", 100.0, 70.0, 60.0)]
+    with pytest.raises(ValueError):
+        bootstrap_paired_median_diff(triples, "A", "B", iterations=0)
+    with pytest.raises(ValueError):
+        bootstrap_paired_contrast_difference(triples, iterations=0)
+
+
+def test_paired_functions_reject_alpha_out_of_range():
+    triples = [_triple(0, "h1", 100.0, 70.0, 60.0)]
+    with pytest.raises(ValueError):
+        bootstrap_paired_median_diff(triples, "A", "B", alpha=0.0)
+    with pytest.raises(ValueError):
+        bootstrap_paired_contrast_difference(triples, alpha=1.0)
+
+
+def test_paired_median_diff_rejects_a_triple_with_a_duplicate_arm():
+    """Two rows both claim arm A; C is present too, so a missing-arm check
+    alone would not catch this — the ambiguous duplicate must be its own
+    rejection, not silently resolved by whichever row was written last."""
+    triples = [
+        [
+            {"triple_index": 0, "arm": "A", "host_id": "h1", "t_total": 100.0},
+            {"triple_index": 0, "arm": "A", "host_id": "h1", "t_total": 999.0},
+            {"triple_index": 0, "arm": "C", "host_id": "h1", "t_total": 60.0},
+        ]
+    ]
+    with pytest.raises(ValueError):
+        bootstrap_paired_median_diff(triples, "A", "C")
+
+
+def test_paired_contrast_difference_rejects_a_triple_with_a_duplicate_arm():
+    triples = [
+        [
+            {"triple_index": 0, "arm": "A", "host_id": "h1", "t_total": 100.0},
+            {"triple_index": 0, "arm": "B", "host_id": "h1", "t_total": 999.0},
+            {"triple_index": 0, "arm": "B", "host_id": "h1", "t_total": 70.0},
+            {"triple_index": 0, "arm": "C", "host_id": "h1", "t_total": 60.0},
+        ]
+    ]
+    with pytest.raises(ValueError):
+        bootstrap_paired_contrast_difference(triples)
+
+
+def test_paired_contrast_difference_rejects_wrong_arms_length():
+    """The contrast (A-B)-(B-C) is only defined for exactly three arms. A
+    2-tuple or 4-tuple must be rejected explicitly rather than crashing on
+    an IndexError deep inside the per-triple delta computation."""
+    triples = [_triple(0, "h1", 100.0, 70.0, 60.0)]
+    with pytest.raises(ValueError):
+        bootstrap_paired_contrast_difference(triples, arms=("A", "B"))
+    with pytest.raises(ValueError):
+        bootstrap_paired_contrast_difference(triples, arms=("A", "B", "C", "D"))

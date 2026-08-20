@@ -58,7 +58,13 @@ def _check_iterations_and_alpha(iterations: int, alpha: float) -> None:
 
 
 def bootstrap_median_diff(a, b, iterations=10000, seed=0, alpha=0.05) -> dict:
-    """Non-parametric interval on median(a) - median(b). No distributional assumption."""
+    """Non-parametric interval on median(a) - median(b). No distributional assumption.
+
+    Do not call this on within_host_triples output: it resamples a and b
+    independently, which is correct for the pooled, unpaired analysis but
+    silently reintroduces the host confound on paired data. Use
+    bootstrap_paired_median_diff for that.
+    """
     _check_iterations_and_alpha(iterations, alpha)
     a = _validate_samples(a, "a")
     b = _validate_samples(b, "b")
@@ -76,7 +82,13 @@ def bootstrap_median_diff(a, b, iterations=10000, seed=0, alpha=0.05) -> dict:
 
 
 def bootstrap_contrast_difference(a, b, c, iterations=10000, seed=0, alpha=0.05) -> dict:
-    """Interval on (A-B) - (B-C): the ranking claim needs its own interval."""
+    """Interval on (A-B) - (B-C): the ranking claim needs its own interval.
+
+    Do not call this on within_host_triples output: it resamples a, b, and c
+    independently, which is correct for the pooled, unpaired analysis but
+    silently reintroduces the host confound on paired data. Use
+    bootstrap_paired_contrast_difference for that.
+    """
     _check_iterations_and_alpha(iterations, alpha)
     a = _validate_samples(a, "a")
     b = _validate_samples(b, "b")
@@ -121,3 +133,112 @@ def within_host_triples(rows, arms=("A", "B", "C")) -> list[list[dict]]:
             continue
         kept.append(g)
     return kept
+
+
+def _arm_lookup(triple: list[dict]) -> dict[str, dict]:
+    """Map arm -> row for one triple, rejecting a duplicate arm outright —
+    a duplicate silently shadowing a missing arm is worse than a KeyError."""
+    out: dict[str, dict] = {}
+    for row in triple:
+        arm = row["arm"]
+        if arm in out:
+            raise ValueError(f"triple has duplicate arm {arm!r}: {triple}")
+        out[arm] = row
+    return out
+
+
+def _row_value(row: dict, value) -> float:
+    """`value` is a key name or a callable(row) -> float — both t_total and
+    t_weights get this treatment, so it is never hardcoded to one field."""
+    v = value(row) if callable(value) else row[value]
+    if not math.isfinite(v):
+        raise ValueError(f"non-finite value in row {row!r}: {v!r}")
+    return v
+
+
+def _paired_delta(triple: list[dict], arm_a: str, arm_b: str, value) -> float:
+    lookup = _arm_lookup(triple)
+    for arm in (arm_a, arm_b):
+        if arm not in lookup:
+            raise ValueError(f"triple is missing arm {arm!r}: has {sorted(lookup)}")
+    return _row_value(lookup[arm_a], value) - _row_value(lookup[arm_b], value)
+
+
+def _paired_contrast_delta(triple: list[dict], arms: tuple[str, str, str], value) -> float:
+    lookup = _arm_lookup(triple)
+    for arm in arms:
+        if arm not in lookup:
+            raise ValueError(f"triple is missing arm {arm!r}: has {sorted(lookup)}")
+    a_val = _row_value(lookup[arms[0]], value)
+    b_val = _row_value(lookup[arms[1]], value)
+    c_val = _row_value(lookup[arms[2]], value)
+    return (a_val - b_val) - (b_val - c_val)
+
+
+def _bootstrap_median_of_units(deltas: list[float], iterations: int, seed: int, alpha: float) -> dict:
+    """Shared engine for both paired bootstraps: `deltas` already holds one
+    scalar per independent unit (one per triple). Resampling this list with
+    replacement is what makes the unit of resampling the triple rather than
+    the individual arm observation inside it."""
+    _check_iterations_and_alpha(iterations, alpha)
+    if not deltas:
+        raise ValueError("deltas must not be empty")
+    rng = random.Random(seed)
+    n = len(deltas)
+    point = statistics.median(deltas)
+    draws = []
+    for _ in range(iterations):
+        resample = [deltas[rng.randrange(n)] for _ in range(n)]
+        draws.append(statistics.median(resample))
+    draws.sort()
+    lo = draws[int((alpha / 2) * iterations)]
+    hi = draws[int((1 - alpha / 2) * iterations) - 1]
+    return {"point": point, "lo": lo, "hi": hi}
+
+
+def bootstrap_paired_median_diff(
+    triples: list[list[dict]],
+    arm_a: str,
+    arm_b: str,
+    value="t_total",
+    iterations=10000,
+    seed=0,
+    alpha=0.05,
+) -> dict:
+    """Paired bootstrap on within_host_triples output: the interval on the
+    median of arm_a - arm_b, computed once per triple.
+
+    Resamples whole triples with replacement, not individual arm
+    observations — the two runs in a triple are not independent draws, they
+    share a host, and treating them as interchangeable with runs from other
+    triples would reintroduce the host confound within_host_triples exists
+    to remove. See bootstrap_median_diff for the unpaired, pooled version.
+    """
+    if not triples:
+        raise ValueError("triples must not be empty")
+    deltas = [_paired_delta(t, arm_a, arm_b, value) for t in triples]
+    return _bootstrap_median_of_units(deltas, iterations, seed, alpha)
+
+
+def bootstrap_paired_contrast_difference(
+    triples: list[list[dict]],
+    arms: tuple[str, str, str] = ("A", "B", "C"),
+    value="t_total",
+    iterations=10000,
+    seed=0,
+    alpha=0.05,
+) -> dict:
+    """Paired bootstrap on within_host_triples output: the interval on the
+    median of (A-B) - (B-C), computed once per triple — the ranking claim on
+    the cleanest subset of the dataset.
+
+    Resamples whole triples with replacement, not individual arm
+    observations; see bootstrap_paired_median_diff and
+    bootstrap_contrast_difference for the reasoning and the unpaired version.
+    """
+    if len(arms) != 3:
+        raise ValueError(f"arms must have exactly 3 entries, got {arms!r}")
+    if not triples:
+        raise ValueError("triples must not be empty")
+    deltas = [_paired_contrast_delta(t, arms, value) for t in triples]
+    return _bootstrap_median_of_units(deltas, iterations, seed, alpha)
