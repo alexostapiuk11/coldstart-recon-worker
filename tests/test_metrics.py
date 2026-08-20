@@ -4,6 +4,7 @@ from coldstart.analysis.metrics import (
     ceiling_bound,
     derive,
     steady_state_latency,
+    t_fast_seconds,
     time_to_fast_index,
     warmup_penalty,
 )
@@ -161,7 +162,7 @@ def test_failed_run_guard_is_not_a_noop():
     # Guards against `if False:` replacing the outcome check: with a broken
     # guard, this failed run would fall through to the ok-run path (which the
     # default fixture's marks/clocks would happily compute), producing a
-    # 20-key "ok": True row instead of the 6-key failure row asserted above.
+    # full "ok": True row instead of the 6-key failure row asserted above.
     rec = make()
     rec.status = {"outcome": "failed", "failure_class": None, "failure_detail": None}
     d = derive(rec)
@@ -334,6 +335,18 @@ def test_steady_state_latency_is_median_of_last_three():
 
 def test_steady_state_latency_is_none_for_empty_warmup():
     assert steady_state_latency([]) is None
+
+
+def test_steady_state_latency_routes_through_stats_median_and_rejects_nan():
+    """steady_state_latency must go through coldstart.analysis.stats.median,
+    not statistics.median -- the one median in the pipeline that used to
+    skip both the shared quantile function every other aggregate uses and
+    its non-finite validation. A `statistics.median` implementation would
+    silently sort a NaN into the result (Python's `<` against NaN is always
+    False, so it can land anywhere) instead of raising."""
+    warmup = [{"req_index": i, "end_to_end": v} for i, v in enumerate([1.0, 2.0, float("nan")])]
+    with pytest.raises(ValueError, match="non-finite"):
+        steady_state_latency(warmup)
 
 
 def test_warmup_penalty_is_first_over_steady():
@@ -510,3 +523,142 @@ def test_t_s5_is_none_when_s4_end_missing():
 
 def test_t_s6_is_first_token_minus_request1_dispatch():
     assert derive(make())["t_s6"] == pytest.approx(2.0)
+
+
+# --- B5 fix: t_fast_seconds ---
+#
+# The default `make()` fixture's warmup records (like every real record
+# recorded before Task 11 ships) carry no `t_dispatch_mono`, so
+# `d["t_fast_seconds"]` is None on all the tests above that use it
+# unmodified -- pinned explicitly below rather than left as an accidental
+# side effect of those tests never checking it.
+
+
+def test_t_fast_seconds_is_none_when_dispatch_offset_absent():
+    """The field Task 11's probe will add (`t_dispatch_mono`) is absent from
+    every real run and every fixture above today. `t_fast_seconds` must be
+    `None` with the reason visible in the row -- never silently inferred by
+    summing `end_to_end`, which would assume zero gap between requests
+    (an assumption, not a measurement)."""
+    d = derive(make())
+    assert d["t_fast_seconds"] is None
+    assert d["t_fast_reason"] is not None
+    assert "t_dispatch_mono" in d["t_fast_reason"]
+
+
+def test_t_fast_seconds_is_none_when_warmup_is_empty():
+    """No warmup requests means no steady state, so `time_to_fast_index` is
+    already `None` -- `t_fast_seconds` must follow it to `None` rather than
+    raising on an empty warmup list. `make(warmup=[])` would not exercise
+    this (its `warmup or [...]` default treats `[]` as falsy and silently
+    substitutes the standard fixture), so the record is built and then
+    mutated directly instead."""
+    rec = make()
+    rec.warmup = []
+    d = derive(rec)
+    assert d["time_to_fast_index"] is None
+    assert d["t_fast_seconds"] is None
+    assert d["t_fast_reason"] is not None
+
+
+def test_t_fast_seconds_is_none_when_s7_warmup_done_missing():
+    """Same discipline as `t_total` (B1): a run cut off before
+    `S7_warmup_done` cannot have its warmup-tail correction computed for
+    `T_fast` either, and must be flagged rather than guessed."""
+    marks = [m for m in make().clock_B["marks"] if m["stage"] != "S7_warmup_done"]
+    d = derive(make(marks=marks))
+    assert d["t_total"] is None  # already covered by test_missing_s7_warmup_done_*
+    assert d["t_fast_seconds"] is None
+    assert "S7_warmup_done" in d["t_fast_reason"]
+
+
+def test_t_fast_seconds_uses_recorded_dispatch_offsets_not_summed_end_to_end():
+    """A fixture where dispatch offsets equal the cumulative sum of prior
+    `end_to_end` values could not tell a real per-request measurement apart
+    from the summing inference this fix removes -- both would compute the
+    same number. This fixture instead bakes a deliberate 0.3s gap between
+    every request's completion and the next request's dispatch (driver-side
+    overhead between sequential requests), so the two would disagree.
+
+    Hand-computed dispatch offsets (start=100.0, gap=0.3, e2e from
+    `_WARMUP_LATENCIES`): [100.0, 110.3, 119.6, 127.9, 135.2, 141.5, 146.8,
+    150.5, 154.8, 158.3]. `steady_state_latency` (median of the last three
+    end_to_end, [4.0, 3.2, 2.0]) is 3.2, threshold 3.52, so
+    `time_to_fast_index` is 6 (e2e=3.4). Fast completion on clock B =
+    dispatch[6] (146.8) + end_to_end[6] (3.4) = 150.2. `S7_warmup_done` is
+    the last request's own completion, dispatch[9] (158.3) + end_to_end[9]
+    (2.0) = 160.3. With t_submit=0.0, t_result=260.0
+    (t_total_job=260.0): tail = 160.3 - 150.2 = 10.1, so
+    t_fast_seconds = 260.0 - 10.1 = 249.9.
+    """
+    dispatch = [100.0, 110.3, 119.6, 127.9, 135.2, 141.5, 146.8, 150.5, 154.8, 158.3]
+    warmup = [
+        {"req_index": i, "ttft": 0.5, "end_to_end": e2e, "t_dispatch_mono": d}
+        for i, (e2e, d) in enumerate(zip(_WARMUP_LATENCIES, dispatch, strict=True))
+    ]
+    marks = [
+        {"stage": "S1_imports_done", "t_mono": 4.0},
+        {"stage": "S2_acquisition_start", "t_mono": 4.0},
+        {"stage": "S3_load_done", "t_mono": 54.0},
+        {"stage": "S4_start", "t_mono": 54.0},
+        {"stage": "S4_end", "t_mono": 90.0},
+        {"stage": "S5_ready", "t_mono": 100.0},
+        {"stage": "S6_request1_dispatch", "t_mono": 100.0},
+        {"stage": "S6_first_token", "t_mono": 102.0},
+        {"stage": "S7_warmup_done", "t_mono": 160.3},
+    ]
+    d = derive(make(marks=marks, warmup=warmup, t_submit=0.0, t_result=260.0))
+    assert d["time_to_fast_index"] == 6
+    assert d["t_fast_seconds"] == pytest.approx(249.9)
+    assert d["t_fast_reason"] is None
+    # Sanity: T_fast >= T_total holds (spec 7), and neither collapses to the
+    # other -- a mutant that returned t_total_job or t_total unmodified
+    # would land on 260.0 or 201.7, not 249.9.
+    assert d["t_fast_seconds"] >= d["t_total"]
+    assert d["t_total"] == pytest.approx(201.7)
+
+
+def test_t_fast_less_than_t_total_raises_loudly():
+    """Spec 7: T_fast >= T_total always. This fixture deliberately corrupts
+    S6_first_token to an implausibly late 200.0 while the fast-tolerance
+    request (index 6, e2e=3.4) is dispatched at 50.0 and so completes at
+    53.4 -- well before the recorded first-token mark. That ordering is
+    impossible under honest instrumentation, and derive() must raise rather
+    than publish a T_fast smaller than T_total.
+    """
+    marks = [
+        {"stage": "S1_imports_done", "t_mono": 4.0},
+        {"stage": "S2_acquisition_start", "t_mono": 4.0},
+        {"stage": "S3_load_done", "t_mono": 54.0},
+        {"stage": "S4_start", "t_mono": 54.0},
+        {"stage": "S4_end", "t_mono": 90.0},
+        {"stage": "S5_ready", "t_mono": 100.0},
+        {"stage": "S6_request1_dispatch", "t_mono": 100.0},
+        {"stage": "S6_first_token", "t_mono": 200.0},
+        {"stage": "S7_warmup_done", "t_mono": 210.0},
+    ]
+    warmup = [
+        {"req_index": i, "ttft": 0.5, "end_to_end": v, "t_dispatch_mono": 50.0}
+        for i, v in enumerate(_WARMUP_LATENCIES)
+    ]
+    rec = make(marks=marks, warmup=warmup, t_submit=0.0, t_result=300.0)
+    rec.run_id = "run-corrupt"
+    with pytest.raises(ValueError, match="T_fast"):
+        derive(rec)
+
+
+def test_t_fast_seconds_pure_function_negative_tail_raises():
+    """Direct test of the extracted function: a fast-index completion after
+    `S7_warmup_done` is impossible on a monotonic clock, the same
+    discipline as every other "impossible" case in this module."""
+    warmup = [{"req_index": 0, "ttft": 0.5, "end_to_end": 5.0, "t_dispatch_mono": 100.0}]
+    with pytest.raises(ValueError, match="negative"):
+        t_fast_seconds(warmup, fast_index=0, t_total_job=200.0, t_warmup_done_mono=104.0)
+
+
+def test_t_fast_seconds_pure_function_reason_is_none_only_when_value_is_not():
+    """`reason` and `value` are mutually exclusive -- a caller should never
+    have to check both to know which branch fired."""
+    value, reason = t_fast_seconds([], fast_index=None, t_total_job=1.0, t_warmup_done_mono=None)
+    assert value is None
+    assert reason is not None

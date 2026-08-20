@@ -1770,6 +1770,54 @@ Until this task ships, `S4_start`/`S4_end` are absent from every real record, `d
 honest behavior of the analysis layer while this task is outstanding — not a bug to work around
 by substituting `S5_ready - S3_load_done` here or in analysis.
 
+**Warmup record contract addition — `t_dispatch_mono` (required by the B5 fix in
+`coldstart/analysis/metrics.py`).** The original warmup record shape, `{req_index, ttft,
+end_to_end}`, carries no absolute clock-B offset — there is no way to know when request N
+*started* relative to `t0`. That makes `T_fast` (spec 7: "submit → first request within 10% of
+steady-state latency") unmeasurable from a stored row, and worse, unreconstructible after the
+fact: you cannot sum `end_to_end` values to infer when each request started, because that assumes
+zero gap between sequential requests (no driver-side dispatch delay, no scheduling jitter between
+one request's completion and the next one's dispatch) — an assumption, not a measurement. A
+stored campaign with this field missing cannot be repaired offline; the field has to be recorded
+live, by this probe, on every run.
+
+This probe is the producer:
+
+- Each warmup request must carry `t_dispatch_mono` — the monotonic instant (same clock, same
+  origin as every other mark this probe emits) at which that request was dispatched. Capture it
+  the same way `_one_request` already captures its own `t_start` internally; the change is to stop
+  discarding that value and return it as part of the request's result dict instead:
+
+  ```python
+  def _one_request(model: str) -> dict:
+      t_start = time.monotonic()
+      ttft = None
+      with requests.post(
+          f"http://127.0.0.1:{PORT}/v1/completions",
+          json={"model": model, "prompt": PROMPT, "max_tokens": MAX_TOKENS, "stream": True},
+          stream=True,
+          timeout=300,
+      ) as r:
+          r.raise_for_status()
+          for chunk in r.iter_lines():
+              if chunk and ttft is None:
+                  ttft = time.monotonic() - t_start
+      return {"t_dispatch_mono": t_start, "ttft": ttft, "end_to_end": time.monotonic() - t_start}
+  ```
+
+  `run_probe`'s existing `warmup.append({"req_index": i, **result})` then carries the new field
+  through with no further change — every warmup record gets it, not just request 1.
+- `t_dispatch_mono` for request 1 must equal (or be consistent with) the existing
+  `S6_request1_dispatch` mark — both name the same instant on the same clock, from two different
+  call sites. A future test (`tests/test_probe_units.py` or an integration test once Task 15
+  exists) should assert this, so the two never quietly drift apart.
+
+`coldstart.analysis.metrics.t_fast_seconds` is what consumes this field: it looks up the warmup
+record at `time_to_fast_index`, reads its `t_dispatch_mono`, and requires it to be present —
+`derive()` returns `t_fast_seconds = None` with the reason recorded in `t_fast_reason` when it is
+absent, exactly as it does for every real record today (this task is not built yet). It never
+falls back to summing `end_to_end`.
+
 **Files:**
 - Modify: `worker/probe.py` (replace placeholder)
 - Create: `tests/test_probe_units.py`
@@ -1904,7 +1952,11 @@ def _one_request(model: str) -> dict:
         for chunk in r.iter_lines():
             if chunk and ttft is None:
                 ttft = time.monotonic() - t_start
-    return {"ttft": ttft, "end_to_end": time.monotonic() - t_start}
+    # t_dispatch_mono (B5) -- the absolute clock-B instant this request was
+    # dispatched. Without it metrics.t_fast_seconds cannot measure T_fast and
+    # will not infer it by summing end_to_end, which would assume zero gap
+    # between sequential requests.
+    return {"t_dispatch_mono": t_start, "ttft": ttft, "end_to_end": time.monotonic() - t_start}
 
 
 def run_probe(recorder, model: str, health_timeout: float = 900.0) -> dict:
@@ -2134,6 +2186,23 @@ def test_stub_returns_a_bundle_shaped_like_the_real_one():
     assert "clock_B" in result
 
 
+def test_stub_warmup_carries_t_dispatch_mono_with_real_gaps_between_requests():
+    """B5: a stub that omitted t_dispatch_mono (the field Task 11's real
+    probe emits) would silently hide the defect metrics.t_fast_seconds
+    exists to fix -- every stub-driven test would then be unable to tell a
+    real per-request offset apart from the summing inference that field
+    replaces. Also pins that the gap is real (non-zero): a dispatch offset
+    exactly equal to the previous request's t_dispatch_mono + end_to_end
+    would BE the summing inference, not a measurement of it."""
+    ep = StubEndpoint(seed=1)
+    warmup = ep.run(arm="A")["warmup"]
+    for w in warmup:
+        assert "t_dispatch_mono" in w
+    for prev, nxt in zip(warmup, warmup[1:], strict=True):
+        zero_gap_dispatch = prev["t_dispatch_mono"] + prev["end_to_end"]
+        assert nxt["t_dispatch_mono"] > zero_gap_dispatch
+
+
 def test_arms_produce_different_weight_times():
     ep = StubEndpoint(seed=1)
     a = ep.run(arm="A")["synthetic_truth"]["t_weights"]
@@ -2172,6 +2241,17 @@ def replay_log_lines() -> list[str]:
     return FIXTURE.read_text().splitlines()
 ```
 
+**Emit `t_dispatch_mono` — same B5 field Task 11's real probe emits (required, not optional).**
+The stub is what makes the GPU-free loop trustworthy: it works only because it is exercised
+against the same record shape the real probe produces. A stub that omitted a field the real probe
+emits would silently hide B5's defect again — the pipeline would look fully tested while every
+stub-driven test still could not tell a real per-request measurement apart from the summing
+inference `t_fast_seconds` refuses to make. The version below also does **not** derive
+`S7_warmup_done` as `t_process + sum(end_to_end)` (the original draft's formula) — that is exactly
+the zero-gap assumption B5 exists to eliminate. Instead each request's dispatch offset advances by
+its own `end_to_end` plus a small deliberate gap, and every clock-B mark that touches warmup timing
+is read back from those per-request offsets, never recomputed by summing.
+
 - [ ] **Step 4: Implement the stub endpoint**
 
 `coldstart/stubs/stub_endpoint.py`:
@@ -2189,6 +2269,15 @@ ARM_PROFILE = {
     "B": {"t_weights": 30.0, "s4b": 40.0},
     "C": {"t_weights": 30.0, "s4b": 3.0},
 }
+
+# Deliberate, non-zero gap between one request's completion and the next
+# request's dispatch (driver-side round trip / scheduling overhead). If this
+# were zero, t_dispatch_mono would equal the cumulative sum of prior
+# end_to_end values, and the stub could no longer distinguish a real
+# per-request offset from the summing inference metrics.t_fast_seconds
+# refuses to make (B5) -- it would exercise the fix without ever being able
+# to catch its regression.
+WARMUP_DISPATCH_GAP = 0.05
 
 
 class StubEndpoint:
@@ -2214,10 +2303,19 @@ class StubEndpoint:
 
         steady = 2.0
         warmup = []
+        t_dispatch = t_process  # request 1 dispatches the instant the server is ready
         for i in range(10):
             penalty = 1.0 + 2.0 * (0.55**i)
             e2e = steady * penalty
-            warmup.append({"req_index": i, "ttft": e2e * 0.25, "end_to_end": e2e})
+            warmup.append(
+                {
+                    "req_index": i,
+                    "t_dispatch_mono": t_dispatch,
+                    "ttft": e2e * 0.25,
+                    "end_to_end": e2e,
+                }
+            )
+            t_dispatch += e2e + WARMUP_DISPATCH_GAP * jitter
 
         first_touch = host not in self._seen
         self._seen.add(host)
@@ -2227,9 +2325,12 @@ class StubEndpoint:
             {"stage": "S2_acquisition_start", "t_mono": s1},
             {"stage": "S3_load_done", "t_mono": s1 + t_weights},
             {"stage": "S5_ready", "t_mono": s1 + t_weights + s4b + s4_other},
-            {"stage": "S6_request1_dispatch", "t_mono": t_process},
-            {"stage": "S6_first_token", "t_mono": t_process + warmup[0]["ttft"]},
-            {"stage": "S7_warmup_done", "t_mono": t_process + sum(w["end_to_end"] for w in warmup)},
+            {"stage": "S6_request1_dispatch", "t_mono": warmup[0]["t_dispatch_mono"]},
+            {"stage": "S6_first_token", "t_mono": warmup[0]["t_dispatch_mono"] + warmup[0]["ttft"]},
+            {
+                "stage": "S7_warmup_done",
+                "t_mono": warmup[-1]["t_dispatch_mono"] + warmup[-1]["end_to_end"],
+            },
         ]
 
         return {
@@ -2251,7 +2352,7 @@ class StubEndpoint:
 - [ ] **Step 5: Run and confirm pass**
 
 Run: `.venv/bin/pytest tests/test_stubs.py -v`
-Expected: PASS — 3 passed
+Expected: PASS — 4 passed
 
 - [ ] **Step 6: Commit**
 
@@ -6380,6 +6481,48 @@ change and therefore cannot be fixed after the campaign runs.** Relatedly, the f
 steady-state band and the tabulated `T_fast` threshold use two different estimators — pooled
 median across rows versus median-of-medians per run — so a reader can see a point inside the band
 while the table says the replica was not yet fast.
+
+**Fixed, on the analysis side.** `derive()` (`coldstart/analysis/metrics.py`) now produces
+`t_fast_seconds`, built with the same duration-correction technique B1 used for `T_total`: the
+raw clock-A job span (`t_total_job`) minus the clock-B duration between the fast-tolerance
+request's completion and job end — never a clock-A timestamp minus a clock-B timestamp directly
+(spec 6.5 rule 1). This makes `T_fast` clock-A-aligned and directly comparable to `T_total`, and
+`derive()` now asserts the spec's invariant (`T_fast >= T_total`) and raises, naming the run and
+arm, if a record ever violates it — the same "impossible under honest instrumentation" discipline
+already applied to a negative `t_weights` or `s4_unattributed`.
+
+The new `t_fast_seconds(warmup, fast_index, t_total_job, t_warmup_done_mono)` function is the one
+place this conversion happens, and it requires each warmup record to carry `t_dispatch_mono` (see
+the Task 11 mark-contract addition below). **Every run recorded before that field exists — which
+today is every real run and every fixture in this repo's test suite — gets `t_fast_seconds = None`
+with the reason recorded in the new `t_fast_reason` field, never a value inferred by summing
+`end_to_end`.** Summing would assume zero gap between sequential requests (no driver-side dispatch
+delay, no scheduling jitter), which is an assumption, not a measurement, and would silently
+reintroduce the exact defect this fix exists to eliminate.
+
+The two steady-state estimators are now one. `figures.warmup_curve`'s per-arm band is the median
+(via `stats.median`, routed through `metrics.steady_state_latency`) of each of that arm's rows'
+*own* median-of-last-three — exactly the per-run definition `time_to_fast_index` compares against
+for that run — not a pooled median over every row's last three requests combined. `FAST_TOLERANCE`
+is imported from `metrics.py` into `figures.py` rather than re-hardcoded as `0.9`/`1.1` literals,
+so the pre-registered tolerance exists in exactly one place. The warmup curve (figure 2) now
+annotates `T_fast` per arm — a marker and label at the request each arm's own median curve first
+lands within `FAST_TOLERANCE` of that arm's steady state, reusing `time_to_fast_index` rather than
+a fourth copy of the threshold logic — closing the "figures" requirement in spec §7 that this
+number be annotated on the plot.
+
+Relatedly (not itself part of B5, but the same "route it through the shared function" discipline):
+`metrics.steady_state_latency` now goes through `coldstart.analysis.stats.median` instead of
+`statistics.median` — the one median in the pipeline that previously skipped both the shared
+quantile function every other aggregate uses and its non-finite validation, so a NaN `end_to_end`
+could pass through `derive()` silently.
+
+**What remains worker-side.** `t_dispatch_mono` is not emitted by anything yet — the probe that
+would emit it (Task 11) is blocked on the Task 6 reconnaissance run, so `t_fast_seconds` is `None`
+on every real record today, with the reason stated in `t_fast_reason`. Task 11's and Task 13's
+text below are updated to require the field once those tasks are actually built; no further
+analysis-side change is needed once they land — `derive()` already consumes it the moment it's
+present on a record.
 
 ## Definition of done for this plan
 

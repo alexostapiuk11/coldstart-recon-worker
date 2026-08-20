@@ -1,6 +1,6 @@
-import statistics
 from typing import TypedDict
 
+from coldstart.analysis.stats import median as stats_median
 from coldstart.checks import DiscardReason, check_consistency, compute_residual
 from coldstart.schema import RunRecord
 
@@ -15,9 +15,9 @@ S4_SUBPHASE_KEYS = ("S4a", "S4b", "S4c", "S4d", "S4e")
 class DerivedRow(TypedDict, total=False):
     """One derived row: the interface between the harness and every published
     figure. `total=False` because a failed run (six keys: ok, arm, host_id,
-    triple_index, consistent, failure_class) and an ok run (twenty keys) are
-    genuinely different contracts, not a partially-filled version of each
-    other — see `derive`.
+    triple_index, consistent, failure_class) and an ok run (every other key
+    below) are genuinely different contracts, not a partially-filled version
+    of each other — see `derive`.
     """
 
     ok: bool
@@ -48,6 +48,8 @@ class DerivedRow(TypedDict, total=False):
     steady_state_latency: float | None
     warmup_penalty: float | None
     time_to_fast_index: int | None
+    t_fast_seconds: float | None
+    t_fast_reason: str | None
     kv_cache_blocks: int | None
     kv_capacity_tokens: int | None
     consistent: bool
@@ -75,11 +77,22 @@ def steady_state_latency(warmup: list[dict]) -> float | None:
 
     Extracted as a named function (rather than inlined in `derive`) because
     the plan reuses this exact definition in `worker/probe.py` (Task 11);
-    importing it from here keeps the two sites from drifting apart.
+    importing it from here keeps the two sites from drifting apart. It is
+    also the one steady-state definition the whole pipeline shares:
+    `figures.warmup_curve`'s per-arm band is the median of *this* function's
+    output across an arm's rows, not a differently-computed pooled median
+    over every row's last three requests — see the module docstring in
+    `figures.py`.
+
+    Routed through `coldstart.analysis.stats.median` rather than
+    `statistics.median` — the one median in this pipeline that used to skip
+    both the shared quantile function every other aggregate goes through
+    and its non-finite validation, so a NaN `end_to_end` would otherwise
+    pass through `derive()` silently.
     """
     if not warmup:
         return None
-    return statistics.median(w["end_to_end"] for w in warmup[-3:])
+    return stats_median([w["end_to_end"] for w in warmup[-3:]])
 
 
 def warmup_penalty(warmup: list[dict], steady: float | None) -> float | None:
@@ -108,6 +121,69 @@ def time_to_fast_index(
         if w["end_to_end"] <= threshold:
             return w["req_index"]
     return None
+
+
+def t_fast_seconds(
+    warmup: list[dict],
+    fast_index: int | None,
+    t_total_job: float,
+    t_warmup_done_mono: float | None,
+) -> tuple[float | None, str | None]:
+    """Clock-A-aligned `T_fast` — spec 7: "submit -> first request within
+    10% of steady-state latency", the number the business-framing table
+    (`economics.py`) consumes in seconds, and always >= `T_total` (spec 7).
+
+    B5: `time_to_fast_index` is a request *index*, not a duration, and
+    every `economics.py` function takes `t_fast` in seconds — nothing
+    converted one to the other. This is the conversion, built the same way
+    B1 built the analogous `T_total` correction: the raw clock-A job span
+    (`t_total_job`) minus the clock-B *duration* between the qualifying
+    event and job completion. It is a duration correction across clocks,
+    never a clock-A timestamp minus a clock-B timestamp directly (spec 6.5
+    rule 1) — `T_platform` remains the only permitted absolute cross-clock
+    subtraction (spec 6.5 rule 2).
+
+    Requires each warmup record to carry `t_dispatch_mono` — the absolute
+    clock-B instant that request was dispatched, on the same monotonic
+    clock as the stage marks (the mark-contract addition the plan's Task 11
+    must ship before this is measurable on a real run). Without it there is
+    no way to know when request N *started* relative to `t0`, so `T_fast`
+    is not reconstructible from a stored row: summing `end_to_end` values
+    instead would assume zero gap between requests, which is an assumption,
+    not a measurement, and would silently reintroduce exactly the inference
+    this function exists to eliminate. Every run recorded before that field
+    exists — which today is every real run and every fixture in this test
+    suite — gets `(None, reason)` here rather than that inference.
+
+    Returns `(value, reason)`: `reason` is `None` exactly when `value` is
+    not, so a caller never has to check both independently to know which
+    branch fired.
+    """
+    if fast_index is None:
+        return None, "no warmup request met the fast-index tolerance (steady state undefined)"
+    if t_warmup_done_mono is None:
+        return None, "S7_warmup_done missing, cannot compute the T_fast warmup-tail correction"
+    req = next((w for w in warmup if w["req_index"] == fast_index), None)
+    if req is None:
+        return None, f"fast index {fast_index} not present in the warmup records"
+    dispatch = req.get("t_dispatch_mono")
+    if dispatch is None:
+        return None, (
+            "warmup record missing t_dispatch_mono -- the probe that emits it "
+            "(plan Task 11) has not shipped, so T_fast cannot be measured; it is "
+            "never inferred by summing end_to_end, which would assume zero gap "
+            "between requests"
+        )
+    fast_completion_mono = dispatch + req["end_to_end"]
+    tail = t_warmup_done_mono - fast_completion_mono
+    if tail < 0:
+        raise ValueError(
+            f"t_fast tail {tail} is negative: the fast-tolerance request "
+            f"(index {fast_index}) completes at {fast_completion_mono} on clock B, "
+            f"after S7_warmup_done ({t_warmup_done_mono}) -- impossible on a "
+            "monotonic clock"
+        )
+    return t_total_job - tail, None
 
 
 def ceiling_bound(t_weights: float, t_total: float) -> float:
@@ -327,6 +403,21 @@ def derive(record: RunRecord) -> DerivedRow:
     steady = steady_state_latency(warmup)
     penalty = warmup_penalty(warmup, steady)
     fast_index = time_to_fast_index(warmup, steady)
+    fast_seconds, fast_reason = t_fast_seconds(warmup, fast_index, t_total_job, t_warmup_end)
+
+    # B5 / spec 7: "T_fast ... is always >= T_total". Both are on the same
+    # clock-A basis (see t_fast_seconds' docstring), so this is a real
+    # invariant, not two incomparable quantities -- a violation means the
+    # timing data is corrupted, the same discipline already applied to a
+    # negative t_weights or a negative T_total correction term above, and it
+    # must not be published silently.
+    if fast_seconds is not None and t_total is not None and fast_seconds < t_total:
+        raise ValueError(
+            f"run {record.run_id!r} (arm {record.arm!r}): t_fast_seconds "
+            f"{fast_seconds} is less than t_total {t_total}; spec requires "
+            "T_fast >= T_total always -- this is impossible under honest "
+            "instrumentation and indicates corrupted timing data"
+        )
 
     return {
         "ok": True,
@@ -356,6 +447,8 @@ def derive(record: RunRecord) -> DerivedRow:
         "steady_state_latency": steady,
         "warmup_penalty": penalty,
         "time_to_fast_index": fast_index,
+        "t_fast_seconds": fast_seconds,
+        "t_fast_reason": fast_reason,
         "kv_cache_blocks": blocks,
         "kv_capacity_tokens": kv_tokens,
         "consistent": consistent,

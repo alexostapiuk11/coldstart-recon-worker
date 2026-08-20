@@ -23,6 +23,21 @@ chart:
   which row happened to be ``rows[0]``.
 
 None of the four functions mutate their input rows.
+
+``warmup_curve``'s steady-state band and ``T_fast`` annotation import
+``FAST_TOLERANCE``, ``steady_state_latency`` and ``time_to_fast_index``
+directly from ``coldstart.analysis.metrics`` — the pre-registered tolerance
+and the one steady-state estimator every published number uses (each run's
+own median of its last three requests). Before this, the tolerance was a
+second hardcoded ``0.9``/``1.1`` literal and the band was a *different*
+estimator — a pooled median over every row's last three requests combined —
+so a reader could see a point sitting inside the drawn band while the
+published table said the replica was not yet fast (B5). This is a
+deliberate, narrow exception to the "pure consumer of whatever fields a row
+happens to carry" policy below: these three names are pre-registered
+parameters and a function, not a row-shape assumption, so importing them
+does not couple this module to ``derive()``'s output shape the way the
+(deliberately *not* imported) ``S4_SUBPHASE_KEYS`` would.
 """
 
 from pathlib import Path
@@ -32,6 +47,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from coldstart.analysis.metrics import FAST_TOLERANCE, steady_state_latency, time_to_fast_index
 from coldstart.analysis.stats import ecdf, median
 
 ARMS = ["A", "B", "C"]
@@ -260,7 +276,7 @@ def warmup_curve(rows, out_path) -> Path:
         raise ValueError("warmup lists are empty")
 
     fig, ax = plt.subplots(figsize=(8, 4.5))
-    for arm in ARMS:
+    for arm_idx, arm in enumerate(ARMS):
         rs = by[arm]
         med = [median([r["warmup"][i]["end_to_end"] for r in rs]) for i in range(n_req)]
         (line,) = ax.plot(
@@ -273,24 +289,75 @@ def warmup_curve(rows, out_path) -> Path:
         # plateau and be flatly wrong for the other two (e.g. the slowest
         # arm would look like it never reaches "steady state" and the
         # fastest arm would look like it beats steady state from request 2
-        # on). Drawn from all of *that arm's* rows, not just its first row
-        # (same one-outlier-row concern as before, now scoped per arm), in
-        # that arm's own line color so the band is unambiguously "this
-        # curve's" rather than a third, disconnected element.
-        steady = median([r["warmup"][k]["end_to_end"] for r in rs for k in (-3, -2, -1)])
+        # on). Drawn in that arm's own line color so the band is
+        # unambiguously "this curve's" rather than a third, disconnected
+        # element.
+        #
+        # Within an arm, this is metrics.steady_state_latency's own
+        # definition -- each row's own median of *its* last three requests
+        # -- aggregated across that arm's rows with the same stats.median
+        # every other aggregate in this module uses (B5). Not a pooled
+        # median over every row's last three requests combined: pooling is
+        # a *different* estimator from the one metrics.py uses to compute
+        # time_to_fast_index/T_fast for each individual run, and the two
+        # can disagree on data where rows differ from each other -- a
+        # reader could then see a point sitting inside this band while the
+        # published table says that run was not yet fast.
+        per_run_steady = [steady_state_latency(r["warmup"]) for r in rs]
+        steady = median(per_run_steady)
         ax.axhspan(
-            steady * 0.9,
-            steady * 1.1,
+            steady * (1 - FAST_TOLERANCE),
+            steady * (1 + FAST_TOLERANCE),
             color=line.get_color(),
             alpha=0.15,
-            label=f"{ARM_LABEL[arm]} steady-state band (±10%)",
+            label=f"{ARM_LABEL[arm]} steady-state band (±{FAST_TOLERANCE:.0%})",
         )
+
+        # T_fast annotation — spec figures section: "the steady-state band
+        # marked and T_fast annotated." Reuses time_to_fast_index (the same
+        # pre-registered definition and FAST_TOLERANCE the published table
+        # uses) against this arm's own median curve, so the marker lands on
+        # exactly the request the arm's headline T_fast would name, rather
+        # than a fourth copy of the threshold logic drifting from the other
+        # three.
+        synthetic_warmup = [{"req_index": k + 1, "end_to_end": v} for k, v in enumerate(med)]
+        fast_req = time_to_fast_index(synthetic_warmup, steady)
+        if fast_req is not None:
+            fast_y = med[fast_req - 1]
+            ax.scatter(
+                [fast_req],
+                [fast_y],
+                marker="*",
+                s=220,
+                color=line.get_color(),
+                edgecolor="black",
+                linewidths=0.6,
+                zorder=5,
+            )
+            # Three arms can land T_fast at the same request index with
+            # close steady-state values (e.g. the cached arms B and C), so a
+            # small alternating up/down offset is not enough separation on
+            # its own -- these three (dx, dy) offsets, one per arm position,
+            # spread the labels both horizontally and vertically so they
+            # cannot stack on each other regardless of how close the
+            # underlying curves are.
+            offset_x, offset_y = ((14, 20), (-92, 2), (14, -42))[arm_idx % 3]
+            ax.annotate(
+                f"T_fast (req {fast_req})",
+                xy=(fast_req, fast_y),
+                xytext=(offset_x, offset_y),
+                textcoords="offset points",
+                fontsize=9,
+                fontweight="bold",
+                color=line.get_color(),
+                arrowprops={"arrowstyle": "-", "color": line.get_color(), "lw": 0.8, "alpha": 0.8},
+            )
 
     ax.set_xlabel("request index")
     ax.set_ylabel("end-to-end latency (s)")
     ax.set_ylim(bottom=0)
     ax.set_title("Ready is not fast")
-    ax.legend(fontsize=8)
+    ax.legend(fontsize=8, loc="upper right")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)

@@ -11,7 +11,6 @@ being an ugly PNG nobody looked at closely enough.
 """
 
 import copy
-import statistics
 from pathlib import Path
 from unittest.mock import patch
 
@@ -30,6 +29,7 @@ from coldstart.analysis.figures import (
     warmup_curve,
     waterfall,
 )
+from coldstart.analysis.metrics import steady_state_latency
 
 # Distinct per-arm warmup shape (different plateau and different initial
 # spike): a fixture where all three arms shared one warmup curve — the
@@ -102,6 +102,15 @@ def rows(n=30):
         steady = _WARMUP_STEADY[arm]
         spike = _WARMUP_SPIKE[arm]
         st = _STAGES[arm]
+        # Per-row jitter on top of the arm's shared curve shape (B5): without
+        # this, every row of an arm has *exactly* the same warmup list, which
+        # makes "pool every row's last three requests into one list and take
+        # its median" and "take the median of each row's own last-three
+        # median" numerically identical -- the two estimators only diverge
+        # when rows differ from each other, and this fixture must be able to
+        # tell them apart (see test_warmup_curve_steady_state_band_is_per_arm_not_pooled
+        # below, which is pinned against this exact jitter).
+        row_jitter = 0.05 * (i // 3)
         row = {
             "arm": arm,
             "host_id": host,
@@ -114,7 +123,8 @@ def rows(n=30):
             "t_s5": st["t_s5"],
             "t_s6": st["t_s6"],
             "warmup": [
-                {"req_index": k, "end_to_end": steady + spike * 0.55**k} for k in range(10)
+                {"req_index": k, "end_to_end": steady + spike * 0.55**k + row_jitter}
+                for k in range(10)
             ],
         }
         for key, val in st["subphases"].items():
@@ -484,19 +494,111 @@ def test_warmup_curve_steady_state_band_is_per_arm_not_pooled(tmp_path):
     never reaches "steady state" and the fastest arm look permanently
     faster than it. A pooled-band implementation draws exactly one band
     (this asserts three, at three independently-verified levels) and fails
-    this test."""
+    this test.
+
+    The three band centers are hand-computed literals, not a recomputation
+    of the implementation's formula (`statistics.median` on pooled values,
+    the pre-B5 version of this test): each arm's per-row last-three median
+    is `steady + spike*0.55**k` for k in (7,8,9) plus that row's jitter
+    (0, 0.05, ..., 0.45 across the arm's 10 rows -- see `rows()`); jitter
+    shifts a row's three values equally, so it shifts that row's own median
+    by the same amount. Sorting the resulting 10 per-row medians and
+    averaging the two middle ones (arm has an even row count) gives the
+    B5-correct band center -- metrics.py's per-run definition, aggregated
+    across rows the same way the published T_fast table is. This is *not*
+    the same number pooling all 30 raw values would give (see the dedicated
+    divergence test below); using the old pooled formula here would fail.
+    """
     data = rows()
     _fig, ax = _call_capturing_axes(warmup_curve, data, tmp_path / "w.png")
 
     bands = [p for p in ax.patches if "steady-state band" in (p.get_label() or "")]
     assert len(bands) == 3  # one band per arm, not one pooled across all three
 
-    by_arm = {a: [r for r in data if r["arm"] == a] for a in figures_module.ARMS}
+    expected_center = {
+        "A": 3.254306878261719,
+        "B": 2.245933484472656,
+        "C": 1.4383974300625,
+    }
     for arm, band in zip(figures_module.ARMS, bands, strict=True):
-        vals = [r["warmup"][k]["end_to_end"] for r in by_arm[arm] for k in (-3, -2, -1)]
-        expected = statistics.median(vals)
-        assert band.get_y() == pytest.approx(expected * 0.9)
-        assert band.get_y() + band.get_height() == pytest.approx(expected * 1.1)
+        center = expected_center[arm]
+        assert band.get_y() == pytest.approx(center * 0.9)
+        assert band.get_y() + band.get_height() == pytest.approx(center * 1.1)
+
+
+def test_warmup_curve_band_matches_metrics_steady_state_not_a_pooled_median(tmp_path):
+    """B5: the chart band must use exactly metrics.steady_state_latency's
+    per-run definition, aggregated across an arm's rows -- not a pooled
+    median over every row's combined last-three values. A fixture where
+    every row of an arm shares one warmup curve cannot tell these two
+    estimators apart (they're numerically identical there); this fixture
+    is built so they disagree by a clean, hand-verified margin.
+
+    Arm A: two rows plateau at [10, 20, 30] (median 20), one row plateaus at
+    [100, 200, 300] (median 200). Per-run median-of-medians:
+    median([20, 20, 200]) = 20 -- the correct, per-B5 answer. Pooling all
+    nine raw values instead: sorted [10,10,20,20,30,30,100,200,300], median
+    (5th of 9) = 30 -- what the pre-fix implementation would have drawn.
+    """
+
+    def warmup10(last3):
+        # Only the last three values feed the steady-state estimator; the
+        # first seven are irrelevant filler so the line/x-axis machinery has
+        # ten points to plot.
+        return [{"req_index": k, "end_to_end": 50.0} for k in range(7)] + [
+            {"req_index": 7 + j, "end_to_end": v} for j, v in enumerate(last3)
+        ]
+
+    arm_a_rows = [
+        {"arm": "A", "warmup": warmup10([10.0, 20.0, 30.0])},
+        {"arm": "A", "warmup": warmup10([10.0, 20.0, 30.0])},
+        {"arm": "A", "warmup": warmup10([100.0, 200.0, 300.0])},
+    ]
+    other_rows = [
+        {"arm": "B", "warmup": warmup10([1.0, 1.0, 1.0])},
+        {"arm": "C", "warmup": warmup10([1.0, 1.0, 1.0])},
+    ]
+    data = arm_a_rows + other_rows
+
+    # Confirm the fixture matches the hand-derived numbers in the docstring
+    # (the "table" side, independent of figures.py entirely).
+    assert steady_state_latency(arm_a_rows[0]["warmup"]) == pytest.approx(20.0)
+    assert steady_state_latency(arm_a_rows[2]["warmup"]) == pytest.approx(200.0)
+
+    _fig, ax = _call_capturing_axes(warmup_curve, data, tmp_path / "w.png")
+    bands = [p for p in ax.patches if "steady-state band" in (p.get_label() or "")]
+    arm_a_band = bands[0]  # ARMS order is A, B, C
+    center = (arm_a_band.get_y() + arm_a_band.get_y() + arm_a_band.get_height()) / 2
+    assert center == pytest.approx(20.0)
+    assert center != pytest.approx(30.0)  # the pooled estimator's (wrong) answer
+
+
+def test_warmup_curve_annotates_t_fast_per_arm(tmp_path):
+    """Spec figures section: figure 2 must have T_fast annotated, not just
+    the steady-state band marked. One row per arm removes the median-across-
+    rows step, so the annotated point is a hand-computed literal: steady =
+    median(last three of [.., 3.2, 3.0, 3.0]) = 3.0, threshold = 3.0*1.1 =
+    3.3, and request 7 (index 6, value 3.2) is the first request at or below
+    it."""
+    e2e = [10.0, 8.0, 6.0, 5.0, 4.0, 3.5, 3.2, 3.0, 3.0, 3.0]
+    warmup = [{"req_index": k, "end_to_end": v} for k, v in enumerate(e2e)]
+    data = [{"arm": a, "warmup": [dict(w) for w in warmup]} for a in ("A", "B", "C")]
+
+    _fig, ax = _call_capturing_axes(warmup_curve, data, tmp_path / "w.png")
+
+    # One scatter marker per arm (ax.scatter -> a PathCollection in
+    # ax.collections; nothing else in warmup_curve adds to that list).
+    assert len(ax.collections) == 3
+    for coll in ax.collections:
+        (x, y) = coll.get_offsets()[0]
+        assert x == pytest.approx(7.0)
+        assert y == pytest.approx(3.2)
+
+    # One "T_fast" annotation per arm (ax.annotate adds to ax.texts).
+    fast_texts = [t for t in ax.texts if "T_fast" in t.get_text()]
+    assert len(fast_texts) == 3
+    for t in fast_texts:
+        assert "7" in t.get_text()
 
 
 def test_warmup_curve_steady_state_bands_are_colored_like_their_own_line(tmp_path):
@@ -540,6 +642,26 @@ def test_warmup_curve_uses_the_shared_median_helper(tmp_path):
     with patch("coldstart.analysis.figures.median", wraps=figures_module.median) as spy:
         warmup_curve(rows(), tmp_path / "w.png")
     assert spy.called
+
+
+def test_warmup_curve_band_width_tracks_metrics_fast_tolerance_not_a_hardcoded_duplicate(
+    tmp_path,
+):
+    """B5: FAST_TOLERANCE must be routed from metrics.py into figures.py so
+    the pre-registered tolerance exists in exactly one place. Before this
+    fix, `warmup_curve` hardcoded the same 0.10 value as literal `0.9`/`1.1`
+    multipliers -- a second copy of a pre-registered parameter, free to
+    drift from `metrics.FAST_TOLERANCE` after data arrives. Patching the
+    name `figures.py` actually reads and checking the drawn band widens
+    accordingly is the only way to tell "reads the constant" apart from "a
+    hardcoded literal that happens to equal the constant's current value" --
+    both draw an identical band at the default 0.10."""
+    with patch("coldstart.analysis.figures.FAST_TOLERANCE", 0.30):
+        _fig, ax = _call_capturing_axes(warmup_curve, rows(), tmp_path / "w.png")
+    bands = [p for p in ax.patches if "steady-state band" in (p.get_label() or "")]
+    center = 3.254306878261719  # arm A, same fixture/derivation as the test above
+    assert bands[0].get_y() == pytest.approx(center * 0.70)
+    assert bands[0].get_y() + bands[0].get_height() == pytest.approx(center * 1.30)
 
 
 # ---------------------------------------------------------------------------
