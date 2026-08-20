@@ -771,15 +771,22 @@ kind: the median of the within-triple deltas, not the difference of two medians.
 **For H4:** per-host medians, plus the share of total variance attributable to host as a
 grouping factor.
 
-**Conventions stated, because readers will recompute.** Percentiles are nearest-order-statistic
-(equivalent to `numpy.percentile(..., method="nearest")`), which is *not* numpy's default of
-`linear`; on right-skewed samples at n≈100 the two differ by up to about two percent at p95.
+**Conventions chosen so readers recomputing land on the number, not near it.** Percentiles use
+linear interpolation between order statistics — identical to `numpy.percentile`'s default and to
+`statistics.median` at q=0.5. An earlier draft specified nearest-order-statistic and proposed to
+*document* the resulting divergence from numpy's default, measured at up to about two percent at
+p95 on right-skewed samples at n≈100. Matching the default is better than annotating a mismatch:
+a reader who recomputes from the published data reproduces the figure exactly, and the whole
+point of publishing the data is that it can be checked.
+
+The same quantile function produces the reported percentiles and every median inside the
+bootstrap, so the p50 in the table and the point estimate of a contrast cannot disagree about
+what the median is — they did in an earlier implementation, by 0.6 seconds at the planned
+campaign size.
+
 Intervals are percentile-method bootstrap intervals, which are first-order accurate and known to
-be biased for skewed statistics — no bias correction is applied, and that limitation is stated
-rather than hidden. The same quantile function produces the reported percentiles and every
-median inside the bootstrap, so the p50 in the table and the point estimate of a contrast cannot
-disagree about what the median is. None of these choices is the only defensible one; publishing
-which one was made is what lets a reader reproduce the number instead of arriving near it.
+be biased for skewed statistics. No bias correction is applied; the limitation is stated rather
+than hidden.
 
 **No fishing.** Four pre-registered hypotheses. Anything else discovered is labeled
 exploratory, in those words, and is never promoted to a headline claim.
