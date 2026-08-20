@@ -14,6 +14,7 @@ from coldstart.analysis.stats import (
     bootstrap_paired_contrast_difference,
     bootstrap_paired_median_diff,
     ecdf,
+    median,
     percentiles,
     within_host_triples,
 )
@@ -153,6 +154,52 @@ def test_percentiles_p50_matches_a_bootstraps_point_estimate_on_the_same_data():
     res = bootstrap_median_diff(xs, zeros, iterations=2, seed=0)
     assert p50 == res["point"]
     assert p50 == pytest.approx(statistics.median(xs))
+
+
+# ---------------------------------------------------------------------------
+# median (Task 18: the shared aggregate figures.py must use instead of
+# statistics.median, so a chart's median and percentiles()'s p50 can never
+# silently disagree on the same data)
+# ---------------------------------------------------------------------------
+
+
+def test_public_median_matches_percentiles_p50_on_the_same_data():
+    """The exact defect Task 17 removed and Task 18's plan text would have
+    reintroduced: figures.py's chart median must be the same computation as
+    the published percentile table's p50, not a second implementation that
+    happens to agree except at even n. Checked at both odd and even n, since
+    `_quantile` takes a different branch at each."""
+    rng = random.Random(2026)
+    xs = [rng.lognormvariate(math.log(80.0), 0.4) for _ in range(37)]  # odd n, skewed
+    assert median(xs) == percentiles(xs, want=("p50",))["p50"]
+    ys = xs + [xs[0]]  # even n
+    assert median(ys) == percentiles(ys, want=("p50",))["p50"]
+
+
+def test_median_matches_statistics_median_on_a_simple_case():
+    assert median([1.0, 2.0, 3.0]) == pytest.approx(2.0)
+    assert median([1.0, 2.0, 3.0, 4.0]) == pytest.approx(2.5)
+
+
+def test_median_rejects_empty_values():
+    with pytest.raises(ValueError, match="empty"):
+        median([])
+
+
+def test_median_rejects_non_finite_values():
+    with pytest.raises(ValueError, match="non-finite"):
+        median([1.0, float("nan"), 2.0])
+    with pytest.raises(ValueError, match="non-finite"):
+        median([1.0, float("inf"), 2.0])
+
+
+def test_median_does_not_apply_the_bootstrap_sample_floor():
+    """median() is a plotting aggregate, not a published interval: it must
+    work well below MIN_BOOTSTRAP_SAMPLES (20), unlike every bootstrap in
+    this module — cold-start's per-arm/per-host subsets routinely are this
+    small."""
+    assert MIN_BOOTSTRAP_SAMPLES > 3  # fixture sanity: this really is below the floor
+    assert median([1.0, 2.0, 3.0]) == pytest.approx(2.0)
 
 
 # ---------------------------------------------------------------------------

@@ -107,6 +107,25 @@ def _median(values) -> float:
     return _quantile(sorted(values), 0.5)
 
 
+def median(values) -> float:
+    """Public median, for callers outside this module (e.g. ``figures.py``)
+    that need a plotting aggregate rather than a published interval. Routes
+    through the same ``_quantile`` helper as ``percentiles()``'s p50 and
+    every bootstrap's point estimate — see the module docstring — so a
+    chart's median and the percentile table's p50 can never silently
+    disagree on the same data; they are one computation, not two
+    definitions of "median" that usually happen to match.
+
+    Deliberately does not apply ``MIN_BOOTSTRAP_SAMPLES``: a chart median is
+    a plotting aggregate, not a confidence interval, and cold-start's
+    per-arm/per-host subsets routinely fall below that floor. It still runs
+    ``_validate_samples`` — an empty or non-finite input is a bug in the
+    caller, not a chart worth drawing.
+    """
+    xs = _validate_samples(values, "values")
+    return _quantile(sorted(xs), 0.5)
+
+
 def percentiles(values, want=("p50", "p90", "p95")) -> dict[str, float]:
     """Percentiles of `values` at the names in `want` (e.g. "p50", "p90"),
     refusing any name whose MIN_SAMPLES floor `values` doesn't meet. See the
