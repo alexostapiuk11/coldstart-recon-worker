@@ -1282,15 +1282,28 @@ git commit -m "feat: cache configuration as the single inter-arm difference"
 **Files:**
 - Create: `coldstart/checks.py`, `tests/test_checks.py`
 
+**Hardening folded in after code review.** The first version of this task accepted NaN as a
+valid run: every IEEE-754 comparison against NaN is false, so a NaN in either clock fell
+through `residual < 0`, `t_process > t_total` and the floor check straight to the accept
+path, and `store.py` round-trips NaN through JSON unchanged. A missing clock-B mark would
+have been published rather than discarded. Inputs are now validated. Also fixed: the bare
+`"oom"` needle matched inside `"no room left on device"`, filing an ENOSPC failure in the
+out-of-memory bucket; `check_consistency` returned a bare 2-tuple, which is always truthy,
+so `if check_consistency(...)` accepted every run including the violations; and the discard
+reason was free-form prose that downstream tabulation would have had to substring-match.
+
 - [ ] **Step 1: Write the failing test**
 
 `tests/test_checks.py`:
 
 ```python
+import json
+
 import pytest
 
 from coldstart.checks import (
     _SIGNATURES,
+    DiscardReason,
     FailureClass,
     check_consistency,
     classify_failure,
@@ -1303,21 +1316,27 @@ def test_residual_is_total_minus_process():
 
 
 def test_consistency_passes_when_process_fits_inside_total():
-    ok, reason = check_consistency(t_total=100.0, t_process=70.0, rtt_floor=0.5)
-    assert ok is True
-    assert reason is None
+    result = check_consistency(t_total=100.0, t_process=70.0, rtt_floor=0.5)
+    assert result.ok is True
+    assert result.reason is None
+    assert result.discard_reason is None
+    assert bool(result) is True
 
 
 def test_consistency_fails_when_process_exceeds_total():
-    ok, reason = check_consistency(t_total=60.0, t_process=70.0, rtt_floor=0.5)
-    assert ok is False
-    assert "exceeds" in reason
+    result = check_consistency(t_total=60.0, t_process=70.0, rtt_floor=0.5)
+    assert result.ok is False
+    assert "exceeds" in result.reason
+    assert result.discard_reason is DiscardReason.PROCESS_EXCEEDS_TOTAL
+    assert bool(result) is False
 
 
 def test_consistency_fails_when_residual_is_below_the_rtt_floor():
-    ok, reason = check_consistency(t_total=70.2, t_process=70.0, rtt_floor=0.5)
-    assert ok is False
-    assert "rtt_floor" in reason
+    result = check_consistency(t_total=70.2, t_process=70.0, rtt_floor=0.5)
+    assert result.ok is False
+    assert "rtt_floor" in result.reason
+    assert result.discard_reason is DiscardReason.RESIDUAL_BELOW_RTT_FLOOR
+    assert bool(result) is False
 
 
 def test_negative_residual_is_never_silently_returned():
@@ -1343,8 +1362,188 @@ def test_every_failure_class_except_unknown_is_reachable():
     Without this, deleting a signature row is invisible: the deleted class simply
     stops being produced and every other test still passes.
     """
-    reachable = {classify_failure(n) for _, needles in _SIGNATURES for n in needles}
+    reachable = {classify_failure(n.text) for _, needles in _SIGNATURES for n in needles}
     assert reachable == set(FailureClass) - {FailureClass.UNKNOWN}
+
+
+# --- C1: non-finite / negative clock readings must raise, not be silently
+# accepted. NaN compares False against every operator, so without an
+# explicit isfinite guard `residual < 0`, `t_process > t_total`, and
+# `< rtt_floor` all fall through to the accept path.
+
+
+@pytest.mark.parametrize(
+    "t_total,t_process",
+    [
+        (float("nan"), 10.0),
+        (100.0, float("nan")),
+        (float("inf"), 10.0),
+        (100.0, float("inf")),
+        (100.0, -5.0),
+        (-5.0, 100.0),
+    ],
+)
+def test_compute_residual_rejects_non_finite_and_negative_inputs(t_total, t_process):
+    with pytest.raises(ValueError):
+        compute_residual(t_total=t_total, t_process=t_process)
+
+
+@pytest.mark.parametrize(
+    "t_total,t_process",
+    [
+        (float("nan"), 10.0),
+        (100.0, float("nan")),
+        (float("inf"), 10.0),
+        (100.0, -5.0),
+    ],
+)
+def test_check_consistency_rejects_non_finite_and_negative_inputs(t_total, t_process):
+    with pytest.raises(ValueError):
+        check_consistency(t_total=t_total, t_process=t_process, rtt_floor=0.5)
+
+
+# --- C2: DEFAULT_RTT_FLOOR must actually be exercised by at least one test
+# that omits the rtt_floor kwarg.
+
+
+def test_check_consistency_uses_default_rtt_floor_when_not_supplied():
+    below = check_consistency(t_total=100.04, t_process=100.0)
+    assert below.ok is False
+
+    above = check_consistency(t_total=100.06, t_process=100.0)
+    assert above.ok is True
+
+
+# --- I3: pin the accept/reject boundary exactly at rtt_floor.
+
+
+def test_check_consistency_boundary_at_exactly_rtt_floor():
+    result = check_consistency(t_total=100.5, t_process=100.0, rtt_floor=0.5)
+    assert result.ok is True
+
+
+def test_check_consistency_boundary_just_below_rtt_floor():
+    result = check_consistency(t_total=100.49, t_process=100.0, rtt_floor=0.5)
+    assert result.ok is False
+
+
+def test_check_consistency_boundary_just_above_rtt_floor():
+    result = check_consistency(t_total=100.51, t_process=100.0, rtt_floor=0.5)
+    assert result.ok is True
+
+
+# --- I5: the bare "oom" needle must be word-boundary anchored, not a raw
+# substring match.
+
+
+def test_oom_needle_does_not_match_substring_inside_another_word():
+    assert classify_failure("no room left on device") is FailureClass.UNKNOWN
+
+
+def test_oom_needle_does_not_match_inside_unrelated_word():
+    assert classify_failure("vroom vroom, engines starting") is FailureClass.UNKNOWN
+
+
+# --- I4: row order in _SIGNATURES is a priority policy (root cause beats
+# symptom); pin it with a deliberately multi-signal string.
+
+
+def test_signature_priority_prefers_root_cause_over_symptom():
+    detail = "EngineCore failed to initialize: CUDA out of memory"
+    assert classify_failure(detail) is FailureClass.OOM
+
+
+# --- I7: classification must be case-insensitive.
+
+
+def test_classify_failure_is_case_insensitive():
+    assert classify_failure("ERROR: Out Of Memory") is FailureClass.OOM
+
+
+# --- I6: every needle must have a real (non-reachability-test) assertion.
+# 8 of the 15 needles are already exercised by test_failure_classification
+# and the priority/case tests above; these cover the remaining 7.
+#
+# These wrapper strings are synthetic — real engine failure text arrives
+# with the Task 6 reconnaissance fixtures. They only confirm the needle is
+# wired to its class, not that the wrapping is realistic.
+
+
+def test_classify_failure_covers_needles_not_exercised_elsewhere():
+    assert classify_failure("worker exited: oom") is FailureClass.OOM
+    assert classify_failure("probe failed: health timeout") is FailureClass.HEALTH_TIMEOUT
+    assert classify_failure("error: failed to fetch") is FailureClass.WEIGHT_ACQUISITION
+    assert classify_failure("pull error: hf hub unreachable") is FailureClass.WEIGHT_ACQUISITION
+    assert classify_failure("registry error: manifest unknown") is FailureClass.IMAGE_PULL
+    assert (
+        classify_failure("scheduler: provisioning timed out")
+        is FailureClass.PROVISIONING_TIMEOUT
+    )
+    assert classify_failure("startup: engine init failed") is FailureClass.ENGINE_INIT
+
+
+# --- I9: check_consistency and compute_residual must agree at the boundary
+# where t_process == t_total (residual is exactly zero, not negative).
+
+
+def test_process_equal_to_total_is_a_zero_residual_not_a_violation():
+    assert compute_residual(t_total=100.0, t_process=100.0) == 0.0
+    result = check_consistency(t_total=100.0, t_process=100.0, rtt_floor=0.0)
+    assert result.ok is True
+
+
+# --- I10: discard reasons are a closed enum, not free-form prose swappable
+# without a test noticing. Already pinned per-branch above; this locks the
+# two members can't be confused with each other.
+
+
+def test_discard_reasons_are_distinct_enum_members():
+    exceeds = check_consistency(t_total=60.0, t_process=70.0, rtt_floor=0.5)
+    below_floor = check_consistency(t_total=70.2, t_process=70.0, rtt_floor=0.5)
+    assert exceeds.discard_reason is not below_floor.discard_reason
+    assert {exceeds.discard_reason, below_floor.discard_reason} == set(DiscardReason)
+
+
+# --- I8: ConsistencyResult must be falsy exactly when the run is invalid,
+# so `if check_consistency(...):` cannot silently accept a violation.
+
+
+def test_check_consistency_result_is_falsy_when_invalid():
+    result = check_consistency(t_total=60.0, t_process=70.0, rtt_floor=0.5)
+    assert not result
+
+
+def test_check_consistency_result_is_truthy_when_valid():
+    result = check_consistency(t_total=100.0, t_process=70.0, rtt_floor=0.5)
+    assert result
+
+
+# --- M11: StrEnum must serialize identically via str() and json.dumps().
+
+
+def test_failure_class_str_and_json_serialization_agree():
+    assert str(FailureClass.OOM) == "oom"
+    assert f"{FailureClass.OOM}" == "oom"
+    assert json.dumps(FailureClass.OOM) == '"oom"'
+
+
+# --- M12: classify_failure's None path must actually be exercised.
+
+
+def test_classify_failure_handles_none_detail():
+    assert classify_failure(None) is FailureClass.UNKNOWN
+
+
+# --- M13: the rtt_floor violation message must show both operands, not
+# just the floor, so a marginal miss can be told apart from a gross one.
+
+
+def test_rtt_floor_violation_message_includes_residual_and_floor():
+    t_total, t_process, rtt_floor = 70.2, 70.0, 0.5
+    residual = compute_residual(t_total=t_total, t_process=t_process)
+    result = check_consistency(t_total=t_total, t_process=t_process, rtt_floor=rtt_floor)
+    assert str(residual) in result.reason
+    assert str(rtt_floor) in result.reason
 ```
 
 - [ ] **Step 2: Run and confirm it fails**
@@ -1357,7 +1556,10 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'coldstart.checks'`
 `coldstart/checks.py`:
 
 ```python
-from enum import Enum
+import math
+import re
+from enum import StrEnum
+from typing import NamedTuple
 
 # Clock A and clock B live on different machines. The residual absorbs the
 # network round trip, so a residual smaller than this floor means the two
@@ -1365,7 +1567,7 @@ from enum import Enum
 DEFAULT_RTT_FLOOR = 0.05
 
 
-class FailureClass(str, Enum):
+class FailureClass(StrEnum):
     SUBMIT_ERROR = "submit_error"
     PROVISIONING_TIMEOUT = "provisioning_timeout"
     IMAGE_PULL = "image_pull"
@@ -1377,28 +1579,85 @@ class FailureClass(str, Enum):
     UNKNOWN = "unknown"
 
 
+class DiscardReason(StrEnum):
+    """Mirrors FailureClass: a closed taxonomy so a downstream reader can
+    tabulate discards by class instead of substring-matching the free-form
+    `reason` string that check_consistency also returns."""
+
+    PROCESS_EXCEEDS_TOTAL = "process_exceeds_total"
+    RESIDUAL_BELOW_RTT_FLOOR = "residual_below_rtt_floor"
+
+
+class _Needle:
+    """Plain substring match, unless `regex` is given for a needle short
+    enough to misfire inside an unrelated word (e.g. "oom" inside "room")."""
+
+    __slots__ = ("_regex", "text")
+
+    def __init__(self, text: str, *, regex: re.Pattern[str] | None = None):
+        self.text = text
+        self._regex = regex
+
+    def matches(self, low: str) -> bool:
+        if self._regex is not None:
+            return self._regex.search(low) is not None
+        return self.text in low
+
+
+# Row order is a priority policy, not incidental: classify_failure is
+# first-match-wins, so when a failure string carries multiple signals the
+# earliest matching row wins. Root cause outranks the symptom it commonly
+# produces, e.g. OOM (root cause) is checked before ENGINE_INIT and
+# HEALTH_TIMEOUT (symptoms an OOM often also trips).
 _SIGNATURES = [
-    (FailureClass.OOM, ("out of memory", "oom")),
-    (FailureClass.HEALTH_TIMEOUT, ("health check timed out", "health timeout")),
-    (FailureClass.WEIGHT_ACQUISITION, ("download weights", "failed to fetch", "hf hub")),
-    (FailureClass.IMAGE_PULL, ("image pull", "manifest unknown")),
-    (FailureClass.PROVISIONING_TIMEOUT, ("no workers available", "provisioning timed out")),
-    (FailureClass.ENGINE_INIT, ("engine init", "failed to initialize")),
-    (FailureClass.TTFT_TIMEOUT, ("first token timed out",)),
-    (FailureClass.SUBMIT_ERROR, ("submit failed",)),
+    (
+        FailureClass.OOM,
+        (_Needle("out of memory"), _Needle("oom", regex=re.compile(r"\boom\b"))),
+    ),
+    (
+        FailureClass.HEALTH_TIMEOUT,
+        (_Needle("health check timed out"), _Needle("health timeout")),
+    ),
+    (
+        FailureClass.WEIGHT_ACQUISITION,
+        (_Needle("download weights"), _Needle("failed to fetch"), _Needle("hf hub")),
+    ),
+    (FailureClass.IMAGE_PULL, (_Needle("image pull"), _Needle("manifest unknown"))),
+    (
+        FailureClass.PROVISIONING_TIMEOUT,
+        (_Needle("no workers available"), _Needle("provisioning timed out")),
+    ),
+    (FailureClass.ENGINE_INIT, (_Needle("engine init"), _Needle("failed to initialize"))),
+    (FailureClass.TTFT_TIMEOUT, (_Needle("first token timed out"),)),
+    (FailureClass.SUBMIT_ERROR, (_Needle("submit failed"),)),
 ]
 
 
-def classify_failure(detail: str) -> FailureClass:
+def classify_failure(detail: str | None) -> FailureClass:
     low = (detail or "").lower()
     for cls, needles in _SIGNATURES:
-        if any(n in low for n in needles):
+        if any(needle.matches(low) for needle in needles):
             return cls
     return FailureClass.UNKNOWN
 
 
+def _validate_clock_inputs(t_total: float, t_process: float) -> None:
+    """Guard both clock readings before any arithmetic — mirrors the
+    precondition guards in StageRecorder.mark (coldstart/recorder.py).
+
+    NaN compares False against every operator, so without this guard a NaN
+    input falls through every check downstream and is silently accepted.
+    """
+    for name, value in (("t_total", t_total), ("t_process", t_process)):
+        if not math.isfinite(value):
+            raise ValueError(f"{name} must be finite, got {value}")
+        if value < 0:
+            raise ValueError(f"{name} must be non-negative, got {value}")
+
+
 def compute_residual(t_total: float, t_process: float) -> float:
     """The one permitted cross-clock subtraction — see spec 6.5 rule 2."""
+    _validate_clock_inputs(t_total, t_process)
     residual = t_total - t_process
     if residual < 0:
         raise ValueError(
@@ -1408,21 +1667,49 @@ def compute_residual(t_total: float, t_process: float) -> float:
     return residual
 
 
+class ConsistencyResult(NamedTuple):
+    """`bool(result)` reflects `ok`, so `if check_consistency(...):` is
+    correct for the one function whose job is to reject."""
+
+    ok: bool
+    reason: str | None
+    discard_reason: DiscardReason | None
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+
 def check_consistency(
     t_total: float, t_process: float, rtt_floor: float = DEFAULT_RTT_FLOOR
-) -> tuple[bool, str | None]:
-    """Discard rule, fixed in advance. Violations are recorded, never silently dropped."""
+) -> ConsistencyResult:
+    """Apply the discard rule fixed in advance (spec 6.5 rule 3).
+
+    Detects a violation and describes it; this function does not persist
+    anything, so the caller is responsible for recording the result.
+    """
+    _validate_clock_inputs(t_total, t_process)
     if t_process > t_total:
-        return False, f"t_process {t_process} exceeds t_total {t_total}"
-    if (t_total - t_process) < rtt_floor:
-        return False, f"residual below rtt_floor {rtt_floor}"
-    return True, None
+        return ConsistencyResult(
+            False,
+            f"t_process {t_process} exceeds t_total {t_total}",
+            DiscardReason.PROCESS_EXCEEDS_TOTAL,
+        )
+    # Single source of truth for the exceeds/negative-residual invariant —
+    # see compute_residual above.
+    residual = compute_residual(t_total, t_process)
+    if residual < rtt_floor:
+        return ConsistencyResult(
+            False,
+            f"residual {residual} below rtt_floor {rtt_floor}",
+            DiscardReason.RESIDUAL_BELOW_RTT_FLOOR,
+        )
+    return ConsistencyResult(True, None, None)
 ```
 
 - [ ] **Step 4: Run and confirm pass**
 
 Run: `.venv/bin/pytest tests/test_checks.py -v`
-Expected: PASS — 7 passed
+Expected: PASS — 33 passed
 
 - [ ] **Step 5: Commit**
 
@@ -2289,7 +2576,10 @@ def derive(record: RunRecord) -> dict:
     m = _marks(record)
     t_process = m["S6_first_token"]
     t_total = record.clock_A["t_result"] - record.clock_A["t_submit"]
-    consistent, reason = check_consistency(t_total=t_total, t_process=t_process)
+    # check_consistency returns a 3-field ConsistencyResult, so attribute access
+    # rather than tuple unpacking — see Task 10.
+    checked = check_consistency(t_total=t_total, t_process=t_process)
+    consistent, reason = checked.ok, checked.reason
 
     warmup = record.warmup
     steady = statistics.median(w["end_to_end"] for w in warmup[-3:]) if warmup else None
