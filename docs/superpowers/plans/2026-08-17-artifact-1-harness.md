@@ -1178,12 +1178,73 @@ git commit -m "feat: clock C lifecycle extraction from real API payloads"
 
 **TEACH — grounds §9b Modules 1, 2, 5.** Show the user that this file is the *entire* difference between arms, and that a diff of arm behavior anywhere else in the codebase would invalidate the experiment.
 
+**As built — corrected from the version below after review.** Three defects in the original
+draft, all now fixed:
+
+1. **Cold paths were static strings (`/tmp/hf-cold`, `/tmp/vllm-cache-cold`).** RunPod
+   serverless workers are reused across runs. A worker that served an earlier arm-A run and
+   is picked again for a later arm-A run would find that earlier run's downloaded weights
+   and compiled artifacts already sitting at those fixed paths — arm A would silently stop
+   being cold, understating the A→B contrast with nothing in the data showing it. This is
+   exactly the risk the spec's risk table names ("Compile cache leaking into a cold arm"),
+   which pairs it with per-run verification from engine output — but verification is a
+   detector, not a preventative. `CacheConfig.env()` now takes `run_id` as a required
+   argument and namespaces every cold path under it
+   (`/tmp/hf-cold/{run_id}`, `/tmp/vllm-cache-cold/{run_id}`), so contamination is
+   structurally impossible rather than merely caught after the fact. `run_id` is an input,
+   not generated inside this module — it comes from the already-existing
+   `RunRecord.run_id` (`coldstart/schema.py`), so the emitted config stays reproducible
+   from a stored run record. The *warm* volume paths (`/runpod-volume/hf`,
+   `/runpod-volume/vllm-cache`) deliberately stay unnamespaced: pre-staging only works if a
+   later run finds what an earlier run put there.
+2. **The original test suite never asserted an actual `env()` value.**
+   `test_env_differs_only_in_cache_variables` compared key *sets* only — a constant `env()`
+   returned for every arm (the most damaging possible bug here, since it would make all
+   three arms identical and the whole experiment a null result) passed every test as
+   written. `tests/test_cache_config.py` now asserts literal per-arm `env()` dictionaries,
+   that arm A never points at the volume, that cold paths vary by `run_id` and warm paths
+   don't, and that `env()` requires `run_id` rather than accepting a default.
+3. **`resolve("Z")` raised a bare `KeyError`.** Every other module in this codebase
+   (`coldstart/analysis/stats.py`'s `unknown percentile` errors, for example) fails loudly
+   with a message naming what was valid. `resolve()` now raises
+   `ValueError(f"unknown arm {arm!r}; known: {sorted(CACHE_CONFIGS)}")`.
+
+A fourth addition, not a fix to the draft: `tests/test_arm_isolation.py` makes the file's own
+docstring claim — "this is the only thing that differs between arms" — a checked,
+codebase-wide property. It AST-scans every `.py` file under `coldstart/` and `worker/`
+(excluding `cache_config.py` itself, `scheduler.py`, and `coldstart/analysis/`, which
+legitimately branch on or group by arm) for any comparison or `match` that branches on an
+`arm`-named identifier, and fails naming the file and line if one exists. This is the test
+that would catch someone later adding `if arm == "C":` inside the probe or the handler,
+verified against the live tree by temporarily injecting exactly that into
+`worker/recon_handler.py` and confirming the test caught it (reverted before commit).
+
+**Open question, not resolved by this task:** whether `HF_HOME` and `VLLM_CACHE_ROOT` are
+the correct variable names for the pinned image. Both are documented, current vLLM/HF
+variables (`VLLM_CACHE_ROOT` is vLLM's own cache root, defaulting to `~/.cache/vllm`; `HF_HOME`
+is the standard Hugging Face cache-home variable vLLM inherits via `huggingface_hub`) — but
+there is at least one open vLLM issue (vllm-project/vllm#20127, v0.9.1) reporting
+`VLLM_CACHE_ROOT` not being honored in a containerized deployment. Task 6's reconnaissance run
+is what actually confirms these names against the pinned image; this task does not have a GPU
+and cannot verify it. Do not treat the names as settled until reconnaissance output for the
+pinned version shows the compile-cache directory actually moving with `VLLM_CACHE_ROOT`.
+
+**Note on arm C:** whether arm C is even measurable depends on the reconnaissance question in
+spec §5/§6.8 — whether the pinned vLLM version compiles at startup at all. If it does not, arm
+C collapses into arm B and gets dropped, reverting to the two-arm design. All three arms are
+still built here because that determination has not been made yet; see the comment above
+`CACHE_CONFIGS` in the implementation.
+
 **Files:**
-- Create: `coldstart/cache_config.py`, `tests/test_cache_config.py`
+- Create: `coldstart/cache_config.py`, `tests/test_cache_config.py`, `tests/test_arm_isolation.py`
 
 - [ ] **Step 1: Write the failing test**
 
-`tests/test_cache_config.py`:
+`tests/test_cache_config.py` — see `tests/test_cache_config.py` in the repo for the full,
+as-built suite (18 tests): the three per-arm shape tests below, plus literal per-arm `env()`
+value assertions, the arm-A-never-points-at-the-volume guard, per-run uniqueness of cold
+paths, stability of warm paths across runs, a required-`run_id` test, malformed-`run_id`
+rejection, and the named-error test for an unknown arm.
 
 ```python
 import pytest
@@ -1213,20 +1274,35 @@ def test_arm_c_caches_both():
     assert c.compile_cache_warm is True
 
 
-def test_env_differs_only_in_cache_variables():
-    envs = {arm: set(resolve(arm).env().keys()) for arm in CACHE_CONFIGS}
-    assert envs["A"] == envs["B"] == envs["C"], "arms must set the same variables"
+def test_arm_a_env_values():
+    assert resolve("A").env("run-123") == {
+        "HF_HOME": "/tmp/hf-cold/run-123",
+        "VLLM_CACHE_ROOT": "/tmp/vllm-cache-cold/run-123",
+    }
 
 
-def test_unknown_arm_is_an_error():
-    with pytest.raises(KeyError):
+def test_cold_paths_are_unique_per_run():
+    env1 = resolve("A").env("run-1")
+    env2 = resolve("A").env("run-2")
+    assert env1["HF_HOME"] != env2["HF_HOME"]
+    assert env1["VLLM_CACHE_ROOT"] != env2["VLLM_CACHE_ROOT"]
+
+
+def test_unknown_arm_is_a_named_error():
+    with pytest.raises(ValueError, match=r"unknown arm 'Z'.*'A', 'B', 'C'"):
         resolve("Z")
 ```
 
+Also `tests/test_arm_isolation.py` — the codebase-wide invariant, independent of this module's
+own correctness: no `.py` file under `coldstart/` or `worker/`, other than
+`cache_config.py`/`scheduler.py`/`coldstart/analysis/`, may branch on an arm value.
+
 - [ ] **Step 2: Run and confirm it fails**
 
-Run: `.venv/bin/pytest tests/test_cache_config.py -v`
+Run: `.venv/bin/pytest tests/test_cache_config.py tests/test_arm_isolation.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'coldstart.cache_config'`
+(`test_arm_isolation.py` collects and passes standalone, since it scans the tree as it exists
+today rather than importing the not-yet-created module.)
 
 - [ ] **Step 3: Implement**
 
@@ -1235,36 +1311,58 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'coldstart.cache_config
 ```python
 from dataclasses import dataclass
 
+# Shared, pre-staged locations on the network volume — deliberately *not* namespaced by
+# run: the entire point of "warm" is that a later run finds what an earlier run put here.
 VOLUME_ROOT = "/runpod-volume"
+VOLUME_HF_HOME = f"{VOLUME_ROOT}/hf"
+VOLUME_VLLM_CACHE_ROOT = f"{VOLUME_ROOT}/vllm-cache"
+
+# Cold locations. These must never be shared between runs (see CacheConfig.env below) —
+# unlike the volume paths above, "cold" only holds if a reused serverless worker cannot
+# find another run's leftovers here.
+COLD_HF_ROOT = "/tmp/hf-cold"
+COLD_VLLM_CACHE_ROOT = "/tmp/vllm-cache-cold"
 
 
 @dataclass(frozen=True)
 class CacheConfig:
     """The single interface that differs between arms — see spec 6.3.
 
-    If arm behavior diverges anywhere else in this codebase, the single-variable
-    claim is false and the experiment is compromised.
+    If arm behavior diverges anywhere else in this codebase, the single-variable claim
+    is false and the experiment is compromised. tests/test_arm_isolation.py checks that
+    structurally rather than hoping it holds.
     """
 
     arm: str
     weights_source: str  # "hub" | "volume"
     compile_cache_warm: bool
 
-    def env(self) -> dict[str, str]:
-        """Every arm sets the same variable names. Only values differ."""
-        if self.weights_source == "volume":
-            hf_home = f"{VOLUME_ROOT}/hf"
-        else:
-            hf_home = "/tmp/hf-cold"
+    def env(self, run_id: str) -> dict[str, str]:
+        """Every arm sets the same variable names. Only values differ.
 
-        if self.compile_cache_warm:
-            cache_root = f"{VOLUME_ROOT}/vllm-cache"
-        else:
-            cache_root = "/tmp/vllm-cache-cold"
+        A cold path is namespaced by `run_id` so a reused serverless worker can never
+        silently serve one run's cache to another run's cold arm. `run_id` is a required
+        input, not generated here, so the emitted config stays reproducible from a
+        stored `RunRecord.run_id`.
+        """
+        if not run_id:
+            raise ValueError(f"run_id must be a non-empty string, got {run_id!r}")
+        if "/" in run_id:
+            raise ValueError(f"run_id must not contain '/': {run_id!r}")
 
+        hf_home = VOLUME_HF_HOME if self.weights_source == "volume" else f"{COLD_HF_ROOT}/{run_id}"
+        cache_root = (
+            VOLUME_VLLM_CACHE_ROOT
+            if self.compile_cache_warm
+            else f"{COLD_VLLM_CACHE_ROOT}/{run_id}"
+        )
         return {"HF_HOME": hf_home, "VLLM_CACHE_ROOT": cache_root}
 
 
+# Arm C's status is provisional: whether it is even measurable depends on the
+# reconnaissance run (spec 5, 6.8) answering whether the pinned vLLM version compiles at
+# startup at all. If it does not, arm C collapses into arm B and gets dropped. All three
+# arms are built here regardless, because that determination has not been made yet.
 CACHE_CONFIGS = {
     "A": CacheConfig("A", weights_source="hub", compile_cache_warm=False),
     "B": CacheConfig("B", weights_source="volume", compile_cache_warm=False),
@@ -1273,18 +1371,21 @@ CACHE_CONFIGS = {
 
 
 def resolve(arm: str) -> CacheConfig:
-    return CACHE_CONFIGS[arm]
+    try:
+        return CACHE_CONFIGS[arm]
+    except KeyError:
+        raise ValueError(f"unknown arm {arm!r}; known: {sorted(CACHE_CONFIGS)}") from None
 ```
 
 - [ ] **Step 4: Run and confirm pass**
 
-Run: `.venv/bin/pytest tests/test_cache_config.py -v`
-Expected: PASS — 6 passed
+Run: `.venv/bin/pytest tests/test_cache_config.py tests/test_arm_isolation.py -v`
+Expected: PASS — 18 passed in `test_cache_config.py`, 4 passed in `test_arm_isolation.py`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add coldstart/cache_config.py tests/test_cache_config.py
+git add coldstart/cache_config.py tests/test_cache_config.py tests/test_arm_isolation.py
 git commit -m "feat: cache configuration as the single inter-arm difference"
 ```
 
