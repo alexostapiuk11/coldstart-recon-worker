@@ -6,6 +6,11 @@ from coldstart.schema import RunRecord
 
 FAST_TOLERANCE = 0.10  # fixed before data — see spec 7
 
+# The five named S4 sub-phases, spec stage taxonomy. Order matters for the
+# waterfall (chronological: device init -> compile -> memory profiling ->
+# KV allocation -> graph capture), not just for iteration.
+S4_SUBPHASE_KEYS = ("S4a", "S4b", "S4c", "S4d", "S4e")
+
 
 class DerivedRow(TypedDict, total=False):
     """One derived row: the interface between the harness and every published
@@ -28,6 +33,17 @@ class DerivedRow(TypedDict, total=False):
     t_s2_to_ready: float | None
     merged_phases: list[str]
     s4_subphases: dict
+    t_s1: float | None
+    t_s4_bracket: float | None
+    t_s4a: float | None
+    t_s4b: float | None
+    t_s4c: float | None
+    t_s4d: float | None
+    t_s4e: float | None
+    t_compile: float | None
+    s4_unattributed: float | None
+    t_s5: float | None
+    t_s6: float | None
     warmup: list[dict]
     steady_state_latency: float | None
     warmup_penalty: float | None
@@ -226,6 +242,81 @@ def derive(record: RunRecord) -> DerivedRow:
         t_ready - t_acq_start if t_acq_start is not None and t_ready is not None else None
     )
 
+    # S4 bracket (B2/B3 fix). No mark delineated S4 before this fix; the
+    # tempting substitute S5_ready - S3_load_done is NOT the bracket -- S5
+    # is a separate, later stage (spec, stage taxonomy: "S5 ready: engine up
+    # -> server reports healthy", a health-poll interval), so that
+    # substitution would fold all of S5 into S4 and misattribute exactly the
+    # quantity this fix exists to get right. The mark contract
+    # (S4_start/S4_end) is added here for analysis; the probe that emits
+    # them (Task 11) is not yet built, so both marks are legitimately
+    # absent on every real run today -- handled the same way a missing
+    # S2/S3 mark already is, never substituted.
+    t_s4_start = m.get("S4_start")
+    t_s4_end = m.get("S4_end")
+    if t_s4_start is None:
+        merged.append("S4_start")
+    if t_s4_end is None:
+        merged.append("S4_end")
+
+    t_s4_bracket: float | None
+    if t_s4_start is None or t_s4_end is None:
+        t_s4_bracket = None
+    else:
+        t_s4_bracket = t_s4_end - t_s4_start
+        # Same discipline as t_weights above: a stage duration is an
+        # intra-clock quantity, so a negative one means the run is broken,
+        # not that it needs correcting before publication.
+        if t_s4_bracket < 0:
+            consistent = False
+            reason = f"t_s4_bracket {t_s4_bracket} is negative: S4_end precedes S4_start"
+            t_s4_bracket = None
+
+    # S4 sub-phases (S4a-S4e), extracted from the pinned engine version's
+    # parsed startup log into explicit fields — B3. A sub-phase this engine
+    # version did not delineate is absent, not zero: the same merged_phases
+    # policy already applied to S2/S3 above, not a silent .get(k, 0.0).
+    raw_subphases = record.engine.get("s4_subphases") or {}
+    subphase_values: dict[str, float | None] = {}
+    for key in S4_SUBPHASE_KEYS:
+        if key in raw_subphases:
+            subphase_values[key] = raw_subphases[key]
+        else:
+            subphase_values[key] = None
+            merged.append(key)
+
+    # T_compile — spec stage taxonomy: "S4b, cold minus warm, the
+    # compile-cache term". This field is the per-run S4b duration;
+    # economics.compile_cache_term(s4b_cold, s4b_warm) combines two arms'
+    # medians of it into the actual contrast. Before this fix nothing
+    # produced either input (B3).
+    t_compile = subphase_values["S4b"]
+
+    identified_sum = sum(v for v in subphase_values.values() if v is not None)
+    s4_unattributed: float | None
+    if t_s4_bracket is None:
+        s4_unattributed = None
+    else:
+        s4_unattributed = t_s4_bracket - identified_sum
+        # Same discipline as t_weights and t_s4_bracket above: the
+        # identified sub-phases not fitting inside the bracket that is
+        # supposed to contain them means the decomposition is broken for
+        # this run, not that the remainder needs clamping to zero.
+        if s4_unattributed < 0:
+            consistent = False
+            reason = (
+                f"s4_unattributed {s4_unattributed} is negative: identified S4 "
+                f"sub-phases ({identified_sum}) exceed the S4 bracket ({t_s4_bracket})"
+            )
+            s4_unattributed = None
+
+    t_s1 = m.get("S1_imports_done")
+    # S5 starts at "engine up", i.e. S4_end -- not S3_load_done, for the
+    # same reason the bracket above never substitutes it.
+    t_s5 = t_ready - t_s4_end if (t_ready is not None and t_s4_end is not None) else None
+    t_s6_dispatch = m.get("S6_request1_dispatch")
+    t_s6 = t_process - t_s6_dispatch if t_s6_dispatch is not None else None
+
     blocks = record.engine.get("kv_cache_blocks")
     block_size = record.engine.get("block_size")
     # `is not None` rather than truthiness: kv_cache_blocks == 0 is a real
@@ -250,6 +341,17 @@ def derive(record: RunRecord) -> DerivedRow:
         "t_s2_to_ready": t_s2_to_ready,
         "merged_phases": merged,
         "s4_subphases": record.engine.get("s4_subphases", {}),
+        "t_s1": t_s1,
+        "t_s4_bracket": t_s4_bracket,
+        "t_s4a": subphase_values["S4a"],
+        "t_s4b": subphase_values["S4b"],
+        "t_s4c": subphase_values["S4c"],
+        "t_s4d": subphase_values["S4d"],
+        "t_s4e": subphase_values["S4e"],
+        "t_compile": t_compile,
+        "s4_unattributed": s4_unattributed,
+        "t_s5": t_s5,
+        "t_s6": t_s6,
         "warmup": warmup,
         "steady_state_latency": steady,
         "warmup_penalty": penalty,

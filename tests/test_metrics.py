@@ -17,11 +17,22 @@ from coldstart.schema import RunRecord
 _WARMUP_LATENCIES = [10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 3.4, 4.0, 3.2, 2.0]
 
 
-def make(arm="A", t_submit=0.0, t_result=150.0, marks=None, warmup=None):
+# Default per-run S4 sub-phase durations. Sum = 34.0; with the default
+# S4_start=54.0/S4_end=90.0 bracket (36.0), that leaves a genuine 2.0s
+# unattributed remainder -- deliberately nonzero, matching the spec's "the
+# waterfall never sums to a suspiciously exact 100%". S4b (compilation) is
+# the largest sub-phase by construction, since it's the one B3 exists to
+# surface.
+_S4_SUBPHASES = {"S4a": 3.0, "S4b": 20.0, "S4c": 4.0, "S4d": 2.0, "S4e": 5.0}
+
+
+def make(arm="A", t_submit=0.0, t_result=150.0, marks=None, warmup=None, s4_subphases=...):
     marks = marks or [
         {"stage": "S1_imports_done", "t_mono": 4.0},
         {"stage": "S2_acquisition_start", "t_mono": 4.0},
         {"stage": "S3_load_done", "t_mono": 54.0},
+        {"stage": "S4_start", "t_mono": 54.0},
+        {"stage": "S4_end", "t_mono": 90.0},
         {"stage": "S5_ready", "t_mono": 100.0},
         {"stage": "S6_request1_dispatch", "t_mono": 100.0},
         {"stage": "S6_first_token", "t_mono": 102.0},
@@ -30,6 +41,14 @@ def make(arm="A", t_submit=0.0, t_result=150.0, marks=None, warmup=None):
     warmup = warmup or [
         {"req_index": i, "ttft": 0.5, "end_to_end": v} for i, v in enumerate(_WARMUP_LATENCIES)
     ]
+    # `...` (not None) is the "use the default" sentinel, so a caller can
+    # still pass s4_subphases=None or ={} to explicitly test "engine omitted
+    # the field entirely" without that colliding with "use the default".
+    if s4_subphases is ...:
+        s4_subphases = dict(_S4_SUBPHASES)
+    engine = {"kv_cache_blocks": 8192, "block_size": 16}
+    if s4_subphases is not None:
+        engine["s4_subphases"] = s4_subphases
     return RunRecord(
         run_id="r",
         run_index=0,
@@ -38,7 +57,7 @@ def make(arm="A", t_submit=0.0, t_result=150.0, marks=None, warmup=None):
         clock_C={},
         clock_B={"t0_wall": 0.0, "marks": marks},
         warmup=warmup,
-        engine={"kv_cache_blocks": 8192, "block_size": 16},
+        engine=engine,
         host={"host_id": "h1"},
         config={},
         status={"outcome": "ok", "failure_class": None, "failure_detail": None},
@@ -194,7 +213,10 @@ def test_t_weights_negative_is_flagged_inconsistent_not_corrected():
     d = derive(make(marks=marks))
     assert d["t_weights"] is None
     assert d["consistent"] is False
-    assert d["merged_phases"] == []  # both marks were present; the value was just invalid
+    # S2/S3 marks were both present -- the value was just invalid -- but this
+    # minimal fixture also omits S4_start/S4_end, so those are genuinely
+    # merged (recorded, not substituted with S5_ready - S3_load_done).
+    assert d["merged_phases"] == ["S4_start", "S4_end"]
 
 
 def test_t_weights_exceeding_t_process_is_flagged_inconsistent():
@@ -336,3 +358,155 @@ def test_time_to_fast_index_zero_tolerance_moves_the_index():
 
 def test_time_to_fast_index_is_none_when_steady_is_none():
     assert time_to_fast_index([{"req_index": 0, "end_to_end": 1.0}], steady=None) is None
+
+
+# --- B3/B2 fix: the S4 bracket, its sub-phases, t_compile, and s4_unattributed ---
+# Default fixture: S3_load_done=54.0, S4_start=54.0, S4_end=90.0, S5_ready=100.0,
+# subphases S4a=3.0 S4b=20.0 S4c=4.0 S4d=2.0 S4e=5.0 (sum=34.0).
+# t_s4_bracket = 90.0 - 54.0 = 36.0
+# s4_unattributed = 36.0 - 34.0 = 2.0  (deliberately nonzero and small)
+# t_s1 = 4.0, t_s5 = 100.0 - 90.0 = 10.0, t_s6 = 102.0 - 100.0 = 2.0
+
+
+def test_t_s4_bracket_is_s4_end_minus_s4_start():
+    assert derive(make())["t_s4_bracket"] == pytest.approx(36.0)
+
+
+def test_t_s4_bracket_is_none_when_s4_start_missing_and_recorded_merged():
+    marks = [m for m in make().clock_B["marks"] if m["stage"] != "S4_start"]
+    d = derive(make(marks=marks))
+    assert d["t_s4_bracket"] is None
+    assert "S4_start" in d["merged_phases"]
+
+
+def test_t_s4_bracket_is_none_when_s4_end_missing_and_recorded_merged():
+    marks = [m for m in make().clock_B["marks"] if m["stage"] != "S4_end"]
+    d = derive(make(marks=marks))
+    assert d["t_s4_bracket"] is None
+    assert "S4_end" in d["merged_phases"]
+
+
+def test_t_s4_bracket_never_substitutes_s5_ready_minus_s3_load_done():
+    """S5_ready - S3_load_done (100.0 - 54.0 = 46.0) folds all of S5 (a
+    health-poll interval, per spec) into S4 and is NOT the bracket -- see
+    the spec's Attribution caveat. With S4_start/S4_end absent, the bracket
+    must be None, never silently computed as 46.0."""
+    marks = [
+        m
+        for m in make().clock_B["marks"]
+        if m["stage"] not in ("S4_start", "S4_end")
+    ]
+    d = derive(make(marks=marks))
+    assert d["t_s4_bracket"] is None
+    assert d["t_s4_bracket"] != pytest.approx(46.0)
+
+
+def test_t_s4_bracket_negative_is_flagged_inconsistent_not_corrected():
+    marks = [
+        {"stage": "S4_start", "t_mono": 95.0},
+        {"stage": "S4_end", "t_mono": 90.0},
+        {"stage": "S6_first_token", "t_mono": 102.0},
+    ]
+    d = derive(make(marks=marks))
+    assert d["t_s4_bracket"] is None
+    assert d["consistent"] is False
+
+
+def test_s4_subphases_are_extracted_into_explicit_fields():
+    d = derive(make())
+    assert d["t_s4a"] == pytest.approx(3.0)
+    assert d["t_s4b"] == pytest.approx(20.0)
+    assert d["t_s4c"] == pytest.approx(4.0)
+    assert d["t_s4d"] == pytest.approx(2.0)
+    assert d["t_s4e"] == pytest.approx(5.0)
+
+
+def test_a_single_undelineated_subphase_is_none_not_zero_and_recorded_merged():
+    """S4d absent from the engine's log for this run is a genuinely
+    different fact from S4d having taken 0.0 seconds -- conflating the two
+    (the .get(k, 0.0) bug) understates S4 the same way clamping a negative
+    unattributed term would."""
+    subphases = {k: v for k, v in _S4_SUBPHASES.items() if k != "S4d"}
+    d = derive(make(s4_subphases=subphases))
+    assert d["t_s4d"] is None
+    assert d["merged_phases"] == ["S4d"]
+
+
+def test_all_subphases_absent_when_engine_omits_the_field_entirely():
+    d = derive(make(s4_subphases=None))
+    assert d["t_s4a"] is None
+    assert d["t_s4b"] is None
+    assert d["t_s4c"] is None
+    assert d["t_s4d"] is None
+    assert d["t_s4e"] is None
+    assert d["merged_phases"] == ["S4a", "S4b", "S4c", "S4d", "S4e"]
+    # bracket is still measured independently of the sub-phase parser.
+    assert d["t_s4_bracket"] == pytest.approx(36.0)
+    # unattributed collapses to the whole bracket, honestly, rather than
+    # raising or silently reporting 0.0 sub-phases as real zeros.
+    assert d["s4_unattributed"] == pytest.approx(36.0)
+
+
+def test_t_compile_is_sourced_from_s4b():
+    """B3: t_compile is what economics.compile_cache_term has been waiting
+    for -- see test_t_compile_feeds_compile_cache_term below for the wiring."""
+    assert derive(make())["t_compile"] == pytest.approx(20.0)
+
+
+def test_t_compile_is_none_when_s4b_is_undelineated():
+    subphases = {k: v for k, v in _S4_SUBPHASES.items() if k != "S4b"}
+    assert derive(make(s4_subphases=subphases))["t_compile"] is None
+
+
+def test_t_compile_feeds_compile_cache_term():
+    """B3 end to end: derive() now produces the two inputs
+    economics.compile_cache_term needs, where previously nothing did."""
+    from coldstart.analysis.economics import compile_cache_term
+
+    cold = derive(make(arm="B", s4_subphases={**_S4_SUBPHASES, "S4b": 20.0}))
+    warm = derive(make(arm="C", s4_subphases={**_S4_SUBPHASES, "S4b": 3.0}))
+    saved = compile_cache_term(s4b_cold=cold["t_compile"], s4b_warm=warm["t_compile"])
+    assert saved == pytest.approx(17.0)
+
+
+def test_s4_unattributed_is_bracket_minus_identified_subphases():
+    """Must be computed from t_s4_bracket (36.0), not from t_process
+    (102.0) -- the two differ by 66.0 in this fixture specifically so a
+    mutant reading t_process instead of the bracket cannot pass by
+    accident: t_process - sum(subphases) = 102 - 34 = 68, not 2.0."""
+    assert derive(make())["s4_unattributed"] == pytest.approx(2.0)
+
+
+def test_s4_unattributed_is_none_when_bracket_is_none():
+    marks = [m for m in make().clock_B["marks"] if m["stage"] != "S4_start"]
+    assert derive(make(marks=marks))["s4_unattributed"] is None
+
+
+def test_s4_unattributed_negative_is_flagged_inconsistent_not_corrected():
+    """Identified sub-phases summing to more than the bracket that is
+    supposed to contain them is impossible -- the same discipline
+    derive() already applies to a negative t_weights."""
+    subphases = {"S4a": 10.0, "S4b": 10.0, "S4c": 10.0, "S4d": 10.0, "S4e": 10.0}  # sum=50 > 36
+    d = derive(make(s4_subphases=subphases))
+    assert d["s4_unattributed"] is None
+    assert d["consistent"] is False
+    assert d["inconsistency_reason"] is not None
+
+
+def test_t_s1_is_the_imports_done_mark():
+    assert derive(make())["t_s1"] == pytest.approx(4.0)
+
+
+def test_t_s5_is_ready_minus_s4_end():
+    assert derive(make())["t_s5"] == pytest.approx(10.0)
+
+
+def test_t_s5_is_none_when_s4_end_missing():
+    """t_s5 must not fall back to S3_load_done either -- same discipline as
+    the bracket itself."""
+    marks = [m for m in make().clock_B["marks"] if m["stage"] != "S4_end"]
+    assert derive(make(marks=marks))["t_s5"] is None
+
+
+def test_t_s6_is_first_token_minus_request1_dispatch():
+    assert derive(make())["t_s6"] == pytest.approx(2.0)

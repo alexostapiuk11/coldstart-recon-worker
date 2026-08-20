@@ -53,20 +53,43 @@ _WARMUP_SPIKE = {"A": 3.5, "B": 2.5, "C": 1.6}
 # instead of bleeding into each other.
 _HOST_OFFSET = {"h0": -10.0, "h1": -5.0, "h2": 0.0, "h3": 5.0, "h4": 10.0}
 
-# Per-arm S4 subphases. Arm A and B keep the original constants (6.0, 12.0);
-# waterfall's exact-width assertions below are pinned against those two
-# arms and are untouched by this change. Arm C cannot use the same
-# constants: with t_process=42.0 and t_weights=30.0, a sub-phase sum of 18.0
-# would make weights + subphases (48.0) exceed t_process (42.0) -- a
-# negative "unattributed" term, which waterfall() now raises on instead of
-# silently clamping to zero (see the dedicated negative-term tests). Arm C's
-# subphases are scaled down so the *default* fixture is internally
-# consistent; the negative case gets its own explicit, separately
-# constructed fixture instead of hiding inside the everyday one.
-_S4_SUBPHASES = {
-    "A": {"S4c": 6.0, "S4e": 12.0},
-    "B": {"S4c": 6.0, "S4e": 12.0},
-    "C": {"S4c": 3.0, "S4e": 6.0},
+# Per-arm chronological stage breakdown, replacing the old {"S4c","S4e"}-only
+# fixture now that waterfall() draws every named stage (B2 fix) instead of
+# two hardcoded sub-phases plus a catch-all "unattributed" that silently
+# absorbed S1, S4a/S4b/S4d, S5, and S6. Each arm's components are hand-picked
+# to sum exactly to that arm's t_process (base - 18.0), leaving a small
+# genuinely positive "unattributed within S4" remainder -- never a
+# suspiciously exact zero, matching the spec's honesty claim.
+#
+# Arm C's S4b (compile term) is deliberately far smaller than A's and B's
+# (1.5 vs 25.0 and 13.0) -- that shrink *is* H3/the compile-cache effect,
+# and a fixture where every arm shared the same S4b could not distinguish
+# "the effect was measured" from "the effect was silently dropped".
+_STAGES = {
+    "A": {
+        "t_s1": 4.0,
+        "t_weights": 80.0,
+        "t_s4_bracket": 50.0,
+        "subphases": {"S4a": 3.0, "S4b": 25.0, "S4c": 5.0, "S4d": 3.0, "S4e": 10.0},
+        "t_s5": 6.0,
+        "t_s6": 2.0,
+    },
+    "B": {
+        "t_s1": 4.0,
+        "t_weights": 47.5,
+        "t_s4_bracket": 21.0,
+        "subphases": {"S4a": 2.0, "S4b": 13.0, "S4c": 2.0, "S4d": 1.0, "S4e": 2.0},
+        "t_s5": 3.0,
+        "t_s6": 1.5,
+    },
+    "C": {
+        "t_s1": 4.0,
+        "t_weights": 30.0,
+        "t_s4_bracket": 5.0,
+        "subphases": {"S4a": 1.0, "S4b": 1.5, "S4c": 1.0, "S4d": 0.5, "S4e": 0.5},
+        "t_s5": 2.0,
+        "t_s6": 1.0,
+    },
 }
 
 
@@ -78,20 +101,25 @@ def rows(n=30):
         base = {"A": 160.0, "B": 95.0, "C": 60.0}[arm]
         steady = _WARMUP_STEADY[arm]
         spike = _WARMUP_SPIKE[arm]
-        out.append(
-            {
-                "arm": arm,
-                "host_id": host,
-                "t_total": base + i * 0.4 + _HOST_OFFSET[host],
-                "t_platform": 18.0,
-                "t_weights": base * 0.5,
-                "s4_subphases": dict(_S4_SUBPHASES[arm]),
-                "t_process": base - 18.0,
-                "warmup": [
-                    {"req_index": k, "end_to_end": steady + spike * 0.55**k} for k in range(10)
-                ],
-            }
-        )
+        st = _STAGES[arm]
+        row = {
+            "arm": arm,
+            "host_id": host,
+            "t_total": base + i * 0.4 + _HOST_OFFSET[host],
+            "t_platform": 18.0,
+            "t_process": base - 18.0,
+            "t_s1": st["t_s1"],
+            "t_weights": st["t_weights"],
+            "t_s4_bracket": st["t_s4_bracket"],
+            "t_s5": st["t_s5"],
+            "t_s6": st["t_s6"],
+            "warmup": [
+                {"req_index": k, "end_to_end": steady + spike * 0.55**k} for k in range(10)
+            ],
+        }
+        for key, val in st["subphases"].items():
+            row[f"t_{key.lower()}"] = val
+        out.append(row)
     return out
 
 
@@ -141,38 +169,50 @@ def test_all_four_figures_write_files(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_waterfall_draws_five_segments_per_arm_with_residual_first_and_correct_stacking(tmp_path):
+def test_waterfall_draws_every_named_stage_per_arm_with_residual_first_and_correct_stacking(
+    tmp_path,
+):
     """Pins the exact segment widths and left offsets for arm A (measured
-    branch), derived by hand from the fixture: t_platform=18 (constant),
-    t_process=142, t_weights=80, S4c=6, S4e=12, so unattributed = 142 - 80 -
-    18 = 44. This catches both a wrong stacking order and a wrong segment
-    value, not just "some bars got drawn"."""
+    branch), derived by hand from the fixture (`_STAGES["A"]`):
+    T_platform=18, S1=4, T_weights=80, S4a=3, S4b=25, S4c=5, S4d=3, S4e=10,
+    unattributed = 50 - (3+25+5+3+10) = 4, S5=6, S6=2 -- 11 segments summing
+    to 160, every one individually labelled (B2 fix: previously S1, S4a,
+    S4b, S4d, S5 and S6 were all invisible, folded into a mislabelled
+    'unattributed' bar). This catches a wrong stacking order or a wrong
+    segment value, not just "some bars got drawn"."""
     data = rows()
     _fig, ax = _call_capturing_axes(waterfall, data, tmp_path / "w.png")
-    assert len(ax.patches) == 15  # 3 arms x 5 segments (every row has t_weights set)
+    assert len(ax.patches) == 33  # 3 arms x 11 segments
 
     residual_rgba = mcolors.to_rgba(RESIDUAL_COLOR)
-    weights_rgba = mcolors.to_rgba("#2f6fd0")
 
-    arm_a = ax.patches[0:5]
+    arm_a = ax.patches[0:11]
     assert arm_a[0].get_facecolor() == residual_rgba  # residual segment drawn first
-    assert arm_a[1].get_facecolor() == weights_rgba
     widths = [p.get_width() for p in arm_a]
-    assert widths == pytest.approx([18.0, 80.0, 6.0, 12.0, 44.0])
+    assert widths == pytest.approx([18.0, 4.0, 80.0, 3.0, 25.0, 5.0, 3.0, 10.0, 4.0, 6.0, 2.0])
     lefts = [p.get_x() for p in arm_a]
-    assert lefts == pytest.approx([0.0, 18.0, 98.0, 104.0, 116.0])
+    assert lefts == pytest.approx(
+        [0.0, 18.0, 22.0, 102.0, 105.0, 130.0, 135.0, 138.0, 148.0, 152.0, 158.0]
+    )
 
 
-def test_waterfall_arm_c_segments_are_pinned_and_genuinely_positive(tmp_path):
-    """Arm C: t_process=42, t_weights=30, S4c+S4e=9 -> unattributed = 42 -
-    30 - 9 = 3, a small but genuinely positive residual (arm C's subphases
-    are scaled down in the fixture specifically so this stays >= 0 -- see
-    the fixture's `_S4_SUBPHASES` comment). The dedicated negative-term
-    tests below cover the case that must now raise instead of clamp."""
+def test_waterfall_arm_c_segments_are_pinned_with_a_much_smaller_compile_term(tmp_path):
+    """Arm C (`_STAGES["C"]`): T_platform=18, S1=4, T_weights=30, S4a=1,
+    S4b=1.5, S4c=1, S4d=0.5, S4e=0.5, unattributed = 5 - 4.5 = 0.5, S5=2,
+    S6=1 -- summing to 60, a small but genuinely positive unattributed
+    residual (the dedicated negative-term tests below cover the case that
+    must raise instead of clamp). Arm C's S4b (index 4) is pinned at 1.5s,
+    versus arm A's 25.0s and arm B's 13.0s -- the compile-cache effect must
+    actually be visible as a shrinking segment, not just present as a
+    number nobody plots."""
     _fig, ax = _call_capturing_axes(waterfall, rows(), tmp_path / "w.png")
-    arm_c = ax.patches[10:15]
-    widths = [p.get_width() for p in arm_c]
-    assert widths == pytest.approx([18.0, 30.0, 3.0, 6.0, 3.0])
+    arm_a, arm_b, arm_c = ax.patches[0:11], ax.patches[11:22], ax.patches[22:33]
+    widths_c = [p.get_width() for p in arm_c]
+    assert widths_c == pytest.approx([18.0, 4.0, 30.0, 1.0, 1.5, 1.0, 0.5, 0.5, 0.5, 2.0, 1.0])
+
+    s4b_a, s4b_b, s4b_c = arm_a[4].get_width(), arm_b[4].get_width(), arm_c[4].get_width()
+    assert s4b_c < s4b_b < s4b_a
+    assert s4b_c == pytest.approx(1.5)
 
 
 def test_waterfall_yticklabels_carry_each_arms_n(tmp_path):
@@ -240,18 +280,19 @@ def test_waterfall_uses_the_shared_median_helper(tmp_path):
 
 
 def test_waterfall_raises_on_a_negative_unattributed_term_instead_of_clamping(tmp_path):
-    """If the measured sub-phases plus t_weights exceed t_process, the
-    decomposition does not fit inside the thing it decomposes -- checks.py
-    applies exactly this discipline to a single run's t_weights ("discard,
-    don't silently correct"). A max(0.0, ...) clamp (the original behavior)
-    would draw a plausible-looking but understated bar instead of surfacing
-    the defect; this must raise, and name the offending arm."""
+    """If the measured sub-phases exceed the S4 bracket that is supposed to
+    contain them, the decomposition does not fit inside the thing it
+    decomposes -- checks.py applies exactly this discipline to a single
+    run's t_weights ("discard, don't silently correct"). A max(0.0, ...)
+    clamp (the original behavior) would draw a plausible-looking but
+    understated bar instead of surfacing the defect; this must raise, and
+    name the offending arm."""
     data = rows()
     for r in data:
         if r["arm"] == "C":
-            # arm C: t_process=42.0, t_weights=30.0; pushing S4e to 40.0
-            # makes weights + subphases = 30 + 46 = 76, well past t_process.
-            r["s4_subphases"] = {"S4c": 6.0, "S4e": 40.0}
+            # arm C: t_s4_bracket=5.0; pushing S4b to 10.0 makes the
+            # sub-phase sum 1+10+1+0.5+0.5=13.0, well past the bracket.
+            r["t_s4b"] = 10.0
     with pytest.raises(ValueError, match="C"):
         waterfall(data, tmp_path / "w.png")
 
@@ -264,9 +305,72 @@ def test_waterfall_negative_unattributed_message_names_the_actual_numbers(tmp_pa
     data = rows()
     for r in data:
         if r["arm"] == "C":
-            r["s4_subphases"] = {"S4c": 6.0, "S4e": 40.0}
-    with pytest.raises(ValueError, match=r"-34\.0"):
+            r["t_s4b"] = 10.0
+    with pytest.raises(ValueError, match=r"-8\.0"):
         waterfall(data, tmp_path / "w.png")
+
+
+def test_waterfall_labels_a_fully_merged_subphase_rather_than_drawing_nothing(tmp_path):
+    """A sub-phase the pinned engine version never delineates (every row in
+    the arm reports it absent, not zero) must not silently vanish: its
+    duration still belongs to *some* visible, named segment. It folds into
+    'unattributed within S4' honestly (that's exactly what the bracket
+    formula does), and the merge is stated in that segment's label rather
+    than the chart just being short one bar with no explanation."""
+    data = rows()
+    for r in data:
+        if r["arm"] == "B":
+            r["t_s4d"] = None
+    _fig, ax = _call_capturing_axes(waterfall, data, tmp_path / "w.png")
+
+    # The legend still carries an "S4d" entry (arms A and C still delineate
+    # it, and the legend is deduplicated by label text across arms) -- the
+    # thing that must be visible instead is a distinct entry stating S4d
+    # was merged into arm B's unattributed segment.
+    _handles, labels = ax.get_legend_handles_labels()
+    assert any("merged" in lbl.lower() and "S4d" in lbl for lbl in labels)
+
+    # Arm B now draws one fewer segment than arm A (no standalone S4d bar).
+    arm_a = ax.patches[0:11]
+    arm_b = ax.patches[11:21]
+    assert len(arm_a) == 11
+    assert len(arm_b) == 10
+
+    # Arm B, unattributed segment (index 7 -- one slot earlier than arm A's
+    # index 8, since S4d's bar was skipped): bracket 21.0 minus the four
+    # *present* sub-phases (2+13+2+2=19.0) = 2.0 -- S4d's missing 1.0s
+    # folds in rather than silently shrinking the bar by 1.0s.
+    assert arm_b[7].get_width() == pytest.approx(2.0)
+
+
+def test_waterfall_handles_a_wholly_unmeasured_s4_bracket_without_crashing_or_substituting(
+    tmp_path,
+):
+    """This is the real near-term state of the pipeline: Task 11 (the probe
+    that emits S4_start/S4_end) is not built yet, so t_s4_bracket is None
+    on every row today. waterfall() must not crash, and it must not
+    silently substitute S5_ready - S3_load_done (unavailable here, and
+    wrong anyway -- see the spec's Attribution caveat and the dedicated
+    metrics.py regression test). The whole S4+S5 span collapses to one
+    honestly-labelled merged segment instead."""
+    data = rows()
+    for r in data:
+        if r["arm"] == "A":
+            r["t_s4_bracket"] = None
+            r["t_s5"] = None
+            for key in ("t_s4a", "t_s4b", "t_s4c", "t_s4d", "t_s4e"):
+                r[key] = None
+    _fig, ax = _call_capturing_axes(waterfall, data, tmp_path / "w.png")
+
+    _handles, labels = ax.get_legend_handles_labels()
+    assert any("merged" in lbl.lower() and "S4" in lbl for lbl in labels)
+    assert not any(lbl.startswith("S4b") for lbl in labels[:6])  # no fake S4b for arm A
+
+    # Arm A: process(142) - S1(4) - weights(80) - S6(2) = 56.0, the honest
+    # combined S4+S5 remainder computable without the missing bracket mark.
+    arm_a = ax.patches[0:5]  # platform, S1, weights, merged S4+S5, S6 (5 segments)
+    assert len(arm_a) == 5
+    assert arm_a[3].get_width() == pytest.approx(56.0)
 
 
 # ---------------------------------------------------------------------------

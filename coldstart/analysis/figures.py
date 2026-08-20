@@ -38,6 +38,26 @@ ARMS = ["A", "B", "C"]
 ARM_LABEL = {"A": "A — nothing cached", "B": "B — weights cached", "C": "C — weights + compile"}
 RESIDUAL_COLOR = "#9e9e9e"  # deliberately distinct from every measured-stage color
 
+# The five named S4 sub-phases, in chronological order — must match
+# coldstart.analysis.metrics.S4_SUBPHASE_KEYS. Not imported directly so this
+# module stays a pure consumer of whatever fields a row happens to carry
+# (rows in tests are hand-built dicts, not always derive() output).
+S4_SUBPHASE_KEYS = ("S4a", "S4b", "S4c", "S4d", "S4e")
+_SUBPHASE_LABEL = {
+    "S4a": "S4a device init",
+    "S4b": "S4b compilation",
+    "S4c": "S4c memory profiling",
+    "S4d": "S4d KV allocation",
+    "S4e": "S4e graph capture",
+}
+_SUBPHASE_COLOR = {
+    "S4a": "#7fae7f",
+    "S4b": "#c0392b",
+    "S4c": "#4a8a4a",
+    "S4d": "#8a6d3b",
+    "S4e": "#c88a2e",
+}
+
 
 def _validate_rows(rows) -> list[dict]:
     """Fail loudly on the one input domain every figure shares: nothing to
@@ -67,11 +87,43 @@ def _by_arm(rows) -> dict[str, list[dict]]:
     return by
 
 
+def _median_present(rs: list[dict], key: str) -> float | None:
+    """Median of `key` across rows that report it (not None), or None if no
+    row does. Never `.get(key, 0.0)` — a sub-phase this engine version did
+    not delineate is absent, the same distinction metrics.derive() makes,
+    and defaulting it to zero would draw a plausibly-shaped but understated
+    bar instead of an honest gap."""
+    vals = [r[key] for r in rs if r.get(key) is not None]
+    return median(vals) if vals else None
+
+
 def waterfall(rows, out_path) -> Path:
-    """Stacked median stage durations per arm, residual visually distinct."""
+    """Stacked median stage durations per arm, every measured stage drawn
+    and individually labelled in chronological order, residual visually
+    distinct.
+
+    Stacking order: T_platform, S1, T_weights (S2+S3), each identified S4
+    sub-phase present in the data, unattributed-within-S4, S5, S6 — spec,
+    "Why S4 is sub-decomposed" and "Attribution caveat". A sub-phase absent
+    from every row in an arm (the pinned engine version never delineated
+    it) is not drawn as its own bar; its duration is still real and folds
+    into the unattributed segment by construction (bracket minus only the
+    *identified* sub-phases), and that segment's label states which
+    sub-phases were merged into it rather than the chart silently being one
+    bar short with no explanation.
+    """
     by = _by_arm(rows)
-    fig, ax = plt.subplots(figsize=(10, 4.5))
+    fig, ax = plt.subplots(figsize=(11, 5.5))
     labels, ys = [], []
+    seen_labels: set[str] = set()
+
+    def _draw(y: float, value: float, label: str, color: str, **kw) -> float:
+        lbl = None if label in seen_labels else label
+        seen_labels.add(label)
+        ax.barh(y, value, left=_draw.left, color=color, label=lbl, **kw)
+        _draw.left += value
+        return value
+
     for i, arm in enumerate(ARMS):
         rs = by[arm]
         labels.append(f"{ARM_LABEL[arm]}\n(n={len(rs)})")
@@ -84,61 +136,94 @@ def waterfall(rows, out_path) -> Path:
         # the chart telling a story the data does not support, so the merge is
         # drawn as one explicitly-labelled bar instead — spec, stage taxonomy.
         measured = [r["t_weights"] for r in rs if r["t_weights"] is not None]
+        _draw.left = 0.0
         if measured:
             weights = median(measured)
-            sub = {
-                k: median([r["s4_subphases"].get(k, 0.0) for r in rs]) for k in ("S4c", "S4e")
-            }
-            unattributed = process - weights - sum(sub.values())
-            if unattributed < 0:
-                # A negative term means the measured components (weights +
-                # subphases) don't fit inside t_process, the thing they are
-                # supposed to sit inside — the decomposition itself is
-                # broken, not just cosmetically short. checks.py already
-                # applies this exact discipline to a single run's t_weights
-                # ("discard, don't silently correct"); a max(0.0, ...) clamp
-                # here would draw a plausible-looking but wrong bar, and
-                # this chart is the last place before publication such a
-                # defect could be caught. Raising (rather than drawing it
-                # some other unmistakable way) is chosen because figures.py
-                # already treats every other malformed input domain in this
-                # module as fatal, not as something to render around.
-                raise ValueError(
-                    f"arm {arm!r}: unattributed S4 time is negative "
-                    f"({unattributed:.3f}s = t_process {process:.3f} - "
-                    f"t_weights {weights:.3f} - S4 subphases "
-                    f"{sum(sub.values()):.3f}); the measured components do "
-                    "not fit inside t_process"
-                )
-            segments = [
-                (platform, "T_platform (not attributable)", RESIDUAL_COLOR),
-                (weights, "T_weights (S2+S3)", "#2f6fd0"),
-                (sub["S4c"], "S4c memory profiling", "#4a8a4a"),
-                (sub["S4e"], "S4e graph capture", "#c88a2e"),
-                (unattributed, "unattributed within S4", "#d9c8a9"),
-            ]
-        else:
-            segments = [
-                (platform, "T_platform (not attributable)", RESIDUAL_COLOR),
-                (process, "S2 to ready (phases merged by engine)", "#7f8fa6"),
-            ]
+            s1 = _median_present(rs, "t_s1")
+            s6 = _median_present(rs, "t_s6")
+            bracket = _median_present(rs, "t_s4_bracket")
 
-        left = 0.0
-        for value, label, color in segments:
-            ax.barh(i, value, left=left, color=color, label=label if i == 0 else None)
-            left += value
+            _draw(i, platform, "T_platform (not attributable)", RESIDUAL_COLOR)
+            if s1 is not None:
+                _draw(i, s1, "S1 imports", "#8e6fc4")
+            _draw(i, weights, "T_weights (S2+S3)", "#2f6fd0")
+
+            if bracket is not None:
+                present: dict[str, float] = {}
+                merged_subs: list[str] = []
+                for key in S4_SUBPHASE_KEYS:
+                    val = _median_present(rs, f"t_{key.lower()}")
+                    if val is not None:
+                        present[key] = val
+                    else:
+                        merged_subs.append(key)
+                identified_sum = sum(present.values())
+                unattributed = bracket - identified_sum
+                if unattributed < 0:
+                    # A negative term means the identified sub-phases don't
+                    # fit inside the S4 bracket that is supposed to contain
+                    # them — the decomposition itself is broken, not just
+                    # cosmetically short. checks.py already applies this
+                    # exact discipline to a single run's t_weights
+                    # ("discard, don't silently correct"); a max(0.0, ...)
+                    # clamp here would draw a plausible-looking but wrong
+                    # bar, and this chart is the last place before
+                    # publication such a defect could be caught.
+                    raise ValueError(
+                        f"arm {arm!r}: unattributed S4 time is negative "
+                        f"({unattributed:.3f}s = S4 bracket {bracket:.3f} - "
+                        f"identified sub-phases {identified_sum:.3f}); the "
+                        "measured sub-phases do not fit inside the bracket "
+                        "that is supposed to contain them"
+                    )
+                for key in S4_SUBPHASE_KEYS:
+                    if key in present:
+                        _draw(i, present[key], _SUBPHASE_LABEL[key], _SUBPHASE_COLOR[key])
+                unattributed_label = "unattributed within S4"
+                if merged_subs:
+                    unattributed_label += f" (includes merged: {', '.join(merged_subs)})"
+                _draw(i, unattributed, unattributed_label, "#d9c8a9")
+                s5 = _median_present(rs, "t_s5")
+                if s5 is not None:
+                    _draw(i, s5, "S5 ready (health poll)", "#5aa9c2")
+            else:
+                # No mark delineates S4 today (Task 11, the probe that
+                # emits S4_start/S4_end, is not built yet). S5_ready -
+                # S3_load_done is NOT the bracket — S5 is a separate, later
+                # stage (spec, Attribution caveat) — so it is never
+                # substituted. What IS honestly known without it: S1,
+                # T_weights and S6 are each independently measured from
+                # their own marks and partition t_process with no gaps
+                # around S4, so process minus those three is exactly the
+                # combined S4+S5 span. Drawn as one explicitly-merged
+                # bucket rather than silently omitted.
+                remainder = process - weights - (s1 or 0.0) - (s6 or 0.0)
+                _draw(
+                    i,
+                    remainder,
+                    "S4 + S5 (merged — S4_start/S4_end not yet measured)",
+                    "#b8b0c8",
+                    hatch="//",
+                )
+
+            if s6 is not None:
+                _draw(i, s6, "S6 cold TTFT", "#4f6d7a")
+        else:
+            _draw(i, platform, "T_platform (not attributable)", RESIDUAL_COLOR)
+            _draw(i, process, "S2 to ready (phases merged by engine)", "#7f8fa6")
 
     ax.set_yticks(ys, labels)
     ax.set_xlabel("seconds (median)")
     ax.set_xlim(left=0)
-    # Arm A (the longest bar) sits at the bottom of the chart, so a
-    # lower-right legend sits directly on top of its tail. Arm C (the
-    # shortest bar, drawn last) is at the top, leaving the upper-right
-    # corner clear regardless of how long arm A's bar grows.
-    ax.legend(loc="upper right", fontsize=8)
+    # Placed outside the axes (to the right) rather than in a corner: with
+    # every stage now individually labelled there can be a dozen legend
+    # entries, more than any in-plot corner has room for without covering a
+    # bar. `bbox_inches="tight"` on save (below) expands the saved canvas to
+    # include it rather than clipping it off.
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8, borderaxespad=0.0)
     ax.set_title("Cold start decomposition")
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return Path(out_path)
 

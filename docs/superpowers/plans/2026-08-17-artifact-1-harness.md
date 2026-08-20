@@ -956,6 +956,20 @@ git commit -m "docs: drop H3 and arm C — pinned vLLM version does not compile 
 
 Patterns come from the real captures in Task 6. Write the test using **exact lines copied out of `fixtures/vllm_logs/startup_0.log`** — do not invent log text.
 
+**Sub-phase key contract.** `parse_engine_log`'s `phases` dict is keyed by exactly the five names
+`coldstart.analysis.metrics.S4_SUBPHASE_KEYS` expects: `S4a` (device init), `S4b` (compilation),
+`S4c` (memory profiling), `S4d` (KV allocation), `S4e` (graph capture) — spec, stage taxonomy.
+`S4b` is not optional set-dressing: it is `T_compile`, the direct measurement H3 exists to get
+(B3), and the entire reason arm C exists. **A key this pinned vLLM version's logs do not emit
+must be omitted from `phases` and listed in `merged`, never defaulted to `0.0` or guessed from a
+neighboring line.** `metrics.derive()` already enforces the "absent, not zero" distinction on the
+consumer side (an omitted key becomes `None`, not `0.0`, and is recorded in `merged_phases`) —
+this parser is the producer side of that same contract and must not undermine it by inventing a
+zero for a phase it never actually saw. The illustrative `PATTERNS`/`MERGED` below are
+placeholders pending the Task 6 reconnaissance capture, not a prediction that `S4b` will turn out
+merged — do not treat that placeholder as license to skip trying to parse `S4b` once real log
+text is available.
+
 **Files:**
 - Create: `coldstart/vllm_logs.py`, `tests/test_vllm_logs.py`
 
@@ -1728,6 +1742,34 @@ git commit -m "feat: clock consistency checks, residual, failure taxonomy"
 them. Two copies of a pre-registered parameter are two copies free to drift, and the one
 that drifts silently is the one that gets published.
 
+**Mark contract addition — `S4_start` and `S4_end` (required by the B2/B3 fixes in
+`coldstart/analysis/metrics.py`).** No mark in the original contract delineates `S4`, so
+`derive()` could not compute an `S4` bracket and the waterfall's "unattributed within S4" was
+silently absorbing S1, all five `S4` sub-phases (including `S4b` compilation — B3), S5, and S6.
+This probe is the producer of the two marks that fix that:
+
+- `recorder.mark("S4_start")` immediately after `S3_load_done` is confirmed — device init begins
+  the instant weights are resident on GPU, so the two marks land at the same instant. Add it
+  right next to the existing `S3_load_done` marking in `drain()`, guarded the same way (`mark()`
+  rejects duplicates).
+- `recorder.mark("S4_end")` from a new log predicate, analogous to `_is_load_complete` — call it
+  `_is_engine_up(line)` — that fires on whatever this vLLM version logs when the engine itself
+  reports ready to accept traffic (found from the Task 6 reconnaissance captures, same discipline
+  as `_is_load_complete`). This is **not** the same event as `S5_ready`: `S5_ready` is marked
+  after `_wait_healthy()` returns, which is the *external* health-check endpoint responding
+  ("server reports healthy," an HTTP round trip through the health poll) — a later, separate
+  event from the engine's own internal "I am up" log line. Marking `S4_end` at `S5_ready` instead
+  would fold all of `S5` into `S4`, which is exactly the substitution
+  `t_s4_bracket = S5_ready - S3_load_done` that `metrics.derive()` now explicitly refuses to make
+  (see the spec's Attribution caveat, and `test_t_s4_bracket_never_substitutes_s5_ready_minus_s3_load_done`
+  in `tests/test_metrics.py`).
+
+Until this task ships, `S4_start`/`S4_end` are absent from every real record, `derive()`'s
+`t_s4_bracket` is `None` on every row, and the waterfall draws an explicitly-labelled "S4 + S5
+(merged — S4_start/S4_end not yet measured)" bucket instead of guessing. That is the intended,
+honest behavior of the analysis layer while this task is outstanding — not a bug to work around
+by substituting `S5_ready - S3_load_done` here or in analysis.
+
 **Files:**
 - Modify: `worker/probe.py` (replace placeholder)
 - Create: `tests/test_probe_units.py`
@@ -1872,6 +1914,7 @@ def run_probe(recorder, model: str, health_timeout: float = 900.0) -> dict:
 
     log_lines: list[str] = []
     seen_load = False
+    seen_engine_up = False
     recorder.mark("S2_acquisition_start")
     proc = subprocess.Popen(
         ["vllm", "serve", model, "--port", str(PORT)],
@@ -1883,7 +1926,7 @@ def run_probe(recorder, model: str, health_timeout: float = 900.0) -> dict:
     )
 
     def drain():
-        nonlocal seen_load
+        nonlocal seen_load, seen_engine_up
         for line in proc.stdout:
             log_lines.append(line.rstrip("\n"))
             # S3_load_done marks "weights resident on GPU" — the end of T_weights
@@ -1894,7 +1937,19 @@ def run_probe(recorder, model: str, health_timeout: float = 900.0) -> dict:
             # credit weight caching with the compile-cache saving.
             if _is_load_complete(line) and not seen_load:
                 recorder.mark("S3_load_done")  # mark() rejects duplicates; guard first
+                recorder.mark("S4_start")  # device init begins the instant weights land
                 seen_load = True
+            # _is_engine_up's predicate comes from Task 7's fixtures, same
+            # discipline as _is_load_complete — filled in once the
+            # reconnaissance capture (Task 6) shows what this vLLM version
+            # logs when it reports itself ready. This is NOT S5_ready: that
+            # mark fires later, on the external health-check endpoint
+            # responding, not on the engine's own internal log line. Folding
+            # S4_end into S5_ready would fold all of S5 into S4 — the exact
+            # substitution metrics.derive() refuses to make.
+            if _is_engine_up(line) and not seen_engine_up:
+                recorder.mark("S4_end")
+                seen_engine_up = True
 
     threading.Thread(target=drain, daemon=True).start()
 
@@ -6261,11 +6316,47 @@ under the label "unattributed". The spec's quantity is different arithmetic enti
 side-effect the waterfall now sums to exactly `t_total` by construction, inverting the spec's
 "the waterfall never sums to a suspiciously exact 100%" honesty claim.
 
+**Fixed.** The mark contract gained `S4_start`/`S4_end` (see Task 11); `derive()`
+(`coldstart/analysis/metrics.py`) now computes `t_s4_bracket = S4_end − S4_start` when both marks
+are present, and `s4_unattributed = t_s4_bracket − Σ(identified S4 sub-phases)`, exactly the
+spec's formula — never `t_process`. `t_s1` and `t_s5` (`S5_ready − S4_end`, not
+`S5_ready − S3_load_done`) are now explicit fields too, so `S1` and `S5` are their own measured
+stages instead of hiding inside a remainder. `waterfall()` (`coldstart/analysis/figures.py`)
+draws every stage in chronological order — `T_platform`, `S1`, `T_weights`, each identified
+`S4a`–`S4e` present in the data, `unattributed within S4`, `S5`, `S6` — with the hardcoded
+`("S4c", "S4e")` pair removed. A negative `s4_unattributed` raises, naming the arm and the actual
+numbers, the same discipline already applied to a negative `t_weights`.
+
+**What remains worker-side.** `S4_start`/`S4_end` are not emitted by anything yet — the probe
+that marks them (Task 11) is blocked on the Task 6 reconnaissance run, so on every real record
+today `t_s4_bracket` is `None`. `derive()` never substitutes `S5_ready − S3_load_done` for it
+(that fold-in is exactly the misattribution B2 exists to stop), and `waterfall()` correspondingly
+draws an explicit `"S4 + S5 (merged — S4_start/S4_end not yet measured)"` segment — computed
+honestly from `t_process` minus the three stages that *are* independently measured today (`S1`,
+`T_weights`, `S6`) — rather than a guess or a silently missing bar. This is the intended,
+temporary state of the analysis layer, not a defect; it resolves itself the moment Task 11 lands
+and starts emitting the two marks, with no further analysis-side change required.
+
 **B3 — `S4b` has no producer anywhere.** `grep s4b` across `coldstart/` and `worker/` returns
 only `economics.compile_cache_term`'s two parameters and their tests. `derive()` passes
 `s4_subphases` through as an opaque dict and computes nothing from it. H3 — the hypothesis the
 spec calls the most interesting result available in this experiment, and the entire reason arm C
 exists — currently has no measurement.
+
+**Fixed.** `derive()` now extracts all five `S4a`–`S4e` sub-phases from
+`record.engine["s4_subphases"]` into explicit fields (`t_s4a`…`t_s4e`), each `None` — not `0.0`
+— when the pinned engine version did not delineate it, recorded in `merged_phases` the same way
+a missing `S2`/`S3` mark already is. `t_compile` is now a first-class field sourced from `S4b`;
+`tests/test_metrics.py::test_t_compile_feeds_compile_cache_term` demonstrates the previously-empty
+wiring end to end, feeding two `derive()` rows' `t_compile` values directly into
+`economics.compile_cache_term(s4b_cold, s4b_warm)`.
+
+**What remains worker-side.** `derive()` reads `record.engine["s4_subphases"]`; nothing populates
+that field on a real run yet. That parser is Task 7's `coldstart/vllm_logs.py`, also blocked on
+the Task 6 reconnaissance run, and is now specified there to use exactly the `S4a`–`S4e` key
+contract this fix consumes, with the same "omit, don't zero" merge policy. Once Task 7 lands, H3
+becomes measurable with no further analysis-side change: `t_compile` (arm B, cold compile) minus
+`t_compile` (arm C, warm compile), aggregated across each arm's rows, is `T_compile`.
 
 **B4 — no stage decides which rows are publishable, so each consumer invented its own error
 policy.** `derive()` returns a 6-key row for failures and a 20-key row for successes, with `None`
