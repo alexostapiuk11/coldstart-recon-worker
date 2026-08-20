@@ -89,7 +89,27 @@ def waterfall(rows, out_path) -> Path:
             sub = {
                 k: median([r["s4_subphases"].get(k, 0.0) for r in rs]) for k in ("S4c", "S4e")
             }
-            unattributed = max(0.0, process - weights - sum(sub.values()))
+            unattributed = process - weights - sum(sub.values())
+            if unattributed < 0:
+                # A negative term means the measured components (weights +
+                # subphases) don't fit inside t_process, the thing they are
+                # supposed to sit inside — the decomposition itself is
+                # broken, not just cosmetically short. checks.py already
+                # applies this exact discipline to a single run's t_weights
+                # ("discard, don't silently correct"); a max(0.0, ...) clamp
+                # here would draw a plausible-looking but wrong bar, and
+                # this chart is the last place before publication such a
+                # defect could be caught. Raising (rather than drawing it
+                # some other unmistakable way) is chosen because figures.py
+                # already treats every other malformed input domain in this
+                # module as fatal, not as something to render around.
+                raise ValueError(
+                    f"arm {arm!r}: unattributed S4 time is negative "
+                    f"({unattributed:.3f}s = t_process {process:.3f} - "
+                    f"t_weights {weights:.3f} - S4 subphases "
+                    f"{sum(sub.values()):.3f}); the measured components do "
+                    "not fit inside t_process"
+                )
             segments = [
                 (platform, "T_platform (not attributable)", RESIDUAL_COLOR),
                 (weights, "T_weights (S2+S3)", "#2f6fd0"),

@@ -30,22 +30,65 @@ from coldstart.analysis.figures import (
     waterfall,
 )
 
+# Distinct per-arm warmup shape (different plateau and different initial
+# spike): a fixture where all three arms shared one warmup curve — the
+# original version of this fixture — makes warmup_curve's three series draw
+# exactly on top of each other. A test can only detect what its fixture can
+# express, and a fixture like that cannot tell "three correct series" apart
+# from "the same series plotted three times" or "two series silently
+# dropped." Values are illustrative (a cached/compiled arm settling faster
+# and lower), not measured.
+_WARMUP_STEADY = {"A": 3.0, "B": 2.0, "C": 1.2}
+_WARMUP_SPIKE = {"A": 3.5, "B": 2.5, "C": 1.6}
+
+# Per-host additive offset on t_total. Every (arm, host) pair appears
+# exactly twice in a 30-row fixture (lcm(3, 5) = 15), so each host's 6 rows
+# split evenly 2/2/2 across arms and this offset shifts each host's own
+# median by exactly this amount — it demonstrates real host heterogeneity
+# (spec H4: host variance, not just within-stage variance, drives the tail)
+# rather than the near-flat (<5% spread) bar chart the unshifted fixture
+# produced. Kept below half the tightest inter-arm gap (B-C, 35s baseline)
+# so ecdf_plot's three per-arm distributions stay visually separated
+# instead of bleeding into each other.
+_HOST_OFFSET = {"h0": -10.0, "h1": -5.0, "h2": 0.0, "h3": 5.0, "h4": 10.0}
+
+# Per-arm S4 subphases. Arm A and B keep the original constants (6.0, 12.0);
+# waterfall's exact-width assertions below are pinned against those two
+# arms and are untouched by this change. Arm C cannot use the same
+# constants: with t_process=42.0 and t_weights=30.0, a sub-phase sum of 18.0
+# would make weights + subphases (48.0) exceed t_process (42.0) -- a
+# negative "unattributed" term, which waterfall() now raises on instead of
+# silently clamping to zero (see the dedicated negative-term tests). Arm C's
+# subphases are scaled down so the *default* fixture is internally
+# consistent; the negative case gets its own explicit, separately
+# constructed fixture instead of hiding inside the everyday one.
+_S4_SUBPHASES = {
+    "A": {"S4c": 6.0, "S4e": 12.0},
+    "B": {"S4c": 6.0, "S4e": 12.0},
+    "C": {"S4c": 3.0, "S4e": 6.0},
+}
+
 
 def rows(n=30):
     out = []
     for i in range(n):
         arm = ["A", "B", "C"][i % 3]
+        host = f"h{i % 5}"
         base = {"A": 160.0, "B": 95.0, "C": 60.0}[arm]
+        steady = _WARMUP_STEADY[arm]
+        spike = _WARMUP_SPIKE[arm]
         out.append(
             {
                 "arm": arm,
-                "host_id": f"h{i % 5}",
-                "t_total": base + i * 0.4,
+                "host_id": host,
+                "t_total": base + i * 0.4 + _HOST_OFFSET[host],
                 "t_platform": 18.0,
                 "t_weights": base * 0.5,
-                "s4_subphases": {"S4c": 6.0, "S4e": 12.0},
+                "s4_subphases": dict(_S4_SUBPHASES[arm]),
                 "t_process": base - 18.0,
-                "warmup": [{"req_index": k, "end_to_end": 2.0 * (1 + 2 * 0.55**k)} for k in range(10)],
+                "warmup": [
+                    {"req_index": k, "end_to_end": steady + spike * 0.55**k} for k in range(10)
+                ],
             }
         )
     return out
@@ -119,13 +162,16 @@ def test_waterfall_draws_five_segments_per_arm_with_residual_first_and_correct_s
     assert lefts == pytest.approx([0.0, 18.0, 98.0, 104.0, 116.0])
 
 
-def test_waterfall_unattributed_segment_floors_at_zero_instead_of_going_negative(tmp_path):
-    """Arm C: t_process=42, t_weights=30, subphases sum to 18 -> raw
-    unattributed would be -6. The chart must clamp to 0, not draw a
-    negative-width bar."""
+def test_waterfall_arm_c_segments_are_pinned_and_genuinely_positive(tmp_path):
+    """Arm C: t_process=42, t_weights=30, S4c+S4e=9 -> unattributed = 42 -
+    30 - 9 = 3, a small but genuinely positive residual (arm C's subphases
+    are scaled down in the fixture specifically so this stays >= 0 -- see
+    the fixture's `_S4_SUBPHASES` comment). The dedicated negative-term
+    tests below cover the case that must now raise instead of clamp."""
     _fig, ax = _call_capturing_axes(waterfall, rows(), tmp_path / "w.png")
     arm_c = ax.patches[10:15]
-    assert arm_c[-1].get_width() == pytest.approx(0.0)
+    widths = [p.get_width() for p in arm_c]
+    assert widths == pytest.approx([18.0, 30.0, 3.0, 6.0, 3.0])
 
 
 def test_waterfall_yticklabels_carry_each_arms_n(tmp_path):
@@ -192,6 +238,36 @@ def test_waterfall_uses_the_shared_median_helper(tmp_path):
     assert spy.called
 
 
+def test_waterfall_raises_on_a_negative_unattributed_term_instead_of_clamping(tmp_path):
+    """If the measured sub-phases plus t_weights exceed t_process, the
+    decomposition does not fit inside the thing it decomposes -- checks.py
+    applies exactly this discipline to a single run's t_weights ("discard,
+    don't silently correct"). A max(0.0, ...) clamp (the original behavior)
+    would draw a plausible-looking but understated bar instead of surfacing
+    the defect; this must raise, and name the offending arm."""
+    data = rows()
+    for r in data:
+        if r["arm"] == "C":
+            # arm C: t_process=42.0, t_weights=30.0; pushing S4e to 40.0
+            # makes weights + subphases = 30 + 46 = 76, well past t_process.
+            r["s4_subphases"] = {"S4c": 6.0, "S4e": 40.0}
+    with pytest.raises(ValueError, match="C"):
+        waterfall(data, tmp_path / "w.png")
+
+
+def test_waterfall_negative_unattributed_message_names_the_actual_numbers(tmp_path):
+    """Pins that the raised message carries the numbers a reader would need
+    to investigate (not just "something is wrong somewhere"), and that a
+    well-formed arm earlier in ARMS order doesn't mask a later arm's
+    defect."""
+    data = rows()
+    for r in data:
+        if r["arm"] == "C":
+            r["s4_subphases"] = {"S4c": 6.0, "S4e": 40.0}
+    with pytest.raises(ValueError, match=r"-34\.0"):
+        waterfall(data, tmp_path / "w.png")
+
+
 # ---------------------------------------------------------------------------
 # warmup_curve
 # ---------------------------------------------------------------------------
@@ -217,6 +293,20 @@ def test_warmup_curve_plots_a_different_request_count_when_the_data_has_fewer(tm
     assert len(arm_lines) == 3
     for ln in arm_lines:
         assert list(ln.get_xdata()) == [1, 2, 3, 4]
+
+
+def test_warmup_curve_series_are_visually_distinct_not_identical(tmp_path):
+    """Regression guard for the fixture itself: the original `rows()` gave
+    every arm the exact same warmup shape, so only the last-drawn arm's line
+    was visible (the other two were drawn underneath it). A test built on
+    that fixture cannot tell "three correct series" from "one series plotted
+    three times" or "two series silently dropped" -- both would pass every
+    other assertion in this file. Each arm's y-data must actually differ."""
+    _fig, ax = _call_capturing_axes(warmup_curve, rows(), tmp_path / "w.png")
+    arm_lines = [ln for ln in ax.lines if ln.get_marker() == "o"]
+    assert len(arm_lines) == 3
+    ydata = [tuple(ln.get_ydata()) for ln in arm_lines]
+    assert len(set(ydata)) == 3
 
 
 def test_warmup_curve_legend_labels_carry_each_arms_n(tmp_path):
@@ -345,6 +435,20 @@ def test_per_host_medians_xticklabels_carry_each_hosts_n(tmp_path):
     assert len(labels) == 5
     for lbl in labels:
         assert "n=6" in lbl
+
+
+def test_per_host_medians_shows_genuine_heterogeneity_not_a_flat_line(tmp_path):
+    """Regression guard for the fixture: this figure exists to support the
+    host-heterogeneity hypothesis (spec H4 -- host variance, not just
+    within-stage variance, drives the tail). The original fixture pooled
+    every host over a balanced 2/2/2 arm mix each, which made every host's
+    median collapse to almost the same value (<5% spread) regardless of any
+    real per-host effect -- a bug that erased host differences entirely
+    would have been invisible against a chart that already looked flat."""
+    _fig, ax = _call_capturing_axes(per_host_medians, rows(), tmp_path / "h.png")
+    heights = [p.get_height() for p in ax.patches]
+    avg = sum(heights) / len(heights)
+    assert (max(heights) - min(heights)) / avg > 0.10
 
 
 def test_per_host_medians_ylim_starts_at_zero(tmp_path):
