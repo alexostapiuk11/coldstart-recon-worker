@@ -1722,6 +1722,12 @@ git commit -m "feat: clock consistency checks, residual, failure taxonomy"
 
 ## Task 11: Worker probe — the real measurement path
 
+**Do not reimplement the warmup trio here.** `steady_state_latency`, `warmup_penalty` and
+`time_to_fast_index` are pre-registered definitions and they live in
+`coldstart/analysis/metrics.py` (Task 16), along with the `FAST_TOLERANCE` constant. Import
+them. Two copies of a pre-registered parameter are two copies free to drift, and the one
+that drifts silently is the one that gets published.
+
 **Files:**
 - Modify: `worker/probe.py` (replace placeholder)
 - Create: `tests/test_probe_units.py`
@@ -2441,6 +2447,18 @@ git commit -m "feat: driver orchestrating scheduled runs into the store"
 **Files:**
 - Create: `coldstart/analysis/metrics.py`, `tests/test_metrics.py`
 
+**Hardening folded in after code review.** The first version of this task passed its own
+nine tests while twenty-two of twenty-five mutations survived them. The three that were
+caught were all in the `T_weights` region; everything around it was undefended. A
+mis-ordered mark produced a negative `t_weights` flagged consistent; `kv_cache_blocks == 0`
+was indistinguishable from the engine reporting nothing; a missing `S2` mark was reported as
+a merged `S3`; failed runs lost their `failure_class` entirely, making the published
+failure-rate-per-arm table impossible to build from derived rows. Worst of the set,
+`FAST_TOLERANCE` — a *pre-registered* analysis parameter — could be changed from `0.10` to
+`0.0` or `10.0` with the whole suite still green. The warmup trio is now extracted as named,
+independently tested functions so Task 11 imports the pre-registered definitions rather than
+growing a second copy of them.
+
 - [ ] **Step 1: Write the failing test**
 
 `tests/test_metrics.py`:
@@ -2448,8 +2466,21 @@ git commit -m "feat: driver orchestrating scheduled runs into the store"
 ```python
 import pytest
 
-from coldstart.analysis.metrics import ceiling_bound, derive
+from coldstart.analysis.metrics import (
+    ceiling_bound,
+    derive,
+    steady_state_latency,
+    time_to_fast_index,
+    warmup_penalty,
+)
+from coldstart.checks import DiscardReason
 from coldstart.schema import RunRecord
+
+# Distinct per-request values with a non-flat tail, so the last-three window,
+# the median (vs. max), and warmup[0] (vs. warmup[1]) are each pinned by a
+# formula that no other formula over the same list would also satisfy.
+# Last three (idx 7, 8, 9) = [4.0, 3.2, 2.0] -> median (steady) = 3.2.
+_WARMUP_LATENCIES = [10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 3.4, 4.0, 3.2, 2.0]
 
 
 def make(arm="A", t_submit=0.0, t_result=150.0, marks=None, warmup=None):
@@ -2463,7 +2494,7 @@ def make(arm="A", t_submit=0.0, t_result=150.0, marks=None, warmup=None):
         {"stage": "S7_warmup_done", "t_mono": 130.0},
     ]
     warmup = warmup or [
-        {"req_index": i, "ttft": 0.5, "end_to_end": 2.0 if i >= 3 else 6.0} for i in range(10)
+        {"req_index": i, "ttft": 0.5, "end_to_end": v} for i, v in enumerate(_WARMUP_LATENCIES)
     ]
     return RunRecord(
         run_id="r",
@@ -2499,14 +2530,64 @@ def test_kv_capacity_is_blocks_times_block_size():
 
 def test_steady_state_and_warmup_penalty():
     d = derive(make())
-    assert d["steady_state_latency"] == 2.0
-    assert d["warmup_penalty"] == 3.0
+    assert d["steady_state_latency"] == pytest.approx(3.2)
+    assert d["warmup_penalty"] == pytest.approx(10.0 / 3.2)
+
+
+def test_time_to_fast_index_uses_the_registered_tolerance():
+    # steady=3.2, threshold=3.2*1.1=3.52. idx6=3.4 is the first value <= 3.52.
+    # A tolerance of 0.0 would instead land on idx8 (3.2); 10.0 would land on
+    # idx0 (10.0) — see test_time_to_fast_index_* below for those directly.
+    d = derive(make())
+    assert d["time_to_fast_index"] == 6
 
 
 def test_inconsistent_run_is_flagged_not_silently_kept():
     d = derive(make(t_result=50.0))
     assert d["consistent"] is False
     assert d["t_platform"] is None
+    assert d["inconsistency_reason"] is not None
+    assert d["discard_reason"] == DiscardReason.PROCESS_EXCEEDS_TOTAL
+
+
+def test_residual_below_rtt_floor_is_flagged_inconsistent():
+    # t_process=102.0 (default marks), t_result=102.03 -> residual=0.03,
+    # below the 0.05 rtt floor.
+    d = derive(make(t_result=102.03))
+    assert d["consistent"] is False
+    assert d["t_platform"] is None
+    assert d["discard_reason"] == DiscardReason.RESIDUAL_BELOW_RTT_FLOOR
+
+
+def test_failed_run_is_not_processed_and_keeps_its_classification():
+    rec = make()
+    rec.host = {"host_id": "h9", "triple_index": 2}
+    rec.status = {
+        "outcome": "failed",
+        "failure_class": "oom",
+        "failure_detail": "CUDA out of memory",
+    }
+    d = derive(rec)
+    assert d == {
+        "ok": False,
+        "arm": "A",
+        "host_id": "h9",
+        "triple_index": 2,
+        "consistent": False,
+        "failure_class": "oom",
+    }
+
+
+def test_failed_run_guard_is_not_a_noop():
+    # Guards against `if False:` replacing the outcome check: with a broken
+    # guard, this failed run would fall through to the ok-run path (which the
+    # default fixture's marks/clocks would happily compute), producing a
+    # 20-key "ok": True row instead of the 6-key failure row asserted above.
+    rec = make()
+    rec.status = {"outcome": "failed", "failure_class": None, "failure_detail": None}
+    d = derive(rec)
+    assert d["ok"] is False
+    assert "t_total" not in d
 
 
 def test_t_weights_is_s2_plus_s3_and_stops_at_the_load_boundary():
@@ -2529,11 +2610,135 @@ def test_t_weights_is_none_when_the_load_boundary_was_not_delineated():
     d = derive(make(marks=marks))
     assert d["t_weights"] is None
     assert d["t_s2_to_ready"] == pytest.approx(96.0)
-    assert "S3" in d["merged_phases"]
+    assert d["merged_phases"] == ["S3"]
+
+
+def test_t_weights_is_none_when_the_acquisition_start_was_not_delineated():
+    """A missing S2 mark is a different defect from a missing S3 mark and must
+    be named correctly — not folded into the same 'S3' label."""
+    marks = [m for m in make().clock_B["marks"] if m["stage"] != "S2_acquisition_start"]
+    d = derive(make(marks=marks))
+    assert d["t_weights"] is None
+    assert d["t_s2_to_ready"] is None
+    assert d["merged_phases"] == ["S2"]
+
+
+def test_t_weights_negative_is_flagged_inconsistent_not_corrected():
+    """S3_load_done preceding S2_acquisition_start is impossible, not a sign
+    error. `abs()`-ing it would silently publish a wrong number."""
+    marks = [
+        {"stage": "S2_acquisition_start", "t_mono": 60.0},
+        {"stage": "S3_load_done", "t_mono": 54.0},
+        {"stage": "S6_first_token", "t_mono": 102.0},
+    ]
+    d = derive(make(marks=marks))
+    assert d["t_weights"] is None
+    assert d["consistent"] is False
+    assert d["merged_phases"] == []  # both marks were present; the value was just invalid
+
+
+def test_t_weights_exceeding_t_process_is_flagged_inconsistent():
+    """A weights phase longer than the process containing it is impossible."""
+    marks = [
+        {"stage": "S2_acquisition_start", "t_mono": 4.0},
+        {"stage": "S3_load_done", "t_mono": 500.0},
+        {"stage": "S6_first_token", "t_mono": 102.0},
+    ]
+    d = derive(make(marks=marks))
+    assert d["t_weights"] is None
+    assert d["consistent"] is False
+
+
+def test_returned_row_carries_identity_and_reason():
+    rec = make()
+    rec.host = {"host_id": "h7", "triple_index": 3}
+    d = derive(rec)
+    assert d["arm"] == "A"
+    assert d["host_id"] == "h7"
+    assert d["triple_index"] == 3
+    assert d["inconsistency_reason"] is None
+
+
+def test_kv_capacity_is_zero_not_none_when_blocks_report_zero():
+    """kv_cache_blocks == 0 is a real, alarming engine state — distinct from
+    the engine not reporting the field at all."""
+    rec = make()
+    rec.engine = {"kv_cache_blocks": 0, "block_size": 16}
+    d = derive(rec)
+    assert d["kv_cache_blocks"] == 0
+    assert d["kv_capacity_tokens"] == 0
+
+
+def test_kv_capacity_is_none_when_engine_omits_the_fields():
+    rec = make()
+    rec.engine = {}
+    d = derive(rec)
+    assert d["kv_cache_blocks"] is None
+    assert d["kv_capacity_tokens"] is None
+
+
+def test_missing_process_mark_raises_with_run_identity():
+    marks = [m for m in make().clock_B["marks"] if m["stage"] != "S6_first_token"]
+    rec = make(marks=marks)
+    rec.run_id = "run-42"
+    with pytest.raises(KeyError) as exc_info:
+        derive(rec)
+    message = str(exc_info.value)
+    assert "run-42" in message
+    assert "A" in message
 
 
 def test_ceiling_bound_is_the_share_removable():
     assert ceiling_bound(t_weights=40.0, t_total=200.0) == pytest.approx(0.20)
+
+
+def test_ceiling_bound_rejects_zero_total():
+    with pytest.raises(ValueError):
+        ceiling_bound(t_weights=10.0, t_total=0.0)
+
+
+def test_ceiling_bound_rejects_weights_exceeding_total():
+    with pytest.raises(ValueError):
+        ceiling_bound(t_weights=300.0, t_total=200.0)
+
+
+# --- direct tests for the extracted warmup-trio functions (I10) ---
+# These pin the definitions themselves, independent of RunRecord plumbing —
+# and are what Task 11's worker/probe.py is meant to import instead of
+# re-deriving the same formulas.
+
+
+def test_steady_state_latency_is_median_of_last_three():
+    warmup = [{"req_index": i, "end_to_end": v} for i, v in enumerate(_WARMUP_LATENCIES)]
+    assert steady_state_latency(warmup) == pytest.approx(3.2)
+
+
+def test_steady_state_latency_is_none_for_empty_warmup():
+    assert steady_state_latency([]) is None
+
+
+def test_warmup_penalty_is_first_over_steady():
+    warmup = [{"req_index": 0, "end_to_end": 9.6}, {"req_index": 1, "end_to_end": 3.2}]
+    assert warmup_penalty(warmup, steady=3.2) == pytest.approx(3.0)
+
+
+def test_warmup_penalty_is_none_when_steady_is_zero():
+    warmup = [{"req_index": 0, "end_to_end": 5.0}]
+    assert warmup_penalty(warmup, steady=0.0) is None
+
+
+def test_time_to_fast_index_returns_first_index_within_tolerance():
+    warmup = [{"req_index": i, "end_to_end": v} for i, v in enumerate([10.0, 3.4, 3.2])]
+    assert time_to_fast_index(warmup, steady=3.2, tolerance=0.10) == 1
+
+
+def test_time_to_fast_index_zero_tolerance_moves_the_index():
+    warmup = [{"req_index": i, "end_to_end": v} for i, v in enumerate([10.0, 3.4, 3.2])]
+    assert time_to_fast_index(warmup, steady=3.2, tolerance=0.0) == 2
+
+
+def test_time_to_fast_index_is_none_when_steady_is_none():
+    assert time_to_fast_index([{"req_index": 0, "end_to_end": 1.0}], steady=None) is None
 ```
 
 - [ ] **Step 2: Run and confirm it fails**
@@ -2547,49 +2752,131 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'coldstart.analysis.met
 
 ```python
 import statistics
+from typing import TypedDict
 
-from coldstart.checks import check_consistency, compute_residual
+from coldstart.checks import DiscardReason, check_consistency, compute_residual
 from coldstart.schema import RunRecord
 
 FAST_TOLERANCE = 0.10  # fixed before data — see spec 7
+
+
+class DerivedRow(TypedDict, total=False):
+    """One derived row: the interface between the harness and every published
+    figure. `total=False` because a failed run (six keys: ok, arm, host_id,
+    triple_index, consistent, failure_class) and an ok run (twenty keys) are
+    genuinely different contracts, not a partially-filled version of each
+    other — see `derive`.
+    """
+
+    ok: bool
+    arm: str
+    host_id: str | None
+    triple_index: int | None
+    failure_class: str | None
+    t_total: float
+    t_process: float
+    t_platform: float | None
+    t_weights: float | None
+    t_s2_to_ready: float | None
+    merged_phases: list[str]
+    s4_subphases: dict
+    warmup: list[dict]
+    steady_state_latency: float | None
+    warmup_penalty: float | None
+    time_to_fast_index: int | None
+    kv_cache_blocks: int | None
+    kv_capacity_tokens: int | None
+    consistent: bool
+    inconsistency_reason: str | None
+    discard_reason: DiscardReason | None
 
 
 def _marks(record: RunRecord) -> dict[str, float]:
     return {m["stage"]: m["t_mono"] for m in record.clock_B.get("marks", [])}
 
 
-def ceiling_bound(t_weights: float, t_total: float) -> float:
-    """Largest fraction of T_total removable if T_weights went to zero.
+def _require_mark(marks: dict[str, float], stage: str, record: RunRecord) -> float:
+    """Fail loudly, but never anonymously — mid-campaign a bare KeyError gives
+    no way to find the offending run."""
+    try:
+        return marks[stage]
+    except KeyError as exc:
+        raise KeyError(
+            f"run {record.run_id!r} (arm {record.arm!r}): missing required stage mark {stage!r}"
+        ) from exc
 
-    Conceptually this is (weights share of T_process) x (T_process share of
-    T_total), but T_process cancels, so it is written in the reduced form. The
-    unreduced version took a T_process argument that could not affect the
-    result — a parameter no test could ever pin.
+
+def steady_state_latency(warmup: list[dict]) -> float | None:
+    """Median end-to-end latency of the last three warmup requests — spec 7.
+
+    Extracted as a named function (rather than inlined in `derive`) because
+    the plan reuses this exact definition in `worker/probe.py` (Task 11);
+    importing it from here keeps the two sites from drifting apart.
     """
+    if not warmup:
+        return None
+    return statistics.median(w["end_to_end"] for w in warmup[-3:])
+
+
+def warmup_penalty(warmup: list[dict], steady: float | None) -> float | None:
+    """Ratio of the first warmup request's latency to steady state.
+
+    Undefined when steady state is exactly zero — an implausible latency
+    reading that must not be silently reported as "no penalty" (that would
+    conflate it with the "no warmup data" case) nor crash the batch with a
+    ZeroDivisionError. Both are treated as None; the `consistent`/reason
+    machinery is not extended to warmup data, so there is nowhere else to
+    surface the anomaly.
+    """
+    if not warmup or steady is None or steady <= 0:
+        return None
+    return warmup[0]["end_to_end"] / steady
+
+
+def time_to_fast_index(
+    warmup: list[dict], steady: float | None, tolerance: float = FAST_TOLERANCE
+) -> int | None:
+    """First request index whose latency lands within `tolerance` of steady state."""
+    if steady is None:
+        return None
+    threshold = steady * (1.0 + tolerance)
+    for w in warmup:
+        if w["end_to_end"] <= threshold:
+            return w["req_index"]
+    return None
+
+
+def ceiling_bound(t_weights: float, t_total: float) -> float:
+    """Largest fraction of T_total removable if T_weights went to zero."""
+    if t_total <= 0:
+        raise ValueError(f"t_total must be positive, got {t_total}")
+    if not (0 <= t_weights <= t_total):
+        raise ValueError(f"t_weights {t_weights} must be within [0, t_total={t_total}]")
     return t_weights / t_total
 
 
-def derive(record: RunRecord) -> dict:
+def derive(record: RunRecord) -> DerivedRow:
     if record.status["outcome"] != "ok":
-        return {"ok": False, "arm": record.arm, "consistent": False}
+        # A failed run never reaches stage marks or clocks, but it still
+        # needs to be countable by arm and by host — that's what feeds the
+        # failure-rate tables and keeps FailureClass reachable from analysis.
+        return {
+            "ok": False,
+            "arm": record.arm,
+            "host_id": record.host.get("host_id"),
+            "triple_index": record.host.get("triple_index"),
+            "consistent": False,
+            "failure_class": record.status.get("failure_class"),
+        }
 
     m = _marks(record)
-    t_process = m["S6_first_token"]
+    t_process = _require_mark(m, "S6_first_token", record)
     t_total = record.clock_A["t_result"] - record.clock_A["t_submit"]
-    # check_consistency returns a 3-field ConsistencyResult, so attribute access
-    # rather than tuple unpacking — see Task 10.
     checked = check_consistency(t_total=t_total, t_process=t_process)
-    consistent, reason = checked.ok, checked.reason
-
-    warmup = record.warmup
-    steady = statistics.median(w["end_to_end"] for w in warmup[-3:]) if warmup else None
-    threshold = steady * (1.0 + FAST_TOLERANCE) if steady else None
-    fast_index = None
-    if threshold is not None:
-        for w in warmup:
-            if w["end_to_end"] <= threshold:
-                fast_index = w["req_index"]
-                break
+    # Carry all three ConsistencyResult fields through: discard_reason is a
+    # closed enum specifically so a downstream reader can tabulate discards
+    # by class instead of substring-matching the free-form `reason` string.
+    consistent, reason, discard_reason = checked.ok, checked.reason, checked.discard_reason
 
     # T_weights = S2 + S3 (spec, stage taxonomy). The volume arms may memory-map
     # weights, fusing acquisition and HBM load with no clean boundary between
@@ -2600,19 +2887,46 @@ def derive(record: RunRecord) -> dict:
     t_acq_start = m.get("S2_acquisition_start")
     t_load_done = m.get("S3_load_done")
     t_ready = m.get("S5_ready")
-    merged = []
-    if t_acq_start is not None and t_load_done is not None:
-        t_weights = t_load_done - t_acq_start
-    else:
-        t_weights = None
+    merged: list[str] = []
+    if t_acq_start is None:
+        merged.append("S2")
+    if t_load_done is None:
         merged.append("S3")
+
+    t_weights: float | None
+    if merged:
+        t_weights = None
+    else:
+        t_weights = t_load_done - t_acq_start
+        # A stage duration is an intra-clock quantity, so it earns the same
+        # discipline compute_residual applies on the cross-clock path: a
+        # negative or out-of-bounds duration means the run is broken, not
+        # that the number needs correcting (e.g. abs()) before publication.
+        if t_weights < 0:
+            consistent = False
+            reason = (
+                f"t_weights {t_weights} is negative: S3_load_done precedes S2_acquisition_start"
+            )
+            t_weights = None
+        elif t_weights > t_process:
+            consistent = False
+            reason = f"t_weights {t_weights} exceeds t_process {t_process}"
+            t_weights = None
+
     t_s2_to_ready = (
         t_ready - t_acq_start if t_acq_start is not None and t_ready is not None else None
     )
 
     blocks = record.engine.get("kv_cache_blocks")
     block_size = record.engine.get("block_size")
-    kv_tokens = blocks * block_size if blocks and block_size else None
+    # `is not None` rather than truthiness: kv_cache_blocks == 0 is a real
+    # (and alarming) engine state, not the same thing as "not reported".
+    kv_tokens = blocks * block_size if blocks is not None and block_size is not None else None
+
+    warmup = record.warmup
+    steady = steady_state_latency(warmup)
+    penalty = warmup_penalty(warmup, steady)
+    fast_index = time_to_fast_index(warmup, steady)
 
     return {
         "ok": True,
@@ -2628,19 +2942,20 @@ def derive(record: RunRecord) -> dict:
         "s4_subphases": record.engine.get("s4_subphases", {}),
         "warmup": warmup,
         "steady_state_latency": steady,
-        "warmup_penalty": (warmup[0]["end_to_end"] / steady) if warmup and steady else None,
+        "warmup_penalty": penalty,
         "time_to_fast_index": fast_index,
         "kv_cache_blocks": blocks,
         "kv_capacity_tokens": kv_tokens,
         "consistent": consistent,
         "inconsistency_reason": reason,
+        "discard_reason": discard_reason,
     }
 ```
 
 - [ ] **Step 4: Run and confirm pass**
 
 Run: `.venv/bin/pytest tests/test_metrics.py -v`
-Expected: PASS — 9 passed
+Expected: PASS — 29 passed
 
 - [ ] **Step 5: Commit**
 
