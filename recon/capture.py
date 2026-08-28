@@ -17,15 +17,30 @@ ENDPOINT = os.environ["RUNPOD_ENDPOINT_ID"]
 OUT = Path("fixtures")
 
 
-def submit(payload: dict) -> str:
-    r = requests.post(
-        f"{API}/{ENDPOINT}/run",
-        headers={"Authorization": f"Bearer {KEY}"},
-        json={"input": payload},
-        timeout=30,
-    )
-    r.raise_for_status()
-    return r.json()["id"]
+def submit(payload: dict, attempts: int = 5) -> str:
+    """Submit one job, retrying the transient rejections.
+
+    The endpoint answers 409 for a while after any config change, and 5xx shows
+    up under load. Both are transient, and a campaign submitting hundreds of
+    jobs cannot abort on one of them the way a single unguarded raise would.
+    """
+    for attempt in range(attempts):
+        r = requests.post(
+            f"{API}/{ENDPOINT}/run",
+            headers={"Authorization": f"Bearer {KEY}"},
+            json={"input": payload},
+            timeout=30,
+        )
+        if r.status_code == 409 or r.status_code >= 500:
+            if attempt == attempts - 1:
+                r.raise_for_status()
+            backoff = 2**attempt
+            print(f"[recon] submit got {r.status_code}, retrying in {backoff}s", flush=True)
+            time.sleep(backoff)
+            continue
+        r.raise_for_status()
+        return r.json()["id"]
+    raise RuntimeError("unreachable: retry loop exited without returning")
 
 
 def poll(job_id: str, timeout=1800) -> dict:
