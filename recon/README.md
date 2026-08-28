@@ -9,42 +9,50 @@ parses log lines copied out of `fixtures/vllm_logs/startup_0.log`, and
 `coldstart/runpod_api.py` maps the lifecycle fields actually present in
 `fixtures/runpod_api/status_0.json`. The plan forbids inventing either.
 
-## Human setup — cannot be automated from here
+## Provisioned infrastructure
 
-1. Create a RunPod account and generate an API key.
-2. The image is built for you. `.github/workflows/build-worker.yml` builds
-   `worker/` natively on an amd64 runner and pushes to
-   `ghcr.io/alexostapiuk11/coldstart-recon-worker` on every push that touches
-   `worker/`, or on demand from the Actions tab. It is not built locally: the
-   base image is amd64-only, so an arm64 Mac would emulate, and the runner's
-   `GITHUB_TOKEN` already has write access to this namespace.
+Created via the RunPod REST API (`https://rest.runpod.io/v1`), not the console.
+`RUNPOD_API_KEY` and `RUNPOD_ENDPOINT_ID` live in `.env`, which is gitignored.
 
-   Take the **digest** from the run summary, not the `:latest` tag. Tags drift,
-   and the reproducibility claim needs a reader to get the same engine.
+| Resource | ID | Notes |
+|---|---|---|
+| Template | `mzadx4qugv` | image pinned by digest, `MODEL_ID`, 60GB container disk |
+| Network volume | `9c7ut2slrd` | 50GB, EU-RO-1 |
+| Endpoint | `ka5mryakkxumew` | RTX 4090 (`ADA_24`), min 0 / max 1, 5s idle, 30min exec |
 
-   **The package is public**, verified by an anonymous pull of the manifest, so
-   RunPod needs no registry credentials. If you ever flip it private, add
-   credentials to the endpoint or the pull fails.
+### Three things that will bite anyone reproducing this
 
-   Current image, built from `ebdec67` and confirmed `linux/amd64`:
+**FlashBoot silently ignores `false` at creation.** `POST /endpoints` with
+`{"flashboot": false}` returns an endpoint with `flashboot: true`. It only sticks
+via a follow-up `POST /endpoints/{id}/update`. This is not cosmetic: FlashBoot
+caches worker state specifically to accelerate cold starts, so leaving it on
+means measuring RunPod's cache instead of the arms, and the numbers would look
+entirely plausible. Re-read the endpoint and assert `flashboot == false` before
+any campaign run rather than trusting the create call.
 
-   ```
-   ghcr.io/alexostapiuk11/coldstart-recon-worker@sha256:c85c6c4428e84d06fd6555f7957a65900908889f66f041004179c1119b017b1d
-   ```
+**The datacenter is fixed when the endpoint is created.** `dataCenterIds` reads
+back as `None` over REST, and the real binding comes from the attached network
+volume — visible as `locations` in the GraphQL API. Repointing an endpoint at a
+volume in a different datacenter does *not* move it; the endpoint has to be
+deleted and recreated.
 
-   Re-check any later build with:
+**24GB capacity is volatile.** US-KS-2 has no 24GB GPUs at all. US-TX-3 and
+US-NC-1 advertised RTX 4090 and then went to `available: false` within minutes,
+which presents as a worker flapping between `ready` and `throttled` while the job
+sits in queue forever — not as an error. EU-RO-1 was the only datacenter holding
+Medium stock. Check availability before a campaign run:
 
-   ```
-   TOKEN=$(curl -s "https://ghcr.io/token?service=ghcr.io&scope=repository:alexostapiuk11/coldstart-recon-worker:pull" | python3 -c "import json,sys;print(json.load(sys.stdin)['token'])")
-   curl -sI -H "Authorization: Bearer $TOKEN" https://ghcr.io/v2/alexostapiuk11/coldstart-recon-worker/manifests/artifact-1-harness | grep -i docker-content-digest
-   ```
+```
+curl -s -X POST "https://api.runpod.io/graphql?api_key=$RUNPOD_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"query { dataCenters { id gpuAvailability { gpuTypeId available stockStatus } } }"}'
+```
 
-3. Create a serverless endpoint on that image, pinned to **one** 24 GB GPU type
-   and **one** region. Both are held fixed for the whole campaign.
-4. Create a network volume; it mounts at `/runpod-volume` (see `HF_HOME` in the
-   Dockerfile).
-5. Set the endpoint env var `MODEL_ID`. Start with `Qwen/Qwen3-0.6B` for the
-   smoke run, then switch to the pinned Qwen3-8B revision.
+## Remaining human setup
+
+1. A RunPod account and API key. Everything else above is scriptable.
+2. Set the endpoint env var `MODEL_ID`: `Qwen/Qwen3-0.6B` for the smoke run, the
+   pinned Qwen3-8B revision for the real capture.
 
 ## Run
 
