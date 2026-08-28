@@ -12,6 +12,11 @@ MODEL = os.environ["MODEL_ID"]
 # Pinning the weights revision is what makes a rebuild reproducible; a floating
 # tag would let the checkpoint move under the experiment mid-campaign.
 REVISION = os.environ.get("MODEL_REVISION") or None
+# Held fixed across arms (spec "Held fixed"). Qwen3-8B's native 40960 context needs
+# 5.62 GiB of KV cache, but 15.27 GiB of weights leave only 4.92 GiB on a 24 GB card,
+# so the engine refuses to start. 8192 fits with headroom and keeps supported
+# concurrency non-degenerate at roughly four sequences.
+MAX_MODEL_LEN = os.environ.get("MAX_MODEL_LEN") or None
 PORT = 8000
 
 
@@ -32,6 +37,8 @@ def handler(job):
     cmd = ["vllm", "serve", MODEL, "--port", str(PORT)]
     if REVISION:
         cmd += ["--revision", REVISION]
+    if MAX_MODEL_LEN:
+        cmd += ["--max-model-len", MAX_MODEL_LEN]
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -78,6 +85,7 @@ def handler(job):
         "env": {
             "MODEL_ID": MODEL,
             "MODEL_REVISION": REVISION,
+            "MAX_MODEL_LEN": MAX_MODEL_LEN,
             "VLLM_CACHE_ROOT": os.environ.get("VLLM_CACHE_ROOT"),
             "HOME": os.environ.get("HOME"),
         },

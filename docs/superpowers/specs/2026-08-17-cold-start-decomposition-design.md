@@ -374,6 +374,30 @@ graph capture on, one identical fixed prompt, a fixed sequence of ten sequential
 fixed `max_tokens` (small but greater than 1, so decode behavior is observable and not only
 prefill), one cold start in flight at a time.
 
+**Resolved values, fixed after reconnaissance (2026-08-28):**
+
+| Parameter | Value | Why this value |
+|---|---|---|
+| GPU SKU | NVIDIA RTX 4090, 24 GB | the 24 GB tier the design targets |
+| Region | EU-RO-1 | the only datacenter holding 24 GB stock; US regions went to zero mid-setup |
+| vLLM version | 0.27.1 | whatever the pinned base image digest contains |
+| Model revision | `b968826d9c46dd6066d109eabc6255188de91218` | resolved from the HF API, not a floating tag |
+| `max_model_len` | 8192 | see below |
+| `gpu_memory_utilization` | 0.9 (vLLM default) | left at the default so a reader reproducing this changes nothing |
+
+`max_model_len` is not a free choice here. Qwen3-8B's native 40960 context requires 5.62 GiB
+of KV cache, while 15.27 GiB of bf16 weights leave only 4.92 GiB free on a 24 GB card at the
+default `gpu_memory_utilization`, so the engine refuses to start at all — observed, not
+predicted. Total KV capacity at this configuration is roughly 35,800 tokens (144 KB/token:
+36 layers x 8 KV heads x 128 head dim x 2 for K and V x 2 bytes). 8192 keeps supported
+concurrency non-degenerate at about four sequences while leaving headroom, where 16384 would
+sit close enough to the limit that a small shift in memory accounting could fail a run
+mid-campaign.
+
+This tension is worth stating plainly in the writeup rather than burying: at 24 GB, an 8B
+model in bf16 spends most of the card on weights, and the KV budget that remains is what
+bounds concurrency.
+
 **Recorded per run:** host identifier, GPU model, driver version, timestamp, arm, run index,
 whether this host has been seen before, **KV cache blocks allocated and the resulting token
 capacity** (reported by vLLM at startup), **per-request latency and TTFT for all ten warmup
