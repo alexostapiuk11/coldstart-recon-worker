@@ -17,4 +17,4 @@ COPY probe.py /opt/probe.py
 COPY handler.py /opt/handler.py
 
 ENTRYPOINT []
-CMD ["python", "-u", "/opt/recon_handler.py"]
+CMD ["python3", "-u", "/opt/recon_handler.py"]
