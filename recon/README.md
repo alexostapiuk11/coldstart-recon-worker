@@ -22,10 +22,22 @@ parses log lines copied out of `fixtures/vllm_logs/startup_0.log`, and
    Take the **digest** from the run summary, not the `:latest` tag. Tags drift,
    and the reproducibility claim needs a reader to get the same engine.
 
-   **Make the package pullable.** A package pushed by `GITHUB_TOKEN` starts
-   private. Either set it public under Packages → coldstart-recon-worker →
-   Package settings → Change visibility, or add registry credentials to the
-   RunPod endpoint. RunPod cannot pull a private package without them.
+   **The package is public**, verified by an anonymous pull of the manifest, so
+   RunPod needs no registry credentials. If you ever flip it private, add
+   credentials to the endpoint or the pull fails.
+
+   Current image, built from `ebdec67` and confirmed `linux/amd64`:
+
+   ```
+   ghcr.io/alexostapiuk11/coldstart-recon-worker@sha256:c85c6c4428e84d06fd6555f7957a65900908889f66f041004179c1119b017b1d
+   ```
+
+   Re-check any later build with:
+
+   ```
+   TOKEN=$(curl -s "https://ghcr.io/token?service=ghcr.io&scope=repository:alexostapiuk11/coldstart-recon-worker:pull" | python3 -c "import json,sys;print(json.load(sys.stdin)['token'])")
+   curl -sI -H "Authorization: Bearer $TOKEN" https://ghcr.io/v2/alexostapiuk11/coldstart-recon-worker/manifests/artifact-1-harness | grep -i docker-content-digest
+   ```
 
 3. Create a serverless endpoint on that image, pinned to **one** 24 GB GPU type
    and **one** region. Both are held fixed for the whole campaign.
