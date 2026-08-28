@@ -9,6 +9,9 @@ import requests
 import runpod
 
 MODEL = os.environ["MODEL_ID"]
+# Pinning the weights revision is what makes a rebuild reproducible; a floating
+# tag would let the checkpoint move under the experiment mid-campaign.
+REVISION = os.environ.get("MODEL_REVISION") or None
 PORT = 8000
 
 
@@ -26,8 +29,11 @@ def _wait_healthy(timeout=900):
 
 def handler(job):
     lines: list[str] = []
+    cmd = ["vllm", "serve", MODEL, "--port", str(PORT)]
+    if REVISION:
+        cmd += ["--revision", REVISION]
     proc = subprocess.Popen(
-        ["vllm", "serve", MODEL, "--port", str(PORT)],
+        cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -68,8 +74,10 @@ def handler(job):
         "log_lines": lines,
         "completion": completion,
         "drain_completed": not drain_thread.is_alive(),
+        "served_cmd": cmd,
         "env": {
             "MODEL_ID": MODEL,
+            "MODEL_REVISION": REVISION,
             "VLLM_CACHE_ROOT": os.environ.get("VLLM_CACHE_ROOT"),
             "HOME": os.environ.get("HOME"),
         },
