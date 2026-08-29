@@ -93,8 +93,25 @@ def _one_request(model: str, now) -> dict:
     return {"t_dispatch_mono": t_start, "ttft": ttft, "end_to_end": now() - t_start}
 
 
-def run_probe(recorder, model: str, health_timeout: float = 900.0) -> dict:
-    """Returns the stage bundle. Caller owns the record assembly."""
+def run_probe(
+    recorder,
+    model: str,
+    health_timeout: float = 900.0,
+    extra_args=(),
+    env_overrides: dict | None = None,
+) -> dict:
+    """Returns the stage bundle. Caller owns the record assembly.
+
+    `extra_args` are appended to `vllm serve` -- the pinned `--revision` and the
+    `--max-model-len` held fixed across arms. Both are the caller's to supply:
+    this module measures a startup, it does not decide what is being started.
+
+    `env_overrides` is the arm's cache configuration (`CacheConfig.env`). It is
+    merged into a copy of the environment for the subprocess only, never applied
+    to `os.environ`: a serverless worker is reused across jobs, and mutating the
+    process environment would let one run's paths survive into the next run's
+    arm -- the leak this configuration exists to prevent.
+    """
     recorder.start()
     recorder.mark("S1_imports_done")
 
@@ -102,15 +119,17 @@ def run_probe(recorder, model: str, health_timeout: float = 900.0) -> dict:
     seen_load = False
     seen_engine_up = False
     recorder.mark("S2_acquisition_start")
+    env = os.environ.copy()
+    if env_overrides:
+        env.update(env_overrides)
+    cmd = ["vllm", "serve", model, "--port", str(PORT), *extra_args]
     proc = subprocess.Popen(
-        ["vllm", "serve", model, "--port", str(PORT)],
+        cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
-        # The arm's cache configuration arrives as environment (CacheConfig.env),
-        # set by the handler. The probe measures; it does not choose the arm.
-        env=os.environ.copy(),
+        env=env,
     )
 
     def drain():
@@ -141,6 +160,8 @@ def run_probe(recorder, model: str, health_timeout: float = 900.0) -> dict:
         drain_thread.join(timeout=15)
         return {
             "healthy": False,
+            "served_cmd": cmd,
+            "env_applied": dict(env_overrides or {}),
             "log_lines": log_lines,
             "warmup": [],
             "clock_B": recorder.bundle(),
@@ -168,6 +189,8 @@ def run_probe(recorder, model: str, health_timeout: float = 900.0) -> dict:
     steady = steady_state_latency(warmup)
     return {
         "healthy": True,
+        "served_cmd": cmd,
+        "env_applied": dict(env_overrides or {}),
         "log_lines": log_lines,
         "warmup": warmup,
         "clock_B": recorder.bundle(),

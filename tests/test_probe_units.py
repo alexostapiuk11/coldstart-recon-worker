@@ -136,7 +136,12 @@ def fake_engine(monkeypatch):
     lines = CAPTURES[0].read_text().splitlines()
     proc = _FakeProc(lines, drained)
 
-    monkeypatch.setattr(probe_mod.subprocess, "Popen", lambda *a, **k: proc)
+    def _popen(cmd, **kwargs):
+        proc.cmd = cmd
+        proc.env = kwargs.get("env")
+        return proc
+
+    monkeypatch.setattr(probe_mod.subprocess, "Popen", _popen)
     # Health only answers once the log is fully drained, so the drain thread's
     # marks land before S5_ready exactly as they do on a real startup.
     monkeypatch.setattr(
@@ -237,3 +242,77 @@ def test_unhealthy_start_returns_no_warmup_and_terminates(monkeypatch):
     assert result["warmup"] == []
     assert proc.terminated is True
     assert "derived" not in result
+
+
+# --- serve arguments and the arm's environment ------------------------------
+
+
+def test_extra_args_are_appended_to_vllm_serve(fake_engine):
+    rec = _counter_recorder()
+    result = probe_mod.run_probe(
+        rec,
+        "Qwen/Qwen3-8B",
+        health_timeout=10.0,
+        extra_args=["--revision", "abc123", "--max-model-len", "8192"],
+    )
+    assert fake_engine.cmd == [
+        "vllm",
+        "serve",
+        "Qwen/Qwen3-8B",
+        "--port",
+        str(probe_mod.PORT),
+        "--revision",
+        "abc123",
+        "--max-model-len",
+        "8192",
+    ]
+    # The record proves what was served rather than asserting it.
+    assert result["served_cmd"] == fake_engine.cmd
+
+
+def test_env_overrides_reach_the_subprocess(fake_engine):
+    rec = _counter_recorder()
+    result = probe_mod.run_probe(
+        rec,
+        "Qwen/Qwen3-8B",
+        health_timeout=10.0,
+        env_overrides={"HF_HOME": "/tmp/hf-cold/run-7", "VLLM_CACHE_ROOT": "/tmp/vc-cold/run-7"},
+    )
+    assert fake_engine.env["HF_HOME"] == "/tmp/hf-cold/run-7"
+    assert fake_engine.env["VLLM_CACHE_ROOT"] == "/tmp/vc-cold/run-7"
+    assert result["env_applied"]["HF_HOME"] == "/tmp/hf-cold/run-7"
+
+
+def test_env_overrides_do_not_mutate_the_process_environment(fake_engine):
+    """A serverless worker is reused across jobs. Mutating os.environ would let
+    one run's cache paths survive into the next run's arm -- the leak observed
+    in the reconnaissance captures."""
+    import os
+
+    before = os.environ.get("VLLM_CACHE_ROOT")
+    rec = _counter_recorder()
+    probe_mod.run_probe(
+        rec,
+        "Qwen/Qwen3-8B",
+        health_timeout=10.0,
+        env_overrides={"VLLM_CACHE_ROOT": "/tmp/should-not-persist"},
+    )
+    assert os.environ.get("VLLM_CACHE_ROOT") == before
+
+
+def test_inherited_environment_survives_the_override(fake_engine):
+    """Overrides are merged into the environment, not a replacement for it --
+    PATH and the CUDA variables must still reach vllm."""
+    import os
+
+    monkey_key = "COLDSTART_PROBE_INHERIT_CHECK"
+    os.environ[monkey_key] = "inherited"
+    try:
+        rec = _counter_recorder()
+        probe_mod.run_probe(
+            rec, "Qwen/Qwen3-8B", health_timeout=10.0, env_overrides={"HF_HOME": "/x"}
+        )
+        assert fake_engine.env[monkey_key] == "inherited"
+        assert fake_engine.env["HF_HOME"] == "/x"
+    finally:
+        del os.environ[monkey_key]

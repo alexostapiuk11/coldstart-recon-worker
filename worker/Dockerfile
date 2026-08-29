@@ -26,4 +26,6 @@ COPY worker/probe.py /opt/probe.py
 COPY worker/handler.py /opt/handler.py
 
 ENTRYPOINT []
-CMD ["python3", "-u", "/opt/recon_handler.py"]
+# The measurement handler. recon_handler.py stays in the image; select it by
+# overriding dockerStartCmd on the template when another capture is needed.
+CMD ["python3", "-u", "/opt/handler.py"]
