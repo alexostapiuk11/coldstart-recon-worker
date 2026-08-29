@@ -1103,6 +1103,16 @@ git commit -m "feat: vLLM startup log parser built against real captures"
 **Files:**
 - Create: `coldstart/runpod_api.py`, `tests/test_runpod_api.py`
 
+**As built (2026-08-28).** `FIELD_MAP` is correct as specified — `delayTime` and
+`executionTime` are both present in every capture, so `residual_splittable` is True
+for this platform. The three absolute-timestamp keys are not exposed and are never
+synthesised from the durations.
+
+Adds `extract_worker_id`, which the placeholder omitted. `workerId` is the platform's
+host identity and the input to `stats.within_host_triples`; without it the driver
+would reach into the raw payload for the one field the paired analysis needs. It is
+deliberately not in `FIELD_MAP`, which stays lifecycle-only.
+
 - [ ] **Step 1: Write the failing test against the captured status payload**
 
 `tests/test_runpod_api.py`:
