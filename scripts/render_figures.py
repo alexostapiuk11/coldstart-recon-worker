@@ -21,17 +21,37 @@ def main() -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     rows = [derive(r) for r in JsonlStore(args.store).read_all()]
-    total = partition(rows, required=REQUIRED_FOR_T_TOTAL).publishable
-    warm = partition(rows, required=REQUIRED_FOR_WARMUP).publishable
+    # Kept as two separately-named PartitionResults (not collapsed into one
+    # call) even though REQUIRED_FOR_T_TOTAL and REQUIRED_FOR_WARMUP are both
+    # `("consistent",)` today, so `total_part` and `warm_part` gate identical
+    # rows right now. That agreement is incidental, not structural -- see the
+    # REQUIRED_FOR_* docstrings in pipeline.py -- and `warmup_curve` must keep
+    # tracking REQUIRED_FOR_WARMUP specifically, not whatever preset the
+    # T_total figures happen to use. If this were "simplified" to a single
+    # partition shared by all four figures, the day the two presets diverge
+    # `warmup_curve` would silently start being gated by the wrong
+    # requirement -- a defect no test and no rendered PNG would reveal until
+    # the data actually exercised the difference.
+    total_part = partition(rows, required=REQUIRED_FOR_T_TOTAL)
+    warm_part = partition(rows, required=REQUIRED_FOR_WARMUP)
 
-    for name, fn, src in [
-        ("waterfall", figures.waterfall, total),
-        ("warmup", figures.warmup_curve, warm),
-        ("ecdf", figures.ecdf_plot, total),
-        ("per_host", figures.per_host_medians, total),
+    for name, fn, part in [
+        ("waterfall", figures.waterfall, total_part),
+        ("warmup", figures.warmup_curve, warm_part),
+        ("ecdf", figures.ecdf_plot, total_part),
+        ("per_host", figures.per_host_medians, total_part),
     ]:
-        path = fn(src, out / f"{name}.png")
-        print(f"{name}: {path} ({Path(path).stat().st_size // 1024} KB, n={len(src)})")
+        try:
+            path = fn(part.publishable, out / f"{name}.png")
+        except Exception as exc:
+            raise SystemExit(
+                f"{name}: could not render from store {args.store!r}: {exc} "
+                f"(publishable={len(part.publishable)}, discarded={len(part.discarded)}, "
+                f"failed={len(part.failed)})"
+            ) from exc
+        print(
+            f"{name}: {path} ({path.stat().st_size // 1024} KB, n={len(part.publishable)})"
+        )
 
 
 if __name__ == "__main__":
