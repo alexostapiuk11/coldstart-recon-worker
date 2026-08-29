@@ -81,6 +81,20 @@ that exposed this (host `h4`: inconsistent, but with a perfectly plausible
 `t_weights`) is pinned in tests/test_pipeline.py landing in `discarded` here,
 specifically because of this ruling."""
 
+REQUIRED_FOR_T_COMPILE: tuple[str, ...] = ("consistent", "t_compile")
+"""The B→C compile-cache contrast (spec 7, spec stage taxonomy: "S4b, cold
+minus warm"). Also requires `"consistent"`, same reasoning as
+REQUIRED_FOR_T_WEIGHTS above — `t_compile` (`subphase_values["S4b"]` in
+`metrics.derive()`) is computed independently of the T_total/T_process
+consistency check and must not be published from a run that check already
+rejected. `t_compile` is `None` under the exact same "merged phase" policy
+that makes `t_weights` `None` when S2/S3 aren't delineated — here it is S4b
+that the pinned engine version did not delineate — not a distinct nullity
+condition requiring its own machinery. Analogous to `by_w`'s use of
+REQUIRED_FOR_T_WEIGHTS in `scripts/analyse.py`: pooling `t_compile` from
+`REQUIRED_FOR_T_TOTAL`'s publishable set (gated on `consistent` alone) would
+let a merged-S4b row's `None` reach a bootstrap unfiltered."""
+
 REQUIRED_FOR_T_FAST: tuple[str, ...] = ("consistent", "t_fast_seconds")
 """The T_fast / business-framing figures (economics.py). Also requires
 `"consistent"`, same reasoning as REQUIRED_FOR_T_WEIGHTS above —

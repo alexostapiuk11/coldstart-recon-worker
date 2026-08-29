@@ -17,6 +17,7 @@ import pytest
 
 from coldstart.analysis.metrics import derive
 from coldstart.analysis.pipeline import (
+    REQUIRED_FOR_T_COMPILE,
     REQUIRED_FOR_T_FAST,
     REQUIRED_FOR_T_TOTAL,
     REQUIRED_FOR_T_WEIGHTS,
@@ -72,6 +73,7 @@ def _record(
     warmup=None,
     t_submit: float = 0.0,
     t_result: float = 150.0,
+    s4_subphases: dict | None = None,
 ) -> RunRecord:
     if outcome != "ok":
         return RunRecord(
@@ -95,7 +97,11 @@ def _record(
         clock_C={},
         clock_B={"t0_wall": 0.0, "marks": _SIMPLE_MARKS if marks is None else marks},
         warmup=_simple_warmup() if warmup is None else warmup,
-        engine={"kv_cache_blocks": 8192, "block_size": 16, "s4_subphases": dict(_S4_SUBPHASES)},
+        engine={
+            "kv_cache_blocks": 8192,
+            "block_size": 16,
+            "s4_subphases": dict(_S4_SUBPHASES) if s4_subphases is None else s4_subphases,
+        },
         host={"host_id": host_id, "triple_index": triple_index},
         config={},
         status={"outcome": "ok", "failure_class": None, "failure_detail": None},
@@ -279,6 +285,44 @@ def test_partition_t_weights_preset_excludes_the_merged_row_and_the_inconsistent
     assert h5["exclusion_labels"] == ("missing_t_weights",)
 
     assert "h4" not in {r["host_id"] for r in result.publishable}
+
+
+def test_partition_t_compile_preset_excludes_a_merged_s4b_row_and_the_inconsistent_row():
+    """Same ruling as REQUIRED_FOR_T_WEIGHTS, applied to `t_compile`
+    (`subphase_values["S4b"]` in metrics.derive()): it is computed
+    independently of the T_total/T_process consistency check, so a
+    clock-inconsistent run's otherwise-plausible `t_compile` must still be
+    discarded, and a run whose engine never delineated S4b (the same
+    "merged phase" nullity condition already applied to t_weights, not a
+    new one) is excluded on `t_compile` alone while remaining
+    clock-consistent -- mirroring h4/h5 above exactly, one bracket over."""
+    clean = derive(_record("B", "r-tc-ok", "h40", 40))
+    merged = derive(
+        _record(
+            "B",
+            "r-tc-merged",
+            "h41",
+            41,
+            s4_subphases={k: v for k, v in _S4_SUBPHASES.items() if k != "S4b"},
+        )
+    )
+    inconsistent = derive(_record("B", "r-tc-bad", "h42", 42, t_result=50.0))
+
+    assert clean["t_compile"] is not None
+    assert merged["t_compile"] is None
+    assert merged["consistent"] is True  # excluded on t_compile alone, not consistency
+    assert inconsistent["t_compile"] is not None  # still a real, plausible value
+    assert inconsistent["consistent"] is False
+
+    result = partition([clean, merged, inconsistent], required=REQUIRED_FOR_T_COMPILE)
+    assert result.publishable == [clean]
+    assert len(result.discarded) == 2
+
+    discarded_by_host = {r["host_id"]: r for r in result.discarded}
+    assert discarded_by_host["h41"]["exclusion_labels"] == ("missing_t_compile",)
+    assert discarded_by_host["h42"]["exclusion_labels"] == (
+        DiscardReason.PROCESS_EXCEEDS_TOTAL.value,
+    )
 
 
 def test_partition_t_fast_preset_keeps_only_the_dispatch_enabled_row():
