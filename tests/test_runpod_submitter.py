@@ -242,3 +242,19 @@ def test_http_transport_status_exhausting_retries_is_captured_as_data_not_raised
     outcome = sub.submit(arm="A", run_id="run-1")
     assert outcome.payload is None
     assert outcome.error is not None
+
+
+def test_job_timeout_budget_exceeds_the_endpoint_execution_timeout():
+    """The client budget covers queue delay PLUS execution; the endpoint's
+    executionTimeoutMs bounds execution alone. A client budget at or below it
+    expires while a job is still queuing and records a healthy run as failed
+    -- observed on the first priming run, delayTime 1898s vs execution 140s.
+    """
+    import inspect
+
+    default = inspect.signature(RunPodSubmitter).parameters["job_timeout"].default
+    endpoint_execution_timeout_s = 1800.0  # executionTimeoutMs on the pinned endpoint
+    assert default > endpoint_execution_timeout_s * 2, (
+        f"job_timeout {default}s leaves no room for queue delay above the "
+        f"endpoint's {endpoint_execution_timeout_s}s execution budget"
+    )

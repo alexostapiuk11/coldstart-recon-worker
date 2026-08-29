@@ -54,6 +54,30 @@ the first cold arm C run and discards it. But you will have paid for a run to do
 what this script does for the same money, and `data/priming.jsonl` — which
 `docs/experiment.md` commits to publishing — will not exist.
 
+## A run recorded as failed may have succeeded
+
+The client polls until `job_timeout` (5400s) and records a timeout as a failed
+run. That budget covers queue delay PLUS execution, which is a different thing
+from the endpoint's own `executionTimeoutMs` (1800s), which bounds execution
+alone.
+
+The gap matters when a worker has to pull the image cold. On the first priming
+run the platform reported `delayTime` 1898s against `executionTime` 140s -- the
+job completed healthily, but the old 1800s client budget had already expired
+while it was still queuing, so it was stored as `failed`.
+
+If a run is recorded as failed with a `timed out after` detail, check the job
+server-side before believing it:
+
+```bash
+set -a; . ./.env; set +a
+curl -s -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  "https://api.runpod.ai/v2/$RUNPOD_ENDPOINT_ID/status/<job-id>" | python3 -m json.tool
+```
+
+A `COMPLETED` status there means the run worked and the record is wrong. The
+job id is in the record's `failure_detail`.
+
 ## Before every window: check capacity
 
 RTX 4090 capacity in EU-RO-1 is volatile (see `recon/README.md`, "24GB

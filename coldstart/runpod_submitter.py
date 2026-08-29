@@ -75,10 +75,24 @@ class HttpTransport:
 
 
 class RunPodSubmitter:
-    """Clock A. Same interface as StubSubmitter -- submit(arm, run_id)."""
+    """Clock A. Same interface as StubSubmitter -- submit(arm, run_id).
+
+    `job_timeout` covers the WHOLE job: the platform's queue delay plus its
+    execution. That is a different budget from the endpoint's own
+    `executionTimeoutMs`, which bounds execution alone, and it has to be
+    larger -- the delay can dwarf the execution when a worker must pull the
+    image cold.
+
+    Measured on the first priming run: `delayTime` 1898s against
+    `executionTime` 140s. The client's old 1800s budget expired while the job
+    was still queuing, so a run that completed healthily was recorded as
+    `failed`. During a campaign that inflates the failure rate with runs that
+    actually worked, discards paid GPU time, and stores a clock-A span that
+    measures the client's patience rather than the job.
+    """
 
     def __init__(self, transport, clock=time.monotonic, poll_interval: float = 5.0,
-                 job_timeout: float = 1800.0, sleep=time.sleep, poll_clock=time.monotonic):
+                 job_timeout: float = 5400.0, sleep=time.sleep, poll_clock=time.monotonic):
         self._transport = transport
         self._clock = clock
         self._poll_interval = poll_interval
