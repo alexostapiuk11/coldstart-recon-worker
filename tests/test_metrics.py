@@ -761,3 +761,46 @@ def test_arm_state_mismatch_reason_names_the_run():
     d = derive(record)
     assert record_id in d["inconsistency_reason"]
     assert "C" in d["inconsistency_reason"]
+
+
+# --- arm_state_unverifiable: a driver-level flag, not something derived from
+# engine/config alone (coldstart.driver._record_from sets it when a live
+# "ok" payload is missing compile_cache_observed and/or
+# cache_config.compile_cache_warm). This is a DISCARD, not a failure: the run
+# still produced a full, otherwise-usable measurement -- so the row must stay
+# `ok`, keep every other metric, and only be excluded via `consistent` /
+# `discard_reason`, the same shape MISSING_WARMUP_END already uses.
+
+
+def test_arm_state_unverifiable_flag_is_discarded_with_its_own_reason():
+    record = make()
+    record.status = dict(record.status, arm_state_unverifiable=True)
+    d = derive(record)
+    assert d["ok"] is True
+    assert d["consistent"] is False
+    assert d["discard_reason"] == DiscardReason.ARM_STATE_UNVERIFIABLE
+    # A discard, not a failure: every other metric this run measured is
+    # still present in the row.
+    assert d["t_weights"] is not None
+    assert d["warmup_penalty"] is not None
+
+
+def test_arm_state_unverifiable_flag_absent_is_the_ordinary_path():
+    """The flag is opt-in: a record without it (every fixture and historical
+    row) must derive exactly as before -- this is the guard against the flag
+    firing when nothing asked it to."""
+    record = make()
+    assert "arm_state_unverifiable" not in record.status
+    assert derive(record)["consistent"] is True
+
+
+def test_arm_state_unverifiable_does_not_override_an_earlier_more_specific_discard_reason():
+    """Same ordering guarantee as the arm-state mismatch check: a run that is
+    both clock-inconsistent and flagged unverifiable keeps the earlier,
+    more specific reason."""
+    record = make(t_result=50.0)  # trips PROCESS_EXCEEDS_TOTAL
+    record.status = dict(record.status, arm_state_unverifiable=True)
+    d = derive(record)
+    assert d["consistent"] is False
+    assert d["discard_reason"] == DiscardReason.PROCESS_EXCEEDS_TOTAL
+    assert d["discard_reason"] != DiscardReason.ARM_STATE_UNVERIFIABLE

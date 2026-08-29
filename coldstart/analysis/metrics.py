@@ -452,9 +452,48 @@ def derive(record: RunRecord) -> DerivedRow:
             "instrumentation and indicates corrupted timing data"
         )
 
+    # A live run whose worker payload was missing compile_cache_observed
+    # and/or cache_config.compile_cache_warm (coldstart/driver.py::
+    # _record_from detects this at write time and sets this flag). From
+    # engine/config alone this run is indistinguishable from a historical
+    # row that simply predates those fields -- both read as "absent" to
+    # _arm_state_mismatch below, which treats absence as unknown on purpose
+    # (fixtures and every pre-Task-4b record must keep passing untouched).
+    # Only the driver knows which situation this actually is, so it says so
+    # explicitly on the record instead of derive() trying to re-derive a
+    # distinction the data cannot support. Checked ahead of the mismatch
+    # check below since it is the more specific explanation when both would
+    # otherwise apply (in practice a run flagged here never also trips the
+    # mismatch check, precisely because the fields the mismatch check needs
+    # are the ones missing) -- but like every check in this block, gated on
+    # `consistent` so it cannot mask an earlier, more specific violation.
+    if bool(record.status.get("arm_state_unverifiable")) and consistent:
+        consistent = False
+        reason = (
+            f"run {record.run_id!r} (arm {record.arm!r}): worker payload was "
+            "missing compile_cache_observed and/or cache_config."
+            "compile_cache_warm -- this run's arm state cannot be verified"
+        )
+        discard_reason = DiscardReason.ARM_STATE_UNVERIFIABLE
+
     # Pre-registered exclusion rule: an arm whose observed cache state is not
     # the state it was configured for is a different arm, not a noisy sample.
     # Checked last so it cannot mask an earlier, more specific violation.
+    #
+    # Arm C specifically requires a pre-warmed network volume
+    # (coldstart/cache_config.py: arm C's cache lives on the shared volume,
+    # which starts cold like any other empty directory). The campaign plan
+    # handles this operationally, not here: a dedicated priming step runs
+    # arm C twice into a separate store before any measured run, so the
+    # volume is already warm by the time a measured arm-C run reaches this
+    # check. That priming is a prerequisite this gate assumes has already
+    # happened, not something it detects or exempts -- silently excusing a
+    # mismatch on "well, it might just be the first run" is exactly the kind
+    # of post-hoc special-casing this gate exists to prevent. One early
+    # arm-C mismatch on an otherwise-primed campaign would be surprising and
+    # worth investigating on its own; a mismatch recurring across many arm-C
+    # runs most likely means priming was skipped, not that this check is
+    # wrong.
     mismatch = _arm_state_mismatch(record)
     if mismatch is not None and consistent:
         consistent = False

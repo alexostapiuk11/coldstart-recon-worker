@@ -1,5 +1,6 @@
 from coldstart.analysis.metrics import derive
 from coldstart.cache_config import resolve
+from coldstart.checks import DiscardReason
 from coldstart.driver import run_campaign
 from coldstart.scheduler import build_schedule
 from coldstart.store import JsonlStore
@@ -291,76 +292,116 @@ def test_resume_rejects_a_drifted_seed(tmp_path):
         raise AssertionError("expected ValueError")
 
 
-# --- missing arm-state telemetry is recorded as failed, never as an
-# unverifiable "ok" ----------------------------------------------------------
+# --- missing arm-state telemetry is a discard, not a failure ----------------
+#
+# The run completed and produced a full, otherwise-usable measurement -- a
+# dropped telemetry field between engine and store is a plumbing bug, not an
+# engine/infra failure (spec: failure vs. discard are two distinct, disjoint
+# signals). So these records must stay `status["outcome"] == "ok"`, with
+# `engine` populated exactly as the healthy path does, and get excluded only
+# via `consistent=False` / `DiscardReason.ARM_STATE_UNVERIFIABLE` -- the same
+# shape MISSING_WARMUP_END already uses for a structurally identical case.
 
 
-def test_missing_compile_cache_observed_is_recorded_as_failed_not_ok(tmp_path):
+def test_missing_compile_cache_observed_is_an_ok_record_discarded_by_arm_state(tmp_path):
     """worker/handler.py sets compile_cache_observed unconditionally on every
     real run. If it is absent from an otherwise-successful payload, something
     upstream dropped data -- and metrics.derive()'s arm-state gate treats a
     missing field as unknown, not a violation (on purpose, for historical
-    rows), so it would silently wave this run through as consistent. The
-    driver must catch it instead."""
+    rows), so it cannot catch this by itself. The driver must flag it
+    explicitly, but the record stays `ok` with everything else intact."""
 
     class DropsObserved:
-        def __init__(self):
-            self._inner = StubEndpoint(seed=15)
+        def __init__(self, clock):
+            self._inner = StubEndpoint(seed=15, clock=clock)
 
         def run(self, arm, run_id):
             payload = self._inner.run(arm=arm, run_id=run_id)
             del payload["compile_cache_observed"]
             return payload
 
+    # A shared VirtualClock, not a real wall clock, so clock A's span
+    # actually contains clock B's marks -- see
+    # test_clock_a_span_contains_the_clock_b_timeline above for why a real
+    # clock here would make derive() see a negative T_total unrelated to
+    # what this test is checking.
+    clock = VirtualClock()
     store = JsonlStore(tmp_path / "runs.jsonl")
     run_campaign(
-        submitter=StubSubmitter(DropsObserved()), store=store, arms=["A"], triples=2, seed=1
+        submitter=StubSubmitter(DropsObserved(clock), clock=clock),
+        store=store,
+        arms=["A"],
+        triples=2,
+        seed=1,
     )
     records = store.read_all()
     assert len(records) == 2
     for record in records:
-        assert record.status["outcome"] == "failed"
-        assert "compile_cache_observed" in record.status["failure_detail"]
-    # A failed record must still derive cleanly to the 6-key failure shape,
-    # never crash trying to read the fields it doesn't have.
+        assert record.status["outcome"] == "ok"
+        assert record.status["arm_state_unverifiable"] is True
+        # engine populated exactly as the healthy path -- nothing lost.
+        assert record.engine["s4_subphases"]
+        assert record.engine["compile_cache_observed"] is None
     for record in records:
         row = derive(record)
-        assert row["ok"] is False
+        assert row["ok"] is True
         assert row["consistent"] is False
+        assert row["discard_reason"] == DiscardReason.ARM_STATE_UNVERIFIABLE
+        # Every other metric is still recoverable -- this is the whole point
+        # of a discard rather than a failure.
+        assert row["t_weights"] is not None
+        assert row["warmup_penalty"] is not None
 
 
-def test_missing_expected_compile_cache_warm_is_recorded_as_failed_not_ok(tmp_path):
+def test_missing_expected_compile_cache_warm_is_an_ok_record_discarded_by_arm_state(tmp_path):
     """The other half of the pair: cache_config.compile_cache_warm missing
-    (e.g. the worker's cache_config block itself got dropped) is the same
+    (e.g. the worker's cache_config block itself got truncated) is the same
     class of unverifiable run as a missing compile_cache_observed."""
 
     class DropsExpected:
-        def __init__(self):
-            self._inner = StubEndpoint(seed=16)
+        def __init__(self, clock):
+            self._inner = StubEndpoint(seed=16, clock=clock)
 
         def run(self, arm, run_id):
             payload = self._inner.run(arm=arm, run_id=run_id)
             del payload["cache_config"]["compile_cache_warm"]
             return payload
 
+    clock = VirtualClock()
     store = JsonlStore(tmp_path / "runs.jsonl")
     run_campaign(
-        submitter=StubSubmitter(DropsExpected()), store=store, arms=["C"], triples=1, seed=2
+        submitter=StubSubmitter(DropsExpected(clock), clock=clock),
+        store=store,
+        arms=["C"],
+        triples=1,
+        seed=2,
     )
     record = store.read_all()[0]
-    assert record.status["outcome"] == "failed"
-    assert "compile_cache_warm" in record.status["failure_detail"]
+    assert record.status["outcome"] == "ok"
+    assert record.status["arm_state_unverifiable"] is True
+    row = derive(record)
+    assert row["ok"] is True
+    assert row["consistent"] is False
+    assert row["discard_reason"] == DiscardReason.ARM_STATE_UNVERIFIABLE
 
 
-def test_present_arm_state_telemetry_still_yields_an_ok_record(tmp_path):
+def test_present_arm_state_telemetry_still_yields_a_consistent_ok_record(tmp_path):
     """Sanity check that the new guard doesn't fire on the ordinary path --
-    every field present must still produce an ok record, as before."""
+    every field present must still produce an ordinary, consistent ok
+    record, with no `arm_state_unverifiable` key at all."""
+    clock = VirtualClock()
     store = JsonlStore(tmp_path / "runs.jsonl")
     run_campaign(
-        submitter=StubSubmitter(StubEndpoint(seed=17)), store=store, arms=["A"], triples=2, seed=1
+        submitter=StubSubmitter(StubEndpoint(seed=17, clock=clock), clock=clock),
+        store=store,
+        arms=["A"],
+        triples=2,
+        seed=1,
     )
     for record in store.read_all():
         assert record.status["outcome"] == "ok"
+        assert "arm_state_unverifiable" not in record.status
+        assert derive(record)["consistent"] is True
 
 
 def test_resume_rejects_a_shrunk_schedule(tmp_path):

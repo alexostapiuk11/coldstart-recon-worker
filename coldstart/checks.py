@@ -38,12 +38,24 @@ class DiscardReason(StrEnum):
     configuration asked for. Pre-registered as an exclusion rule: an arm whose
     cache state was not what it claimed is not a slightly noisy data point, it
     is a different arm.
+
+    ARM_STATE_UNVERIFIABLE is also produced by metrics.derive(), for the
+    sibling case ARM_STATE_MISMATCH cannot cover: a live run whose worker
+    payload was missing compile_cache_observed and/or
+    cache_config.compile_cache_warm (coldstart/driver.py detects this and
+    flags the record; derive() cannot tell it apart from a historical row
+    that simply predates those fields by looking at the data alone, so the
+    driver carries the distinction explicitly). Not the same as a mismatch --
+    there is no disagreement to report, only an unanswerable question -- and
+    not a FailureClass either: the run completed and produced a full,
+    otherwise-usable measurement, so it is a discard, not a failure.
     """
 
     PROCESS_EXCEEDS_TOTAL = "process_exceeds_total"
     RESIDUAL_BELOW_RTT_FLOOR = "residual_below_rtt_floor"
     MISSING_WARMUP_END = "missing_warmup_end"
     ARM_STATE_MISMATCH = "arm_state_mismatch"
+    ARM_STATE_UNVERIFIABLE = "arm_state_unverifiable"
 
 
 class _Needle:

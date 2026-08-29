@@ -51,57 +51,32 @@ def _record_from(scheduled, run_id: str, outcome) -> RunRecord:
     # worker bug, a truncated payload, a `.get(..., None)` upstream
     # swallowing what should have been a KeyError.
     #
-    # This cannot be left for metrics.derive()'s arm-state gate to catch.
-    # That gate treats an absent field as "unknown, not a violation" *on
-    # purpose* -- fixtures and every historical record genuinely never had
-    # these fields, and treating their absence as a mismatch would discard
-    # all of them. A live run that should have both fields and is missing
-    # one is a different situation from a historical row that never had
-    # them, but derive() has no way to tell those apart from the record
-    # alone -- only the driver knows this record just arrived from a run
-    # that was supposed to carry them. So the distinction is drawn here,
-    # upstream, once, rather than by loosening derive()'s permissiveness and
-    # losing the thing that makes old data readable at all.
+    # This cannot be left for metrics.derive()'s arm-state gate to catch by
+    # itself: that gate treats an absent field as "unknown, not a violation"
+    # *on purpose* -- fixtures and every historical record genuinely never
+    # had these fields, and treating their absence as a mismatch would
+    # discard all of them. A live run that should have both fields and is
+    # missing one looks, from engine/config alone, IDENTICAL to a historical
+    # row that never had them -- derive() cannot tell the two apart from the
+    # record's data. Only the driver knows which situation this is, so it
+    # says so explicitly: see the `arm_state_unverifiable` flag on `status`
+    # below, and metrics.derive() for how it acts on that flag.
     #
-    # Recorded as a failed run (reusing the same outcome.error path's
-    # machinery: classify_failure + status.outcome="failed") rather than as
-    # an "ok" row with a null field, because a downstream reader must be able
-    # to *count* this the way it counts every other failure mode -- an "ok"
-    # row that happens to have consistent=True forever (derive() would never
-    # flag it, since both arm-state inputs are absent) is exactly the
-    # invisible-failure shape this whole gate exists to close.
+    # This is still an "ok" run, not a failed one: the run completed and
+    # produced real, paid-for telemetry -- t_weights, the S4 waterfall,
+    # warmup latencies -- none of which depend on the two fields that are
+    # missing. docs/experiment.md publishes failure rate and discard rate as
+    # two distinct signals: failure means the run produced no usable result
+    # (OOM, timeout, image pull, ...); discard means the run completed but
+    # violates an invariant. A dropped telemetry field between engine and
+    # store is the latter -- a plumbing bug, not an engine/infra failure --
+    # and folding it into "failed" would both inflate the failure rate with
+    # something that isn't one, and permanently throw away every other
+    # metric this run measured (derive() returns a bare 6-key row for any
+    # non-ok run).
     observed = p.get("compile_cache_observed")
     expected = (p.get("cache_config") or {}).get("compile_cache_warm")
-    if observed is None or expected is None:
-        missing = [
-            name
-            for name, value in (
-                ("compile_cache_observed", observed),
-                ("cache_config.compile_cache_warm", expected),
-            )
-            if value is None
-        ]
-        detail = (
-            f"worker payload missing required arm-state telemetry ({', '.join(missing)}); "
-            "this run's arm state cannot be verified, so it must not be published as ok"
-        )
-        return RunRecord(
-            run_id=run_id,
-            run_index=scheduled.run_index,
-            arm=scheduled.arm,
-            clock_A=outcome.clock_A,
-            clock_C=p.get("clock_C", {}),
-            clock_B=p.get("clock_B", {}),
-            warmup=p.get("warmup", []),
-            engine={},
-            host=dict(p.get("host", {})),
-            config=p.get("cache_config", {}),
-            status={
-                "outcome": "failed",
-                "failure_class": classify_failure(detail).value,
-                "failure_detail": detail,
-            },
-        )
+    arm_state_unverifiable = observed is None or expected is None
 
     parsed = parse_engine_log("\n".join(p.get("log_lines", [])))
     return RunRecord(
@@ -120,7 +95,7 @@ def _record_from(scheduled, run_id: str, outcome) -> RunRecord:
             # arm says what was configured, this is what was on disk BEFORE
             # the run started (worker/handler.py snapshots it ahead of
             # run_probe -- see that module for why the timing matters).
-            "compile_cache_observed": p.get("compile_cache_observed"),
+            "compile_cache_observed": observed,
             # Diagnostic only, never read by the arm-state gate: the same
             # check taken again after the run. A cold arm should flip
             # False -> True (its own compile wrote the cache); staying
@@ -138,7 +113,19 @@ def _record_from(scheduled, run_id: str, outcome) -> RunRecord:
         # resolved to, so the analysis can verify the arm from the record
         # rather than trusting its label.
         config=p.get("cache_config", {}),
-        status={"outcome": "ok", "failure_class": None, "failure_detail": None},
+        status={
+            "outcome": "ok",
+            "failure_class": None,
+            "failure_detail": None,
+            # Present and True only when this "ok" payload is missing
+            # compile_cache_observed and/or cache_config.compile_cache_warm.
+            # Absent (the ordinary case) means "known verifiable" -- only
+            # the driver ever sets this key; metrics.derive() only reads it.
+            # Omitted rather than always-present-and-False so every existing
+            # record and fixture that predates this flag round-trips through
+            # RunRecord unchanged.
+            **({"arm_state_unverifiable": True} if arm_state_unverifiable else {}),
+        },
     )
 
 
