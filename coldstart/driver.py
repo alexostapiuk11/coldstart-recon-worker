@@ -96,9 +96,15 @@ def run_campaign(submitter, store, arms, triples, seed, on_run=None, resume=Fals
 
     Off by default: silently skipping runs an operator asked for is a worse
     failure than repeating them.
+
+    The drift guard assumes the store holds only this campaign's records. A
+    store that accumulated several independent, non-resumed campaigns (which
+    `resume=False` permits) would have its every record checked against this
+    schedule, so a legitimate resume could be refused. Give each campaign its
+    own store file.
     """
     schedule = build_schedule(arms=arms, triples=triples, seed=seed)
-    done: dict[int, str] = {}
+    done: set[int] = set()
     if resume:
         arm_by_index = {s.run_index: s.arm for s in schedule}
         for r in store.read_all():
@@ -122,7 +128,7 @@ def run_campaign(submitter, store, arms, triples, seed, on_run=None, resume=Fals
                     f"together -- resume must use the exact arms/triples/seed "
                     f"of the original window."
                 )
-            done[r.run_index] = r.arm
+            done.add(r.run_index)
     for scheduled in schedule:
         if scheduled.run_index in done:
             continue
