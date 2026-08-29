@@ -2352,6 +2352,32 @@ git commit -m "feat: serverless handler returning stage bundle via result channe
 **Files:**
 - Create: `coldstart/stubs/stub_engine.py`, `coldstart/stubs/stub_endpoint.py`, `tests/test_stubs.py`
 
+**As built (2026-08-28).** Three shape mismatches in the sketch, each of which
+would have left part of the pipeline untested while appearing covered:
+
+1. **The marks list omitted `S4_start` and `S4_end`** — the two marks Task 11's probe
+   emits and `derive()` reads. Every stub-driven row would have carried
+   `t_s4_bracket=None`, so the B2/B3 bracket would never be exercised off-GPU.
+2. **S5 had no duration.** `S5_ready` sat exactly where the engine came up, so a
+   regression folding S5 into the S4 bracket would have passed here. S5 now has its
+   own term and `S4_end < S5_ready` is asserted.
+3. **`synthetic_truth["t_process"]`** was `s1 + t_weights + s4b + s4_other`, but
+   `derive()` defines `t_process` as the `S6_first_token` mark. The ground truth now
+   matches the quantity the analysis actually recovers.
+
+**The stub replays the capture that matches the arm.** Because the recon runs reused
+one worker, `fixtures/` holds both a cold compile (`startup_0`, 38.96 s) and a warm
+one (`startup_1`, 0.30 s) under otherwise identical configuration. Arm C replays the
+warm capture instead of a cold log relabelled as warm, so `derive()` recovers
+`t_compile` 38.96 vs 0.30 — and the 35,792 vs 43,040 KV difference — with no GPU.
+
+Fixture paths are anchored to the repository, not the working directory. `run()`
+takes `run_id` and returns `run_id`/`arm`/`cache_config`, matching the real handler's
+provenance so an assembled record has one shape regardless of source.
+
+`tests/test_stubs.py` ends with `derive()` run on stub output for all three arms —
+the check that the GPU-free loop is real rather than a toy.
+
 - [ ] **Step 1: Write the failing test**
 
 `tests/test_stubs.py`:
