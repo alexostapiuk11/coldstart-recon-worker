@@ -26,6 +26,17 @@ FIELD_MAP = {
 # raw payload.
 WORKER_ID_FIELD = "workerId"
 
+# The platform's terminal job states. This module is the designated single
+# source of truth for the platform's payload vocabulary, so runpod_submitter.py
+# imports this rather than keeping its own copy.
+#
+# recon/capture.py keeps its own literal copy of this same set rather than
+# importing it: that script is a frozen reproduction tool for the committed
+# fixtures and intentionally imports only stdlib plus requests, so a reader
+# does not need this package installed to reproduce them. That duplication is
+# deliberate -- see the matching note in runpod_submitter.py.
+TERMINAL_STATES = {"COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"}
+
 
 def extract_lifecycle(payload: dict) -> dict:
     """Clock C. Returns only fields the platform actually exposes.

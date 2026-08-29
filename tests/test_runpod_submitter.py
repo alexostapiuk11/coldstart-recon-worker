@@ -1,6 +1,7 @@
 import pytest
+import requests
 
-from coldstart.runpod_submitter import RunPodSubmitter
+from coldstart.runpod_submitter import HttpTransport, RunPodSubmitter
 
 COMPLETED = {
     "id": "job-1",
@@ -36,6 +37,43 @@ class FakeTransport:
 
     def status(self, job_id):
         return self._statuses.pop(0) if len(self._statuses) > 1 else self._statuses[0]
+
+
+class _FakeResponse:
+    """Stands in for a `requests.Response` in HttpTransport tests."""
+
+    def __init__(self, status_code, json_data=None):
+        self.status_code = status_code
+        self._json = json_data if json_data is not None else {}
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} error")
+
+    def json(self):
+        return self._json
+
+
+class _FakeSession:
+    """Stands in for the `requests` module: HttpTransport calls
+    `session.get`/`session.post` exactly as it would call the module-level
+    functions. get and post are queued separately so a test can script a
+    submit-then-poll sequence without one call stealing the other's response.
+    """
+
+    def __init__(self, get_responses=(), post_responses=()):
+        self._get_responses = list(get_responses)
+        self._post_responses = list(post_responses)
+        self.get_calls = 0
+        self.post_calls = 0
+
+    def post(self, url, headers=None, json=None, timeout=None):
+        self.post_calls += 1
+        return self._post_responses.pop(0)
+
+    def get(self, url, headers=None, timeout=None):
+        self.get_calls += 1
+        return self._get_responses.pop(0)
 
 
 def _submitter(transport, **kw):
@@ -124,3 +162,83 @@ def test_keyboard_interrupt_still_escapes():
 
     with pytest.raises(KeyboardInterrupt):
         _submitter(Stopped()).submit(arm="A", run_id="run-1")
+
+
+def test_missing_status_key_polls_until_timeout():
+    """A status payload with no `status` key at all can't be classified as
+    terminal -- `.get("status")` returns None, which is not in
+    TERMINAL_STATES -- so it falls through to the poll loop and eventually
+    times out rather than being silently treated as success or raising a
+    KeyError. This is the intended fail-safe for a malformed or unexpected
+    platform response."""
+    weird = {"id": "job-1"}
+    sub = RunPodSubmitter(
+        transport=FakeTransport([weird]),
+        clock=iter([0.0, 1.0]).__next__,
+        poll_interval=0.0,
+        job_timeout=0.0,
+    )
+    outcome = sub.submit(arm="A", run_id="run-1")
+    assert outcome.payload is None
+    assert "timed out" in outcome.error
+
+
+def test_poll_timeout_with_simulated_elapsed_time_exceeding_budget():
+    """Exercises the timeout path over several real polls of simulated
+    elapsed time, not just the trivial job_timeout=0.0 case. `poll_clock` is
+    a separate injectable from `clock` (which supplies only the two
+    clock_A stamps) precisely so this is testable -- see the comment on
+    RunPodSubmitter._poll_clock."""
+    running = {"id": "job-1", "status": "IN_PROGRESS"}
+    t = FakeTransport([running, running, running])
+    sub = RunPodSubmitter(
+        transport=t,
+        clock=iter([100.0, 200.0]).__next__,
+        poll_interval=0.0,
+        job_timeout=10.0,
+        poll_clock=iter([0.0, 4.0, 9.0, 15.0]).__next__,
+    )
+    outcome = sub.submit(arm="A", run_id="run-1")
+    assert outcome.payload is None
+    assert "timed out" in outcome.error
+
+
+def test_http_transport_status_retries_transient_5xx_then_succeeds():
+    session = _FakeSession(
+        get_responses=[_FakeResponse(500), _FakeResponse(200, {"status": "COMPLETED"})]
+    )
+    transport = HttpTransport("ep", "key", attempts=3, session=session, sleep=lambda s: None)
+    result = transport.status("job-1")
+    assert result == {"status": "COMPLETED"}
+    assert session.get_calls == 2
+
+
+def test_transient_polling_blip_does_not_fail_a_job_that_would_have_completed():
+    """CRITICAL fix: previously status() had no retry, so a single transient
+    5xx or network blip on any one of up to job_timeout/poll_interval polls
+    would raise, be caught by submit()'s broad except, and permanently record
+    a paid -- possibly successful -- job as failed. status() now retries
+    exactly as start() does."""
+    session = _FakeSession(
+        post_responses=[_FakeResponse(200, {"id": "job-1"})],
+        get_responses=[_FakeResponse(500), _FakeResponse(200, COMPLETED)],
+    )
+    transport = HttpTransport("ep", "key", attempts=3, session=session, sleep=lambda s: None)
+    sub = RunPodSubmitter(transport=transport, clock=iter([100.0, 200.0]).__next__,
+                          poll_interval=0.0)
+    outcome = sub.submit(arm="A", run_id="run-1")
+    assert outcome.error is None
+    assert outcome.payload is not None
+
+
+def test_http_transport_status_exhausting_retries_is_captured_as_data_not_raised():
+    session = _FakeSession(
+        post_responses=[_FakeResponse(200, {"id": "job-1"})],
+        get_responses=[_FakeResponse(500), _FakeResponse(500)],
+    )
+    transport = HttpTransport("ep", "key", attempts=2, session=session, sleep=lambda s: None)
+    sub = RunPodSubmitter(transport=transport, clock=iter([100.0, 200.0]).__next__,
+                          poll_interval=0.0)
+    outcome = sub.submit(arm="A", run_id="run-1")
+    assert outcome.payload is None
+    assert outcome.error is not None

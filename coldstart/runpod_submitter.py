@@ -8,40 +8,69 @@ import time
 
 import requests
 
-from coldstart.runpod_api import extract_lifecycle, extract_worker_id
+from coldstart.runpod_api import TERMINAL_STATES, extract_lifecycle, extract_worker_id
 from coldstart.submitter import SubmitOutcome
 
 API = "https://api.runpod.ai/v2"
-TERMINAL = {"COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"}
 
 
 class HttpTransport:
-    """The real endpoint. Retries the transient rejections, as recon/capture.py does."""
+    """The real endpoint. Retries the transient rejections, as recon/capture.py does.
 
-    def __init__(self, endpoint_id: str, api_key: str, attempts: int = 5):
+    The retry pattern below is a deliberate duplicate of recon/capture.py's,
+    not a shared import: recon/capture.py is a frozen reproduction script for
+    the committed fixtures that intentionally imports only stdlib plus
+    requests, so a reader can reproduce those fixtures without installing this
+    package. Coupling it to coldstart would break that.
+    """
+
+    def __init__(self, endpoint_id: str, api_key: str, attempts: int = 5,
+                 session=requests, sleep=time.sleep):
         self._url = f"{API}/{endpoint_id}"
         self._headers = {"Authorization": f"Bearer {api_key}"}
         self._attempts = attempts
+        # `requests` the module exposes top-level get/post functions with the
+        # same signature a caller would use on a `requests.Session()`, so it
+        # doubles as the default "session" here. Tests substitute a fake.
+        self._session = session
+        self._sleep = sleep
 
-    def start(self, payload: dict) -> str:
+    def _send_with_retry(self, send) -> "requests.Response":
+        """Retry the transient rejections for one HTTP call. Shared by
+        start() and status() -- `_await_terminal` polls status() up to
+        `job_timeout / poll_interval` times per job, so a single transient
+        blip on any one poll must not be fatal to a job that would otherwise
+        have completed successfully.
+        """
         for attempt in range(self._attempts):
-            r = requests.post(f"{self._url}/run", headers=self._headers,
-                              json={"input": payload}, timeout=30)
+            r = send()
             # 409 is returned for a window after any endpoint config change and
             # 5xx shows up under load. Both are transient; a campaign of
             # hundreds of jobs cannot abort on one of them.
             if r.status_code == 409 or r.status_code >= 500:
                 if attempt == self._attempts - 1:
                     r.raise_for_status()
-                time.sleep(2**attempt)
+                self._sleep(2**attempt)
                 continue
             r.raise_for_status()
-            return r.json()["id"]
+            return r
         raise RuntimeError("unreachable: retry loop exited without returning")
 
+    def start(self, payload: dict) -> str:
+        r = self._send_with_retry(
+            lambda: self._session.post(
+                f"{self._url}/run", headers=self._headers,
+                json={"input": payload}, timeout=30,
+            )
+        )
+        return r.json()["id"]
+
     def status(self, job_id: str) -> dict:
-        r = requests.get(f"{self._url}/status/{job_id}", headers=self._headers, timeout=30)
-        r.raise_for_status()
+        r = self._send_with_retry(
+            lambda: self._session.get(
+                f"{self._url}/status/{job_id}", headers=self._headers, timeout=30
+            )
+        )
         return r.json()
 
 
@@ -49,20 +78,29 @@ class RunPodSubmitter:
     """Clock A. Same interface as StubSubmitter -- submit(arm, run_id)."""
 
     def __init__(self, transport, clock=time.monotonic, poll_interval: float = 5.0,
-                 job_timeout: float = 1800.0, sleep=time.sleep):
+                 job_timeout: float = 1800.0, sleep=time.sleep, poll_clock=time.monotonic):
         self._transport = transport
         self._clock = clock
         self._poll_interval = poll_interval
         self._job_timeout = job_timeout
         self._sleep = sleep
+        # Deliberately a separate injectable from `clock`: `clock` supplies
+        # exactly the two clock_A stamps (t_submit, t_result) callers pass a
+        # short fixed sequence for; `_await_terminal` can call the polling
+        # clock an unbounded number of times per job (once for the deadline,
+        # then once per poll), which would exhaust that sequence. Keeping
+        # them separate lets tests simulate elapsed polling time -- including
+        # a real timeout after several polls -- without touching clock_A's
+        # two-value contract.
+        self._poll_clock = poll_clock
 
     def _await_terminal(self, job_id: str) -> dict:
-        deadline = time.monotonic() + self._job_timeout
+        deadline = self._poll_clock() + self._job_timeout
         while True:
             status = self._transport.status(job_id)
-            if status.get("status") in TERMINAL:
+            if status.get("status") in TERMINAL_STATES:
                 return status
-            if time.monotonic() >= deadline:
+            if self._poll_clock() >= deadline:
                 raise TimeoutError(f"job {job_id} timed out after {self._job_timeout}s")
             self._sleep(self._poll_interval)
 
@@ -83,6 +121,12 @@ class RunPodSubmitter:
         # is not. Within-host pairing needs the stable one.
         worker_id = extract_worker_id(status)
         if worker_id:
+            # container_host_id is only added when there is a distinct
+            # platform identity to pair it against. Without a worker_id there
+            # is exactly one identity known for this run (whatever host_id
+            # the output already carries); setting container_host_id to a
+            # copy of it would misleadingly imply two identities that do not,
+            # in fact, differ.
             host["container_host_id"] = host.get("host_id")
             host["host_id"] = worker_id
         host["job_id"] = status.get("id")
