@@ -6529,6 +6529,25 @@ Proves the whole pipeline recovers a known answer before any paid measurement ru
 **Files:**
 - Create: `tests/test_end_to_end.py`
 
+**As built (2026-08-28).** The snippets below predate two things and need the
+adjustments made in the committed version:
+
+- The submitter and endpoint must **share a `VirtualClock`**. With a wall clock the
+  stub returns in microseconds, so the clock-A span is shorter than the clock-B
+  timeline inside it and every `T_total` is negative. See Task 15.
+- The paired test is sized to clear `bootstrap_paired_median_diff`'s 20-unit floor:
+  with two hosts only ~a quarter of triples land entirely on one host, so 120 triples
+  are needed, not 40. The floor is a real guard, not an obstacle to route around.
+
+**The gap this task existed to find.** The stub's synthetic S4 bracket was drawn
+independently of the log it replays — `ARM_PROFILE` invented `s4b = 40.0 * jitter`
+while the replayed capture reports a fixed `S4b = 38.96`. On a low jitter draw the
+identified sub-phases did not fit inside the bracket that is supposed to contain them,
+and `derive()` correctly flagged `s4_unattributed` negative on ~7% of arm A/B runs. No
+per-module test could see it: each side was self-consistent. The capture is now the
+stub's S4 ground truth, and the arms differ in compile time through the capture each
+replays rather than through a second, conflicting source.
+
 - [ ] **Step 1: Write the failing test**
 
 `tests/test_end_to_end.py`:
@@ -6896,13 +6915,30 @@ present on a record.
 
 ## Definition of done for this plan
 
-- [ ] All 19 tasks complete, full suite green, ruff clean.
-- [ ] `fixtures/` contains real engine logs and API responses, committed.
-- [ ] `fixtures/README.md` answers all three reconnaissance questions, including whether arm C survives.
-- [ ] The harness runs a 120-run campaign end to end against stubs with no GPU and no cost.
-- [ ] All four figures generated from synthetic data and **visually inspected**.
-- [ ] The analysis pipeline recovers the stub's known effect ordering with an interval excluding zero.
-- [ ] Business-framing metrics implemented and tested, including cache break-even volume.
-- [ ] Total spend under $15.
+- [x] All 19 tasks complete, full suite green (458 tests), ruff clean.
+- [x] `fixtures/` contains real engine logs and API responses, committed.
+- [x] `fixtures/README.md` answers all three reconnaissance questions — arm C **survives** (this vLLM compiles at startup).
+- [x] The harness runs a 120-run campaign end to end against stubs with no GPU and no cost.
+- [x] All four figures generated from synthetic data and **visually inspected** — see below.
+- [x] The analysis pipeline recovers the stub's known effect ordering with an interval excluding zero.
+- [x] Business-framing metrics implemented and tested, including cache break-even volume.
+- [x] Total spend under $15 — actual spend was a few dollars.
+
+**Visual inspection (2026-08-28), from a 120-run synthetic campaign, seed 2026.**
+`waterfall` draws `S4b compilation` as its own labelled band — large in arms A and B,
+absent in C — with `unattributed within S4` a thin sliver, which is the B2/B3 fix
+visible rather than asserted. `warmup_curve` shows the decay, the ±10% steady-state
+band and the `T_fast` annotation spec §7 requires; all three arms coincide because the
+stub models warmup identically across arms, which is the honest null (warmup behaviour
+after the server is ready does not depend on how the weights got there). `ecdf_plot`
+separates the three arms in the expected order, C < B < A. `per_host_medians` shows the
+host confound the paired analysis exists to remove — one host at ~218 s against ~105–127
+s for the rest, matching the stub's 1.75x multiplier for that host.
+
+**Still outstanding before any paid campaign.** `coldstart/submitter.py` contains only
+`StubSubmitter`; there is no real RunPod submitter, so `worker/handler.py` is currently
+reachable only from a code path that does not exist yet. That is consistent with this
+plan's stated goal (prove the harness against stubs) but it is the first thing the
+campaign plan must build.
 
 **Not in this plan, deliberately:** pre-registration commit, the ~300-run paid campaign, real-data analysis, and the post. Those follow in a second plan once this harness is proven — the whole point of the GPU-free loop is that measurement code is proven before it costs money.
