@@ -32,6 +32,30 @@ from coldstart.store import JsonlStore
 ITERATIONS = 10_000
 
 
+def _missing_arms(samples: dict[str, list], arms: tuple[str, ...]) -> list[str]:
+    """Arms in `arms` whose sample list in `samples` is empty."""
+    return [a for a in arms if not samples.get(a)]
+
+
+def _withheld_message(missing: list[str]) -> str:
+    """Same 'withheld: <reason>' idiom the paired bootstrap below already
+    uses, naming every empty arm so an operator can see which one it was
+    rather than a bare crash."""
+    names = " and ".join(f"arm {a}" for a in missing)
+    verb = "has" if len(missing) == 1 else "have"
+    return f"withheld: {names} {verb} no publishable rows"
+
+
+def _bootstrap_or_withhold(compute, samples: dict[str, list], arms: tuple[str, ...]):
+    """Run `compute()` unless any of `arms` has zero rows in `samples`, in
+    which case withhold with a message naming the empty arm(s) instead of
+    letting the bootstrap raise on an empty sample."""
+    missing = _missing_arms(samples, arms)
+    if missing:
+        return _withheld_message(missing)
+    return compute()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--store", default="data/campaign.jsonl")
@@ -55,10 +79,13 @@ def main() -> None:
         return
 
     pub = total_part.publishable
-    out["distributions"] = {
-        arm: percentiles([r["t_total"] for r in pub if r["arm"] == arm])
-        for arm in ("A", "B", "C")
-    }
+    out["distributions"] = {}
+    for arm in ("A", "B", "C"):
+        arm_rows = [r["t_total"] for r in pub if r["arm"] == arm]
+        if arm_rows:
+            out["distributions"][arm] = percentiles(arm_rows)
+        else:
+            out["distributions"][arm] = _withheld_message([arm])
     # H5: does a warm compile cache buy KV capacity? Routed through the shared
     # median every other aggregate uses, not a hand-rolled index.
     out["kv_capacity_median"] = {
@@ -71,12 +98,19 @@ def main() -> None:
     by_w = {a: [r["t_weights"] for r in weights_pub if r["arm"] == a] for a in "ABC"}
     by_c = {a: [r["t_compile"] for r in pub if r["arm"] == a] for a in "ABC"}
 
-    # Mechanism contrasts, each in the unit that explains it.
-    out["contrast_A_to_B_t_weights"] = bootstrap_median_diff(
-        by_w["A"], by_w["B"], iterations=ITERATIONS, seed=1
+    # Mechanism contrasts, each in the unit that explains it. An arm with no
+    # publishable rows (e.g. a systematic failure or a rate limit that wiped
+    # out one arm mid-campaign) must not crash the analysis that exists to
+    # explain why a campaign looks wrong -- it is withheld by name instead.
+    out["contrast_A_to_B_t_weights"] = _bootstrap_or_withhold(
+        lambda: bootstrap_median_diff(by_w["A"], by_w["B"], iterations=ITERATIONS, seed=1),
+        by_w,
+        ("A", "B"),
     )
-    out["contrast_B_to_C_t_compile"] = bootstrap_median_diff(
-        by_c["B"], by_c["C"], iterations=ITERATIONS, seed=2
+    out["contrast_B_to_C_t_compile"] = _bootstrap_or_withhold(
+        lambda: bootstrap_median_diff(by_c["B"], by_c["C"], iterations=ITERATIONS, seed=2),
+        by_c,
+        ("B", "C"),
     )
 
     # The ranking claim, in one unit across all three arms. It has to be a
@@ -86,15 +120,23 @@ def main() -> None:
     # different quantities and produce a number that means nothing. t_total is
     # the honest common unit -- "which cache buys more cold start back".
     by_t = {a: [r["t_total"] for r in pub if r["arm"] == a] for a in "ABC"}
-    out["contrast_A_to_B_t_total"] = bootstrap_median_diff(
-        by_t["A"], by_t["B"], iterations=ITERATIONS, seed=5
+    out["contrast_A_to_B_t_total"] = _bootstrap_or_withhold(
+        lambda: bootstrap_median_diff(by_t["A"], by_t["B"], iterations=ITERATIONS, seed=5),
+        by_t,
+        ("A", "B"),
     )
-    out["contrast_B_to_C_t_total"] = bootstrap_median_diff(
-        by_t["B"], by_t["C"], iterations=ITERATIONS, seed=6
+    out["contrast_B_to_C_t_total"] = _bootstrap_or_withhold(
+        lambda: bootstrap_median_diff(by_t["B"], by_t["C"], iterations=ITERATIONS, seed=6),
+        by_t,
+        ("B", "C"),
     )
     # Reported before any ranking claim is made -- spec 7.
-    out["difference_of_contrasts_t_total"] = bootstrap_contrast_difference(
-        by_t["A"], by_t["B"], by_t["C"], iterations=ITERATIONS, seed=3
+    out["difference_of_contrasts_t_total"] = _bootstrap_or_withhold(
+        lambda: bootstrap_contrast_difference(
+            by_t["A"], by_t["B"], by_t["C"], iterations=ITERATIONS, seed=3
+        ),
+        by_t,
+        ("A", "B", "C"),
     )
 
     triples = within_host_triples(rows)
