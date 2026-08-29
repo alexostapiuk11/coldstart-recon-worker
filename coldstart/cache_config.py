@@ -55,12 +55,11 @@ class CacheConfig:
         return {"HF_HOME": hf_home, "VLLM_CACHE_ROOT": cache_root}
 
 
-# Arm C's status is provisional: whether it is even measurable depends on the
-# reconnaissance run (spec 5, 6.8) answering whether the pinned vLLM version compiles at
-# startup at all. If it does not, arm C collapses into arm B and gets dropped, and the
-# experiment reverts to a two-arm design — see the "Version dependency" note in spec 5.
-# All three arms are built here regardless, because that determination has not been made
-# yet; nothing here should be read as three arms being a settled fact.
+# Arm C is settled. The reconnaissance run (spec 5, 6.8) asked whether the pinned vLLM
+# version compiles at startup at all — if it did not, arm C would collapse into arm B and
+# the experiment would revert to two arms. It does: the captures show `torch.compile took
+# 38.96 s in total` against a 53.73 s engine init (fixtures/README.md, Q3). H3 and arm C
+# are retained, and docs/experiment.md pre-registers them on that basis.
 CACHE_CONFIGS = {
     "A": CacheConfig("A", weights_source="hub", compile_cache_warm=False),
     "B": CacheConfig("B", weights_source="volume", compile_cache_warm=False),

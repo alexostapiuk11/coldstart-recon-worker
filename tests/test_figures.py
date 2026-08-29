@@ -393,9 +393,8 @@ def test_waterfall_labels_a_fully_merged_subphase_rather_than_drawing_nothing(tm
 def test_waterfall_handles_a_wholly_unmeasured_s4_bracket_without_crashing_or_substituting(
     tmp_path,
 ):
-    """This is the real near-term state of the pipeline: Task 11 (the probe
-    that emits S4_start/S4_end) is not built yet, so t_s4_bracket is None
-    on every row today. waterfall() must not crash, and it must not
+    """The probe emits S4_start/S4_end on every run, so this is the
+    degraded case: a row that lost them. waterfall() must not crash, and it must not
     silently substitute S5_ready - S3_load_done (unavailable here, and
     wrong anyway -- see the spec's Attribution caveat and the dedicated
     metrics.py regression test). The whole S4+S5 span collapses to one

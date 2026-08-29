@@ -28,6 +28,32 @@ operating it, not re-litigating what's pinned.
   window (see "Pre-flight gate" below) — this bullet is about the state you
   should expect going in, not an extra manual check.
 
+## Once, before the first window: prime arm C
+
+Arm C measures a startup that finds a **warm** compile cache on the volume. That
+cache has to be created first, and creating it is not a measured run.
+
+```bash
+set -a; . ./.env; set +a
+.venv/bin/python scripts/prime_compile_cache.py
+```
+
+Two arm C runs, written to `data/priming.jsonl` — never to the campaign store.
+Expect the first to report `compile_cache_observed=False` with an `S4b` around
+39 s (compiling cold, writing the cache) and the second `True` with `S4b` under
+one second. The script checks that second condition itself and refuses to
+declare success otherwise. Costs roughly $0.50.
+
+**If it exits saying priming did not take, do not start the campaign.** The
+likely cause is `VLLM_CACHE_ROOT` not reaching the engine, which would make arm
+C silently identical to arm B — the campaign would run to completion and report
+a compile effect of about zero.
+
+Skipping this step does not corrupt the statistics: the arm-state gate catches
+the first cold arm C run and discards it. But you will have paid for a run to do
+what this script does for the same money, and `data/priming.jsonl` — which
+`docs/experiment.md` commits to publishing — will not exist.
+
 ## Before every window: check capacity
 
 RTX 4090 capacity in EU-RO-1 is volatile (see `recon/README.md`, "24GB
@@ -78,6 +104,19 @@ FlashBoot on produces a complete, plausible dataset that measures RunPod's
 cache instead of the arms, and nothing downstream would reveal that.
 
 ## Running a window
+
+**The campaign runs across at least three windows on separate days.** This is a
+design requirement, not scheduling convenience: fleet conditions on rented
+capacity vary by time and day, and collecting all ~300 runs in one sitting
+confounds the arm effect with that session's conditions. Nothing in the code
+enforces this — `--resume` will happily let you chain the whole schedule in one
+evening — and the confound cannot be detected afterwards from the stored
+records, nor repaired except by re-running the campaign. Interleaving protects
+against drift *within* a window; separate days are what protect against a window
+being unrepresentative. See `docs/experiment.md`, "Sampling".
+
+Run part of the schedule, stop with Ctrl-C, and resume on a later day.
+
 
 ```bash
 set -a; . ./.env; set +a

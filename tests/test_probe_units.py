@@ -217,7 +217,7 @@ def test_request_one_dispatch_matches_the_s6_mark(fake_engine):
 
 def test_t_fast_seconds_is_computable_from_the_probe_output(fake_engine):
     """The end-to-end point of the t_dispatch_mono contract: a real bundle
-    must yield a T_fast, not the 'probe has not shipped' reason."""
+    must yield a T_fast, not a withheld reason."""
     rec = _counter_recorder()
     result = probe_mod.run_probe(rec, "Qwen/Qwen3-8B", health_timeout=10.0)
     warmup = result["warmup"]

@@ -343,11 +343,10 @@ def derive(record: RunRecord) -> DerivedRow:
     # is a separate, later stage (spec, stage taxonomy: "S5 ready: engine up
     # -> server reports healthy", a health-poll interval), so that
     # substitution would fold all of S5 into S4 and misattribute exactly the
-    # quantity this fix exists to get right. The mark contract
-    # (S4_start/S4_end) is added here for analysis; the probe that emits
-    # them (Task 11) is not yet built, so both marks are legitimately
-    # absent on every real run today -- handled the same way a missing
-    # S2/S3 mark already is, never substituted.
+    # quantity this fix exists to get right. The probe emits S4_start and
+    # S4_end on every run, so a live record missing them means they were
+    # lost for that run -- handled the same way a missing S2/S3 mark
+    # already is, never substituted.
     t_s4_start = m.get("S4_start")
     t_s4_end = m.get("S4_end")
     if t_s4_start is None:

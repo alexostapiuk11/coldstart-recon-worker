@@ -82,12 +82,26 @@ Every derived row comes from `coldstart.analysis.metrics.derive`. Rows are
 partitioned by `coldstart.analysis.pipeline.partition` before any figure or
 statistic sees them; consistency is a requirement of every preset.
 
+**Sampling: at least three windows on separate days.** The ~300 runs are not
+collected in one sitting. Fleet conditions on rented elastic capacity vary by
+time and day, and a single-session campaign would confound the arm effect with
+that session's conditions -- a confound that cannot be detected afterwards from
+the stored records and cannot be repaired except by re-running. Interleaving
+protects against drift *within* a window; spreading across days is what protects
+against a window being unrepresentative.
+
 Primary comparison unit: `t_weights` for A→B, `t_compile` for B→C.
 Reported for each contrast: median difference with a 95% bootstrap percentile
 interval (`bootstrap_median_diff`, 10,000 iterations).
 **The interval on the difference of the two contrasts
 (`bootstrap_contrast_difference`) is reported before any ranking claim is
-made.**
+made, and it is computed on `t_total` across all three arms** -- not on the
+two mechanism units above. `bootstrap_contrast_difference` computes
+`(median(A) - median(B)) - (median(B) - median(C))`, using B in both halves, so
+it requires one shared unit; subtracting a `t_weights` contrast from a
+`t_compile` one would difference two different quantities. `t_total` is the
+honest common unit for the ranking claim, which asks which cache buys back more
+cold start.
 
 Secondary, supporting only: within-host triples
 (`bootstrap_paired_median_diff`), reported with wider intervals and never as
