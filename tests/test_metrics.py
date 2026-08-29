@@ -662,3 +662,28 @@ def test_t_fast_seconds_pure_function_reason_is_none_only_when_value_is_not():
     value, reason = t_fast_seconds([], fast_index=None, t_total_job=1.0, t_warmup_done_mono=None)
     assert value is None
     assert reason is not None
+
+
+def test_kv_capacity_uses_the_engine_reported_token_count():
+    """vLLM 0.27.1 reports "GPU KV cache size: N tokens" directly and emits no
+    block count or block size (fixtures/README.md Q1). The capacity must be
+    read from that, not left None because it cannot be reconstructed."""
+    rec = make()
+    rec.engine = {"kv_capacity_tokens": 35792}
+    d = derive(rec)
+    assert d["kv_capacity_tokens"] == 35792
+    assert d["kv_cache_blocks"] is None
+
+
+def test_directly_reported_capacity_wins_over_reconstruction():
+    """The engine's own statement of capacity beats blocks x block_size, which
+    exists only for versions that report the parts instead of the total."""
+    rec = make()
+    rec.engine = {"kv_capacity_tokens": 35792, "kv_cache_blocks": 8192, "block_size": 16}
+    assert derive(rec)["kv_capacity_tokens"] == 35792
+
+
+def test_directly_reported_zero_capacity_is_zero_not_none():
+    rec = make()
+    rec.engine = {"kv_capacity_tokens": 0}
+    assert derive(rec)["kv_capacity_tokens"] == 0

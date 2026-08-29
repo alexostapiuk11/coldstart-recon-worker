@@ -397,7 +397,20 @@ def derive(record: RunRecord) -> DerivedRow:
     block_size = record.engine.get("block_size")
     # `is not None` rather than truthiness: kv_cache_blocks == 0 is a real
     # (and alarming) engine state, not the same thing as "not reported".
-    kv_tokens = blocks * block_size if blocks is not None and block_size is not None else None
+    #
+    # Capacity has two possible producers, and the engine's own statement wins.
+    # The pinned vLLM version reports "GPU KV cache size: N tokens" directly and
+    # emits neither a block count nor a block size, so reconstructing capacity by
+    # multiplication is impossible there and would silently null out the figure
+    # `supported_concurrency` is built on. The product is kept as the fallback
+    # for versions that report the parts instead of the total.
+    reported_tokens = record.engine.get("kv_capacity_tokens")
+    if reported_tokens is not None:
+        kv_tokens = reported_tokens
+    elif blocks is not None and block_size is not None:
+        kv_tokens = blocks * block_size
+    else:
+        kv_tokens = None
 
     warmup = record.warmup
     steady = steady_state_latency(warmup)
