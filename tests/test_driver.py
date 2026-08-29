@@ -1,0 +1,208 @@
+from coldstart.analysis.metrics import derive
+from coldstart.cache_config import resolve
+from coldstart.driver import run_campaign
+from coldstart.store import JsonlStore
+from coldstart.stubs.stub_endpoint import StubEndpoint, VirtualClock
+from coldstart.submitter import StubSubmitter
+
+
+def test_campaign_writes_one_record_per_scheduled_run(tmp_path):
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(StubEndpoint(seed=3)),
+        store=store,
+        arms=["A", "B", "C"],
+        triples=5,
+        seed=11,
+    )
+    records = store.read_all()
+    assert len(records) == 15
+    assert sorted({r.arm for r in records}) == ["A", "B", "C"]
+
+
+def test_failed_runs_are_recorded_and_never_retried(tmp_path):
+    class SometimesBroken:
+        def __init__(self):
+            self.calls = 0
+            self._inner = StubEndpoint(seed=4)
+
+        def run(self, arm, run_id):
+            self.calls += 1
+            if self.calls % 3 == 0:
+                raise RuntimeError("health check timed out")
+            return self._inner.run(arm=arm, run_id=run_id)
+
+    ep = SometimesBroken()
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(ep), store=store, arms=["A", "B", "C"], triples=3, seed=1
+    )
+    records = store.read_all()
+    assert len(records) == 9, "every scheduled run yields exactly one record"
+    assert ep.calls == 9, "no run may be retried in place"
+    failed = [r for r in records if r.status["outcome"] == "failed"]
+    assert failed and failed[0].status["failure_class"] == "health_timeout"
+
+
+# --- run_id identity: the record must name the paths the run actually used ---
+
+
+def test_record_run_id_is_the_id_the_endpoint_ran_under(tmp_path):
+    """CacheConfig namespaces cold paths by run_id and its docstring promises
+    the config is reproducible from a stored RunRecord.run_id. Adopting the
+    platform's job id here instead would break that."""
+    seen = []
+
+    class Recording:
+        def __init__(self):
+            self._inner = StubEndpoint(seed=7)
+
+        def run(self, arm, run_id):
+            seen.append(run_id)
+            return self._inner.run(arm=arm, run_id=run_id)
+
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(Recording()), store=store, arms=["A"], triples=3, seed=2
+    )
+    stored = [r.run_id for r in store.read_all()]
+    assert stored == seen
+
+
+def test_cold_cache_paths_are_reconstructible_from_the_stored_record(tmp_path):
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(StubEndpoint(seed=9)),
+        store=store,
+        arms=["A"],
+        triples=2,
+        seed=3,
+    )
+    for record in store.read_all():
+        expected = resolve(record.arm).env(record.run_id)
+        assert record.config["env"] == expected
+
+
+def test_run_ids_are_unique_across_the_campaign(tmp_path):
+    """Two runs sharing an id would share a cold cache directory, and the
+    second would find the first's compiled artifacts."""
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(StubEndpoint(seed=6)),
+        store=store,
+        arms=["A", "B", "C"],
+        triples=4,
+        seed=5,
+    )
+    ids = [r.run_id for r in store.read_all()]
+    assert len(set(ids)) == len(ids)
+
+
+# --- provenance and schedule bookkeeping ------------------------------------
+
+
+def test_records_carry_the_resolved_arm_configuration(tmp_path):
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(StubEndpoint(seed=8)),
+        store=store,
+        arms=["C"],
+        triples=1,
+        seed=4,
+    )
+    record = store.read_all()[0]
+    assert record.config["arm"] == "C"
+    assert record.config["compile_cache_warm"] is True
+    assert record.engine["compile_cache_observed"] is True
+
+
+def test_triple_and_run_indices_are_preserved(tmp_path):
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(StubEndpoint(seed=2)),
+        store=store,
+        arms=["A", "B", "C"],
+        triples=3,
+        seed=1,
+    )
+    records = store.read_all()
+    assert [r.run_index for r in records] == list(range(9))
+    assert [r.host["triple_index"] for r in records] == [0, 0, 0, 1, 1, 1, 2, 2, 2]
+
+
+def test_failed_record_still_carries_clock_a_and_triple_index(tmp_path):
+    class AlwaysBroken:
+        def run(self, arm, run_id):
+            raise RuntimeError("health check timed out")
+
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(AlwaysBroken()),
+        store=store,
+        arms=["A"],
+        triples=2,
+        seed=1,
+    )
+    for record in store.read_all():
+        assert record.status["outcome"] == "failed"
+        assert "t_submit" in record.clock_A and "t_result" in record.clock_A
+        assert record.host["triple_index"] is not None
+
+
+# --- the whole loop: campaign -> store -> analysis, no GPU ------------------
+
+
+def test_a_stub_campaign_derives_end_to_end(tmp_path):
+    """Clock A and clock B must be consistent for this to work at all: the
+    submitter and the endpoint share a virtual clock, so the clock-A span
+    actually contains the clock-B timeline it is supposed to."""
+    clock = VirtualClock()
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(StubEndpoint(seed=12, clock=clock), clock=clock),
+        store=store,
+        arms=["A", "B", "C"],
+        triples=4,
+        seed=7,
+    )
+    rows = [derive(r) for r in store.read_all()]
+    assert len(rows) == 12
+    assert all(row["ok"] for row in rows)
+    assert all(row["t_s4_bracket"] is not None for row in rows)
+    assert all(row["t_fast_seconds"] is not None for row in rows)
+    warm = [r for r in rows if r["arm"] == "C"]
+    cold = [r for r in rows if r["arm"] == "B"]
+    assert max(r["t_compile"] for r in warm) < min(r["t_compile"] for r in cold)
+
+
+def test_clock_a_span_contains_the_clock_b_timeline(tmp_path):
+    """A real wall clock around an instant stub gives a clock-A span far
+    shorter than the clock-B marks inside it, and derive() then computes a
+    negative T_total. The shared virtual clock is what prevents that."""
+    clock = VirtualClock()
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(StubEndpoint(seed=13, clock=clock), clock=clock),
+        store=store,
+        arms=["A"],
+        triples=3,
+        seed=2,
+    )
+    for record in store.read_all():
+        span = record.clock_A["t_result"] - record.clock_A["t_submit"]
+        marks = {m["stage"]: m["t_mono"] for m in record.clock_B["marks"]}
+        assert span > marks["S7_warmup_done"]
+
+
+def test_derived_t_total_is_positive_for_every_run(tmp_path):
+    clock = VirtualClock()
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(StubEndpoint(seed=14, clock=clock), clock=clock),
+        store=store,
+        arms=["A", "B", "C"],
+        triples=3,
+        seed=8,
+    )
+    for row in (derive(r) for r in store.read_all()):
+        assert row["t_total"] > 0

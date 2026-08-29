@@ -23,13 +23,35 @@ ARM_PROFILE = {
 WARMUP_DISPATCH_GAP = 0.05
 
 
+class VirtualClock:
+    """A clock the stub endpoint advances as though the job really took time.
+
+    Clock A is stamped by the submitter around the call; clock B is the
+    synthetic in-container timeline. With a real wall clock the stub returns in
+    microseconds, so the clock-A span is far shorter than the clock-B marks it
+    is supposed to contain, and `derive()` computes a negative `T_total`. Shared
+    between the submitter and the endpoint, this makes the two consistent: time
+    passes during the job, in the amount the job claims to have taken.
+    """
+
+    def __init__(self, start: float = 0.0):
+        self._t = start
+
+    def __call__(self) -> float:
+        return self._t
+
+    def advance(self, seconds: float) -> None:
+        self._t += seconds
+
+
 class StubEndpoint:
     """In-process stand-in for the RunPod endpoint. No network, no cost."""
 
-    def __init__(self, seed: int = 0, hosts: int = 6):
+    def __init__(self, seed: int = 0, hosts: int = 6, clock: VirtualClock | None = None):
         self._rng = random.Random(seed)
         self._hosts = [f"host-{i}" for i in range(hosts)]
         self._seen: set[str] = set()
+        self._clock = clock
 
     def run(self, arm: str, run_id: str) -> dict:
         prof = ARM_PROFILE[arm]
@@ -89,6 +111,13 @@ class StubEndpoint:
             {"stage": "S7_warmup_done", "t_mono": t_warmup_done},
         ]
 
+        # The span a caller stamping clock A around this call would observe:
+        # platform queue/bring-up, then the whole in-container run through S7.
+        # derive() subtracts the clock-B warmup tail from it to recover T_total.
+        t_job_elapsed = t_platform + t_warmup_done
+        if self._clock is not None:
+            self._clock.advance(t_job_elapsed)
+
         return {
             "job_id": str(uuid.uuid4()),
             "run_id": run_id,
@@ -120,5 +149,6 @@ class StubEndpoint:
                 "t_process": t_first_token,
                 "t_platform": t_platform,
                 "s4b": s4b,
+                "t_job_elapsed": t_job_elapsed,
             },
         }
