@@ -31,6 +31,20 @@ Cache configuration is the only thing that differs between arms
 | B | network volume | cold, per-run path |
 | C | network volume | warm, on the volume |
 
+**Arm C requires a primed volume, and priming is not a measured run.** A warm
+compile cache has to be created before arm C can measure one. Before the
+campaign opens, arm C is run twice against the volume and both runs are written
+to a separate store (`data/priming.jsonl`), never to `data/campaign.jsonl`. The
+first compiles cold and writes the cache; the second must report
+`compile_cache_observed = true` with an `S4b` under one second, which is the
+check that the volume is genuinely warm.
+
+Priming runs are excluded from every published number. They are recorded and
+committed so a reader can see they happened and what they cost, not because they
+are data. Without this step arm C's early runs would compile cold and its later
+runs would not, making the arm a mixture whose effect grows with run index --
+which would look like a real trend.
+
 ## Hypotheses
 
 **H1 (decomposition).** Weight handling is the dominant directly-measured stage
