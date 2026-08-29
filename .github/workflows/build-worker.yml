@@ -12,6 +12,11 @@ on:
     branches: ["**"]
     paths:
       - "worker/**"
+      # The image vendors this package (see the Dockerfile's COPY), so a change
+      # here changes the image. Omitting it meant every coldstart/ fix shipped a
+      # stale image while the digest looked current -- including, once, the
+      # pre-probe cache-observation fix the arm-state gate depends on.
+      - "coldstart/**"
       - ".github/workflows/build-worker.yml"
   workflow_dispatch:
 
