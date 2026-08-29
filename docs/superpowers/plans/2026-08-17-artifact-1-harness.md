@@ -974,6 +974,18 @@ text is available.
 **Files:**
 - Create: `coldstart/vllm_logs.py`, `tests/test_vllm_logs.py`
 
+**As built (2026-08-28), against the real captures.** S4b *is* delineated — the
+placeholder above guessed otherwise — leaving only S4a and S4d merged. S4a has no
+duration line at all and S4d reports a size rather than a time, so neither can be
+recovered from this version's output.
+
+The reconnaissance also exposed a defect in the already-built `metrics.derive()`:
+it computed KV capacity as `kv_cache_blocks * block_size`, but 0.27.1 reports
+`GPU KV cache size: N tokens` directly and emits neither part, so capacity came out
+`None` and silently nulled the figure `supported_concurrency` depends on. `derive()`
+now prefers a directly reported `kv_capacity_tokens` and keeps the product as a
+fallback; the old behaviour is unchanged for versions that report the parts.
+
 - [ ] **Step 1: Write the failing test against real fixture text**
 
 `tests/test_vllm_logs.py`:
@@ -1028,15 +1040,17 @@ from dataclasses import dataclass, field
 # Filled from fixtures/README.md Q1 — the lines this vLLM version actually emits.
 # Each pattern must capture a float in group "sec".
 PATTERNS: dict[str, re.Pattern] = {
-    "S4c": re.compile(r"memory profiling.*took (?P<sec>[\d.]+) seconds", re.I),
-    "S4e": re.compile(r"graph capturing finished in (?P<sec>[\d.]+) secs", re.I),
+    # Anchored on "in total": two partial compile lines precede it.
+    "S4b": re.compile(r"torch\.compile took (?P<sec>[\d.]+) s in total", re.IGNORECASE),
+    "S4c": re.compile(r"Initial profiling/warmup run took (?P<sec>[\d.]+) s", re.IGNORECASE),
+    "S4e": re.compile(r"Graph capturing finished in (?P<sec>[\d.]+) secs?", re.IGNORECASE),
 }
 
 # Sub-phases this version does not delineate. Reported merged, never guessed apart.
-MERGED: list[str] = ["S4a", "S4b", "S4d"]
+MERGED: list[str] = ["S4a", "S4d"]
 
-KV_BLOCKS = re.compile(r"GPU KV cache size: (?P<blocks>[\d,]+) tokens", re.I)
-BLOCK_SIZE = re.compile(r"block_size[=: ]+(?P<n>\d+)", re.I)
+# 0.27.1 reports the total directly and emits neither part.
+KV_TOKENS = re.compile(r"GPU KV cache size: (?P<tokens>[\d,]+) tokens", re.IGNORECASE)
 
 
 @dataclass
