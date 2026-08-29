@@ -55,3 +55,10 @@ def test_missing_key_is_refused_not_defaulted():
     del broken["flashboot"]
     with pytest.raises(PreflightError, match="flashboot"):
         assert_endpoint_matches(broken)
+
+
+def test_empty_pinned_override_is_refused():
+    """An explicitly empty `pinned` would otherwise iterate zero times and pass
+    any endpoint -- the exact false pass this guard exists to prevent."""
+    with pytest.raises(ValueError, match="empty"):
+        assert_endpoint_matches(OK, pinned={})
