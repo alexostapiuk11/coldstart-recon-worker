@@ -1948,6 +1948,35 @@ falls back to summing `end_to_end`.
 - Modify: `worker/probe.py` (replace placeholder)
 - Create: `tests/test_probe_units.py`
 
+**As built (2026-08-28).** Two defects in the Step 3 sketch below, both of which
+would have surfaced on a real run rather than in tests:
+
+1. `_one_request` took `t_dispatch_mono` from a bare `time.monotonic()`. Marks are
+   stored *relative to t0* (`StageRecorder.bundle`), and `metrics.t_fast_seconds`
+   computes `tail = t_warmup_done_mono - (dispatch + end_to_end)`. An absolute value
+   is larger by the process uptime, so `tail` goes hugely negative and the function
+   raises on every run. Fixed by adding `StageRecorder.now()` — the same clock, the
+   same origin as `mark()` — and passing `recorder.now` into `_one_request`.
+2. The sketch re-defines the warmup trio locally, contradicting this task's own
+   header. They are pre-registered and `metrics`' versions take `steady` as an
+   argument, so the two copies had already diverged in signature. The probe imports
+   them; `test_warmup_trio_is_imported_not_reimplemented` asserts *identity*, so a
+   future local re-definition cannot pass by behaving the same today.
+
+Predicates, from `fixtures/vllm_logs/startup_*.log`: `Model loading took` for
+`S3_load_done`/`S4_start`, and `init engine (profile, create kv cache, warmup model)
+took` for `S4_end`. Each matches exactly once in all three captures, and the tests
+pin the near-misses — `Loading weights took` (earlier, weights not yet resident) and
+the `Starting vLLM server` / `Application startup complete` lines (S5, not S4).
+
+`S3_load_done == S4_start` is asserted as *adjacency*, not equality: `mark()` reads
+the clock once per call, so two marks can never be byte-equal.
+
+Packaging: the image vendors `coldstart/` and the build context moved from `worker/`
+to the repository root, because the probe imports from a package outside `worker/`.
+`PYTHONPATH=/opt`. The modules it pulls in are stdlib-only, verified by importing
+`probe` with only the staged directory on the path.
+
 - [ ] **Step 1: Write the failing test for the pure parts**
 
 `tests/test_probe_units.py`:
