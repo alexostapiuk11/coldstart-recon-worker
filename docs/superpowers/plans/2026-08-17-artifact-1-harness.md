@@ -2219,6 +2219,34 @@ git commit -m "feat: worker probe brackets vllm serve and drives ten warmup requ
 **Files:**
 - Modify: `worker/handler.py` (replace placeholder), `worker/Dockerfile`
 
+**As built (2026-08-28).** The sketch below has one defect and two obsolete steps.
+
+**Defect: the arm was never applied.** The sketch records `env_observed` but nothing
+*sets* `HF_HOME`/`VLLM_CACHE_ROOT`, and endpoint environment cannot vary per job, so
+all three arms would have run identically — producing clean-looking numbers that
+measure nothing. The handler now takes `arm` and `run_id` from the job input,
+resolves `CacheConfig`, and passes `env_overrides` to the probe. Both inputs are
+required; a default would silently attribute a mislabelled run to some arm.
+
+**An unmounted volume is now a hard error**, not a `makedirs`. Creating
+`/runpod-volume/...` when the volume is absent puts the cache on container disk, so
+arms B and C run cold while reporting themselves warm — an invalid experiment that
+still yields plausible numbers.
+
+**Probe changes this required:** `extra_args` (so `--revision` and the fixed
+`--max-model-len` reach `vllm serve` — without them the campaign hits the same OOM
+that made the first 8B capture return `healthy: false`) and `env_overrides`, merged
+into the subprocess environment only. Never `os.environ`: a reused worker would
+carry one run's paths into the next run's arm.
+
+**Steps 2 and 3 are obsolete.** Staging a gitignored `worker/coldstart_pkg/` copy is
+the second-drifting-copy problem Task 11 avoided. The build context is the repository
+root and `coldstart/` is copied directly, with `PYTHONPATH=/opt`. The `CMD` is
+`python3`, not `python` — the base image has no `python`.
+
+`runpod` is imported inside `main()` so the module stays importable for tests and
+importing it never starts a server as a side effect.
+
 - [ ] **Step 1: Implement the handler**
 
 `worker/handler.py`:
