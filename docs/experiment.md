@@ -7,7 +7,7 @@ is the evidence that the hypotheses below were fixed in advance.
 
 Endpoint ka5mryakkxumew, EU-RO-1, NVIDIA GeForce RTX 4090 (24 GB), network
 volume 9c7ut2slrd, template mzadx4qugv, image
-ghcr.io/alexostapiuk11/coldstart-recon-worker@sha256:14b22033a8d65f230c3ca4df2b0e69500b57e3296dec3a7ca8b88548b628aa4f,
+ghcr.io/alexostapiuk11/coldstart-recon-worker@sha256:3656fbc39211c7d103bff4ed72596f3363fb3bc0f41ac3a313400a9e588b93a9,
 vLLM 0.27.1, Qwen/Qwen3-8B revision b968826d9c46dd6066d109eabc6255188de91218,
 --max-model-len 8192, gpu_memory_utilization at the 0.9 default, FlashBoot off,
 workersMin 0, workersMax 1.
@@ -19,6 +19,13 @@ concurrency non-degenerate at roughly four sequences.
 
 Any change to a value above ends the experiment rather than continuing across
 the boundary.
+
+The image digest above was re-pinned once, before any measurement, when the
+vendored `coldstart/` package was found not to trigger an image rebuild in CI:
+the endpoint was serving an image 20+ commits stale, predating the pre-probe
+compile-cache observation the arm-state exclusion rule depends on. No data had
+been collected under the old digest, so nothing is spliced across the change --
+the re-pin is recorded here rather than silently applied.
 
 ## Arms
 
