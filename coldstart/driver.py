@@ -71,10 +71,25 @@ def _record_from(scheduled, run_id: str, outcome) -> RunRecord:
     )
 
 
-def run_campaign(submitter, store, arms, triples, seed, on_run=None):
-    """One record per scheduled run. Never retries in place -- see spec 6.6."""
+def run_campaign(submitter, store, arms, triples, seed, on_run=None, resume=False):
+    """One record per scheduled run. Never retries in place -- see spec 6.6.
+
+    `resume=True` skips runs already present in the store, keyed by
+    `run_index`. The schedule is rebuilt from the same `arms`/`triples`/`seed`,
+    so a resumed window continues the original interleaving rather than
+    generating a new one -- interleaving is the design's most important
+    validity property and a fresh schedule would change which arm runs when.
+
+    Off by default: silently skipping runs an operator asked for is a worse
+    failure than repeating them.
+    """
     schedule = build_schedule(arms=arms, triples=triples, seed=seed)
+    done: set[int] = set()
+    if resume:
+        done = {r.run_index for r in store.read_all()}
     for scheduled in schedule:
+        if scheduled.run_index in done:
+            continue
         run_id = _new_run_id()
         outcome = submitter.submit(arm=scheduled.arm, run_id=run_id)
         record = _record_from(scheduled, run_id, outcome)

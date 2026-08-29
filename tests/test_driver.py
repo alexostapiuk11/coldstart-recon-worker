@@ -1,6 +1,7 @@
 from coldstart.analysis.metrics import derive
 from coldstart.cache_config import resolve
 from coldstart.driver import run_campaign
+from coldstart.scheduler import build_schedule
 from coldstart.store import JsonlStore
 from coldstart.stubs.stub_endpoint import StubEndpoint, VirtualClock
 from coldstart.submitter import StubSubmitter
@@ -206,3 +207,54 @@ def test_derived_t_total_is_positive_for_every_run(tmp_path):
     )
     for row in (derive(r) for r in store.read_all()):
         assert row["t_total"] > 0
+
+
+# --- resumable campaigns -----------------------------------------------------
+
+
+def test_resume_skips_completed_runs_and_keeps_the_schedule(tmp_path):
+    """Resume must continue the same interleaved schedule. Rebuilding it would
+    change which arm runs when, which is the confound interleaving exists to
+    prevent."""
+
+    class FailsAfter:
+        def __init__(self, limit):
+            self.limit = limit
+            self.calls = 0
+            self._inner = StubEndpoint(seed=21)
+
+        def run(self, arm, run_id):
+            self.calls += 1
+            if self.calls > self.limit:
+                raise KeyboardInterrupt("operator stopped the window")
+            return self._inner.run(arm=arm, run_id=run_id)
+
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    kw = {"store": store, "arms": ["A", "B", "C"], "triples": 4, "seed": 31}
+    try:
+        run_campaign(submitter=StubSubmitter(FailsAfter(5)), **kw)
+    except KeyboardInterrupt:
+        pass
+    first = store.read_all()
+    assert len(first) == 5
+
+    ep = FailsAfter(999)
+    run_campaign(submitter=StubSubmitter(ep), resume=True, **kw)
+    all_records = store.read_all()
+
+    assert len(all_records) == 12
+    assert ep.calls == 7, "resume must not re-run completed runs"
+    assert [r.run_index for r in all_records] == list(range(12))
+    # The arm at each index is the one the original schedule assigned.
+    expected = [s.arm for s in build_schedule(arms=["A", "B", "C"], triples=4, seed=31)]
+    assert [r.arm for r in all_records] == expected
+
+
+def test_resume_is_off_by_default(tmp_path):
+    """Appending a second campaign to a populated store must not silently
+    skip runs the operator meant to perform."""
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    kw = {"store": store, "arms": ["A"], "triples": 2, "seed": 1}
+    run_campaign(submitter=StubSubmitter(StubEndpoint(seed=22)), **kw)
+    run_campaign(submitter=StubSubmitter(StubEndpoint(seed=23)), **kw)
+    assert len(store.read_all()) == 4
