@@ -687,3 +687,46 @@ def test_directly_reported_zero_capacity_is_zero_not_none():
     rec = make()
     rec.engine = {"kv_capacity_tokens": 0}
     assert derive(rec)["kv_capacity_tokens"] == 0
+
+
+def test_arm_state_mismatch_is_discarded_with_its_own_reason():
+    """Arm C configured warm but observed cold means VLLM_CACHE_ROOT did not
+    reach the engine, so arm C silently ran as arm B. The campaign would
+    report a compile effect near zero and look entirely healthy."""
+    record = make()
+    record.arm = "C"
+    record.config = {"arm": "C", "compile_cache_warm": True}
+    record.engine = dict(record.engine, compile_cache_observed=False)
+    d = derive(record)
+    assert d["consistent"] is False
+    assert d["discard_reason"] == DiscardReason.ARM_STATE_MISMATCH
+
+
+def test_matching_arm_state_is_left_alone():
+    record = make()
+    record.arm = "C"
+    record.config = {"arm": "C", "compile_cache_warm": True}
+    record.engine = dict(record.engine, compile_cache_observed=True)
+    assert derive(record)["consistent"] is True
+
+
+def test_cold_arm_observing_a_warm_cache_is_also_a_mismatch():
+    """The leak direction that actually happened in reconnaissance: a cold arm
+    finding a previous run's compiled artifacts."""
+    record = make()
+    record.arm = "A"
+    record.config = {"arm": "A", "compile_cache_warm": False}
+    record.engine = dict(record.engine, compile_cache_observed=True)
+    d = derive(record)
+    assert d["consistent"] is False
+    assert d["discard_reason"] == DiscardReason.ARM_STATE_MISMATCH
+
+
+def test_absent_arm_state_is_not_a_mismatch():
+    """Fixtures and stub rows carry neither field. Absence is unknown, not
+    a violation -- inventing one would discard every historical record."""
+    record = make()
+    record.config = {}
+    record.engine = dict(record.engine)
+    record.engine.pop("compile_cache_observed", None)
+    assert derive(record)["consistent"] is True

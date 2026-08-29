@@ -32,11 +32,18 @@ class DiscardReason(StrEnum):
     (spec 6.5 / B1), so it never reaches check_consistency at all — it needs
     its own tabulatable reason rather than silently falling into one of the
     other two.
+
+    ARM_STATE_MISMATCH is produced by metrics.derive() when the compile-cache
+    state observed from engine output disagrees with the state the arm's
+    configuration asked for. Pre-registered as an exclusion rule: an arm whose
+    cache state was not what it claimed is not a slightly noisy data point, it
+    is a different arm.
     """
 
     PROCESS_EXCEEDS_TOTAL = "process_exceeds_total"
     RESIDUAL_BELOW_RTT_FLOOR = "residual_below_rtt_floor"
     MISSING_WARMUP_END = "missing_warmup_end"
+    ARM_STATE_MISMATCH = "arm_state_mismatch"
 
 
 class _Needle:

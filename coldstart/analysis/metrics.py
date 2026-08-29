@@ -186,6 +186,25 @@ def t_fast_seconds(
     return t_total_job - tail, None
 
 
+def _arm_state_mismatch(record: RunRecord) -> str | None:
+    """Compare the arm's configured cache state against what was observed.
+
+    Both sides must be present to compare. Absence is unknown, not a
+    violation: fixtures and stub-built rows carry neither field, and treating
+    missing as mismatched would discard every historical record.
+    """
+    expected = (record.config or {}).get("compile_cache_warm")
+    observed = (record.engine or {}).get("compile_cache_observed")
+    if expected is None or observed is None:
+        return None
+    if bool(expected) != bool(observed):
+        return (
+            f"arm {record.arm!r} configured compile_cache_warm={bool(expected)} "
+            f"but engine output observed {bool(observed)}"
+        )
+    return None
+
+
 def ceiling_bound(t_weights: float, t_total: float) -> float:
     """Largest fraction of T_total removable if T_weights went to zero."""
     if t_total <= 0:
@@ -431,6 +450,15 @@ def derive(record: RunRecord) -> DerivedRow:
             "T_fast >= T_total always -- this is impossible under honest "
             "instrumentation and indicates corrupted timing data"
         )
+
+    # Pre-registered exclusion rule: an arm whose observed cache state is not
+    # the state it was configured for is a different arm, not a noisy sample.
+    # Checked last so it cannot mask an earlier, more specific violation.
+    mismatch = _arm_state_mismatch(record)
+    if mismatch is not None and consistent:
+        consistent = False
+        reason = mismatch
+        discard_reason = DiscardReason.ARM_STATE_MISMATCH
 
     return {
         "ok": True,
