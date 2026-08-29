@@ -2,17 +2,33 @@
 
 import random
 import uuid
+from functools import lru_cache
 
 from coldstart.cache_config import resolve
 from coldstart.stubs.stub_engine import replay_log_lines
+from coldstart.vllm_logs import parse_engine_log
 
 # Plausible ground truth in seconds. Values are arbitrary but ordered so the
 # analysis has a known answer to recover.
+#
+# Only t_weights is invented. The S4 timeline comes from the replayed capture
+# instead: inventing an s4b here as well made the stub incoherent, because the
+# bracket was drawn independently of the log whose sub-phases have to fit
+# inside it. On a low jitter draw the identified sub-phases exceeded the
+# bracket and derive() correctly flagged s4_unattributed negative -- roughly 7%
+# of arm A/B runs. The arms already differ in compile time through the capture
+# each one replays, so the second, conflicting source of truth is removed.
 ARM_PROFILE = {
-    "A": {"t_weights": 95.0, "s4b": 40.0},
-    "B": {"t_weights": 30.0, "s4b": 40.0},
-    "C": {"t_weights": 30.0, "s4b": 3.0},
+    "A": {"t_weights": 95.0},
+    "B": {"t_weights": 30.0},
+    "C": {"t_weights": 30.0},
 }
+
+# Time inside S4 that the engine log does not name -- S4a device init and S4d
+# KV allocation, which this vLLM version announces by result rather than by
+# duration. Positive by construction so the bracket always contains the
+# sub-phases identified within it.
+S4_UNATTRIBUTED = 4.0
 
 # Deliberate, non-zero gap between one request's completion and the next
 # request's dispatch (driver-side round trip / scheduling overhead). If this
@@ -21,6 +37,13 @@ ARM_PROFILE = {
 # from the summing inference metrics.t_fast_seconds refuses to make (B5) -- it
 # would exercise the fix without ever being able to catch its regression.
 WARMUP_DISPATCH_GAP = 0.05
+
+
+@lru_cache(maxsize=2)
+def _replay(compile_warm: bool):
+    """Capture lines plus their parsed sub-phases, read once per capture."""
+    lines = replay_log_lines(compile_warm)
+    return tuple(lines), parse_engine_log("\n".join(lines))
 
 
 class VirtualClock:
@@ -56,14 +79,19 @@ class StubEndpoint:
     def run(self, arm: str, run_id: str) -> dict:
         prof = ARM_PROFILE[arm]
         config = resolve(arm)
+        log_lines, parsed = _replay(config.compile_cache_warm)
         jitter = self._rng.lognormvariate(0.0, 0.25)
         host = self._rng.choice(self._hosts)
         host_factor = 1.0 + 0.15 * self._hosts.index(host)
 
         t_weights = prof["t_weights"] * jitter * host_factor
-        s4b = prof["s4b"] * jitter
         s1 = 4.0 * jitter
-        s4_other = 25.0 * jitter
+        # The bracket is the sub-phases the replayed capture actually reports,
+        # plus a positive unattributed remainder -- so what derive() computes as
+        # s4_unattributed is exactly S4_UNATTRIBUTED * jitter, never negative.
+        s4b = parsed.phases.get("S4b", 0.0)
+        identified = sum(parsed.phases.values())
+        s4_other = identified - s4b + S4_UNATTRIBUTED * jitter
         # S5 is its own stage -- engine up to the health endpoint answering.
         # Collapsing it into S4 here would let the analysis fold S5 into the
         # bracket off-GPU with nothing to catch it.
@@ -123,7 +151,7 @@ class StubEndpoint:
             "run_id": run_id,
             "arm": arm,
             "healthy": True,
-            "log_lines": replay_log_lines(compile_warm=config.compile_cache_warm),
+            "log_lines": list(log_lines),
             "warmup": warmup,
             "clock_B": {"t0_wall": 0.0, "marks": marks},
             "host": {
