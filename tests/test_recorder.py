@@ -47,3 +47,31 @@ def test_at_raises_for_an_unmarked_stage():
     r.mark("S1")
     with pytest.raises(KeyError):
         r.at("S2")
+
+
+def test_now_is_relative_to_t0():
+    """`now()` reads the same clock on the same origin as `mark()`.
+
+    The probe needs the current clock-B instant for `t_dispatch_mono` without
+    naming a stage. It has to be t0-relative: `metrics.t_fast_seconds`
+    subtracts it from `S7_warmup_done`, which `bundle()` stores relative to
+    t0, so an absolute `time.monotonic()` there would make the tail hugely
+    negative and raise on every real run.
+    """
+    r = StageRecorder(clock=iter([100.0, 100.5, 101.0]).__next__)
+    r.start()
+    assert r.now() == 0.5
+    assert r.now() == 1.0
+
+
+def test_now_shares_its_origin_with_mark():
+    r = StageRecorder(clock=iter([10.0, 12.0, 12.0]).__next__)
+    r.start()
+    marked = r.mark("S6_request1_dispatch")
+    assert r.now() == marked == 2.0
+
+
+def test_now_before_start_is_an_error():
+    r = StageRecorder()
+    with pytest.raises(RuntimeError):
+        r.now()

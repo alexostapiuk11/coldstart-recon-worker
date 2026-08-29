@@ -28,6 +28,20 @@ class StageRecorder:
         self._marks.append({"stage": stage, "t_mono": t})
         return t
 
+    def now(self) -> float:
+        """Current clock-B instant, relative to t0, without naming a stage.
+
+        `worker/probe.py` needs this for each warmup request's
+        `t_dispatch_mono`. It must share `mark()`'s origin, not be a raw
+        `time.monotonic()`: `metrics.t_fast_seconds` subtracts the dispatch
+        instant from the `S7_warmup_done` mark, and `bundle()` stores marks
+        relative to t0, so an absolute value would make the tail negative by
+        the process uptime and raise on every real run.
+        """
+        if self._t0 is None:
+            raise RuntimeError("start() must be called before now()")
+        return self._clock() - self._t0
+
     def at(self, stage: str) -> float:
         for m in self._marks:
             if m["stage"] == stage:

@@ -9,12 +9,21 @@ ENV HF_HOME=/runpod-volume/hf
 ENV VLLM_CACHE_ROOT=/root/.cache/vllm
 ENV PYTHONUNBUFFERED=1
 
-COPY requirements.txt /opt/requirements.txt
+# The probe imports the pre-registered warmup trio from coldstart.analysis.metrics
+# rather than re-defining it, so the package ships in the image. /opt is on the
+# path for both that package and the worker modules beside it.
+ENV PYTHONPATH=/opt
+
+COPY worker/requirements.txt /opt/requirements.txt
 RUN pip install --no-cache-dir -r /opt/requirements.txt
 
-COPY recon_handler.py /opt/recon_handler.py
-COPY probe.py /opt/probe.py
-COPY handler.py /opt/handler.py
+# Build context is the repository root, not worker/, because the package above
+# lives outside worker/. Vendoring a copy into worker/ instead would put a
+# second, drifting copy of the pre-registered definitions in the tree.
+COPY coldstart /opt/coldstart
+COPY worker/recon_handler.py /opt/recon_handler.py
+COPY worker/probe.py /opt/probe.py
+COPY worker/handler.py /opt/handler.py
 
 ENTRYPOINT []
 CMD ["python3", "-u", "/opt/recon_handler.py"]
