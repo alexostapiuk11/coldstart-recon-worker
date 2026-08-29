@@ -291,6 +291,78 @@ def test_resume_rejects_a_drifted_seed(tmp_path):
         raise AssertionError("expected ValueError")
 
 
+# --- missing arm-state telemetry is recorded as failed, never as an
+# unverifiable "ok" ----------------------------------------------------------
+
+
+def test_missing_compile_cache_observed_is_recorded_as_failed_not_ok(tmp_path):
+    """worker/handler.py sets compile_cache_observed unconditionally on every
+    real run. If it is absent from an otherwise-successful payload, something
+    upstream dropped data -- and metrics.derive()'s arm-state gate treats a
+    missing field as unknown, not a violation (on purpose, for historical
+    rows), so it would silently wave this run through as consistent. The
+    driver must catch it instead."""
+
+    class DropsObserved:
+        def __init__(self):
+            self._inner = StubEndpoint(seed=15)
+
+        def run(self, arm, run_id):
+            payload = self._inner.run(arm=arm, run_id=run_id)
+            del payload["compile_cache_observed"]
+            return payload
+
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(DropsObserved()), store=store, arms=["A"], triples=2, seed=1
+    )
+    records = store.read_all()
+    assert len(records) == 2
+    for record in records:
+        assert record.status["outcome"] == "failed"
+        assert "compile_cache_observed" in record.status["failure_detail"]
+    # A failed record must still derive cleanly to the 6-key failure shape,
+    # never crash trying to read the fields it doesn't have.
+    for record in records:
+        row = derive(record)
+        assert row["ok"] is False
+        assert row["consistent"] is False
+
+
+def test_missing_expected_compile_cache_warm_is_recorded_as_failed_not_ok(tmp_path):
+    """The other half of the pair: cache_config.compile_cache_warm missing
+    (e.g. the worker's cache_config block itself got dropped) is the same
+    class of unverifiable run as a missing compile_cache_observed."""
+
+    class DropsExpected:
+        def __init__(self):
+            self._inner = StubEndpoint(seed=16)
+
+        def run(self, arm, run_id):
+            payload = self._inner.run(arm=arm, run_id=run_id)
+            del payload["cache_config"]["compile_cache_warm"]
+            return payload
+
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(DropsExpected()), store=store, arms=["C"], triples=1, seed=2
+    )
+    record = store.read_all()[0]
+    assert record.status["outcome"] == "failed"
+    assert "compile_cache_warm" in record.status["failure_detail"]
+
+
+def test_present_arm_state_telemetry_still_yields_an_ok_record(tmp_path):
+    """Sanity check that the new guard doesn't fire on the ordinary path --
+    every field present must still produce an ok record, as before."""
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(StubEndpoint(seed=17)), store=store, arms=["A"], triples=2, seed=1
+    )
+    for record in store.read_all():
+        assert record.status["outcome"] == "ok"
+
+
 def test_resume_rejects_a_shrunk_schedule(tmp_path):
     """Resuming with fewer triples than the original window leaves stored
     run_indices the rebuilt schedule doesn't cover -- the same class of drift

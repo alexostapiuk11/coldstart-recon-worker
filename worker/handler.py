@@ -59,6 +59,25 @@ def _prepare_cache_dirs(env_overrides: dict) -> None:
         os.makedirs(path, exist_ok=True)
 
 
+def _compile_cache_present(env_overrides: dict) -> bool:
+    """Whether this arm's torch.compile cache directory exists right now.
+
+    Purely a directory check: it cannot tell "a previous run already
+    compiled here" apart from "this run's own compile just finished and
+    wrote the directory". Callers control which of those two questions gets
+    asked by choosing *when* they call this -- see the two call sites in
+    handler() below, which ask it at different points for different reasons.
+
+    Also cannot tell "warm because this exact model/config was compiled
+    here before" apart from "warm because a *different* model or config was
+    compiled here before" -- a volume path carrying a stale cache for
+    another model would read True either way. Out of scope while this
+    campaign pins one model and one set of engine flags across the whole
+    run (spec "Held fixed"), but a real limitation if that ever changes.
+    """
+    return os.path.isdir(os.path.join(env_overrides["VLLM_CACHE_ROOT"], "torch_compile_cache"))
+
+
 def _gpu_info() -> dict:
     try:
         out = subprocess.run(
@@ -99,6 +118,29 @@ def handler(job):
 
     _prepare_cache_dirs(env_overrides)
 
+    # Snapshot the cache state BEFORE run_probe(), not after. The gate this
+    # feeds (metrics.derive()'s arm-state check, Task 4b) asks "was this
+    # arm's cache warm when the run STARTED" -- but a COLD compile creates
+    # `torch_compile_cache/` as a side effect of *finishing*. Fixture
+    # evidence from a run known to be a first-ever cache miss
+    # (fixtures/vllm_logs/startup_0.log): "Using cache directory: .../
+    # torch_compile_cache/.../backbone" followed later by "saved AOT
+    # compiled function to .../torch_compile_cache/torch_aot_compile/...",
+    # after which fixtures/runpod_api/status_0.json shows the directory
+    # present. A plain os.path.isdir() cannot distinguish "found a
+    # pre-existing cache" from "just created one by compiling" -- both read
+    # True. Reading it after run_probe() returns would therefore report
+    # compile_cache_observed=True for every genuinely cold arm A/B run,
+    # tripping the arm-state gate on exactly the healthy runs it must not
+    # discard, and silently passing the actual leak (a warm cache surviving
+    # onto a cold arm) undetected in the other direction.
+    #
+    # This is the subtlety that gets "simplified" back into a bug later:
+    # moving this call to after run_probe() below will look harmless (it
+    # still reports *a* boolean) while quietly discarding ~2/3 of a paid
+    # campaign. Do not move it.
+    compile_cache_observed = _compile_cache_present(env_overrides)
+
     model = os.environ["MODEL_ID"]
     result = run_probe(
         StageRecorder(),
@@ -118,9 +160,14 @@ def handler(job):
         "compile_cache_warm": config.compile_cache_warm,
         "env": dict(env_overrides),
     }
-    result["compile_cache_observed"] = os.path.isdir(
-        os.path.join(env_overrides["VLLM_CACHE_ROOT"], "torch_compile_cache")
-    )
+    # The field metrics.derive()'s arm-state gate consumes -- the pre-probe
+    # reading captured above.
+    result["compile_cache_observed"] = compile_cache_observed
+    # Diagnostic only; never consumed by the gate. A cold arm SHOULD show
+    # False before and True after (its own compile just wrote the cache); a
+    # cold arm reading False for both means torch.compile never wrote a
+    # cache at all, which is itself worth seeing during reconnaissance.
+    result["compile_cache_present_after"] = _compile_cache_present(env_overrides)
     return result
 
 

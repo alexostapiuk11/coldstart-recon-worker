@@ -730,3 +730,34 @@ def test_absent_arm_state_is_not_a_mismatch():
     record.engine = dict(record.engine)
     record.engine.pop("compile_cache_observed", None)
     assert derive(record)["consistent"] is True
+
+
+def test_arm_mismatch_does_not_override_an_earlier_more_specific_discard_reason():
+    """A run can be clock-inconsistent (spec 6.5 rule 3) AND arm-mismatched at
+    the same time. The arm-state check is applied last specifically so it
+    cannot mask an earlier, more specific violation -- this locks in that
+    ordering guarantee rather than leaving it untested."""
+    record = make(t_result=50.0)  # trips PROCESS_EXCEEDS_TOTAL, per
+    # test_inconsistent_run_is_flagged_not_silently_kept above.
+    record.arm = "C"
+    record.config = {"arm": "C", "compile_cache_warm": True}
+    record.engine = dict(record.engine, compile_cache_observed=False)  # also a mismatch
+    d = derive(record)
+    assert d["consistent"] is False
+    assert d["discard_reason"] == DiscardReason.PROCESS_EXCEEDS_TOTAL
+    assert d["discard_reason"] != DiscardReason.ARM_STATE_MISMATCH
+
+
+def test_arm_state_mismatch_reason_names_the_run():
+    """Sibling messages in this module lead with `run {run_id!r} (arm
+    {arm!r}): ...` so a discard is traceable during a campaign with many of
+    them -- the arm-state reason must follow the same convention."""
+    record_id = "run-arm-mismatch"
+    record = make()
+    record.run_id = record_id
+    record.arm = "C"
+    record.config = {"arm": "C", "compile_cache_warm": True}
+    record.engine = dict(record.engine, compile_cache_observed=False)
+    d = derive(record)
+    assert record_id in d["inconsistency_reason"]
+    assert "C" in d["inconsistency_reason"]

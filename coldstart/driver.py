@@ -43,6 +43,66 @@ def _record_from(scheduled, run_id: str, outcome) -> RunRecord:
         )
 
     p = outcome.payload
+
+    # A transport-level success (outcome.error is None) is not the same thing
+    # as a telemetry-complete one. worker/handler.py sets both of these
+    # fields unconditionally on every real run, so either being absent here
+    # means something between the engine and the store dropped data -- a
+    # worker bug, a truncated payload, a `.get(..., None)` upstream
+    # swallowing what should have been a KeyError.
+    #
+    # This cannot be left for metrics.derive()'s arm-state gate to catch.
+    # That gate treats an absent field as "unknown, not a violation" *on
+    # purpose* -- fixtures and every historical record genuinely never had
+    # these fields, and treating their absence as a mismatch would discard
+    # all of them. A live run that should have both fields and is missing
+    # one is a different situation from a historical row that never had
+    # them, but derive() has no way to tell those apart from the record
+    # alone -- only the driver knows this record just arrived from a run
+    # that was supposed to carry them. So the distinction is drawn here,
+    # upstream, once, rather than by loosening derive()'s permissiveness and
+    # losing the thing that makes old data readable at all.
+    #
+    # Recorded as a failed run (reusing the same outcome.error path's
+    # machinery: classify_failure + status.outcome="failed") rather than as
+    # an "ok" row with a null field, because a downstream reader must be able
+    # to *count* this the way it counts every other failure mode -- an "ok"
+    # row that happens to have consistent=True forever (derive() would never
+    # flag it, since both arm-state inputs are absent) is exactly the
+    # invisible-failure shape this whole gate exists to close.
+    observed = p.get("compile_cache_observed")
+    expected = (p.get("cache_config") or {}).get("compile_cache_warm")
+    if observed is None or expected is None:
+        missing = [
+            name
+            for name, value in (
+                ("compile_cache_observed", observed),
+                ("cache_config.compile_cache_warm", expected),
+            )
+            if value is None
+        ]
+        detail = (
+            f"worker payload missing required arm-state telemetry ({', '.join(missing)}); "
+            "this run's arm state cannot be verified, so it must not be published as ok"
+        )
+        return RunRecord(
+            run_id=run_id,
+            run_index=scheduled.run_index,
+            arm=scheduled.arm,
+            clock_A=outcome.clock_A,
+            clock_C=p.get("clock_C", {}),
+            clock_B=p.get("clock_B", {}),
+            warmup=p.get("warmup", []),
+            engine={},
+            host=dict(p.get("host", {})),
+            config=p.get("cache_config", {}),
+            status={
+                "outcome": "failed",
+                "failure_class": classify_failure(detail).value,
+                "failure_detail": detail,
+            },
+        )
+
     parsed = parse_engine_log("\n".join(p.get("log_lines", [])))
     return RunRecord(
         run_id=run_id,
@@ -57,8 +117,19 @@ def _record_from(scheduled, run_id: str, outcome) -> RunRecord:
             "s4_subphases": parsed.phases,
             "s4_merged": parsed.merged,
             # The detector for a compile cache leaking into a cold arm: the
-            # arm says what was configured, this says what was on disk.
+            # arm says what was configured, this is what was on disk BEFORE
+            # the run started (worker/handler.py snapshots it ahead of
+            # run_probe -- see that module for why the timing matters).
             "compile_cache_observed": p.get("compile_cache_observed"),
+            # Diagnostic only, never read by the arm-state gate: the same
+            # check taken again after the run. A cold arm should flip
+            # False -> True (its own compile wrote the cache); staying
+            # False -> False on a cold arm means the compile never wrote a
+            # cache at all, worth seeing even though it doesn't fail the
+            # gate. Carried through here so it survives to the stored
+            # record rather than being dropped after the handler computes
+            # it.
+            "compile_cache_present_after": p.get("compile_cache_present_after"),
         },
         # Copied, not aliased: the payload's dict is the endpoint's, and
         # triple_index is stamped onto the record's copy below.

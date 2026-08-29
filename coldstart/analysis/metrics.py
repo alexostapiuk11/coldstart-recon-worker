@@ -199,8 +199,9 @@ def _arm_state_mismatch(record: RunRecord) -> str | None:
         return None
     if bool(expected) != bool(observed):
         return (
-            f"arm {record.arm!r} configured compile_cache_warm={bool(expected)} "
-            f"but engine output observed {bool(observed)}"
+            f"run {record.run_id!r} (arm {record.arm!r}): configured "
+            f"compile_cache_warm={bool(expected)} but engine output observed "
+            f"{bool(observed)}"
         )
     return None
 

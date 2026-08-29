@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -167,3 +168,82 @@ def test_mounted_volume_directory_is_created(tmp_path, monkeypatch):
     monkeypatch.setattr(cache_config, "VOLUME_ROOT", str(root))
     handler_mod._prepare_cache_dirs({"HF_HOME": str(root / "hf")})
     assert (root / "hf").is_dir()
+
+
+# --- compile_cache_observed: read BEFORE the probe, never after -------------
+#
+# A cold compile creates `torch_compile_cache/` as a side effect of
+# *finishing* (see fixtures/vllm_logs/startup_0.log, a known cache-miss run:
+# "Using cache directory: .../torch_compile_cache/.../backbone" followed by
+# "saved AOT compiled function to .../torch_compile_cache/torch_aot_compile/
+# ..."). A plain directory check cannot tell "found a pre-existing cache"
+# apart from "just created one by compiling" -- both read True. The gate
+# metrics.derive() applies (Task 4b) needs the PRE-run answer; reading the
+# POST-run answer would flag every healthy cold arm A/B run as a mismatch.
+
+
+def test_compile_cache_observed_is_captured_before_run_probe_runs(tmp_path, monkeypatch):
+    """Ordering regression: fails if someone moves the observation call from
+    before run_probe() to after it in handler.handler()."""
+    monkeypatch.setattr(cache_config, "COLD_HF_ROOT", str(tmp_path / "hf-cold"))
+    monkeypatch.setattr(cache_config, "COLD_VLLM_CACHE_ROOT", str(tmp_path / "vllm-cache-cold"))
+    monkeypatch.setenv("MODEL_ID", "Qwen/Qwen3-8B")
+    monkeypatch.delenv("MODEL_REVISION", raising=False)
+    monkeypatch.delenv("MAX_MODEL_LEN", raising=False)
+
+    order = []
+    real_present = handler_mod._compile_cache_present
+
+    def _tracking_present(env_overrides):
+        order.append("compile_cache_present")
+        return real_present(env_overrides)
+
+    def _fake_run_probe(recorder, model, health_timeout=900.0, extra_args=(), env_overrides=None):
+        order.append("run_probe")
+        return {"healthy": True, "warmup": [], "clock_B": {"marks": []}, "log_lines": []}
+
+    monkeypatch.setattr(handler_mod, "_compile_cache_present", _tracking_present)
+    monkeypatch.setattr(handler_mod, "run_probe", _fake_run_probe)
+
+    handler_mod.handler(_job(arm="A"))
+
+    # Two readings are taken -- one feeds compile_cache_observed, one feeds
+    # the post-run diagnostic -- but the FIRST one, the one the gate
+    # consumes, must land before run_probe(), not after.
+    assert order == ["compile_cache_present", "run_probe", "compile_cache_present"]
+
+
+def test_cold_arm_reports_observed_false_even_though_its_own_compile_creates_the_dir(
+    tmp_path, monkeypatch
+):
+    """The specific failure this whole gate exists to prevent: on a real
+    cold arm, `torch_compile_cache/` does not exist when the run starts and
+    is created partway through by the compile itself. `compile_cache_observed`
+    must reflect the directory's state at the START of the run (False), even
+    though by the time the job returns the directory is there (True) --
+    otherwise every genuinely cold run would be reported as warm and
+    discarded by metrics.derive()'s arm-state check."""
+    monkeypatch.setattr(cache_config, "COLD_HF_ROOT", str(tmp_path / "hf-cold"))
+    monkeypatch.setattr(cache_config, "COLD_VLLM_CACHE_ROOT", str(tmp_path / "vllm-cache-cold"))
+    monkeypatch.setenv("MODEL_ID", "Qwen/Qwen3-8B")
+    monkeypatch.delenv("MODEL_REVISION", raising=False)
+    monkeypatch.delenv("MAX_MODEL_LEN", raising=False)
+
+    def _fake_run_probe(recorder, model, health_timeout=900.0, extra_args=(), env_overrides=None):
+        cache_root = env_overrides["VLLM_CACHE_ROOT"]
+        compile_dir = os.path.join(cache_root, "torch_compile_cache")
+        assert not os.path.isdir(compile_dir), (
+            "the directory must not exist yet when the probe starts -- "
+            "that is what makes this a genuinely cold arm"
+        )
+        # Simulate the compile finishing during the probe and writing the
+        # cache directory as a side effect, as the real engine does.
+        os.makedirs(compile_dir)
+        return {"healthy": True, "warmup": [], "clock_B": {"marks": []}, "log_lines": []}
+
+    monkeypatch.setattr(handler_mod, "run_probe", _fake_run_probe)
+
+    result = handler_mod.handler(_job(arm="A"))
+
+    assert result["compile_cache_observed"] is False
+    assert result["compile_cache_present_after"] is True
