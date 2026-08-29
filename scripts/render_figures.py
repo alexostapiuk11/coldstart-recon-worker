@@ -8,7 +8,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from coldstart.analysis import figures
 from coldstart.analysis.metrics import derive
-from coldstart.analysis.pipeline import REQUIRED_FOR_T_TOTAL, REQUIRED_FOR_WARMUP, partition
+from coldstart.analysis.pipeline import (
+    REQUIRED_FOR_T_TOTAL,
+    REQUIRED_FOR_WARMUP,
+    NotPublishableError,
+    partition,
+)
 from coldstart.store import JsonlStore
 
 
@@ -43,7 +48,7 @@ def main() -> None:
     ]:
         try:
             path = fn(part.publishable, out / f"{name}.png")
-        except Exception as exc:
+        except (ValueError, NotPublishableError) as exc:
             raise SystemExit(
                 f"{name}: could not render from store {args.store!r}: {exc} "
                 f"(publishable={len(part.publishable)}, discarded={len(part.discarded)}, "
