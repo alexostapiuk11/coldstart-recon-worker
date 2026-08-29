@@ -258,3 +258,62 @@ def test_resume_is_off_by_default(tmp_path):
     run_campaign(submitter=StubSubmitter(StubEndpoint(seed=22)), **kw)
     run_campaign(submitter=StubSubmitter(StubEndpoint(seed=23)), **kw)
     assert len(store.read_all()) == 4
+
+
+def test_resume_rejects_a_drifted_seed(tmp_path):
+    """A resumed window must use the exact seed of the original one. Silently
+    accepting a different seed would splice two different interleavings
+    together with nothing downstream able to tell -- the confound
+    interleaving exists to prevent."""
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(StubEndpoint(seed=21)),
+        store=store,
+        arms=["A", "B", "C"],
+        triples=4,
+        seed=31,
+    )
+    try:
+        run_campaign(
+            submitter=StubSubmitter(StubEndpoint(seed=21)),
+            store=store,
+            arms=["A", "B", "C"],
+            triples=4,
+            seed=99,
+            resume=True,
+        )
+    except ValueError as e:
+        msg = str(e)
+        assert "run_index 0" in msg
+        assert "C" in msg  # the arm actually stored at index 0
+        assert "A" in msg  # the arm the drifted schedule expects at index 0
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_resume_rejects_a_shrunk_schedule(tmp_path):
+    """Resuming with fewer triples than the original window leaves stored
+    run_indices the rebuilt schedule doesn't cover -- the same class of drift
+    as a wrong seed, and must not be silently ignored."""
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(StubEndpoint(seed=21)),
+        store=store,
+        arms=["A", "B", "C"],
+        triples=4,
+        seed=31,
+    )
+    try:
+        run_campaign(
+            submitter=StubSubmitter(StubEndpoint(seed=21)),
+            store=store,
+            arms=["A", "B", "C"],
+            triples=2,
+            seed=31,
+            resume=True,
+        )
+    except ValueError as e:
+        assert "run_index" in str(e)
+        assert "beyond" in str(e)
+    else:
+        raise AssertionError("expected ValueError")

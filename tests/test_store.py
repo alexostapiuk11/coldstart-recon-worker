@@ -80,3 +80,26 @@ def test_parent_directories_are_created(tmp_path):
     store = JsonlStore(tmp_path / "deep" / "nested" / "runs.jsonl")
     store.append(make_record())
     assert len(store.read_all()) == 1
+
+
+def test_a_truncated_trailing_line_raises_an_actionable_error(tmp_path):
+    """A process killed mid-append leaves a truncated last line. read_all()
+    must fail loudly and name where -- silently dropping it would let the
+    analysis layer quietly compute a published result from an incomplete
+    store."""
+    path = tmp_path / "runs.jsonl"
+    store = JsonlStore(path)
+    store.append(make_record("r1", 0, "A"))
+    store.append(make_record("r2", 1, "B"))
+    # Simulate a kill mid-write: append a truncated (non-JSON) trailing line.
+    with path.open("a") as f:
+        f.write('{"run_id": "r3", "run_index": 2, "arm": "C"')  # no closing brace
+
+    try:
+        store.read_all()
+    except ValueError as e:
+        msg = str(e)
+        assert str(path) in msg
+        assert "3" in msg  # 1-based line number of the corrupt line
+    else:
+        raise AssertionError("expected ValueError")

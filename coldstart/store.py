@@ -20,8 +20,20 @@ class JsonlStore:
             return []
         out = []
         with self.path.open() as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    out.append(RunRecord.from_dict(json.loads(line)))
+            for lineno, raw_line in enumerate(f, start=1):
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError as e:
+                    raise ValueError(
+                        f"{self.path}: line {lineno} is not valid JSON ({e}). "
+                        "A line truncated mid-write is the signature of a "
+                        "process killed mid-append (e.g. an interrupted "
+                        "campaign); if this is the last line in the file, "
+                        "truncating it is the fix -- read_all() will not "
+                        "silently drop it for you."
+                    ) from e
+                out.append(RunRecord.from_dict(data))
         return out

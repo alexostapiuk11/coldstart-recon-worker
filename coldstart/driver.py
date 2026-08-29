@@ -80,13 +80,49 @@ def run_campaign(submitter, store, arms, triples, seed, on_run=None, resume=Fals
     generating a new one -- interleaving is the design's most important
     validity property and a fresh schedule would change which arm runs when.
 
+    Callers MUST pass the exact `arms`/`triples`/`seed` of the window being
+    resumed. Nothing on disk records which schedule produced the stored rows,
+    and a runner script typically takes these as command-line arguments, so a
+    typo'd seed or triple count is realistic. Passed a drifted value, this
+    function would otherwise splice two different interleavings into one
+    store -- exactly the confound interleaving exists to prevent -- and
+    nothing downstream would ever reveal it, since the resulting store still
+    looks like one well-formed campaign. To turn that silent corruption into
+    a loud failure, every stored row whose `run_index` falls within the
+    freshly-built schedule is checked against the arm that schedule assigns
+    to it; a mismatch raises `ValueError`. A stored `run_index` past the end
+    of the rebuilt schedule (e.g. resuming with fewer `triples` than the
+    original window) is the same class of drift and also raises.
+
     Off by default: silently skipping runs an operator asked for is a worse
     failure than repeating them.
     """
     schedule = build_schedule(arms=arms, triples=triples, seed=seed)
-    done: set[int] = set()
+    done: dict[int, str] = {}
     if resume:
-        done = {r.run_index for r in store.read_all()}
+        arm_by_index = {s.run_index: s.arm for s in schedule}
+        for r in store.read_all():
+            expected_arm = arm_by_index.get(r.run_index)
+            if expected_arm is None:
+                raise ValueError(
+                    f"resume: stored run_index {r.run_index} falls beyond the "
+                    f"rebuilt schedule, which only covers 0..{len(schedule) - 1} "
+                    f"for the given arms/triples/seed. This means resume was "
+                    f"called with different schedule parameters (e.g. fewer "
+                    f"triples) than produced the stored data -- resume must use "
+                    f"the exact arms/triples/seed of the original window."
+                )
+            if r.arm != expected_arm:
+                raise ValueError(
+                    f"resume: stored run_index {r.run_index} has arm "
+                    f"{r.arm!r} on disk, but the rebuilt schedule assigns it "
+                    f"arm {expected_arm!r}. This means resume was called with "
+                    f"different arms/triples/seed than produced the stored "
+                    f"data, which would splice two different interleavings "
+                    f"together -- resume must use the exact arms/triples/seed "
+                    f"of the original window."
+                )
+            done[r.run_index] = r.arm
     for scheduled in schedule:
         if scheduled.run_index in done:
             continue
