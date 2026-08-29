@@ -2577,6 +2577,14 @@ git commit -m "feat: GPU-free stub endpoint replaying real captured engine logs"
 **Files:**
 - Create: `coldstart/submitter.py`, `tests/test_submitter.py`
 
+**As built (2026-08-28).** `submit()` takes `run_id` from the caller. The arm's cache
+paths are namespaced by it (`CacheConfig.env`), so the id a run executes under must be
+the id its record carries; generating one here, or adopting the platform's job id
+afterwards, would make the paths unreconstructible from `RunRecord.run_id`. Clock A is
+stamped on the failure path too — a failed run still consumed wall-clock time and still
+counts in the failure-rate table. `except Exception` deliberately leaves
+`KeyboardInterrupt` alone, so stopping a campaign is not recorded as a run failure.
+
 - [ ] **Step 1: Write the failing test**
 
 `tests/test_submitter.py`:
@@ -2675,6 +2683,26 @@ git commit -m "feat: clock A submitter with failures captured as data"
 
 **Files:**
 - Create: `coldstart/driver.py`, `tests/test_driver.py`
+
+**As built (2026-08-28).** Three defects in the sketch:
+
+1. **`run_id` came from `p.get("job_id")` after the run.** It has to exist *before* the
+   endpoint starts, because the arm's cache paths are namespaced by it. Generated up
+   front and threaded through; a test reconstructs each record's paths from its stored
+   `run_id`.
+2. **`config=p.get("config", {})`** reads a key neither the worker nor the stub returns,
+   so every record would have carried an empty config. The worker returns
+   `cache_config` — what the arm actually resolved to.
+3. **The stub submitter and stub endpoint did not share a clock.** With a real wall
+   clock the stub returns in microseconds, so the clock-A span was shorter than the
+   clock-B timeline inside it and `derive()` raised on a negative `T_total`. The
+   sketch's driver tests only counted records, so this appeared only once the analysis
+   was run over a stub campaign. `stubs.stub_endpoint.VirtualClock`, shared by both,
+   advances by the span the job claims to have taken.
+
+A 30-run stub campaign derives end to end with no GPU, separating the arms as designed:
+median `T_total` 229 / 174 / 110 s for A / B / C, `t_weights` 129.5 → 46.7,
+`t_compile` 38.96 → 0.30.
 
 - [ ] **Step 1: Write the failing test**
 
