@@ -88,12 +88,17 @@ REQUIRED_FOR_T_WEIGHTS above — `t_compile` (`subphase_values["S4b"]` in
 `metrics.derive()`) is computed independently of the T_total/T_process
 consistency check and must not be published from a run that check already
 rejected. `t_compile` is `None` under the exact same "merged phase" policy
-that makes `t_weights` `None` when S2/S3 aren't delineated — here it is S4b
-that the pinned engine version did not delineate — not a distinct nullity
-condition requiring its own machinery. Analogous to `by_w`'s use of
-REQUIRED_FOR_T_WEIGHTS in `scripts/analyse.py`: pooling `t_compile` from
-`REQUIRED_FOR_T_TOTAL`'s publishable set (gated on `consistent` alone) would
-let a merged-S4b row's `None` reach a bootstrap unfiltered."""
+that makes `t_weights` `None` when S2/S3 aren't delineated -- here, when a
+given run's parsed engine log has no `S4b` entry in its phases. The pinned
+engine version normally DOES delineate S4b (unlike S4a/S4d, which it merges
+-- see coldstart/vllm_logs.py's PATTERNS and the fixture captures), so on a
+healthy run this is populated, not the common case; the preset still needs
+its own gate because that nullity condition is independent of clock
+consistency, not because it is expected to fire often. Analogous to `by_w`'s
+use of REQUIRED_FOR_T_WEIGHTS in `scripts/analyse.py`: pooling `t_compile`
+from `REQUIRED_FOR_T_TOTAL`'s publishable set (gated on `consistent` alone)
+would let a run without an S4b entry's `None` reach a bootstrap
+unfiltered."""
 
 REQUIRED_FOR_T_FAST: tuple[str, ...] = ("consistent", "t_fast_seconds")
 """The T_fast / business-framing figures (economics.py). Also requires

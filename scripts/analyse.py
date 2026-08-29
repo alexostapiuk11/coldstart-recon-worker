@@ -7,6 +7,7 @@
 import argparse
 import json
 import sys
+import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -72,31 +73,38 @@ def _floor_or_withhold(compute, counts: dict[str, int], floor: int) -> dict:
     bootstrap, and kv_capacity_median route through.
 
     `counts` maps a human-readable label (an arm name, or "within-host
-    triples") to how many publishable, non-None samples back that
-    computation. Zero is just the n=0 case of the same floor a thin-but-
-    nonzero sample already fails -- not a separate condition, and not
-    something `compute` (a raising bootstrap/percentile call) is ever asked
-    to handle itself. Every label short of `floor` is named in the reason,
-    not just the first, so an operator sees every empty or thin arm in one
-    message instead of debugging them one crash at a time.
+    triples") to how many publishable, non-None units back that computation
+    -- a "unit" is a row for a per-arm sample, a triple for the paired case,
+    which is why the message below states a bare count rather than a
+    hardcoded noun that would only fit one of the two. Zero is just the n=0
+    case of the same floor a thin-but-nonzero sample already fails -- not a
+    separate condition, and not something `compute` (a raising
+    bootstrap/percentile call) is ever asked to handle itself. Every label
+    short of `floor` is named in the reason, not just the first, so an
+    operator sees every empty or thin arm in one message instead of
+    debugging them one crash at a time.
     """
     short = {label: n for label, n in counts.items() if n < floor}
     if short:
-        parts = [f"{label} has {n} publishable rows" for label, n in short.items()]
+        parts = [f"{label} has {n}" for label, n in short.items()]
         return _withheld(f"{', '.join(parts)} (needs >= {floor})")
     return _published(compute())
 
 
-def _full_analysis(rows: list[dict], total_part: PartitionResult) -> dict:
+def _full_analysis(rows: list[dict], total_part: PartitionResult, out: dict) -> None:
     """Every metric beyond the always-safe summary block: distributions,
     KV-capacity medians, the six contrasts, and the paired analysis.
 
-    Isolated from `main()` so the risky section can be wrapped in one
-    try/except there -- an exception raised in here must never cost the
-    caller `failure_rate_by_arm`/`discard_table`, which is exactly the
-    diagnostic an operator reaches for when a campaign looks broken.
+    Writes directly into the caller's `out` dict, key by key, instead of
+    building and returning a separate one -- so if a later statement in here
+    raises, every field already computed is still sitting in `out` for
+    `main()` to print. Isolated from `main()` only so the risky section can
+    be wrapped in one try/except there; an exception raised in here must
+    never cost the caller `failure_rate_by_arm`/`discard_table` (already in
+    `out` before this is called), nor any of this function's own
+    already-computed fields -- both are exactly the diagnostics an operator
+    reaches for when a campaign looks broken.
     """
-    out: dict = {}
     pub = total_part.publishable
 
     out["distributions"] = {}
@@ -125,10 +133,12 @@ def _full_analysis(rows: list[dict], total_part: PartitionResult) -> dict:
             KV_CAPACITY_FLOOR,
         )
 
-    # t_compile has its own nullity condition (an undelineated S4b),
-    # independent of T_total consistency -- REQUIRED_FOR_T_COMPILE gates it
-    # exactly the way REQUIRED_FOR_T_WEIGHTS gates t_weights below, so a
-    # merged-S4b row's None can never reach a bootstrap unfiltered.
+    # t_compile has its own nullity condition (a run whose parsed engine log
+    # has no S4b entry -- the pinned engine normally DOES delineate S4b, so
+    # this is not the common case, but it is independent of T_total
+    # consistency when it happens) -- REQUIRED_FOR_T_COMPILE gates it exactly
+    # the way REQUIRED_FOR_T_WEIGHTS gates t_weights below, so a row without
+    # an S4b entry's None can never reach a bootstrap unfiltered.
     weights_pub = partition(rows, required=REQUIRED_FOR_T_WEIGHTS).publishable
     compile_pub = partition(rows, required=REQUIRED_FOR_T_COMPILE).publishable
     by_w = {a: [r["t_weights"] for r in weights_pub if r["arm"] == a] for a in "ABC"}
@@ -172,7 +182,19 @@ def _full_analysis(rows: list[dict], total_part: PartitionResult) -> dict:
         MIN_BOOTSTRAP_SAMPLES,
     )
 
-    triples = within_host_triples(rows)
+    # The paired contrast pools t_weights per triple (bootstrap_paired_median_diff
+    # below, value="t_weights"), so a triple only qualifies if every arm inside
+    # it actually has a valid t_weights -- not merely a consistent, complete-
+    # looking group of three rows. within_host_triples() itself checks only
+    # ok/arm/host_id/triple_index structure (stats.py's `_row_value` docstring
+    # warns every caller of exactly this gap), so it is built from weights_pub
+    # -- REQUIRED_FOR_T_WEIGHTS's publishable set, the same one `by_w` above
+    # already uses -- rather than the raw `rows`. A triple where one arm's
+    # t_weights is None (an undelineated S2/S3) or whose row failed
+    # consistency then simply has that row absent from weights_pub, so the
+    # group no longer covers all three arms and within_host_triples drops it,
+    # the same way a failed run's absence already does.
+    triples = within_host_triples(weights_pub)
     out["within_host_triples"] = len(triples)
     out["paired_A_to_B_t_weights"] = _floor_or_withhold(
         lambda: bootstrap_paired_median_diff(
@@ -181,8 +203,6 @@ def _full_analysis(rows: list[dict], total_part: PartitionResult) -> dict:
         {"within-host triples": len(triples)},
         MIN_BOOTSTRAP_SAMPLES,
     )
-
-    return out
 
 
 def main() -> None:
@@ -212,13 +232,17 @@ def main() -> None:
         return
 
     try:
-        out.update(_full_analysis(rows, total_part))
+        _full_analysis(rows, total_part, out)
     except Exception as exc:  # noqa: BLE001 -- deliberately broad, see comment below
-        # A crash here must not cost the caller the summary block above --
-        # that is exactly the diagnostic an operator needs at the moment
+        # A crash here must not cost the caller the summary block above, nor
+        # any field _full_analysis already wrote into `out` before raising --
+        # both are exactly the diagnostics an operator needs at the moment
         # something has gone wrong enough to raise. Print what was safely
-        # computed plus the error, then exit non-zero so a script or CI
-        # check still sees failure.
+        # computed plus a short error summary (stdout stays one clean JSON
+        # document for tooling), write the real traceback to stderr for a
+        # human, then exit non-zero so a script or CI check still sees
+        # failure.
+        print(traceback.format_exc(), file=sys.stderr)
         out["error"] = f"{type(exc).__name__}: {exc}"
         print(json.dumps(out, indent=2, default=str))
         sys.exit(1)
