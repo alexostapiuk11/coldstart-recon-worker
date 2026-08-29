@@ -151,9 +151,10 @@ def t_fast_seconds(
     is not reconstructible from a stored row: summing `end_to_end` values
     instead would assume zero gap between requests, which is an assumption,
     not a measurement, and would silently reintroduce exactly the inference
-    this function exists to eliminate. Every run recorded before that field
-    exists — which today is every real run and every fixture in this test
-    suite — gets `(None, reason)` here rather than that inference.
+    this function exists to eliminate. Any run whose warmup records predate
+    that field gets `(None, reason)` here rather than that inference. The probe
+    now emits it on every run, so a live campaign row missing it means the
+    field was dropped somewhere, not that it was never produced.
 
     Returns `(value, reason)`: `reason` is `None` exactly when `value` is
     not, so a caller never has to check both independently to know which
@@ -169,10 +170,9 @@ def t_fast_seconds(
     dispatch = req.get("t_dispatch_mono")
     if dispatch is None:
         return None, (
-            "warmup record missing t_dispatch_mono -- the probe that emits it "
-            "(plan Task 11) has not shipped, so T_fast cannot be measured; it is "
-            "never inferred by summing end_to_end, which would assume zero gap "
-            "between requests"
+            "warmup record missing t_dispatch_mono, so T_fast cannot be "
+            "measured for this run; it is never inferred by summing end_to_end, "
+            "which would assume zero gap between requests"
         )
     fast_completion_mono = dispatch + req["end_to_end"]
     tail = t_warmup_done_mono - fast_completion_mono

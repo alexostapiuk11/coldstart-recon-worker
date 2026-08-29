@@ -248,8 +248,10 @@ def waterfall(rows, out_path) -> Path:
                 if s5 is not None:
                     _draw(i, s5, "S5 ready (health poll)", "#5aa9c2")
             else:
-                # No mark delineates S4 today (Task 11, the probe that
-                # emits S4_start/S4_end, is not built yet). S5_ready -
+                # This row carries no S4_start/S4_end marks. The probe emits
+                # them on every run now, so on a live campaign this branch means
+                # the marks were lost for this run, not that they are
+                # unavailable in principle. S5_ready -
                 # S3_load_done is NOT the bracket — S5 is a separate, later
                 # stage (spec, Attribution caveat) — so it is never
                 # substituted. What IS honestly known without it: S1,
@@ -262,7 +264,7 @@ def waterfall(rows, out_path) -> Path:
                 _draw(
                     i,
                     remainder,
-                    "S4 + S5 (merged — S4_start/S4_end not yet measured)",
+                    "S4 + S5 (merged — S4 bracket marks absent)",
                     "#b8b0c8",
                     hatch="//",
                 )
