@@ -92,12 +92,42 @@ set -a; . ./.env; set +a
   Running a window is just "start it, let it run, stop it when you want,
   resume tomorrow with the same `--triples`."
 - `--resume` skips runs already present in `--store` (matched by
-  `run_index`) instead of re-running them. Omit it only when deliberately
-  starting a brand-new store from scratch.
-- `--store` defaults to `data/campaign.jsonl`. Use one store file per
-  campaign — see "Resume drift" below for why.
+  `run_index`) instead of re-running them. Omitting it is no longer just "a
+  choice you make when starting fresh" — if `--store` already holds records
+  and `--resume` is not passed, `run_window.py` now refuses to start at all.
+  See "Refusing to restart from zero" below.
+- `--store` defaults to an **absolute, repo-root-anchored** path,
+  `<repo>/data/campaign.jsonl` (`scripts/run_window.py:36`) — not a
+  cwd-relative one. This is deliberate: `run_campaign`'s resume-drift guard
+  only checks records that are actually present, so a cwd-relative default
+  invoked from a different directory (a different terminal, a tmux pane, a
+  cron entry) would silently open a fresh, empty store, pass the drift check
+  trivially, and restart the "resumed" campaign from `run_index` 0 —
+  re-submitting and re-paying for every run already collected. Passing
+  `--store` explicitly always overrides the default.
+
+  **`scripts/analyse.py`'s `--store` default is different: it is still
+  cwd-relative (`"data/campaign.jsonl"`).** The two scripts do not behave
+  alike. Always pass `--store` explicitly to `analyse.py` if you are not
+  running it from the repo root, and don't assume "it worked with no flags
+  for `run_window.py`" tells you anything about `analyse.py`.
+- Use one store file per campaign — see "Resume drift" below for why.
 - Stopping with Ctrl-C is safe. `KeyboardInterrupt` is not treated as a run
   failure and the store is append-only; nothing already written is touched.
+- When the invocation ends (schedule exhausted, or you stopped it), it
+  prints a tally line, e.g.:
+
+  ```
+  [done] 12 runs; failed=2 ok=10 (arm B: 2 failed); store=/path/to/data/campaign.jsonl
+  ```
+
+  This comes from `RunTally.summary()` (`scripts/run_window.py`) — total
+  runs this invocation, a count per outcome, and, only when failures
+  occurred, a per-arm breakdown of which arm they landed on. Look at the
+  per-arm breakdown, not just the pass/fail total: one arm failing
+  systematically (rather than failures spread evenly) is the signal that
+  something about that arm's configuration is broken, not just noise, and is
+  worth stopping to investigate before running another window.
 
 ## Resume drift: `ValueError` on resume
 
@@ -132,6 +162,37 @@ record in the store against the current schedule, so a store that
 accumulated more than one independent, non-resumed campaign will trip a
 false positive on a legitimate resume. Keep separate `--store` paths for
 separate campaigns.
+
+## Refusing to restart from zero: missing `--resume` on a non-empty store
+
+Before submitting anything, `run_window.py` also checks whether `--store`
+already holds records and `--resume` was not passed
+(`_guard_against_silent_restart`, `scripts/run_window.py:97-124`). If so it
+exits immediately, without contacting RunPod, printing:
+
+```
+refusing to start: N record(s) already exist in <store path> and --resume
+was not passed. Continuing would re-submit and re-pay for every one of
+them, and nothing downstream de-duplicates by run_index. Pass --resume to
+continue the existing campaign, or --force-restart if you really mean to
+start over from run_index 0.
+```
+
+This guard exists because forgetting `--resume` on, say, day three of a
+campaign would otherwise silently re-submit and re-pay for every
+already-completed run and append duplicate `run_index` rows to the store —
+nothing downstream de-duplicates by `run_index`, so this would both bias the
+dataset and waste money, without any error to flag it.
+
+What to do: almost always, pass `--resume` — this is the normal case, and
+matches "Running a window" above. Pass `--force-restart` only when you are
+deliberately discarding the existing campaign and starting over from
+`run_index` 0 (e.g. the store belongs to an aborted or unrelated run and you
+want a clean slate under the same path). `--force-restart` does not delete
+or touch the existing records; it just lets the script proceed despite them
+and prints a `[warning]` line naming how many existing records it is
+ignoring. If you use it, treat the store as no longer a clean single-campaign
+history — move the old file aside first if you might need it later.
 
 ## Truncated store: `ValueError` on read
 
