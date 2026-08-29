@@ -73,14 +73,18 @@ def fetch_endpoint(endpoint_id: str, api_key: str) -> dict:
     """Fetch the endpoint's current config. Deliberately a single unretried GET.
 
     coldstart.runpod_submitter.HttpTransport retries 409/5xx because those show up
-    mid-campaign on calls that submit or poll a job, where aborting the whole
-    campaign over one transient blip would be worse than a short backoff. A
-    pre-flight check runs once before a paid window is allowed to open, so the
-    trade is reversed: a transient platform error here should abort loudly and
-    make the operator look at it, not be retried into a delayed success that
-    quietly proceeds. Masking it behind automatic retry defeats the purpose of a
-    check that exists to catch exactly the kind of platform-side surprise a retry
-    would paper over.
+    mid-campaign on calls that submit or poll a job, where there is an in-flight
+    paid run to protect and aborting over one transient blip would waste it.
+
+    Here there is nothing in flight yet. This check runs once, before any money
+    is committed, so a transient platform error costs the operator a cheap
+    manual re-run rather than a wasted paid job -- which makes the retry
+    machinery not worth its complexity at this checkpoint.
+
+    Note what this reasoning does NOT claim: retrying would not weaken the
+    check. A retried GET still returns whatever the endpoint reports and
+    assert_endpoint_matches still validates it identically. The justification is
+    the cost asymmetry, not a correctness risk.
     """
     r = requests.get(
         f"{REST}/endpoints/{endpoint_id}",
