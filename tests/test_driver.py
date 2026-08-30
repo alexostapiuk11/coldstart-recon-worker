@@ -430,3 +430,30 @@ def test_resume_rejects_a_shrunk_schedule(tmp_path):
         assert "beyond" in str(e)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_records_keep_the_raw_engine_log(tmp_path):
+    """The published claim is that a reader re-derives every number from the
+    committed records. Without the raw log, `s4_subphases` can only be
+    trusted -- and a parser bug found after the campaign would make the
+    dataset unrepeatable instead of re-parseable. Cannot be added
+    retroactively: unrecorded logs are gone."""
+    clock = VirtualClock()
+    store = JsonlStore(tmp_path / "runs.jsonl")
+    run_campaign(
+        submitter=StubSubmitter(StubEndpoint(seed=5, clock=clock), clock=clock),
+        store=store,
+        arms=["A"],
+        triples=1,
+        seed=1,
+    )
+    record = store.read_all()[0]
+    lines = record.engine["log_lines"]
+    assert lines, "raw engine log missing from the stored record"
+
+    # And it must be the log the parsed values actually came from.
+    from coldstart.vllm_logs import parse_engine_log
+
+    reparsed = parse_engine_log("\n".join(lines))
+    assert reparsed.phases == record.engine["s4_subphases"]
+    assert reparsed.merged == record.engine["s4_merged"]

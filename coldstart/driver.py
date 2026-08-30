@@ -89,6 +89,15 @@ def _record_from(scheduled, run_id: str, outcome) -> RunRecord:
         warmup=p.get("warmup", []),
         engine={
             **parsed.engine_info,
+            # The raw engine output this run's parsed values came from. Kept
+            # because the artifact's published claim is that a reader can
+            # re-derive every number from the committed records without a GPU
+            # -- without these, `s4_subphases` can only be trusted, not
+            # re-derived, and a parser bug found after the campaign would make
+            # the whole dataset unrepeatable rather than re-parseable. It is
+            # also what verifies the engine's dtype per run (spec 10). Roughly
+            # 15 KB per run; a 300-run campaign stores a few MB.
+            "log_lines": p.get("log_lines", []),
             "s4_subphases": parsed.phases,
             "s4_merged": parsed.merged,
             # The detector for a compile cache leaking into a cold arm: the
