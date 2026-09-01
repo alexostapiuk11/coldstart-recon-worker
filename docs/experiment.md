@@ -7,7 +7,7 @@ is the evidence that the hypotheses below were fixed in advance.
 
 Endpoint ka5mryakkxumew, EU-RO-1, NVIDIA GeForce RTX 4090 (24 GB), network
 volume 9c7ut2slrd, template mzadx4qugv, image
-ghcr.io/alexostapiuk11/coldstart-recon-worker@sha256:4054d860cbda07e2f303649688743d674bc6d6561efbcfea3ec84bea4527d0a5,
+ghcr.io/alexostapiuk11/coldstart-recon-worker@sha256:d41f67dd59981558244582d814a195d89e5c810d1cc72e1141f1a00a100983e9,
 vLLM 0.27.1, Qwen/Qwen3-8B revision b968826d9c46dd6066d109eabc6255188de91218,
 --max-model-len 8192, gpu_memory_utilization at the 0.9 default, FlashBoot off,
 workersMin 0, workersMax 1.
@@ -35,7 +35,10 @@ cold `HF_HOME` never being removed -- ~15.3 GiB of weights per run against a
 "No space left on device" before the engine started, resetting whenever the
 worker recycled. That attrition falls on one arm, so it would have biased the
 primary A->B contrast through survivorship rather than appearing as noise. The
-worker now frees each run's cold directories after the run.
+worker now frees each run's cold directories after the run, and also empties
+the cold roots BEFORE each run -- the first fix was insufficient on its own,
+because a worker can inherit a disk already filled by runs from an earlier
+image that had no cleanup, which end-cleanup cannot remove.
 
 Those 27 runs are retained at `data/discarded-window-0.jsonl` and are excluded
 from every published number. They are kept because they are the evidence for
