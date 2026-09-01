@@ -81,26 +81,35 @@ job id is in the record's `failure_detail`.
 ## Before every window: check capacity
 
 RTX 4090 capacity in EU-RO-1 is volatile (see `recon/README.md`, "24GB
-capacity is volatile"). Check it before starting a window:
+capacity is volatile"). Check it before starting a window -- but **sample it
+more than once**. A single reading is not reliable: two queries seconds apart
+have returned `False` then `True`, and acting on the first would have blocked a
+window that ran fine. Eight consecutive samples over two minutes then read
+`True` every time.
 
 ```bash
 set -a; . ./.env; set +a
-curl -s -X POST "https://api.runpod.io/graphql?api_key=$RUNPOD_API_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"query { dataCenters { id gpuAvailability { gpuTypeId available stockStatus } } }"}' \
-  | .venv/bin/python -c "
+for i in 1 2 3 4 5; do
+  curl -s -X POST "https://api.runpod.io/graphql?api_key=$RUNPOD_API_KEY" \
+    -H 'Content-Type: application/json' \
+    -d '{"query":"query { dataCenters { id gpuAvailability { gpuTypeId available stockStatus } } }"}' \
+    | python3 -c "
 import json,sys
-d=json.load(sys.stdin)
-for dc in d['data']['dataCenters']:
+for dc in json.load(sys.stdin)['data']['dataCenters']:
     if dc['id'] != 'EU-RO-1': continue
     for g in dc.get('gpuAvailability') or []:
         if g['gpuTypeId'] == 'NVIDIA GeForce RTX 4090':
             print('EU-RO-1 RTX 4090:', g['available'], g.get('stockStatus'))
 "
+  sleep 15
+done
 ```
 
-Expected: `EU-RO-1 RTX 4090: True <stock>`. If `False`, do not start a
-window. A queued job with no capacity behind it presents as a worker flapping
+Read the samples as a group, not individually. Mostly `True` means go; a lone
+`False` among them is noise. Sustained `False` across every sample is the
+condition to respect.
+
+If every sample reads `False`, do not start a window. A queued job with no capacity behind it presents as a worker flapping
 between `ready` and `throttled` while the job waits indefinitely — not as an
 error you'll notice quickly. This check needs `.env` and talks to the RunPod
 API directly; it is not run automatically as part of `run_window.py`.
