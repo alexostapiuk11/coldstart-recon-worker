@@ -247,3 +247,42 @@ def test_cold_arm_reports_observed_false_even_though_its_own_compile_creates_the
 
     assert result["compile_cache_observed"] is False
     assert result["compile_cache_present_after"] is True
+
+
+def test_cold_dirs_are_removed_after_the_run(tmp_path, monkeypatch):
+    """Per-run cold dirs isolate runs while they are measured. Kept
+    afterwards they accumulate ~15.3 GiB per arm A run on a 60 GB disk, and
+    the fourth run on a worker dies with 'No space left on device' -- observed
+    as a three-good-then-fail cycle biasing the primary contrast."""
+    cold = tmp_path / "hf-cold" / "run-1"
+    cold.mkdir(parents=True)
+    (cold / "weights.bin").write_bytes(b"x" * 64)
+    handler_mod._clear_cold_dirs({"HF_HOME": str(cold)})
+    assert not cold.exists()
+
+
+def test_volume_dirs_are_never_removed(tmp_path, monkeypatch):
+    """Deleting a volume path would silently turn a warm arm cold -- the
+    exact condition the arm-state gate exists to catch, caused by us."""
+    root = tmp_path / "runpod-volume"
+    warm = root / "vllm-cache"
+    warm.mkdir(parents=True)
+    (warm / "compiled").write_bytes(b"x")
+    monkeypatch.setattr(cache_config, "VOLUME_ROOT", str(root))
+    handler_mod._clear_cold_dirs({"VLLM_CACHE_ROOT": str(warm)})
+    assert warm.exists() and (warm / "compiled").exists()
+
+
+def test_cold_dirs_are_cleared_even_when_the_run_fails(captured, monkeypatch, tmp_path):
+    """A failed run consumed the disk too. Skipping cleanup on the failure
+    path is how one bad run makes every later run on that worker fail."""
+    cleared = []
+    monkeypatch.setattr(handler_mod, "_clear_cold_dirs", lambda env: cleared.append(env))
+
+    def _boom(*a, **k):
+        raise RuntimeError("probe exploded")
+
+    monkeypatch.setattr(handler_mod, "run_probe", _boom)
+    with pytest.raises(RuntimeError, match="probe exploded"):
+        handler_mod.handler({"input": {"arm": "A", "run_id": "run-9"}})
+    assert cleared, "cold dirs were not cleared on the failure path"

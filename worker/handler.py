@@ -5,6 +5,7 @@ lost to log-retrieval failure -- see spec 6.1.
 """
 
 import os
+import shutil
 import socket
 import subprocess
 
@@ -78,6 +79,33 @@ def _compile_cache_present(env_overrides: dict) -> bool:
     return os.path.isdir(os.path.join(env_overrides["VLLM_CACHE_ROOT"], "torch_compile_cache"))
 
 
+def _clear_cold_dirs(env_overrides: dict) -> None:
+    """Remove this run's per-run cold cache directories.
+
+    They are namespaced by run_id so a reused serverless worker cannot serve
+    one run's downloaded weights or compiled artifacts to the next run's cold
+    arm. That isolation is only needed WHILE the run is measured; afterwards
+    the directory is dead weight.
+
+    Leaving them cost a campaign. Arm A writes ~15.3 GiB of weights per run to
+    container disk, the disk is 60 GB, and nothing removed them -- so the
+    fourth arm A run on a given worker died with "No space left on device
+    (os error 28)" before the engine could start. It presented as a repeating
+    three-good-then-fail cycle, resetting whenever the worker recycled, and it
+    is worse than a plain failure: the attrition falls on one arm, biasing the
+    primary A->B contrast through survivorship rather than showing up as
+    noise.
+
+    Volume paths are never touched. They are the warm caches arms B and C
+    exist to measure, and deleting one would silently turn a warm arm cold.
+    """
+    root = cache_config.VOLUME_ROOT
+    for path in env_overrides.values():
+        if path == root or path.startswith(root + "/"):
+            continue
+        shutil.rmtree(path, ignore_errors=True)
+
+
 def _gpu_info() -> dict:
     try:
         out = subprocess.run(
@@ -142,13 +170,27 @@ def handler(job):
     compile_cache_observed = _compile_cache_present(env_overrides)
 
     model = os.environ["MODEL_ID"]
-    result = run_probe(
-        StageRecorder(),
-        model,
-        extra_args=_serve_args(),
-        env_overrides=env_overrides,
-    )
+    try:
+        result = run_probe(
+            StageRecorder(),
+            model,
+            extra_args=_serve_args(),
+            env_overrides=env_overrides,
+        )
+        result = _finish(result, run_id, arm, config, env_overrides, compile_cache_observed)
+    finally:
+        # After every observation, never between them: _finish reads the
+        # post-run cache state, and clearing first would report False for a
+        # cold arm that did compile, destroying the diagnostic. In a finally
+        # because a failed run consumed the disk too, and the next run on
+        # this worker needs it back -- skipping cleanup on the failure path
+        # is how one bad run makes every later arm A run on that worker fail.
+        _clear_cold_dirs(env_overrides)
+    return result
 
+
+def _finish(result, run_id, arm, config, env_overrides, compile_cache_observed):
+    """Attach the run's provenance and post-run observations."""
     result["run_id"] = run_id
     result["arm"] = arm
     result["host"] = _gpu_info()
