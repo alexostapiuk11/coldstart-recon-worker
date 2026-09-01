@@ -11,6 +11,20 @@ import requests
 from coldstart.runpod_api import TERMINAL_STATES, extract_lifecycle, extract_worker_id
 from coldstart.submitter import SubmitOutcome
 
+
+class _UnhealthyRun(RuntimeError):
+    """A job that completed but whose engine never became healthy.
+
+    Carries the worker's output so the run's log lines survive into the stored
+    record. Without it the failure is recorded with no evidence, and a
+    health-timeout is precisely the failure that cannot be diagnosed from
+    timings alone.
+    """
+
+    def __init__(self, message: str, output: dict):
+        super().__init__(message)
+        self.output = output
+
 API = "https://api.runpod.ai/v2"
 
 
@@ -126,7 +140,9 @@ class RunPodSubmitter:
         if not output.get("healthy"):
             # The job completed but the engine never answered its health check.
             # Phrased to match checks.classify_failure's HEALTH_TIMEOUT needle.
-            raise RuntimeError("health check timed out: probe reported unhealthy")
+            raise _UnhealthyRun(
+                "health check timed out: probe reported unhealthy", output
+            )
 
         output["clock_C"] = extract_lifecycle(status)
         host = dict(output.get("host") or {})
@@ -152,12 +168,15 @@ class RunPodSubmitter:
         try:
             job_id = self._transport.start({"arm": arm, "run_id": run_id})
             payload = self._payload_from(self._await_terminal(job_id))
-            error = None
+            error, diagnostics = None, None
+        except _UnhealthyRun as e:
+            payload, error, diagnostics = None, str(e), e.output
         except Exception as e:  # noqa: BLE001 -- failures are data (spec 6.6)
-            payload, error = None, str(e)
+            payload, error, diagnostics = None, str(e), None
         t_result = self._clock()
         return SubmitOutcome(
             clock_A={"t_submit": t_submit, "t_result": t_result},
             payload=payload,
             error=error,
+            diagnostics=diagnostics,
         )

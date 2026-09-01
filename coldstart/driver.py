@@ -24,15 +24,34 @@ def _new_run_id() -> str:
 
 def _record_from(scheduled, run_id: str, outcome) -> RunRecord:
     if outcome.error is not None:
+        # A failed run keeps whatever the worker managed to report. A
+        # health-timeout returns its log lines with healthy=False, and those
+        # lines are the only evidence of why the engine never came up --
+        # timings alone cannot distinguish a hang from a crash from a slow
+        # download. Storing them costs a few KB on a run that already cost
+        # real GPU time; discarding them makes the failure permanently
+        # unexplainable, and failures are the rows most in need of explaining.
+        diag = outcome.diagnostics or {}
+        diag_lines = diag.get("log_lines") or []
+        failed_engine: dict = {}
+        if diag_lines:
+            diag_parsed = parse_engine_log("\n".join(diag_lines))
+            failed_engine = {
+                **diag_parsed.engine_info,
+                "log_lines": diag_lines,
+                # How far startup actually got before it stalled.
+                "s4_subphases": diag_parsed.phases,
+                "s4_merged": diag_parsed.merged,
+            }
         return RunRecord(
             run_id=run_id,
             run_index=scheduled.run_index,
             arm=scheduled.arm,
             clock_A=outcome.clock_A,
             clock_C={},
-            clock_B={},
-            warmup=[],
-            engine={},
+            clock_B=diag.get("clock_B", {}),
+            warmup=diag.get("warmup", []),
+            engine=failed_engine,
             host={},
             config={},
             status={

@@ -6,6 +6,12 @@ from coldstart.schema import RunRecord
 
 FAST_TOLERANCE = 0.10  # fixed before data — see spec 7
 
+# Slack on the T_fast >= T_total invariant, in seconds. Sized to absorb the gap
+# between two consecutive reads of the same monotonic clock (observed: 7.3e-05 s)
+# while still catching any violation big enough to mean corrupted timing. This is
+# a measurement-noise floor, not a per-metric tolerance: nothing else relaxes.
+T_FAST_INVARIANT_TOLERANCE_S = 1e-3
+
 # The five named S4 sub-phases, spec stage taxonomy. Order matters for the
 # waterfall (chronological: device init -> compile -> memory profiling ->
 # KV allocation -> graph capture), not just for iteration.
@@ -443,7 +449,22 @@ def derive(record: RunRecord) -> DerivedRow:
     # timing data is corrupted, the same discipline already applied to a
     # negative t_weights or a negative T_total correction term above, and it
     # must not be published silently.
-    if fast_seconds is not None and t_total is not None and fast_seconds < t_total:
+    #
+    # The tolerance is not slack for sloppy data; it exists because the two
+    # quantities read the same monotonic clock at two different moments.
+    # `t_total` uses the S6_first_token mark, taken just after `_one_request`
+    # returns; `t_fast_seconds` uses that request's own dispatch + end_to_end,
+    # taken just inside it. When the fast-tolerance request IS request 1 --
+    # the normal case on a warm arm, where the first request already lands
+    # within tolerance -- the two describe the same event and differ only by
+    # the gap between consecutive clock reads. Observed on a real arm C run:
+    # 7.3e-05 s. Without a tolerance, `derive()` raises on that run and one
+    # such row makes an entire campaign unanalysable.
+    if (
+        fast_seconds is not None
+        and t_total is not None
+        and fast_seconds < t_total - T_FAST_INVARIANT_TOLERANCE_S
+    ):
         raise ValueError(
             f"run {record.run_id!r} (arm {record.arm!r}): t_fast_seconds "
             f"{fast_seconds} is less than t_total {t_total}; spec requires "

@@ -457,3 +457,44 @@ def test_records_keep_the_raw_engine_log(tmp_path):
     reparsed = parse_engine_log("\n".join(lines))
     assert reparsed.phases == record.engine["s4_subphases"]
     assert reparsed.merged == record.engine["s4_merged"]
+
+
+def test_a_failed_run_keeps_the_evidence_of_why_it_failed():
+    """A health-timeout returns log lines with healthy=False. Timings alone
+    cannot tell a hang from a crash from a slow download, so discarding those
+    lines makes the failure permanently unexplainable -- and failures are the
+    rows most in need of explaining."""
+    from coldstart.driver import _record_from
+    from coldstart.scheduler import ScheduledRun
+    from coldstart.submitter import SubmitOutcome
+
+    lines = ["Model loading took 15.27 GiB and 36.4 seconds", "torch.compile took 12.5 s in total"]
+    outcome = SubmitOutcome(
+        clock_A={"t_submit": 0.0, "t_result": 901.0},
+        payload=None,
+        error="health check timed out: probe reported unhealthy",
+        diagnostics={"log_lines": lines, "healthy": False},
+    )
+    record = _record_from(ScheduledRun(run_index=0, triple_index=0, arm="A"), "run-1", outcome)
+
+    assert record.status["outcome"] == "failed"
+    assert record.status["failure_class"] == "health_timeout"
+    assert record.engine["log_lines"] == lines
+    # and it says how far startup actually got before stalling
+    assert record.engine["s4_subphases"]["S4b"] == 12.5
+
+
+def test_a_failure_with_no_diagnostics_still_records_cleanly():
+    from coldstart.driver import _record_from
+    from coldstart.scheduler import ScheduledRun
+    from coldstart.submitter import SubmitOutcome
+
+    outcome = SubmitOutcome(
+        clock_A={"t_submit": 0.0, "t_result": 5.0},
+        payload=None,
+        error="submit failed: connection reset",
+        diagnostics=None,
+    )
+    record = _record_from(ScheduledRun(run_index=0, triple_index=0, arm="B"), "run-2", outcome)
+    assert record.status["outcome"] == "failed"
+    assert record.engine == {}

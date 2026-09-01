@@ -804,3 +804,41 @@ def test_arm_state_unverifiable_does_not_override_an_earlier_more_specific_disca
     assert d["consistent"] is False
     assert d["discard_reason"] == DiscardReason.PROCESS_EXCEEDS_TOTAL
     assert d["discard_reason"] != DiscardReason.ARM_STATE_UNVERIFIABLE
+
+
+def test_t_fast_below_t_total_by_clock_read_noise_is_tolerated():
+    """When the fast-tolerance request is request 1 -- normal on a warm arm --
+    t_fast and t_total describe the same event read microseconds apart, and
+    t_fast lands just below. Observed on a real arm C campaign run at
+    7.3e-05 s. Raising there makes one warm run poison a whole campaign."""
+    record = make()
+    marks = {m["stage"]: m["t_mono"] for m in record.clock_B["marks"]}
+    dispatch = marks["S6_request1_dispatch"]
+    # request 1 completes a hair BEFORE the S6_first_token mark is taken
+    e2e = marks["S6_first_token"] - dispatch - 7.3e-05
+    record.warmup = [
+        {"req_index": i, "t_dispatch_mono": dispatch + i * (e2e + 0.01),
+         "ttft": 0.1, "end_to_end": e2e}
+        for i in range(10)
+    ]
+    d = derive(record)
+    assert d["t_fast_seconds"] is not None
+    assert d["t_fast_seconds"] < d["t_total"]  # by noise, and tolerated
+
+
+def test_t_fast_meaningfully_below_t_total_still_raises():
+    """The invariant must still catch corrupted timing -- the tolerance is a
+    clock-read noise floor, not permission to publish impossible data."""
+    record = make()
+    marks = {m["stage"]: m["t_mono"] for m in record.clock_B["marks"]}
+    dispatch = marks["S6_request1_dispatch"]
+    # 0.5 s early: far beyond a clock-read gap, but still a positive latency
+    # so steady state is defined and the invariant is actually reached.
+    e2e = marks["S6_first_token"] - dispatch - 0.5
+    record.warmup = [
+        {"req_index": i, "t_dispatch_mono": dispatch + i * (e2e + 0.01),
+         "ttft": 0.1, "end_to_end": e2e}
+        for i in range(10)
+    ]
+    with pytest.raises(ValueError, match="t_fast_seconds"):
+        derive(record)

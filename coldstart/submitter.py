@@ -9,6 +9,13 @@ class SubmitOutcome:
     clock_A: dict
     payload: dict | None
     error: str | None
+    # What the worker returned on a run that failed but still reported
+    # something. `payload` stays None for a failure so nothing downstream can
+    # mistake it for a usable run; this carries the engine output that explains
+    # WHY it failed. A health-timeout run is the case that matters: the probe
+    # returns its log lines with healthy=False, and without this they are
+    # dropped -- discarding the evidence for exactly the runs that need it.
+    diagnostics: dict | None = None
 
 
 class StubSubmitter:
