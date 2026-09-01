@@ -286,3 +286,34 @@ def test_cold_dirs_are_cleared_even_when_the_run_fails(captured, monkeypatch, tm
     with pytest.raises(RuntimeError, match="probe exploded"):
         handler_mod.handler({"input": {"arm": "A", "run_id": "run-9"}})
     assert cleared, "cold dirs were not cleared on the failure path"
+
+
+def test_stale_cold_dirs_from_earlier_runs_are_purged_at_start(tmp_path, monkeypatch):
+    """A worker outlives any single run and can inherit a full disk -- from a
+    run that crashed before cleanup, or a previous campaign under an image
+    with no cleanup. End-cleanup cannot fix what it never created. Observed:
+    the restarted campaign's very first run died with 'No space left on
+    device' on a worker still holding the prior campaign's arm A weights."""
+    hf_root = tmp_path / "hf-cold"
+    stale = hf_root / "some-earlier-run"
+    stale.mkdir(parents=True)
+    (stale / "weights.bin").write_bytes(b"x" * 64)
+    monkeypatch.setattr(cache_config, "COLD_HF_ROOT", str(hf_root))
+    monkeypatch.setattr(cache_config, "COLD_VLLM_CACHE_ROOT", str(tmp_path / "vllm-cold"))
+
+    handler_mod._purge_cold_roots()
+    assert not stale.exists()
+
+
+def test_purge_never_touches_the_volume(tmp_path, monkeypatch):
+    """Purging a volume path would turn arms B and C silently cold."""
+    root = tmp_path / "runpod-volume"
+    warm = root / "vllm-cache"
+    warm.mkdir(parents=True)
+    (warm / "compiled").write_bytes(b"x")
+    monkeypatch.setattr(cache_config, "VOLUME_ROOT", str(root))
+    monkeypatch.setattr(cache_config, "COLD_HF_ROOT", str(tmp_path / "hf-cold"))
+    monkeypatch.setattr(cache_config, "COLD_VLLM_CACHE_ROOT", str(tmp_path / "vllm-cold"))
+
+    handler_mod._purge_cold_roots()
+    assert warm.exists() and (warm / "compiled").exists()

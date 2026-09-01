@@ -79,6 +79,28 @@ def _compile_cache_present(env_overrides: dict) -> bool:
     return os.path.isdir(os.path.join(env_overrides["VLLM_CACHE_ROOT"], "torch_compile_cache"))
 
 
+def _purge_cold_roots() -> None:
+    """Empty the cold cache roots before the run starts.
+
+    Clearing this run's own directories afterwards is not enough on its own.
+    A serverless worker outlives any single run, and it can inherit a disk
+    already full of directories some earlier run left behind -- one that
+    crashed before its cleanup, or one from a previous campaign under an
+    image that had no cleanup at all. That is not hypothetical: the first run
+    of the restarted campaign died with "No space left on device" on a worker
+    still holding the previous campaign's arm A weights.
+
+    Purging at the start makes a worker self-healing regardless of what it
+    inherited, which end-cleanup alone cannot do. Safe because workersMax is
+    1, so no other run on this worker is using these paths.
+
+    Only the cold roots, never the volume: those hold the warm caches arms B
+    and C exist to measure.
+    """
+    for root in (cache_config.COLD_HF_ROOT, cache_config.COLD_VLLM_CACHE_ROOT):
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def _clear_cold_dirs(env_overrides: dict) -> None:
     """Remove this run's per-run cold cache directories.
 
@@ -144,6 +166,9 @@ def handler(job):
     config = resolve(arm)
     env_overrides = config.env(run_id)
 
+    # Before creating this run's directories, drop anything a previous run
+    # left on this worker's disk. See _purge_cold_roots.
+    _purge_cold_roots()
     _prepare_cache_dirs(env_overrides)
 
     # Snapshot the cache state BEFORE run_probe(), not after. The gate this
