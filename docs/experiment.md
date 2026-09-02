@@ -155,6 +155,28 @@ the headline.
 Distributions are reported as p50/p90/p95 and a full ECDF. **No p99** — at
 ~100 runs per arm that is one or two observations.
 
+**Two things window 1 established that change how results must be reported,
+recorded here before the remaining windows run.**
+
+*The warmup curve is flat, and that is the finding.* Request 1 is 7.7% slower
+than steady state — inside the ±10% tolerance — so `T_fast` is request 1 and
+"ready is not fast" does not hold at this configuration. The engine's own log
+explains it: vLLM runs a profiling forward pass and captures 86 CUDA graph
+shapes *before* answering `/health`, then serves. The warmup cost is real and
+large, but it is paid inside `S4` where the waterfall already shows it, not
+served to users afterwards. Figure 2 will report this rather than an assumed
+penalty. A side diagnostic, run on a separate template and never on the pinned
+campaign image, asks whether longer generations change it; its results are
+supporting context, not pre-registered data.
+
+*First-touch runs must be separated before any distribution is published.* The
+campaign's first run carried `t_platform` of 2174 s — a cold image pull — which
+is 17.8x the next slowest run and makes a pooled ECDF unreadable. The threats
+table already required a first-touch versus repeat-host flag reported
+separately; it is derived from the store (a run is first-touch when it is the
+first on its `host_id`) rather than recorded by the worker, so it applies
+retroactively to every run already collected.
+
 ## Exclusion rules, fixed in advance
 
 - A run whose clocks fail `check_consistency` is discarded, reason recorded.
