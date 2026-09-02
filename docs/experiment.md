@@ -89,6 +89,25 @@ engine init.
 substantially by host heterogeneity rather than by variance within any single
 stage.
 
+**H4 may not be answerable on this provider, and that is recorded before any
+data.** Host placement is RunPod's to decide, not ours. The driver submits
+serially, so only one job is ever in flight and no endpoint setting changes
+this; `idleTimeout` is already at its 5 s minimum, so workers do terminate
+between runs, and RunPod still re-allocates the same physical machine because
+it has the image cached. Across 27 runs of a discarded first window we observed
+**2 distinct hosts, one of them serving 23 runs**.
+
+The commitment: publish the distinct host count and the per-host run
+distribution alongside H4, whatever they turn out to be, and state plainly that
+H4 is under-powered if the campaign lands on a handful of machines. No
+post-hoc reframing, and no quiet omission of the host count if it is
+embarrassing.
+
+Note this cuts the other way for the secondary analysis: the same concentration
+makes within-host triples plentiful, so the paired contrast should be well
+supplied even when H4 is not. That asymmetry is a fact about renting elastic
+capacity, and it is worth reporting as one.
+
 **H5 (compile cache buys KV capacity).** A cold compile inflates the engine's
 measured peak activation, reducing the KV cache budget. Arm C therefore shows
 higher `kv_capacity_tokens` than arm B under otherwise identical configuration.
