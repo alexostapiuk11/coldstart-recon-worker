@@ -25,7 +25,12 @@ from coldstart.analysis.metrics import (
 
 PORT = 8000
 WARMUP_REQUESTS = 10
-MAX_TOKENS = 16
+# Generation length for each warmup request. Env-overridable ONLY so a
+# side diagnostic can ask whether the flat warmup curve is a property of the
+# engine or of our request size -- the campaign leaves it unset and gets 16,
+# so the pinned measurement path is unchanged. A diagnostic runs on its own
+# template; it never shares the campaign's pinned image.
+MAX_TOKENS = int(os.environ.get("WARMUP_MAX_TOKENS") or 16)
 PROMPT = "Explain what a key-value cache does, in two sentences."
 
 # Predicates read off the real captures in fixtures/vllm_logs/ (vLLM 0.27.1),
