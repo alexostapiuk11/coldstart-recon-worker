@@ -510,3 +510,44 @@ def test_task19_pooling_pattern_works_through_the_gate_on_a_campaign_with_a_merg
 
     out = bootstrap_median_diff(by_a, by_b, iterations=200, seed=1)
     assert out["point"] == pytest.approx(0.0)  # both arms share the same t_weights fixture value
+
+
+def test_annotate_first_touch_marks_only_the_first_run_on_each_host():
+    from coldstart.analysis.pipeline import annotate_first_touch
+
+    rows = [
+        {"run_index": 0, "host_id": "h1"},
+        {"run_index": 1, "host_id": "h1"},
+        {"run_index": 2, "host_id": "h2"},
+        {"run_index": 3, "host_id": "h1"},
+    ]
+    out = {r["run_index"]: r["first_touch"] for r in annotate_first_touch(rows)}
+    assert out == {0: True, 1: False, 2: True, 3: False}
+
+
+def test_annotate_first_touch_uses_run_index_not_list_order():
+    """Order must come from the scheduler's index, not however the store was
+    read, or which run counts as first becomes an artifact of read order."""
+    from coldstart.analysis.pipeline import annotate_first_touch
+
+    rows = [
+        {"run_index": 5, "host_id": "h1"},
+        {"run_index": 1, "host_id": "h1"},
+    ]
+    out = {r["run_index"]: r["first_touch"] for r in annotate_first_touch(rows)}
+    assert out == {1: True, 5: False}
+
+
+def test_annotate_first_touch_does_not_guess_for_a_run_with_no_host():
+    from coldstart.analysis.pipeline import annotate_first_touch
+
+    out = annotate_first_touch([{"run_index": 0, "host_id": None}])
+    assert out[0]["first_touch"] is None
+
+
+def test_annotate_first_touch_does_not_mutate_its_input():
+    from coldstart.analysis.pipeline import annotate_first_touch
+
+    rows = [{"run_index": 0, "host_id": "h1"}]
+    annotate_first_touch(rows)
+    assert "first_touch" not in rows[0]

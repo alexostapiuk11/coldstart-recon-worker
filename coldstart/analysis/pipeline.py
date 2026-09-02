@@ -268,3 +268,35 @@ def discard_table(discarded_rows) -> dict[str, dict]:
         reason = row["exclusion_reason"]
         entry["by_reason"][reason] = entry["by_reason"].get(reason, 0) + 1
     return out
+
+
+def annotate_first_touch(rows):
+    """Mark each row as the first run on its host, or a repeat.
+
+    Spec 5's threats table requires first-touch and repeat-host runs to be
+    reported separately: a host that has never pulled the image pays for it,
+    and that cost lands in `t_platform`. In window 1 the single first-touch run
+    carried 2174 s of platform time against a 65.7 s median, 17.8x the next
+    slowest -- pooled into an ECDF it flattens every real difference into the
+    left edge of the plot.
+
+    Derived from the store rather than recorded by the worker, so it applies to
+    runs already collected: a run is first-touch when no earlier run in the same
+    campaign landed on its `host_id`. Order comes from `run_index`, which the
+    scheduler assigns, so this is deterministic and independent of read order.
+
+    Returns a new list; input rows are not mutated. A row with no `host_id`
+    (a failed run never reached a worker) is marked None rather than guessed at.
+    """
+    seen: set = set()
+    out = []
+    for row in sorted(rows, key=lambda r: r.get("run_index", 0)):
+        host = row.get("host_id")
+        annotated = dict(row)
+        if host is None:
+            annotated["first_touch"] = None
+        else:
+            annotated["first_touch"] = host not in seen
+            seen.add(host)
+        out.append(annotated)
+    return out

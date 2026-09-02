@@ -12,6 +12,7 @@ from coldstart.analysis.pipeline import (
     REQUIRED_FOR_T_TOTAL,
     REQUIRED_FOR_WARMUP,
     NotPublishableError,
+    annotate_first_touch,
     partition,
 )
 from coldstart.store import JsonlStore
@@ -25,7 +26,7 @@ def main() -> None:
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    rows = [derive(r) for r in JsonlStore(args.store).read_all()]
+    rows = annotate_first_touch([derive(r) for r in JsonlStore(args.store).read_all()])
     # Kept as two separately-named PartitionResults (not collapsed into one
     # call) even though REQUIRED_FOR_T_TOTAL and REQUIRED_FOR_WARMUP are both
     # `("consistent",)` today, so `total_part` and `warm_part` gate identical
@@ -40,23 +41,37 @@ def main() -> None:
     total_part = partition(rows, required=REQUIRED_FOR_T_TOTAL)
     warm_part = partition(rows, required=REQUIRED_FOR_WARMUP)
 
-    for name, fn, part in [
-        ("waterfall", figures.waterfall, total_part),
-        ("warmup", figures.warmup_curve, warm_part),
-        ("ecdf", figures.ecdf_plot, total_part),
-        ("per_host", figures.per_host_medians, total_part),
+    # Spec 5 requires first-touch and repeat-host runs to be reported
+    # separately. A host that has never pulled the image pays for it in
+    # t_platform: window 1's single first-touch run carried 2174 s against a
+    # 65.7 s median, 17.8x the next slowest, and pooling it flattened every
+    # real difference in the ECDF into the left edge of the plot. Only the
+    # distribution figure is affected -- the waterfall and per-host figures
+    # use medians, which absorb one outlier, and excluding runs from them
+    # would understate what the campaign actually cost.
+    ecdf_rows = [r for r in total_part.publishable if r.get("first_touch") is False]
+    n_first_touch = len(total_part.publishable) - len(ecdf_rows)
+    if n_first_touch:
+        print(
+            f"ecdf: excluding {n_first_touch} first-touch run(s), "
+            f"plotting {len(ecdf_rows)} repeat-host runs"
+        )
+
+    for name, fn, plot_rows, part in [
+        ("waterfall", figures.waterfall, total_part.publishable, total_part),
+        ("warmup", figures.warmup_curve, warm_part.publishable, warm_part),
+        ("ecdf", figures.ecdf_plot, ecdf_rows, total_part),
+        ("per_host", figures.per_host_medians, total_part.publishable, total_part),
     ]:
         try:
-            path = fn(part.publishable, out / f"{name}.png")
+            path = fn(plot_rows, out / f"{name}.png")
         except (ValueError, NotPublishableError) as exc:
             raise SystemExit(
                 f"{name}: could not render from store {args.store!r}: {exc} "
-                f"(publishable={len(part.publishable)}, discarded={len(part.discarded)}, "
-                f"failed={len(part.failed)})"
+                f"(plotted={len(plot_rows)}, publishable={len(part.publishable)}, "
+                f"discarded={len(part.discarded)}, failed={len(part.failed)})"
             ) from exc
-        print(
-            f"{name}: {path} ({path.stat().st_size // 1024} KB, n={len(part.publishable)})"
-        )
+        print(f"{name}: {path} ({path.stat().st_size // 1024} KB, n={len(plot_rows)})")
 
 
 if __name__ == "__main__":

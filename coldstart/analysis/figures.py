@@ -403,8 +403,26 @@ def warmup_curve(rows, out_path) -> Path:
     ax.set_xlabel("request index")
     ax.set_ylabel("end-to-end latency (s)")
     ax.set_ylim(bottom=0)
-    ax.set_title("Ready is not fast")
-    ax.legend(fontsize=8, loc="upper right")
+    # The spec's working title for this figure was "Ready is not fast",
+    # written before the measurement. The campaign says the opposite at this
+    # configuration: request 1 lands 7.7% above steady state, inside the
+    # tolerance band, because vLLM runs a profiling pass and captures 86 CUDA
+    # graph shapes BEFORE answering /health. The warmup is real and it is
+    # expensive -- it is simply paid inside S4, where the waterfall shows it,
+    # rather than served to the first users. The title states what the data
+    # shows; changing the data to fit the title was never an option.
+    # `pad` keeps it clear of the per-arm T_fast annotations, which cluster at
+    # the top-left when every arm reaches tolerance on request 1.
+    ax.set_title("Ready is already fast — the warmup was paid before ready", pad=24)
+    # Outside the axes, as the waterfall's is. On real data the curve is
+    # nearly flat and sits high, so an in-axes legend covered requests 6-10
+    # entirely -- the data was present and simply hidden behind the box.
+    ax.legend(
+        loc="upper left",
+        bbox_to_anchor=(1.01, 1.0),
+        fontsize=8,
+        borderaxespad=0.0,
+    )
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
