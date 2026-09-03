@@ -127,13 +127,24 @@ Every derived row comes from `coldstart.analysis.metrics.derive`. Rows are
 partitioned by `coldstart.analysis.pipeline.partition` before any figure or
 statistic sees them; consistency is a requirement of every preset.
 
-**Sampling: at least three windows on separate days.** The ~300 runs are not
-collected in one sitting. Fleet conditions on rented elastic capacity vary by
-time and day, and a single-session campaign would confound the arm effect with
-that session's conditions -- a confound that cannot be detected afterwards from
-the stored records and cannot be repaired except by re-running. Interleaving
-protects against drift *within* a window; spreading across days is what protects
-against a window being unrepresentative.
+**Sampling: windows, and what the spacing actually was.** The design calls for
+at least three windows on separate days, because fleet conditions on rented
+elastic capacity vary by time and day and a single-session campaign would
+confound the arm effect with that session's conditions — a confound that cannot
+be detected afterwards from the stored records.
+
+What actually happened is published rather than implied. Window 1's 100 runs all
+fell on 2026-09-02 UTC. Window 2 was started a few hours later, after the UTC
+day boundary but within the same working session, so it satisfies "a different
+day" by calendar and only partially by intent. Every run carries `t0_wall`, so
+the true spacing between windows is recoverable from the published records, and
+the post states it. A reader who thinks two windows hours apart sample one set
+of fleet conditions is entitled to discount the fleet-drift mitigation
+accordingly; that judgement is theirs to make with the timestamps in hand, not
+ours to obscure by reporting only a window count.
+
+Interleaving within each window is unaffected — it protects against drift inside
+a window regardless of when the window ran.
 
 Primary comparison unit: `t_weights` for A→B, `t_compile` for B→C.
 Reported for each contrast: median difference with a 95% bootstrap percentile
