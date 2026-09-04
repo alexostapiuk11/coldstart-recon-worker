@@ -1,7 +1,7 @@
 """Derive every published number from the stored JSONL.
 
-    .venv/bin/python scripts/analyse.py --store data/campaign.jsonl
-    .venv/bin/python scripts/analyse.py --store data/campaign.jsonl --summary-only
+.venv/bin/python scripts/analyse.py --store data/campaign.jsonl
+.venv/bin/python scripts/analyse.py --store data/campaign.jsonl --summary-only
 """
 
 import argparse
@@ -12,6 +12,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from coldstart.analysis.economics import (
+    Assumptions,
+    break_even_events_per_day,
+    cache_is_worth_renting,
+    compile_cache_break_even_events_per_day,
+    compile_cache_term,
+    foregone_tokens,
+    gpu_cost_per_scale_up,
+    supported_concurrency,
+)
 from coldstart.analysis.metrics import derive
 from coldstart.analysis.pipeline import (
     REQUIRED_FOR_T_COMPILE,
@@ -48,6 +58,119 @@ DIST_FLOOR = max(MIN_SAMPLES[name] for name in ("p50", "p90", "p95"))
 # serves as a plotting aggregate (per its docstring), but a headline published
 # figure is not a plotting aggregate.
 KV_CAPACITY_FLOOR = MIN_SAMPLES["p50"]
+
+
+# The published conversion assumptions (spec 7: "published in each artifact so
+# a reader can substitute their own").
+#
+# Only `assumed_context_length` is measured -- it is the pinned
+# `--max-model-len` the campaign actually ran under. The three money rates are
+# ILLUSTRATIVE and deliberately round, because this campaign measured seconds
+# and tokens, not prices: it never recorded an invoice, and a rate quoted from
+# memory would be the one number in the artifact that a reader could not
+# re-derive from committed data. A round $1.00/GPU-hour also makes every dollar
+# figure below trivially rescalable -- halve the rate, halve the cost.
+#
+# What is NOT an assumption, and is reported next to every dollar figure, is
+# the GPU-seconds each event costs. That is measured, and it is what a reader
+# multiplies by their own contract rate.
+PUBLISHED_ASSUMPTIONS = Assumptions(
+    gpu_hourly_rate=1.00,
+    scale_ups_per_day=24.0,
+    steady_state_tokens_per_sec=800.0,
+    volume_monthly_cost=3.50,
+    assumed_context_length=8192,
+)
+ASSUMPTION_PROVENANCE = {
+    "gpu_hourly_rate": "illustrative round number, substitute your own",
+    "scale_ups_per_day": "illustrative: one scale-up per hour",
+    "steady_state_tokens_per_sec": "illustrative batched decode rate; not measured here",
+    "volume_monthly_cost": "illustrative rental for the 50 GB network volume",
+    "assumed_context_length": "MEASURED: the pinned --max-model-len",
+}
+VERSION_CHANGES_PER_MONTH = 2.0
+
+
+def _economics(out: dict) -> None:
+    """Convert the measured seconds into the decision units spec 7 asks for.
+
+    Reads only from `out`, never from the rows -- so every published dollar
+    figure is a pure function of numbers already printed above it in the same
+    document, and a reader can check the arithmetic by hand without rerunning
+    anything. A withheld input (below the sample floor) propagates as a
+    withheld output rather than silently pricing a missing median as zero.
+    """
+    a = PUBLISHED_ASSUMPTIONS
+    econ: dict = {
+        "assumptions": {
+            **{k: getattr(a, k) for k in ASSUMPTION_PROVENANCE},
+            "version_changes_per_month": VERSION_CHANGES_PER_MONTH,
+        },
+        "assumption_provenance": ASSUMPTION_PROVENANCE,
+    }
+
+    t_fast = out.get("t_fast_median", {})
+    econ["per_scale_up"] = {}
+    for arm in ("A", "B", "C"):
+        entry = t_fast.get(arm, {})
+        if entry.get("withheld"):
+            econ["per_scale_up"][arm] = _withheld(entry["reason"])
+            continue
+        seconds = entry["point"]
+        econ["per_scale_up"][arm] = _published(
+            {
+                "gpu_seconds": seconds,
+                "gpu_cost_usd": gpu_cost_per_scale_up(seconds, a),
+                "foregone_tokens": foregone_tokens(seconds, a),
+            }
+        )
+
+    econ["supported_concurrency_at_8192"] = {}
+    for arm in ("A", "B", "C"):
+        entry = out.get("kv_capacity_median", {}).get(arm, {})
+        if entry.get("withheld"):
+            econ["supported_concurrency_at_8192"][arm] = _withheld(entry["reason"])
+        else:
+            econ["supported_concurrency_at_8192"][arm] = _published(
+                {"concurrent_requests": supported_concurrency(int(entry["point"]), a)}
+            )
+
+    # Weight cache: a continuously rented volume. Compile cache: free to store,
+    # but re-warmed from scratch every time the engine version changes -- a
+    # lumpy per-version charge, not a monthly rental. Same unit, different
+    # shape; that difference is the operational point of the whole comparison.
+    a_e, b_e, c_e = (econ["per_scale_up"][k] for k in ("A", "B", "C"))
+    if any(e.get("withheld") for e in (a_e, b_e, c_e)):
+        econ["break_even"] = _withheld("a per-arm median was withheld")
+    else:
+        weight_saved = a_e["gpu_seconds"] - b_e["gpu_seconds"]
+        compile_saved = b_e["gpu_seconds"] - c_e["gpu_seconds"]
+        # One re-warm is one full cold-compile start, which is exactly what
+        # arm B pays -- the priming procedure in the pre-registration.
+        rewarm_cost = gpu_cost_per_scale_up(b_e["gpu_seconds"], a)
+        weight_be = break_even_events_per_day(weight_saved, a)
+        compile_be = compile_cache_break_even_events_per_day(
+            compile_saved, rewarm_cost, VERSION_CHANGES_PER_MONTH, a
+        )
+        econ["break_even"] = _published(
+            {
+                "weight_cache_seconds_saved": weight_saved,
+                "weight_cache_events_per_day": weight_be,
+                "weight_cache_worth_renting": cache_is_worth_renting(a, weight_be),
+                "compile_cache_seconds_saved": compile_saved,
+                "compile_cache_rewarm_cost_usd": rewarm_cost,
+                "compile_cache_events_per_day": compile_be,
+                "compile_cache_worth_renting": cache_is_worth_renting(a, compile_be),
+            }
+        )
+
+    s4b = out.get("s4b_median", {})
+    if not any(s4b.get(k, {}).get("withheld", True) for k in ("B", "C")):
+        econ["compile_cache_term_seconds"] = compile_cache_term(
+            s4b["B"]["point"], s4b["C"]["point"]
+        )
+
+    out["economics"] = econ
 
 
 def _withheld(reason: str) -> dict:
@@ -133,6 +256,38 @@ def _full_analysis(rows: list[dict], total_part: PartitionResult, out: dict) -> 
             KV_CAPACITY_FLOOR,
         )
 
+    # T_fast, not T_total, is what the economics price: a replica is rented
+    # from the moment it starts until it is serving at steady-state latency,
+    # and the gap between "ready" and "fast" is rented time too. On this
+    # campaign the two are within 0.1s because the warmup is paid before the
+    # health check passes (see the warmup figure) -- but that is a measured
+    # result of this configuration, not an identity, so the economics read
+    # T_fast and would diverge correctly on an engine that served slow first
+    # requests.
+    out["t_fast_median"] = {}
+    for arm in ("A", "B", "C"):
+        vals = [
+            r["t_fast_seconds"] for r in pub if r["arm"] == arm and r["t_fast_seconds"] is not None
+        ]
+        out["t_fast_median"] = out["t_fast_median"]
+        out["t_fast_median"][arm] = _floor_or_withhold(
+            lambda vals=vals: {"point": median(vals)},
+            {f"arm {arm}": len(vals)},
+            MIN_BOOTSTRAP_SAMPLES,
+        )
+
+    # S4b in isolation, so the compile-cache term can be read directly rather
+    # than inferred from the B->C contrast (which is measured on t_compile and
+    # would agree, but agreement is worth showing rather than asserting).
+    out["s4b_median"] = {}
+    for arm in ("A", "B", "C"):
+        vals = [r["t_s4b"] for r in pub if r["arm"] == arm and r["t_s4b"] is not None]
+        out["s4b_median"][arm] = _floor_or_withhold(
+            lambda vals=vals: {"point": median(vals)},
+            {f"arm {arm}": len(vals)},
+            MIN_BOOTSTRAP_SAMPLES,
+        )
+
     # t_compile has its own nullity condition (a run whose parsed engine log
     # has no S4b entry -- the pinned engine normally DOES delineate S4b, so
     # this is not the common case, but it is independent of T_total
@@ -203,6 +358,8 @@ def _full_analysis(rows: list[dict], total_part: PartitionResult, out: dict) -> 
         {"within-host triples": len(triples)},
         MIN_BOOTSTRAP_SAMPLES,
     )
+
+    _economics(out)
 
 
 def main() -> None:

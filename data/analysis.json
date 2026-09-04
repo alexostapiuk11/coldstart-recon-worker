@@ -60,6 +60,34 @@
       "point": 43040.0
     }
   },
+  "t_fast_median": {
+    "A": {
+      "withheld": false,
+      "point": 81.11750624351771
+    },
+    "B": {
+      "withheld": false,
+      "point": 65.51645619090596
+    },
+    "C": {
+      "withheld": false,
+      "point": 39.39131698082019
+    }
+  },
+  "s4b_median": {
+    "A": {
+      "withheld": false,
+      "point": 19.01
+    },
+    "B": {
+      "withheld": false,
+      "point": 18.785
+    },
+    "C": {
+      "withheld": false,
+      "point": 0.325
+    }
+  },
   "contrast_A_to_B_t_weights": {
     "withheld": false,
     "point": 15.479601986939088,
@@ -96,5 +124,67 @@
     "point": 14.933642188785598,
     "lo": 13.856380612123758,
     "hi": 15.93148589041084
+  },
+  "economics": {
+    "assumptions": {
+      "gpu_hourly_rate": 1.0,
+      "scale_ups_per_day": 24.0,
+      "steady_state_tokens_per_sec": 800.0,
+      "volume_monthly_cost": 3.5,
+      "assumed_context_length": 8192,
+      "version_changes_per_month": 2.0
+    },
+    "assumption_provenance": {
+      "gpu_hourly_rate": "illustrative round number, substitute your own",
+      "scale_ups_per_day": "illustrative: one scale-up per hour",
+      "steady_state_tokens_per_sec": "illustrative batched decode rate; not measured here",
+      "volume_monthly_cost": "illustrative rental for the 50 GB network volume",
+      "assumed_context_length": "MEASURED: the pinned --max-model-len"
+    },
+    "per_scale_up": {
+      "A": {
+        "withheld": false,
+        "gpu_seconds": 81.11750624351771,
+        "gpu_cost_usd": 0.022532640623199363,
+        "foregone_tokens": 64894.00499481417
+      },
+      "B": {
+        "withheld": false,
+        "gpu_seconds": 65.51645619090596,
+        "gpu_cost_usd": 0.018199015608584987,
+        "foregone_tokens": 52413.164952724765
+      },
+      "C": {
+        "withheld": false,
+        "gpu_seconds": 39.39131698082019,
+        "gpu_cost_usd": 0.010942032494672276,
+        "foregone_tokens": 31513.053584656154
+      }
+    },
+    "supported_concurrency_at_8192": {
+      "A": {
+        "withheld": false,
+        "concurrent_requests": 4
+      },
+      "B": {
+        "withheld": false,
+        "concurrent_requests": 4
+      },
+      "C": {
+        "withheld": false,
+        "concurrent_requests": 5
+      }
+    },
+    "break_even": {
+      "withheld": false,
+      "weight_cache_seconds_saved": 15.601050052611754,
+      "weight_cache_events_per_day": 26.552480374429486,
+      "weight_cache_worth_renting": false,
+      "compile_cache_seconds_saved": 26.125139210085763,
+      "compile_cache_rewarm_cost_usd": 0.018199015608584987,
+      "compile_cache_events_per_day": 0.16489601572397652,
+      "compile_cache_worth_renting": true
+    },
+    "compile_cache_term_seconds": 18.46
   }
 }
