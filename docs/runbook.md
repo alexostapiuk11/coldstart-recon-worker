@@ -297,3 +297,38 @@ store (failure rate by arm, discard table, the bootstrap contrasts — see
 check the per-arm counts, failure rate, and discard rate before deciding
 whether to run another window or whether the stopping rule
 (`docs/experiment.md`, "Stopping rule") has been met.
+
+## Re-publishing the figures
+
+`build/` is gitignored, so the figures a reader actually sees are the copies in
+`docs/figures/`, which `docs/post.md` links to. Re-render and re-copy whenever
+`coldstart/analysis/figures.py` or the store changes:
+
+```bash
+.venv/bin/python scripts/render_figures.py --store data/campaign.jsonl --out build/figures
+```
+
+```bash
+cp build/figures/{waterfall,warmup,ecdf,per_host}.png docs/figures/
+```
+
+Then regenerate the phone-width inspection copies, **look at them**, and copy
+those in too:
+
+```bash
+.venv/bin/python -c "
+from pathlib import Path
+import matplotlib.image as mpimg, matplotlib.pyplot as plt
+for name in ['waterfall','warmup','ecdf','per_host']:
+    img = mpimg.imread(Path('build/figures')/f'{name}.png')
+    h, w = img.shape[0], img.shape[1]
+    fig = plt.figure(figsize=(375/100, 375/100*h/w), dpi=100)
+    ax = fig.add_axes([0,0,1,1]); ax.imshow(img); ax.axis('off')
+    fig.savefig(Path('docs/figures')/f'{name}-phone.png', dpi=100); plt.close(fig)
+"
+```
+
+`tests/test_published_figures.py` fails if `docs/figures/` drifts from what the
+committed store renders, if the post stops linking a figure, or if the directory
+becomes untracked. It deliberately does not copy the files for you: a test that
+repaired the drift it detects would make the drift invisible.

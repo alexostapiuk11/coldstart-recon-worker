@@ -11,10 +11,14 @@ The pre-registration commits to leading with the finding that transfers
 furthest to a reader on different infrastructure, not the one that cost the
 most effort. Ranked before writing anything below:
 
-1. **A warm compile cache is worth more than a warm weight cache** — and the
-   two are not substitutes. Transfers to any `torch.compile`-based serving
-   stack; the mechanism does not depend on this GPU, this model, or this
-   provider.
+1. **A warm compile cache is worth more than a warm weight cache** — the
+   difference of the two contrasts on `t_total` is **−10.39 s, 95% bootstrap
+   [−20.30, −5.54]**: the compile-cache contrast is about 10 s larger per
+   event, and the interval never crosses zero. The number is quoted here
+   rather than only in the analysis below because the pre-registration forbids
+   making this ranking claim anywhere without it. The two caches are also not
+   substitutes. Transfers to any `torch.compile`-based serving stack; the
+   mechanism does not depend on this GPU, this model, or this provider.
 2. **The compile cache buys KV cache capacity, not just seconds.** Transfers
    wherever memory profiling runs a real forward pass, which is everywhere in
    vLLM.
@@ -41,7 +45,7 @@ The headline is (1).
 | Hardware | NVIDIA RTX 4090 (24 GB), RunPod serverless, EU-RO-1 |
 | Image | `ghcr.io/…/coldstart-recon-worker@sha256:d41f67dd…` |
 | Runs | 300 — 100 per arm |
-| Billed GPU time | 5.45 GPU-hours |
+| Measured cold-start time | 6.14 GPU-hours — the sum of `T_total` over all 300 runs, of which 0.63 is the single first-touch run below. Not an invoice: this campaign measured seconds, never billing |
 
 Three arms differing in **exactly one interface**, the cache configuration:
 
@@ -64,7 +68,7 @@ C 0/100.
 
 ## The decomposition
 
-![Cold start decomposition](../build/figures/waterfall.png)
+![Cold start decomposition](figures/waterfall.png)
 
 Median seconds per phase. Every row sums to that arm's median total; nothing is
 hidden in a residual.
@@ -89,7 +93,7 @@ kind of gap a reader is entitled to see.
 
 ## The distribution, not the mean
 
-![Distribution](../build/figures/ecdf.png)
+![Distribution](figures/ecdf.png)
 
 | arm | p50 | p90 | p95 |
 |---|---:|---:|---:|
@@ -159,8 +163,9 @@ Stated before any ranking claim, as the pre-registration requires:
 | B→C, on `t_total` | 26.07 s | [25.97, 31.01] |
 | **difference of contrasts, on `t_total`** | **−10.39 s** | **[−20.30, −5.54]** |
 
-The difference excludes zero across its whole interval. Only now is the ranking
-claim licensed:
+The difference excludes zero across its whole interval. That is what licenses
+the ranking claim — which is why the last row is quoted alongside the claim at
+the top of this post rather than held back until here:
 
 > **Caching the compiled artifacts buys more total cold start than caching the
 > weights** — about 10 s more per event, and the interval never crosses zero.
@@ -212,7 +217,7 @@ of the replica — long after the compiler's memory is gone.
 
 ## Ready is already fast
 
-![Warmup](../build/figures/warmup.png)
+![Warmup](figures/warmup.png)
 
 The pre-registered expectation, written before measurement, was "ready is not
 fast": that a freshly-ready replica would serve its first requests slowly.
@@ -323,7 +328,7 @@ the same measurement would find real user-visible cost.
 
 ## Host heterogeneity: not answerable
 
-![Per host](../build/figures/per_host.png)
+![Per host](figures/per_host.png)
 
 The design intended to test whether host placement drives the tail (H4). It
 cannot be answered from this campaign. **All 300 runs landed on the same host**
