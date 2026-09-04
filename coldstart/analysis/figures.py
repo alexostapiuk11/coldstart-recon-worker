@@ -323,11 +323,26 @@ def warmup_curve(rows, out_path) -> Path:
         raise ValueError("warmup lists are empty")
 
     fig, ax = plt.subplots(figsize=(8, 4.5))
+    fast_marks: list = []
+    steadies: dict = {}
     for arm_idx, arm in enumerate(ARMS):
         rs = by[arm]
         med = [median([r["warmup"][i]["end_to_end"] for r in rs]) for i in range(n_req)]
+        # On real data the three arms' post-ready curves coincide to within a
+        # millisecond, so a plain solid line per arm draws three curves in the
+        # same pixels and the reader sees only whichever arm was drawn last --
+        # indistinguishable from A and B having been dropped from the figure.
+        # Distinct dash patterns and markers, with the later arms drawn
+        # narrower, keep all three readable exactly where they overlap.
+        style, marker, width = (("-", "o", 3.2), ("--", "s", 2.0), (":", "^", 1.2))[arm_idx % 3]
         (line,) = ax.plot(
-            range(1, n_req + 1), med, marker="o", label=f"{ARM_LABEL[arm]} (n={len(rs)})"
+            range(1, n_req + 1),
+            med,
+            linestyle=style,
+            marker=marker,
+            markersize=5,
+            linewidth=width,
+            label=f"{ARM_LABEL[arm]} (n={len(rs)})",
         )
 
         # Steady state is per-arm, not pooled across all three arms. Each
@@ -352,6 +367,7 @@ def warmup_curve(rows, out_path) -> Path:
         # published table says that run was not yet fast.
         per_run_steady = [steady_state_latency(r["warmup"]) for r in rs]
         steady = median(per_run_steady)
+        steadies[arm] = steady
         ax.axhspan(
             steady * (1 - FAST_TOLERANCE),
             steady * (1 + FAST_TOLERANCE),
@@ -370,35 +386,83 @@ def warmup_curve(rows, out_path) -> Path:
         synthetic_warmup = [{"req_index": k + 1, "end_to_end": v} for k, v in enumerate(med)]
         fast_req = time_to_fast_index(synthetic_warmup, steady)
         if fast_req is not None:
-            fast_y = med[fast_req - 1]
+            fast_marks.append((arm, fast_req, med[fast_req - 1], line.get_color()))
+
+    # Annotated after the arm loop, not inside it. Every arm can reach
+    # tolerance on the same request (on this campaign all three reach it on
+    # request 1), and a per-arm annotation then draws the same label three
+    # times on one point -- with fixed offsets, one of which pushed the text
+    # off the left edge of the figure entirely. Collapsing the shared case
+    # into a single label states the same fact once and cannot clip.
+    if fast_marks:
+        reqs = {req for _, req, _, _ in fast_marks}
+        if len(reqs) == 1 and len(fast_marks) == len(ARMS):
+            (req,) = reqs
+            ys = [y for _, _, y, _ in fast_marks]
             ax.scatter(
-                [fast_req],
-                [fast_y],
+                [req],
+                [max(ys)],
                 marker="*",
-                s=220,
-                color=line.get_color(),
-                edgecolor="black",
-                linewidths=0.6,
-                zorder=5,
+                s=260,
+                color="black",
+                zorder=6,
             )
-            # Three arms can land T_fast at the same request index with
-            # close steady-state values (e.g. the cached arms B and C), so a
-            # small alternating up/down offset is not enough separation on
-            # its own -- these three (dx, dy) offsets, one per arm position,
-            # spread the labels both horizontally and vertically so they
-            # cannot stack on each other regardless of how close the
-            # underlying curves are.
-            offset_x, offset_y = ((14, 20), (-92, 2), (14, -42))[arm_idx % 3]
             ax.annotate(
-                f"T_fast (req {fast_req})",
-                xy=(fast_req, fast_y),
-                xytext=(offset_x, offset_y),
+                f"T_fast (req {req}) — all three arms",
+                xy=(req, max(ys)),
+                xytext=(44, -16),
                 textcoords="offset points",
                 fontsize=9,
                 fontweight="bold",
-                color=line.get_color(),
-                arrowprops={"arrowstyle": "-", "color": line.get_color(), "lw": 0.8, "alpha": 0.8},
+                arrowprops={"arrowstyle": "-", "color": "black", "lw": 0.8},
             )
+        else:
+            for arm_idx, (_, req, y, color) in enumerate(fast_marks):
+                ax.scatter(
+                    [req],
+                    [y],
+                    marker="*",
+                    s=220,
+                    color=color,
+                    edgecolor="black",
+                    linewidths=0.6,
+                    zorder=5,
+                )
+                # Offsets point inward from whichever edge the marker sits
+                # near, so a T_fast on request 1 or on the last request can
+                # never be laid out off the canvas.
+                dx = 14 if req <= (n_req + 1) / 2 else -14
+                ha = "left" if dx > 0 else "right"
+                ax.annotate(
+                    f"T_fast (req {req})",
+                    xy=(req, y),
+                    xytext=(dx, (24, -30, 46)[arm_idx % 3]),
+                    textcoords="offset points",
+                    fontsize=9,
+                    fontweight="bold",
+                    ha=ha,
+                    color=color,
+                    arrowprops={"arrowstyle": "-", "color": color, "lw": 0.8, "alpha": 0.8},
+                )
+
+    # State the coincidence numerically. A reader looking at three superimposed
+    # curves should not have to take on faith that they are separate series.
+    spread_ms = (max(steadies.values()) - min(steadies.values())) * 1000
+    # Inside the axes, in the empty band below the curves. Centred on the
+    # *figure* it would overflow the narrow axes and clip against the canvas
+    # edge; the axes' lower half is empty on this data and holds it intact.
+    ax.text(
+        0.5,
+        0.45,
+        f"All three arms coincide.\nSteady-state medians differ by {spread_ms:.1f} ms — cache\n"
+        "configuration does not affect latency once the engine is up.",
+        transform=ax.transAxes,
+        ha="center",
+        va="center",
+        fontsize=9,
+        style="italic",
+        linespacing=1.5,
+    )
 
     ax.set_xlabel("request index")
     ax.set_ylabel("end-to-end latency (s)")
@@ -456,11 +520,30 @@ def per_host_medians(rows, out_path) -> Path:
         median([_required_field(r, "t_total") for r in rows if r["host_id"] == h]) for h in hosts
     ]
     counts = [sum(1 for r in rows if r["host_id"] == h) for h in hosts]
-    ax.bar(range(len(hosts)), meds)
+    ax.bar(range(len(hosts)), meds, width=0.5 if len(hosts) > 1 else 0.25)
     ax.set_xticks(range(len(hosts)), [f"{h}\n(n={c})" for h, c in zip(hosts, counts, strict=True)])
     ax.set_ylabel("median T_total (s)")
     ax.set_ylim(bottom=0)
-    ax.set_title("Host heterogeneity")
+
+    # A single host is the degenerate case: one bar filling the frame looks like a
+    # measurement of host heterogeneity when it is the opposite -- the campaign never
+    # observed a second host, so H4 has no evidence either way. Say that on the chart,
+    # because the figure travels without its caption.
+    if len(hosts) == 1:
+        ax.set_title("Host heterogeneity: NOT ANSWERABLE from this campaign")
+        ax.set_xlim(-0.75, 0.75)
+        ax.text(
+            0.5,
+            0.5,
+            f"All {counts[0]} runs landed on one host.\nNo between-host comparison exists.",
+            transform=ax.transAxes,
+            ha="center",
+            va="center",
+            fontsize=12,
+            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.85},
+        )
+    else:
+        ax.set_title("Host heterogeneity")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)

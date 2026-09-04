@@ -204,6 +204,24 @@ Stop at 100 runs per arm, or when the intervals on **both** contrasts are tight
 enough to distinguish a large effect from no effect — whichever comes first.
 Both must qualify.
 
+## Stopping decision, recorded
+
+Stopped at the pre-registered 100 runs per arm — the first branch of the
+stopping rule, not the early-exit branch. Both contrasts had in fact resolved
+by 200 runs, but the spec separately requires publishing p50/p90/p95 and a full
+ECDF, and those need 80 samples per arm; stopping early would have satisfied
+the stopping rule while failing the reporting requirement.
+
+The intervals that the rule was judged against, at 300 runs:
+
+- A→B on `t_weights`: **15.48 s [14.46, 16.45]**
+- B→C on `t_compile`: **18.46 s [18.35, 18.64]**
+- difference of contrasts, on `t_total`: **−10.39 s [−20.30, −5.54]**
+
+Both contrasts exclude zero, and so does their difference. No run was
+discarded and none failed, so the exclusion rules never fired — the failure
+and discard tables are empty by outcome, not by omission.
+
 ## Headline selection rule
 
 Rank candidate findings by how far they transfer to a reader on different

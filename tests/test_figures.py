@@ -424,10 +424,21 @@ def test_waterfall_handles_a_wholly_unmeasured_s4_bracket_without_crashing_or_su
 # ---------------------------------------------------------------------------
 
 
+def _arm_lines(ax):
+    """The three per-arm curves, selected by their legend label.
+
+    Not by marker: each arm now draws a different marker and dash pattern so
+    that three curves which coincide to within a millisecond on real data stay
+    individually readable. A selector keyed to one marker silently matched a
+    single arm once that changed.
+    """
+    return [ln for ln in ax.lines if "n=" in (ln.get_label() or "")]
+
+
 def test_warmup_curve_plots_the_number_of_requests_present_in_the_data(tmp_path):
     data = rows()  # every row has a 10-request warmup
     _fig, ax = _call_capturing_axes(warmup_curve, data, tmp_path / "w.png")
-    arm_lines = [ln for ln in ax.lines if ln.get_marker() == "o"]
+    arm_lines = _arm_lines(ax)
     assert len(arm_lines) == 3
     for ln in arm_lines:
         assert list(ln.get_xdata()) == list(range(1, 11))
@@ -440,7 +451,7 @@ def test_warmup_curve_plots_a_different_request_count_when_the_data_has_fewer(tm
     for r in data:
         r["warmup"] = r["warmup"][:4]
     _fig, ax = _call_capturing_axes(warmup_curve, data, tmp_path / "w.png")
-    arm_lines = [ln for ln in ax.lines if ln.get_marker() == "o"]
+    arm_lines = _arm_lines(ax)
     assert len(arm_lines) == 3
     for ln in arm_lines:
         assert list(ln.get_xdata()) == [1, 2, 3, 4]
@@ -454,7 +465,7 @@ def test_warmup_curve_series_are_visually_distinct_not_identical(tmp_path):
     three times" or "two series silently dropped" -- both would pass every
     other assertion in this file. Each arm's y-data must actually differ."""
     _fig, ax = _call_capturing_axes(warmup_curve, rows(), tmp_path / "w.png")
-    arm_lines = [ln for ln in ax.lines if ln.get_marker() == "o"]
+    arm_lines = _arm_lines(ax)
     assert len(arm_lines) == 3
     ydata = [tuple(ln.get_ydata()) for ln in arm_lines]
     assert len(set(ydata)) == 3
@@ -601,32 +612,59 @@ def test_warmup_curve_band_matches_metrics_steady_state_not_a_pooled_median(tmp_
     assert center != pytest.approx(30.0)  # the pooled estimator's (wrong) answer
 
 
-def test_warmup_curve_annotates_t_fast_per_arm(tmp_path):
-    """Spec figures section: figure 2 must have T_fast annotated, not just
-    the steady-state band marked. One row per arm removes the median-across-
-    rows step, so the annotated point is a hand-computed literal: steady =
-    median(last three of [.., 3.2, 3.0, 3.0]) = 3.0, threshold = 3.0*1.1 =
-    3.3, and request 7 (index 6, value 3.2) is the first request at or below
-    it."""
+def test_warmup_curve_collapses_t_fast_when_every_arm_shares_the_request(tmp_path):
+    """Spec figures section: figure 2 must have T_fast annotated. When every
+    arm reaches tolerance on the *same* request -- which is what the campaign
+    actually produced, all three on request 1 -- annotating per arm stamped
+    three identical labels on one point and laid one of them off the left edge
+    of the canvas. The shared case collapses to a single label.
+
+    One row per arm removes the median-across-rows step, so the annotated
+    point is a hand-computed literal: steady = median(last three of
+    [.., 3.2, 3.0, 3.0]) = 3.0, threshold = 3.0*1.1 = 3.3, and request 7
+    (index 6, value 3.2) is the first request at or below it."""
     e2e = [10.0, 8.0, 6.0, 5.0, 4.0, 3.5, 3.2, 3.0, 3.0, 3.0]
     warmup = [{"req_index": k, "end_to_end": v} for k, v in enumerate(e2e)]
     data = [{"arm": a, "warmup": [dict(w) for w in warmup]} for a in ("A", "B", "C")]
 
     _fig, ax = _call_capturing_axes(warmup_curve, data, tmp_path / "w.png")
 
-    # One scatter marker per arm (ax.scatter -> a PathCollection in
-    # ax.collections; nothing else in warmup_curve adds to that list).
-    assert len(ax.collections) == 3
-    for coll in ax.collections:
-        (x, y) = coll.get_offsets()[0]
-        assert x == pytest.approx(7.0)
-        assert y == pytest.approx(3.2)
+    assert len(ax.collections) == 1
+    (x, y) = ax.collections[0].get_offsets()[0]
+    assert x == pytest.approx(7.0)
+    assert y == pytest.approx(3.2)
 
-    # One "T_fast" annotation per arm (ax.annotate adds to ax.texts).
+    fast_texts = [t for t in ax.texts if "T_fast" in t.get_text()]
+    assert len(fast_texts) == 1
+    assert "7" in fast_texts[0].get_text()
+    assert "all three arms" in fast_texts[0].get_text()
+
+
+def test_warmup_curve_annotates_t_fast_per_arm_when_the_arms_differ(tmp_path):
+    """The collapse is only for the shared case. Arms that reach tolerance on
+    different requests each keep their own marker and label, because the
+    figure is then reporting three distinct facts."""
+
+    def curve(plateau_from):
+        e2e = [10.0 - k for k in range(plateau_from)] + [3.0] * (10 - plateau_from)
+        return [{"req_index": k, "end_to_end": v} for k, v in enumerate(e2e)]
+
+    data = [
+        {"arm": "A", "warmup": curve(3)},
+        {"arm": "B", "warmup": curve(5)},
+        {"arm": "C", "warmup": curve(7)},
+    ]
+    _fig, ax = _call_capturing_axes(warmup_curve, data, tmp_path / "w.png")
+
+    assert len(ax.collections) == 3
     fast_texts = [t for t in ax.texts if "T_fast" in t.get_text()]
     assert len(fast_texts) == 3
-    for t in fast_texts:
-        assert "7" in t.get_text()
+    # Each label is offset *inward* from the edge it sits nearest, which is
+    # what stops a T_fast on request 1 being laid out past the left margin.
+    for txt in fast_texts:
+        req = txt.xy[0]
+        dx = txt.get_position()[0]
+        assert (dx > 0) == (req <= 5.5), f"label for request {req} offset outward (dx={dx})"
 
 
 def test_warmup_curve_steady_state_bands_are_colored_like_their_own_line(tmp_path):
@@ -635,7 +673,7 @@ def test_warmup_curve_steady_state_bands_are_colored_like_their_own_line(tmp_pat
     curve it belongs to now that there are three. Each band's color must
     match its own arm's line color exactly."""
     _fig, ax = _call_capturing_axes(warmup_curve, rows(), tmp_path / "w.png")
-    arm_lines = [ln for ln in ax.lines if ln.get_marker() == "o"]
+    arm_lines = _arm_lines(ax)
     bands = [p for p in ax.patches if "steady-state band" in (p.get_label() or "")]
     assert len(arm_lines) == len(bands) == 3
     for line, band in zip(arm_lines, bands, strict=True):

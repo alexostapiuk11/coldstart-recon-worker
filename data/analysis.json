@@ -1,0 +1,100 @@
+{
+  "n_records": 300,
+  "failure_rate_by_arm": {
+    "A": {
+      "total": 100,
+      "failed": 0,
+      "by_class": {},
+      "rate": 0.0
+    },
+    "C": {
+      "total": 100,
+      "failed": 0,
+      "by_class": {},
+      "rate": 0.0
+    },
+    "B": {
+      "total": 100,
+      "failed": 0,
+      "by_class": {},
+      "rate": 0.0
+    }
+  },
+  "discard_table": {},
+  "counts": {
+    "publishable_t_total": 300,
+    "discarded": 0,
+    "failed": 0
+  },
+  "distributions": {
+    "A": {
+      "withheld": false,
+      "p50": 81.11761860409388,
+      "p90": 96.27105829388093,
+      "p95": 96.3508849928765
+    },
+    "B": {
+      "withheld": false,
+      "p50": 65.43434140135832,
+      "p90": 85.92790905294696,
+      "p95": 86.3769601671669
+    },
+    "C": {
+      "withheld": false,
+      "p50": 39.36539598401396,
+      "p90": 54.838175199040414,
+      "p95": 54.92961485526066
+    }
+  },
+  "kv_capacity_median": {
+    "A": {
+      "withheld": false,
+      "point": 35792.0
+    },
+    "B": {
+      "withheld": false,
+      "point": 35792.0
+    },
+    "C": {
+      "withheld": false,
+      "point": 43040.0
+    }
+  },
+  "contrast_A_to_B_t_weights": {
+    "withheld": false,
+    "point": 15.479601986939088,
+    "lo": 14.461841325741261,
+    "hi": 16.446450692834333
+  },
+  "contrast_B_to_C_t_compile": {
+    "withheld": false,
+    "point": 18.46,
+    "lo": 18.35,
+    "hi": 18.645
+  },
+  "contrast_A_to_B_t_total": {
+    "withheld": false,
+    "point": 15.683277202735553,
+    "lo": 10.668280972433422,
+    "hi": 20.468701240954033
+  },
+  "contrast_B_to_C_t_total": {
+    "withheld": false,
+    "point": 26.068945417344366,
+    "lo": 25.970067194431977,
+    "hi": 31.005027138020523
+  },
+  "difference_of_contrasts_t_total": {
+    "withheld": false,
+    "point": -10.385668214608813,
+    "lo": -20.298430798044137,
+    "hi": -5.536687525687739
+  },
+  "within_host_triples": 100,
+  "paired_A_to_B_t_weights": {
+    "withheld": false,
+    "point": 14.933642188785598,
+    "lo": 13.856380612123758,
+    "hi": 15.93148589041084
+  }
+}
