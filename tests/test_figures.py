@@ -18,11 +18,14 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.colors as mcolors
+import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 import pytest
 
 import coldstart.analysis.figures as figures_module
 from coldstart.analysis.figures import (
+    MIN_PHONE_TEXT_PX,
+    PHONE_WIDTH_PX,
     RESIDUAL_COLOR,
     ecdf_plot,
     per_host_medians,
@@ -240,20 +243,34 @@ def test_waterfall_xlim_starts_at_zero(tmp_path):
     assert ax.get_xlim()[0] == 0
 
 
-def test_waterfall_text_sizes_are_large_enough_to_survive_downscaling(tmp_path):
-    """With up to a dozen legend entries now (versus five before), the chart
-    is wider in absolute pixels; unless the font sizes scale up to match,
-    the *relative* size of every label shrinks once the PNG is displayed at
-    a fixed width (e.g. a 390px-wide phone screen) -- pins a floor so a
-    future edit can't silently let this regress back to illegible."""
-    _fig, ax = _call_capturing_axes(waterfall, rows(), tmp_path / "w.png")
-    assert ax.title.get_fontsize() >= 13
-    assert ax.xaxis.label.get_fontsize() >= 11
+def test_waterfall_text_is_legible_at_phone_width(tmp_path):
+    """Supersedes a floor on absolute point sizes (title >= 13, ticks >= 10,
+    legend >= 9). That guard could not do its job and did not: the waterfall
+    was later widened from 8in to 10.9in to fit its legend, every one of those
+    absolute floors still passed, and the arm labels dropped to 5.3px on a
+    phone -- illegible. Point size alone never determined legibility; the ratio
+    to figure width does. Asserted here for the waterfall specifically because
+    it is the densest of the four and the one that regressed.
+    """
+    fig, ax = _call_capturing_axes(waterfall, rows(), tmp_path / "w.png")
+    width_in = fig.get_size_inches()[0]
+
+    def rendered_px(pt):
+        return pt * PHONE_WIDTH_PX / (72 * width_in)
+
+    assert rendered_px(ax.title.get_fontsize()) >= 9.0
+    assert rendered_px(ax.xaxis.label.get_fontsize()) >= MIN_PHONE_TEXT_PX
     for tick_label in ax.get_xticklabels() + ax.get_yticklabels():
-        assert tick_label.get_fontsize() >= 10
-    legend = ax.get_legend()
+        assert rendered_px(tick_label.get_fontsize()) >= MIN_PHONE_TEXT_PX
+
+    # The legend belongs to the figure, not the axes -- centring it on the
+    # axes pushed it off the right margin, because the arm labels inset the
+    # axes from the canvas edge.
+    assert ax.get_legend() is None
+    (legend,) = fig.legends
+    assert len(legend.get_texts()) >= 5
     for text in legend.get_texts():
-        assert text.get_fontsize() >= 9
+        assert rendered_px(text.get_fontsize()) >= MIN_PHONE_TEXT_PX
 
 
 def test_waterfall_merged_branch_draws_two_segments_labeled_merged(tmp_path):
@@ -858,3 +875,65 @@ def test_fixture_sanity_ten_rows_per_arm_five_hosts():
     assert sorted({r["arm"] for r in data}) == ["A", "B", "C"]
     assert sum(1 for r in data if r["arm"] == "A") == 10
     assert len({r["host_id"] for r in data}) == 5
+
+
+# --- phone legibility -------------------------------------------------------
+
+
+def test_every_figure_clears_the_phone_text_floor(tmp_path):
+    """The post is read on phones, and a figure that is illegible there still
+    renders, still passes every assertion about its data, and looks correct on
+    the laptop it was written on. This module has shipped that defect twice --
+    once fixed by enlarging the waterfall's text, then reintroduced when the
+    waterfall was widened to fit its legend, which cancelled the enlargement
+    exactly (`rendered_px = pt * 375 / (72 * width_in)`: the denominator grew
+    with the numerator).
+
+    Asserts the arithmetic directly on every text artist matplotlib will draw,
+    so neither a smaller font nor a wider canvas can regress it silently.
+    """
+    renderers = (
+        (waterfall, rows()),
+        (warmup_curve, rows()),
+        (ecdf_plot, rows()),
+        (per_host_medians, rows()),
+    )
+    for render, data in renderers:
+        fig, ax = _call_capturing_axes(render, data, tmp_path / "f.png")
+        width_in = fig.get_size_inches()[0]
+
+        texts = [(t.get_text(), t.get_fontsize()) for t in ax.texts]
+        texts += [(ax.get_title(), ax.title.get_fontsize())]
+        texts += [(ax.get_xlabel(), ax.xaxis.label.get_fontsize())]
+        texts += [(ax.get_ylabel(), ax.yaxis.label.get_fontsize())]
+        texts += [(lab.get_text(), lab.get_fontsize()) for lab in ax.get_xticklabels()]
+        texts += [(lab.get_text(), lab.get_fontsize()) for lab in ax.get_yticklabels()]
+        legend = ax.get_legend()
+        if legend is not None:
+            texts += [(t.get_text(), t.get_fontsize()) for t in legend.get_texts()]
+
+        for label, pt in texts:
+            if not label.strip():
+                continue
+            rendered_px = pt * PHONE_WIDTH_PX / (72 * width_in)
+            assert rendered_px >= MIN_PHONE_TEXT_PX, (
+                f"{render.__name__}: {label!r} renders at {rendered_px:.1f}px at phone "
+                f"width ({pt:.1f}pt on a {width_in:.1f}in canvas); "
+                f"floor is {MIN_PHONE_TEXT_PX}px"
+            )
+
+
+def test_figures_do_not_widen_the_canvas_on_save(tmp_path):
+    """`bbox_inches="tight"` expands the written PNG past `figsize` by however
+    much an outside-the-axes legend needs, making the true width -- the
+    denominator the test above depends on -- unknowable from the code. That is
+    how the waterfall's phone regression got in. Pin that the saved pixel width
+    matches the declared figure width."""
+    for render in (waterfall, warmup_curve, ecdf_plot, per_host_medians):
+        out = tmp_path / f"{render.__name__}.png"
+        fig, _ax = _call_capturing_axes(render, rows(), out)
+        expected = round(fig.get_size_inches()[0] * 150)
+        actual = mpimg.imread(out).shape[1]
+        assert actual == expected, (
+            f"{render.__name__}: saved {actual}px wide but figsize declares {expected}px"
+        )

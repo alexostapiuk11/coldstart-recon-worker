@@ -72,6 +72,39 @@ ARMS = ["A", "B", "C"]
 ARM_LABEL = {"A": "A — nothing cached", "B": "B — weights cached", "C": "C — weights + compile"}
 RESIDUAL_COLOR = "#9e9e9e"  # deliberately distinct from every measured-stage color
 
+# Phone legibility, as arithmetic instead of guesswork.
+#
+# These figures are published in a post most readers open on a phone, where the
+# PNG is scaled to the viewport width. What survives that downscale is not a
+# font's absolute point size but its size *relative to the figure*: rendering
+# DPI cancels out, leaving
+#
+#     rendered_px = pt * PHONE_WIDTH_PX / (72 * figure_width_in)
+#
+# The consequence is counterintuitive and this module has been caught by it
+# twice: making a crowded chart *wider* to fit its legend makes every label
+# smaller on a phone. Widening must be paid for with a proportional font
+# increase, or the room gained is cancelled exactly.
+#
+# MIN_PHONE_TEXT_PX is calibrated against rendered output, not taste: at the
+# 300-run campaign's figures, 8pt legends on an 8-inch canvas (5.2px) and 11pt
+# arm labels on a 10.9-inch canvas (5.3px) were both unreadable at phone width,
+# while a 12pt callout on an 8-inch canvas (7.8px) was comfortable. The floor
+# sits just below the latter. `test_figures.py` asserts every text artist in
+# all four figures clears it, so this cannot regress silently -- which it did
+# before, because a figure that is illegible on a phone still renders, still
+# passes every assertion about its data, and looks fine on the laptop where it
+# was written.
+PHONE_WIDTH_PX = 375
+MIN_PHONE_TEXT_PX = 7.5
+
+
+def phone_pt(px: float, fig_width_in: float) -> float:
+    """Point size that renders at `px` pixels when a `fig_width_in`-wide figure
+    is displayed `PHONE_WIDTH_PX` wide. Inverse of the relation above."""
+    return px * 72 * fig_width_in / PHONE_WIDTH_PX
+
+
 # The five named S4 sub-phases, in chronological order — must match
 # coldstart.analysis.metrics.S4_SUBPHASE_KEYS. Not imported directly so this
 # module stays a pure consumer of whatever fields a row happens to carry
@@ -174,7 +207,8 @@ def waterfall(rows, out_path) -> Path:
     bar short with no explanation.
     """
     by = _by_arm(rows)
-    fig, ax = plt.subplots(figsize=(11, 5.5))
+    fig_w = 9.0
+    fig, ax = plt.subplots(figsize=(fig_w, 7.0))
     labels, ys = [], []
     seen_labels: set[str] = set()
 
@@ -204,7 +238,7 @@ def waterfall(rows, out_path) -> Path:
             s6 = _median_present(rs, "t_s6")
             bracket = _median_present(rs, "t_s4_bracket")
 
-            _draw(i, platform, "T_platform (not attributable)", RESIDUAL_COLOR)
+            _draw(i, platform, "T_platform (not attributed)", RESIDUAL_COLOR)
             if s1 is not None:
                 _draw(i, s1, "S1 imports", "#8e6fc4")
             _draw(i, weights, "T_weights (S2+S3)", "#2f6fd0")
@@ -240,9 +274,9 @@ def waterfall(rows, out_path) -> Path:
                 for key in S4_SUBPHASE_KEYS:
                     if key in present:
                         _draw(i, present[key], _SUBPHASE_LABEL[key], _SUBPHASE_COLOR[key])
-                unattributed_label = "unattributed within S4"
+                unattributed_label = "S4 unattributed"
                 if merged_subs:
-                    unattributed_label += f" (includes merged: {', '.join(merged_subs)})"
+                    unattributed_label += f" (merged: {', '.join(merged_subs)})"
                 _draw(i, unattributed, unattributed_label, "#d9c8a9")
                 s5 = _median_present(rs, "t_s5")
                 if s5 is not None:
@@ -264,7 +298,7 @@ def waterfall(rows, out_path) -> Path:
                 _draw(
                     i,
                     remainder,
-                    "S4 + S5 (merged — S4 bracket marks absent)",
+                    "S4+S5 (merged — no S4 marks)",
                     "#b8b0c8",
                     hatch="//",
                 )
@@ -273,37 +307,43 @@ def waterfall(rows, out_path) -> Path:
                 _draw(i, s6, "S6 cold TTFT", "#4f6d7a")
         else:
             _draw(i, platform, "T_platform (not attributable)", RESIDUAL_COLOR)
-            _draw(i, process, "S2 to ready (phases merged by engine)", "#7f8fa6")
+            _draw(i, process, "S2→ready (engine merged phases)", "#7f8fa6")
 
-    ax.set_yticks(ys, labels, fontsize=11)
-    ax.set_xlabel("seconds (median)", fontsize=12)
-    ax.tick_params(axis="x", labelsize=11)
+    ax.set_yticks(ys, labels, fontsize=phone_pt(7.8, fig_w))
+    ax.set_xlabel("seconds (median)", fontsize=phone_pt(8.2, fig_w))
+    ax.tick_params(axis="x", labelsize=phone_pt(7.6, fig_w))
     ax.set_xlim(left=0)
-    # Placed outside the axes (to the right) rather than in a corner: with
-    # every stage now individually labelled there can be a dozen legend
-    # entries, more than any in-plot corner has room for without covering a
-    # bar. `bbox_inches="tight"` on save (below) expands the saved canvas to
-    # include it rather than clipping it off. Font sizes here are larger
-    # than the other three figures' legends (fontsize=8) specifically
-    # because this chart is wider in absolute pixels now that it carries up
-    # to a dozen entries -- what determines legibility once a reader
-    # displays the PNG at a fixed width (e.g. a phone screen) is
-    # `font_pt / figure_width_in`, not the font's absolute point size, so a
-    # wider chart needs correspondingly larger fonts to hold the same
-    # rendered size after downscaling. `labelspacing`/`handlelength` are
-    # trimmed so the wider font doesn't blow the legend column out further.
-    ax.legend(
-        loc="upper left",
-        bbox_to_anchor=(1.01, 1.0),
-        fontsize=10,
-        borderaxespad=0.0,
+    # Below the axes in two columns, not outside it to the right.
+    #
+    # A right-hand legend forced `bbox_inches="tight"` on save, which expands
+    # the written canvas past `figsize` by however wide the legend happens to
+    # be -- so the figure's true width, the denominator every one of these font
+    # sizes depends on, was not knowable from the code. It came out at 10.9in,
+    # which silently shrank the 11pt arm labels to 5.3px on a phone. Underneath
+    # the axes the legend costs vertical space, which downscaling does not
+    # penalise, and the width stays exactly `fig_w`.
+    # Centred on the *figure*, not the axes. The arm labels ("C — weights +
+    # compile (n=100)") inset the axes well to the right of the canvas edge, so
+    # a legend centred on the axes sits off-centre on the page and its widest
+    # entry ran past the right margin -- clipping the closing parenthesis of
+    # the merged-subphase label, the one legend entry the spec specifically
+    # requires be shown rather than hidden.
+    handles, legend_labels = ax.get_legend_handles_labels()
+    fig.legend(
+        handles,
+        legend_labels,
+        loc="lower center",
+        ncol=2,
+        fontsize=phone_pt(7.6, fig_w),
         labelspacing=0.4,
         handlelength=1.5,
         handletextpad=0.5,
+        columnspacing=1.4,
+        frameon=False,
     )
-    ax.set_title("Cold start decomposition", fontsize=15)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    ax.set_title("Cold start decomposition", fontsize=phone_pt(10.0, fig_w))
+    fig.tight_layout(rect=(0.0, 0.19, 1.0, 1.0))
+    fig.savefig(out_path, dpi=150)
     plt.close(fig)
     return Path(out_path)
 
@@ -322,7 +362,8 @@ def warmup_curve(rows, out_path) -> Path:
     if n_req == 0:
         raise ValueError("warmup lists are empty")
 
-    fig, ax = plt.subplots(figsize=(8, 4.5))
+    fig_w = 8.0
+    fig, ax = plt.subplots(figsize=(fig_w, 5.0))
     fast_marks: list = []
     steadies: dict = {}
     for arm_idx, arm in enumerate(ARMS):
@@ -412,7 +453,7 @@ def warmup_curve(rows, out_path) -> Path:
                 xy=(req, max(ys)),
                 xytext=(44, -16),
                 textcoords="offset points",
-                fontsize=9,
+                fontsize=phone_pt(7.6, fig_w),
                 fontweight="bold",
                 arrowprops={"arrowstyle": "-", "color": "black", "lw": 0.8},
             )
@@ -438,7 +479,7 @@ def warmup_curve(rows, out_path) -> Path:
                     xy=(req, y),
                     xytext=(dx, (24, -30, 46)[arm_idx % 3]),
                     textcoords="offset points",
-                    fontsize=9,
+                    fontsize=phone_pt(7.6, fig_w),
                     fontweight="bold",
                     ha=ha,
                     color=color,
@@ -453,19 +494,20 @@ def warmup_curve(rows, out_path) -> Path:
     # edge; the axes' lower half is empty on this data and holds it intact.
     ax.text(
         0.5,
-        0.45,
+        0.66,
         f"All three arms coincide.\nSteady-state medians differ by {spread_ms:.1f} ms — cache\n"
         "configuration does not affect latency once the engine is up.",
         transform=ax.transAxes,
         ha="center",
         va="center",
-        fontsize=9,
+        fontsize=phone_pt(7.8, fig_w),
         style="italic",
         linespacing=1.5,
     )
 
-    ax.set_xlabel("request index")
-    ax.set_ylabel("end-to-end latency (s)")
+    ax.set_xlabel("request index", fontsize=phone_pt(8.2, fig_w))
+    ax.set_ylabel("end-to-end latency (s)", fontsize=phone_pt(8.2, fig_w))
+    ax.tick_params(labelsize=phone_pt(7.6, fig_w))
     ax.set_ylim(bottom=0)
     # The spec's working title for this figure was "Ready is not fast",
     # written before the measurement. The campaign says the opposite at this
@@ -477,15 +519,26 @@ def warmup_curve(rows, out_path) -> Path:
     # shows; changing the data to fit the title was never an option.
     # `pad` keeps it clear of the per-arm T_fast annotations, which cluster at
     # the top-left when every arm reaches tolerance on request 1.
-    ax.set_title("Ready is already fast — the warmup was paid before ready", pad=24)
-    # Outside the axes, as the waterfall's is. On real data the curve is
-    # nearly flat and sits high, so an in-axes legend covered requests 6-10
-    # entirely -- the data was present and simply hidden behind the box.
+    ax.set_title(
+        "Ready is already fast — the warmup was paid before ready",
+        fontsize=phone_pt(9.4, fig_w),
+        pad=18,
+    )
+    # Inside the axes, in the empty lower half. Outside-right it squeezed the
+    # axes to little over half the canvas, and at a font size legible on a
+    # phone six entries would have taken more than that again. On this data the
+    # curves sit against the top of the plot and everything below them is
+    # empty, so an in-axes legend hides nothing -- the earlier objection to
+    # placing it here (it covered requests 6-10) applied to a corner position,
+    # not to the empty band.
     ax.legend(
-        loc="upper left",
-        bbox_to_anchor=(1.01, 1.0),
-        fontsize=8,
-        borderaxespad=0.0,
+        loc="lower center",
+        fontsize=phone_pt(7.6, fig_w),
+        borderaxespad=0.6,
+        labelspacing=0.35,
+        handlelength=1.6,
+        handletextpad=0.5,
+        frameon=False,
     )
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
@@ -495,17 +548,19 @@ def warmup_curve(rows, out_path) -> Path:
 
 def ecdf_plot(rows, out_path) -> Path:
     by = _by_arm(rows)
-    fig, ax = plt.subplots(figsize=(8, 4.5))
+    fig_w = 8.0
+    fig, ax = plt.subplots(figsize=(fig_w, 4.5))
     for arm in ARMS:
         rs = by[arm]
         xs, ys = ecdf([_required_field(r, "t_total") for r in rs])
         ax.step(xs, ys, where="post", label=f"{ARM_LABEL[arm]} (n={len(rs)})")
-    ax.set_xlabel("T_total (s)")
-    ax.set_ylabel("fraction of runs ≤ x")
+    ax.set_xlabel("T_total (s)", fontsize=phone_pt(8.2, fig_w))
+    ax.set_ylabel("fraction of runs ≤ x", fontsize=phone_pt(8.2, fig_w))
+    ax.tick_params(labelsize=phone_pt(7.6, fig_w))
     ax.set_xlim(left=0)
     ax.set_ylim(0, 1)
-    ax.set_title("Distribution, not a mean")
-    ax.legend(fontsize=8)
+    ax.set_title("Distribution, not a mean", fontsize=phone_pt(9.4, fig_w))
+    ax.legend(fontsize=phone_pt(7.6, fig_w), frameon=False, loc="lower right")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
@@ -515,14 +570,16 @@ def ecdf_plot(rows, out_path) -> Path:
 def per_host_medians(rows, out_path) -> Path:
     rows = _validate_rows(rows)
     hosts = sorted({r["host_id"] for r in rows})
-    fig, ax = plt.subplots(figsize=(8, 4.5))
+    fig_w = 8.0
+    fig, ax = plt.subplots(figsize=(fig_w, 4.5))
     meds = [
         median([_required_field(r, "t_total") for r in rows if r["host_id"] == h]) for h in hosts
     ]
     counts = [sum(1 for r in rows if r["host_id"] == h) for h in hosts]
     ax.bar(range(len(hosts)), meds, width=0.5 if len(hosts) > 1 else 0.25)
     ax.set_xticks(range(len(hosts)), [f"{h}\n(n={c})" for h, c in zip(hosts, counts, strict=True)])
-    ax.set_ylabel("median T_total (s)")
+    ax.set_ylabel("median T_total (s)", fontsize=phone_pt(8.2, fig_w))
+    ax.tick_params(labelsize=phone_pt(7.6, fig_w))
     ax.set_ylim(bottom=0)
 
     # A single host is the degenerate case: one bar filling the frame looks like a
@@ -530,7 +587,10 @@ def per_host_medians(rows, out_path) -> Path:
     # observed a second host, so H4 has no evidence either way. Say that on the chart,
     # because the figure travels without its caption.
     if len(hosts) == 1:
-        ax.set_title("Host heterogeneity: NOT ANSWERABLE from this campaign")
+        ax.set_title(
+            "Host heterogeneity: NOT ANSWERABLE from this campaign",
+            fontsize=phone_pt(8.8, fig_w),
+        )
         ax.set_xlim(-0.75, 0.75)
         ax.text(
             0.5,
@@ -539,11 +599,11 @@ def per_host_medians(rows, out_path) -> Path:
             transform=ax.transAxes,
             ha="center",
             va="center",
-            fontsize=12,
+            fontsize=phone_pt(8.2, fig_w),
             bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.85},
         )
     else:
-        ax.set_title("Host heterogeneity")
+        ax.set_title("Host heterogeneity", fontsize=phone_pt(9.4, fig_w))
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
