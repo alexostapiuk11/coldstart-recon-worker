@@ -1,7 +1,23 @@
+<!--
+Permanent slug: /experiments/vllm-cold-start-decomposition
+Never changes, per the portfolio contract (artifact 1 spec §3). It names the
+mechanism rather than the headline, so the title can still be reworded at
+publication without breaking the URL.
+
+The absolute canonical URL is set once the domain is live; until then the slug
+is published as a path. If publication slips past the date below, update the
+date -- it is the publication date, not the date the draft was finished.
+-->
+
 # Where a vLLM cold start actually goes
+
+**Oleksii Ostapiuk** · 2026-09-03 · `/experiments/vllm-cold-start-decomposition`
 
 Three hundred measured cold starts on rented GPUs, decomposed into phases, with
 every published number re-derivable from committed data on a laptop.
+
+Harness, raw data, analysis and figure code:
+[github.com/alexostapiuk11/coldstart-recon-worker](https://github.com/alexostapiuk11/coldstart-recon-worker)
 
 ---
 
@@ -357,8 +373,10 @@ implied.
 
 ## Reproducing this
 
-Every number above comes from `data/campaign.jsonl`, committed. No GPU
-required:
+Every number above comes from `data/campaign.jsonl`, committed to
+[github.com/alexostapiuk11/coldstart-recon-worker](https://github.com/alexostapiuk11/coldstart-recon-worker)
+along with the harness that produced it, the analysis, and the figure code. No
+GPU required:
 
 ```bash
 python scripts/analyse.py --store data/campaign.jsonl > analysis.json
