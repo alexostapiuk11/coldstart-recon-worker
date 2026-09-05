@@ -68,11 +68,13 @@ class EventQueue:
                     "event queued after it"
                 )
             raise ValueError(
-                f"event time is {event.time}, which is infinite; an event at "
-                "+inf would sort to the back of every heap and never fire, "
-                "and if it were popped anyway it would pin `now` at infinity, "
-                "mislabeling every later, finite push as a backwards-clock "
-                "violation instead of naming the real problem"
+                f"event time is {event.time}, which is infinite. +inf sorts to "
+                "the back of every heap and never fires, and if it were popped "
+                "anyway it would pin `now` at infinity, mislabeling every "
+                "later finite push as a backwards-clock violation instead of "
+                "naming the real problem; -inf sorts ahead of everything and "
+                "would fire before the run began. Either way the cause is an "
+                "arithmetic overflow upstream, not a clock ordering error."
             )
         if event.time < self.now:
             raise ValueError(
