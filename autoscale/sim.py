@@ -1,39 +1,39 @@
 """The simulation loop. Fixed capacity here; the policy-driven loop is Task 10.
 
-Concurrency is modeled at the fleet level: each of the `replicas` serving
-replicas holds exactly one request at a time, so the fleet has `replicas`
-service positions, and a request's service time is read from the measured
-curve at the number of requests actually in flight across the fleet the
-instant it is dispatched. That is coarser than modeling vLLM's scheduler, and
-deliberately so -- the curve already encodes what continuous batching does to
-latency, so re-deriving it from a model would replace a measurement with an
-assumption.
+Concurrency is modeled PER REPLICA, because that is what the service curve
+measures: one replica, concurrency swept. Fleet capacity is
+`serving_replicas x curve.max_measured_concurrency`, and a request's service
+time is read from the curve at the per-replica load under even balancing,
+`ceil(in_flight / serving_replicas)`.
 
-What that abstraction does NOT model, stated plainly because the open-loop
-validation gate in plan 2 is what will expose it:
+Getting this wrong is not subtle. An earlier version set capacity to the
+replica COUNT -- one request per replica -- then read the per-replica curve at
+FLEET concurrency. That caps a replica at a single concurrent request, which
+contradicts continuous batching outright: artifact 1 measured KV capacity
+supporting roughly 69-84 concurrent requests at this request shape. It would
+make the autoscaler add replicas far more aggressively than reality requires,
+and replica-seconds is the cost axis of every Pareto frontier, so H1, H2 and
+the H3 headline would all inherit the distortion.
 
-* Fleet concurrency is read from a curve measured per replica. With N
-  replicas each holding one request, this asks the curve "what is latency at
-  concurrency N?" -- the latency of ONE replica serving N concurrent requests
-  -- even though each replica here is serving one. The fleet is effectively
-  modeled as a single replica with N service positions, not as N independent
-  replicas. On a rising curve that is pessimistic for a spread-out fleet.
-* A request's service time is frozen at dispatch. Concurrency changes while it
-  runs -- others finish, others start -- and the running request keeps the
-  value it was given. A request dispatched into a busy fleet stays slow after
-  the fleet drains, and one dispatched into an idle fleet stays fast after the
-  fleet fills.
-* Within one batch of simultaneous dispatches the curve is read at 1, 2, 3...
-  as the positions fill, so the first request of a simultaneous batch is
-  charged the idle-fleet service time and the last the full-batch one. Order
-  within an instant therefore changes individual latencies, though not their
-  sum. The `EventQueue` tiebreak makes that order deterministic, so runs
-  remain reproducible from a seed; it does not make it physical.
+Two simplifications remain, both deliberate and both stated in the post:
 
-These are limitations of the modeling approach, not bugs in it. The gate pins
-replica count, drives a real transient on hardware, and compares this loop's
-predicted latency trajectory against what actually happened -- which is
-precisely the measurement that says whether they matter.
+- **Even balancing.** Requests are assumed spread evenly across serving
+  replicas rather than assigned to specific ones. Real load balancers do
+  round-robin or least-connections, which is close; modeling individual
+  replica assignment would add a scheduler this experiment does not measure.
+- **Service time is frozen at dispatch.** A request dispatched into a busy
+  fleet stays slow after the fleet drains, and vice versa. Within a single
+  instant this also means the per-replica load rises as a simultaneous batch
+  fills, so the first request dispatched is charged `ceil(1 / replicas)` and
+  the last `ceil(k / replicas)`; the `EventQueue` tiebreak makes that order
+  deterministic, so runs stay reproducible from a seed -- it does not make
+  the order physical. The distortion is two-sided rather than systematically
+  flattering, and the open-loop validation gate is exactly the measurement
+  that says whether it matters.
+
+What is NOT modeled is vLLM's scheduler itself, deliberately: the curve
+already encodes what continuous batching does to latency, so re-deriving it
+from a model would replace a measurement with an assumption.
 """
 
 import math
@@ -105,10 +105,12 @@ def run_fixed_capacity(
 
     # `replicas < 1` is False for a NaN and for any float above 1, so the
     # type check must come first. A float replicas is not a harmless
-    # ergonomic: `len(in_flight) < capacity` with capacity=1.5 admits TWO
-    # concurrent requests, so a fractional count silently rounds capacity UP
-    # and reports the resulting optimistic latencies as if 1.5 replicas were
-    # a meaningful fleet. A NaN passes every check and then makes
+    # ergonomic: it makes both halves of the model incoherent. Capacity
+    # `1.5 * max_measured_concurrency` is not a whole number of requests, and
+    # `len(in_flight) < capacity` rounds it UP (capacity 1.5 admits TWO), while
+    # `ceil(in_flight / 1.5)` is a per-replica load on a replica that does not
+    # exist -- and the resulting optimistic latencies are reported as if 1.5
+    # replicas were a meaningful fleet. A NaN passes every check and then makes
     # `len(in_flight) < capacity` False forever, so nothing is ever
     # dispatched and the run reports every request unfinished rather than
     # naming the bad input.
@@ -203,7 +205,10 @@ def run_fixed_capacity(
     waiting: list[float] = []  # arrival times of queued requests
     in_flight: dict[int, float] = {}  # completion event id -> arrival time
     next_id = 0
-    capacity = replicas
+    # Per replica, not per fleet: the curve measured ONE replica at a swept
+    # concurrency, so `max_measured_concurrency` is how many requests a single
+    # replica was actually observed serving.
+    capacity = replicas * curve.max_measured_concurrency
 
     def start_service(now: float) -> None:
         nonlocal next_id
@@ -211,7 +216,17 @@ def run_fixed_capacity(
             # FIFO: the front of `waiting` is the earliest arrival still
             # queued, so no request overtakes one that arrived before it.
             arrived = waiting.pop(0)
-            concurrency = len(in_flight) + 1
+            # The load on the replica this request lands on, under even
+            # balancing -- not the fleet total. `+ 1` counts the request being
+            # dispatched, and `ceil` rounds a fleet that cannot be divided
+            # evenly toward the replica carrying the extra request.
+            concurrency = math.ceil((len(in_flight) + 1) / replicas)
+            # Tying capacity to the measured range means this is normally
+            # unreachable: `len(in_flight) + 1 <= replicas * M` implies
+            # `ceil((len(in_flight) + 1) / replicas) <= M` for a whole-number
+            # M. It can still fire when the curve's top measured point is
+            # fractional -- capacity 1.5 admits two requests, whose load is 2
+            # -- so the guard stays rather than becoming an assumption.
             if curve.is_extrapolating(concurrency):
                 result.extrapolated_samples += 1
             service = curve.latency_at(concurrency)

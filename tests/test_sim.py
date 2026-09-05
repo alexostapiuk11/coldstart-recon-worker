@@ -3,9 +3,18 @@ import pytest
 from autoscale.service import ServiceCurve
 from autoscale.sim import SimResult, run_fixed_capacity
 
+# 0.5 s at every concurrency, measured out to 100. Wide enough that capacity
+# (`replicas * max_measured_concurrency`) never binds, so it is the curve for
+# tests about accounting and input validation rather than about queueing.
 FLAT = ServiceCurve(
     points=[(1, 0.5, 2.0, 0.5), (100, 0.5, 200.0, 1.0)], measured=True
 )
+
+# Also 0.5 s at every concurrency, but measured only to 2, so one replica
+# holds two requests and a third queues. This is the curve for the queueing
+# tests: capacity binds at a hand-checkable size and the arithmetic stays
+# trivial because the latency never moves.
+NARROW = ServiceCurve(points=[(1, 0.5, 2.0, 0.5), (2, 0.5, 4.0, 0.6)], measured=True)
 
 
 def test_one_arrival_on_an_idle_replica_waits_only_for_service():
@@ -15,26 +24,61 @@ def test_one_arrival_on_an_idle_replica_waits_only_for_service():
 
 
 def test_requests_beyond_capacity_queue_rather_than_vanish():
-    """Three simultaneous arrivals, one replica, 0.5 s service: they complete
-    at 0.5, 1.0 and 1.5, so latencies are 0.5, 1.0, 1.5."""
-    result = run_fixed_capacity(arrivals=[0.0, 0.0, 0.0], replicas=1, curve=FLAT, until=10.0)
+    """Three simultaneous arrivals on one replica whose curve was measured to
+    concurrency 2, so capacity is 2:
 
-    assert result.latencies == pytest.approx([0.5, 1.0, 1.5])
+    t=0.0  A dispatched at per-replica load ceil(1/1)=1 -> 0.5 s, done 0.5
+           B dispatched at per-replica load ceil(2/1)=2 -> 0.5 s, done 0.5
+           C queues: two in flight is the whole capacity
+    t=0.5  A completes (latency 0.5); C dispatched at load ceil(2/1)=2 ->
+           0.5 s, done 1.0
+    t=0.5  B completes (latency 0.5)
+    t=1.0  C completes, latency 1.0 - 0.0 = 1.0
+    """
+    result = run_fixed_capacity(arrivals=[0.0, 0.0, 0.0], replicas=1, curve=NARROW, until=10.0)
+
+    assert result.latencies == pytest.approx([0.5, 0.5, 1.0])
     assert len(result.latencies) == 3
 
 
-def test_two_replicas_halve_the_queue():
-    result = run_fixed_capacity(arrivals=[0.0, 0.0], replicas=2, curve=FLAT, until=10.0)
-    assert result.latencies == pytest.approx([0.5, 0.5])
+def test_two_replicas_remove_the_queue_one_replica_cannot_hold():
+    """Four simultaneous arrivals against NARROW (two requests per replica).
+
+    One replica, capacity 2: A and B are served at once and complete at 0.5;
+    C and D are dispatched as those two complete and finish at 1.0, so their
+    latencies are 1.0.
+
+    Two replicas, capacity 4: all four are dispatched at t=0, at per-replica
+    loads ceil(1/2)=1, ceil(2/2)=1, ceil(3/2)=2, ceil(4/2)=2 -- all 0.5 s on
+    this curve -- so nothing queues and every latency is 0.5.
+    """
+    one = run_fixed_capacity(arrivals=[0.0] * 4, replicas=1, curve=NARROW, until=10.0)
+    two = run_fixed_capacity(arrivals=[0.0] * 4, replicas=2, curve=NARROW, until=10.0)
+
+    assert one.latencies == pytest.approx([0.5, 0.5, 1.0, 1.0])
+    assert two.latencies == pytest.approx([0.5, 0.5, 0.5, 0.5])
 
 
 def test_requests_still_in_flight_when_the_window_ends_are_counted_not_dropped():
     """Dropping them would make every overloaded policy look better than it is,
-    which is the exact direction of error that would flatter a lagging signal."""
-    result = run_fixed_capacity(arrivals=[0.0, 0.0, 0.0], replicas=1, curve=FLAT, until=0.6)
+    which is the exact direction of error that would flatter a lagging signal.
 
-    assert result.completed == 1
-    assert result.unfinished == 2
+    Three arrivals, one replica, capacity 2: A and B complete at 0.5, C is
+    dispatched at 0.5 and would complete at 1.0, past the window.
+    """
+    result = run_fixed_capacity(arrivals=[0.0, 0.0, 0.0], replicas=1, curve=NARROW, until=0.6)
+
+    assert result.completed == 2
+    assert result.unfinished == 1
+
+
+def test_an_event_landing_exactly_on_the_window_boundary_is_inside_it():
+    """`until` is inclusive: a completion at exactly `until` counts. Making the
+    break `>=` would discard it and report a finished request as unfinished."""
+    result = run_fixed_capacity(arrivals=[0.0], replicas=1, curve=FLAT, until=0.5)
+
+    assert (result.completed, result.unfinished) == (1, 0)
+    assert result.latencies == pytest.approx([0.5])
 
 
 def test_zero_replicas_is_refused():
@@ -61,69 +105,209 @@ def test_result_reports_the_percentiles_the_pre_registration_names():
 # --- self-review additions -------------------------------------------------
 #
 # `RISING` is the shape that makes the concurrency-dependent service time
-# observable at all: FLAT returns 0.5 s at every concurrency, so it cannot
-# distinguish "reads the curve at the right concurrency" from "ignores
-# concurrency". Its measured range stops at 2, so a query at 3 is
-# extrapolation and the sim must say so.
+# observable at all: FLAT and NARROW return 0.5 s at every concurrency, so
+# they cannot distinguish "reads the curve at the right per-replica load" from
+# "ignores load". Measured to 2, so one replica holds two requests.
 RISING = ServiceCurve(points=[(1, 1.0, 10.0, 0.2), (2, 2.0, 12.0, 0.4)], measured=True)
+
+# The placeholder's shape, truncated at the concurrency-16 point: latency flat
+# then rising, and a measured range wide enough to show one replica batching.
+# latency_at: 1 -> 0.30, 2 -> 0.31, 4 -> 0.33, 8 -> 0.38, 16 -> 0.52, with
+# linear interpolation in between (3 -> 0.32, 5 -> 0.3425, 6 -> 0.355,
+# 7 -> 0.3675, 9 -> 0.3975, 10 -> 0.415, ... 15 -> 0.5025).
+BATCHING = ServiceCurve(
+    points=[
+        (1, 0.30, 53.0, 0.18),
+        (2, 0.31, 103.0, 0.34),
+        (4, 0.33, 194.0, 0.61),
+        (8, 0.38, 337.0, 0.85),
+        (16, 0.52, 492.0, 0.96),
+    ],
+    measured=True,
+)
+
+# Service times of one replica batching 1..16 requests, read off BATCHING by
+# hand. Spelled out rather than computed from the curve so the test checks the
+# simulator against arithmetic done independently of it.
+BATCHING_1_TO_16 = [
+    0.30,
+    0.31,
+    0.32,
+    0.33,
+    0.3425,
+    0.355,
+    0.3675,
+    0.38,
+    0.3975,
+    0.415,
+    0.4325,
+    0.45,
+    0.4675,
+    0.485,
+    0.5025,
+    0.52,
+]
 
 
 def test_a_hand_computed_two_replica_run_with_staggered_arrivals():
-    """Worked by hand against RISING, replicas=2, arrivals at 0.0, 0.5, 0.6:
+    """Worked by hand against RISING, replicas=2 (capacity 2*2=4), arrivals at
+    0.0, 0.5, 0.6. Per-replica load is ceil(in_flight / replicas):
 
-    t=0.0  A arrives, fleet idle -> curve at concurrency 1 = 1.0 s, done 1.0
-    t=0.5  B arrives, one in flight -> curve at concurrency 2 = 2.0 s, done 2.5
-    t=0.6  C arrives, both positions full -> queues
-    t=1.0  A completes, latency 1.0 - 0.0 = 1.0; C dispatched at concurrency 2
-           = 2.0 s, done 3.0
-    t=2.5  B completes, latency 2.5 - 0.5 = 2.0
-    t=3.0  C completes, latency 3.0 - 0.6 = 2.4
+    t=0.0  A arrives, fleet idle -> load ceil(1/2)=1, curve 1.0 s, done 1.0
+    t=0.5  B arrives, one in flight -> load ceil(2/2)=1 (one request each),
+           curve 1.0 s, done 1.5
+    t=0.6  C arrives, two in flight -> load ceil(3/2)=2, curve 2.0 s, done 2.6
+    t=1.0  A completes, latency 1.0 - 0.0 = 1.0
+    t=1.5  B completes, latency 1.5 - 0.5 = 1.0
+    t=2.6  C completes, latency 2.6 - 0.6 = 2.0
+
+    Under the old fleet-concurrency model B was charged the curve at 2 and
+    C queued behind a two-request capacity; both are wrong for two replicas
+    that between them were measured serving four.
     """
     result = run_fixed_capacity(arrivals=[0.0, 0.5, 0.6], replicas=2, curve=RISING, until=10.0)
 
-    assert result.latencies == pytest.approx([1.0, 2.0, 2.4])
+    assert result.latencies == pytest.approx([1.0, 1.0, 2.0])
     assert result.completed == 3
     assert result.unfinished == 0
 
 
 def test_a_later_arrival_cannot_overtake_an_earlier_one():
-    """FIFO, checked with distinct arrival times so LIFO would give a different
-    answer: 0.0/0.1/0.2 on one replica at 0.5 s complete at 0.5, 1.0 and 1.5,
-    for latencies 0.5, 0.9, 1.3. Serving the queue from the back would instead
-    give 0.5, 0.8, 1.4 -- the earliest arrival punished worst."""
-    result = run_fixed_capacity(arrivals=[0.0, 0.1, 0.2], replicas=1, curve=FLAT, until=10.0)
+    """FIFO, checked with two requests in the queue at once so LIFO gives a
+    different answer. NARROW, one replica (capacity 2), arrivals 0.0/0.1/0.2/0.3:
 
-    assert result.latencies == pytest.approx([0.5, 0.9, 1.3])
+    t=0.0  A dispatched (load 1), done 0.5
+    t=0.1  B dispatched (load 2), done 0.6
+    t=0.2  C queues;  t=0.3  D queues
+    t=0.5  A completes (latency 0.5); FIFO takes C -> done 1.0
+    t=0.6  B completes (latency 0.5); FIFO takes D -> done 1.1
+    t=1.0  C completes, latency 1.0 - 0.2 = 0.8
+    t=1.1  D completes, latency 1.1 - 0.3 = 0.8
+
+    Serving the queue from the back would give 0.5, 0.5, 0.7, 0.9 instead --
+    D overtaking C, and C punished worst for arriving first.
+    """
+    result = run_fixed_capacity(
+        arrivals=[0.0, 0.1, 0.2, 0.3], replicas=1, curve=NARROW, until=10.0
+    )
+
+    assert result.latencies == pytest.approx([0.5, 0.5, 0.8, 0.8])
 
 
-def test_simultaneous_dispatches_read_the_curve_at_one_two_and_three():
-    """Documents the within-batch skew the module docstring names: three
-    requests arriving at the same instant on three replicas are charged the
-    curve at concurrency 1, 2 and 3 as the positions fill, not a common value.
-    RISING stops at concurrency 2, so the third is extrapolation and is
-    counted."""
-    result = run_fixed_capacity(arrivals=[0.0, 0.0, 0.0], replicas=3, curve=RISING, until=10.0)
+def test_simultaneous_arrivals_spread_across_replicas_each_see_load_one():
+    """Eight requests arriving at once on eight replicas: even balancing puts
+    one on each, so every one of them is charged the curve at per-replica load
+    ceil(i/8)=1, i.e. 0.30 s. The old model charged the last-dispatched the
+    curve at fleet concurrency 8 (0.38 s) even though its replica was serving
+    one request."""
+    result = run_fixed_capacity(
+        arrivals=[0.0] * 8, replicas=8, curve=BATCHING, until=10.0
+    )
 
-    assert result.latencies == pytest.approx([1.0, 2.0, 2.0])
-    assert result.extrapolated_samples == 1
+    assert result.latencies == pytest.approx([0.30] * 8)
+    assert result.completed == 8
+
+
+def test_one_replica_batches_up_to_its_measured_concurrency():
+    """Eight requests arriving at once on ONE replica whose curve was measured
+    to 16: capacity is 16, so all eight are dispatched immediately and none
+    queues. They fill the batch one at a time, so the per-replica load rises
+    1, 2, ... 8 as they go in and the service times are the hand-read curve
+    values 0.30, 0.31, 0.32, 0.33, 0.3425, 0.355, 0.3675, 0.38.
+
+    All arrive at 0.0, so latency equals service time, and every one lands
+    inside a 0.4 s window. Under the old model capacity would be 1: one
+    request served and seven queued, with completions marching out past 2 s.
+    """
+    result = run_fixed_capacity(arrivals=[0.0] * 8, replicas=1, curve=BATCHING, until=0.4)
+
+    assert result.latencies == pytest.approx(BATCHING_1_TO_16[:8])
+    assert (result.completed, result.unfinished) == (8, 0)
+
+
+def test_twenty_requests_on_one_replica_dispatch_sixteen_and_queue_four():
+    """Capacity is 1 * 16, so sixteen of the twenty go in at t=0 and four wait.
+
+    The sixteen are charged loads 1..16, completing at those same times
+    (0.30 ... 0.52). Each of the first four completions frees a slot, and the
+    replacement is dispatched into a batch of sixteen again -- load ceil(16/1)
+    = 16, service 0.52 -- so the queued four complete at 0.30+0.52=0.82,
+    0.31+0.52=0.83, 0.32+0.52=0.84 and 0.33+0.52=0.85.
+    """
+    result = run_fixed_capacity(arrivals=[0.0] * 20, replicas=1, curve=BATCHING, until=10.0)
+
+    assert result.latencies[:16] == pytest.approx(BATCHING_1_TO_16)
+    assert result.latencies[16:] == pytest.approx([0.82, 0.83, 0.84, 0.85])
+    assert (result.completed, result.unfinished) == (20, 0)
+
+
+def test_adding_replicas_reduces_latency_monotonically():
+    """Thirty-two simultaneous requests against BATCHING, replicas 1/2/4/8.
+
+    r=1: capacity 16, so sixteen queue; each queued request is dispatched into
+         a full batch (0.52 s) as a slot frees, and the last one leaves at
+         0.52 + 0.52 = 1.04, which is the p99 over 32 samples (index 31).
+    r=2: capacity 32, loads ceil(i/2) = 1,1,2,2,...,16,16 -> worst 0.52.
+    r=4: loads ceil(i/4) = 1,1,1,1,...,8,8,8,8 -> worst latency_at(8) = 0.38.
+    r=8: loads ceil(i/8) = 1..4 -> worst latency_at(4) = 0.33.
+    """
+    p99 = {
+        r: run_fixed_capacity(
+            arrivals=[0.0] * 32, replicas=r, curve=BATCHING, until=100.0
+        ).percentiles()["p99"]
+        for r in (1, 2, 4, 8)
+    }
+
+    assert p99[1] == pytest.approx(1.04)
+    assert p99[2] == pytest.approx(0.52)
+    assert p99[4] == pytest.approx(0.38)
+    assert p99[8] == pytest.approx(0.33)
+    assert p99[1] > p99[2] > p99[4] > p99[8]
 
 
 def test_nothing_is_extrapolated_inside_the_measured_range():
-    result = run_fixed_capacity(arrivals=[0.0, 0.0], replicas=2, curve=RISING, until=10.0)
+    """With capacity = replicas * max_measured_concurrency and load
+    ceil(in_flight / replicas), the load can never exceed the measured range
+    for a curve whose top point is a whole number of requests -- which is the
+    point of tying capacity to the measured range."""
+    result = run_fixed_capacity(arrivals=[0.0] * 32, replicas=2, curve=BATCHING, until=100.0)
 
     assert result.extrapolated_samples == 0
+
+
+def test_a_fractional_measured_range_can_still_admit_an_extrapolated_request():
+    """The one way the load leaves the measured range, and why the guard stays.
+
+    This curve's top measured point is 1.5, so one replica has capacity 1.5 --
+    which admits TWO requests, because `len(in_flight) < 1.5` is true at one.
+    The second is then charged the curve at load 2, above anything measured.
+    Hand-computed: A goes in at load 1 (0.5 s, done 0.5); B at load 2
+    (extrapolated, clamped to 0.6, done 0.6); C queues, is dispatched at 0.5
+    at load 2 (extrapolated again, 0.6) and completes at 1.1.
+    """
+    fractional = ServiceCurve(
+        points=[(1, 0.5, 2.0, 0.5), (1.5, 0.6, 3.0, 0.6)], measured=True
+    )
+
+    result = run_fixed_capacity(arrivals=[0.0] * 3, replicas=1, curve=fractional, until=10.0)
+
+    assert result.latencies == pytest.approx([0.5, 0.6, 1.1])
+    assert result.extrapolated_samples == 2
 
 
 def test_requests_left_in_flight_and_requests_left_waiting_are_both_counted():
     """Both terms of the unfinished tally, separately: with two replicas and
     two arrivals nothing queues, so the count is entirely in-flight; with one
-    replica and three arrivals one is in flight and two are still waiting."""
+    replica on NARROW and three arrivals, two are in flight and one is still
+    waiting, so a tally that counted only in-flight would report 2."""
     in_flight_only = run_fixed_capacity(
         arrivals=[0.0, 0.0], replicas=2, curve=FLAT, until=0.3
     )
     assert (in_flight_only.completed, in_flight_only.unfinished) == (0, 2)
 
-    with_a_queue = run_fixed_capacity(arrivals=[0.0, 0.0, 0.0], replicas=1, curve=FLAT, until=0.3)
+    with_a_queue = run_fixed_capacity(
+        arrivals=[0.0, 0.0, 0.0], replicas=1, curve=NARROW, until=0.3
+    )
     assert (with_a_queue.completed, with_a_queue.unfinished) == (0, 3)
 
 
@@ -176,28 +360,36 @@ def test_an_unsorted_trace_replays_as_if_it_had_been_sorted():
     """Documented, not accidental: every arrival is pushed before the first
     pop, so the heap orders them and the queue is still served in arrival
     order. A caller handing over an unsorted trace gets the right answer
-    rather than a subtly reordered one."""
-    shuffled = run_fixed_capacity(arrivals=[0.2, 0.0, 0.1], replicas=1, curve=FLAT, until=10.0)
-    ordered = run_fixed_capacity(arrivals=[0.0, 0.1, 0.2], replicas=1, curve=FLAT, until=10.0)
+    rather than a subtly reordered one. Checked on NARROW, where capacity
+    binds, so a reordering would actually change the latencies."""
+    shuffled = run_fixed_capacity(arrivals=[0.2, 0.0, 0.1], replicas=1, curve=NARROW, until=10.0)
+    ordered = run_fixed_capacity(arrivals=[0.0, 0.1, 0.2], replicas=1, curve=NARROW, until=10.0)
 
+    assert ordered.latencies == pytest.approx([0.5, 0.5, 0.8])
     assert shuffled.latencies == pytest.approx(ordered.latencies)
 
 
 @pytest.mark.parametrize("bad", [1.5, 2.0, float("nan"), float("inf"), True])
 def test_a_non_integer_replica_count_is_refused(bad):
-    """`len(in_flight) < 1.5` admits two requests, so a fractional count
-    silently rounds capacity up; a NaN count blocks every dispatch and reports
-    the whole trace unfinished. Neither raises on its own."""
+    """A fractional count makes both halves of the model incoherent: capacity
+    `1.5 * max_measured_concurrency` is not a whole number of requests, and
+    `ceil(in_flight / 1.5)` is a per-replica load on a replica that does not
+    exist. A NaN count blocks every dispatch and reports the whole trace
+    unfinished. Neither raises on its own."""
     with pytest.raises(ValueError, match="replicas must be an int"):
         run_fixed_capacity(arrivals=[0.0, 0.0], replicas=bad, curve=FLAT, until=10.0)
 
 
-def test_capacity_actually_limits_concurrency():
-    """Three arrivals on two replicas: two are served at once and the third
-    waits, so the latencies are 0.5, 0.5, 1.0 rather than three 0.5s."""
-    result = run_fixed_capacity(arrivals=[0.0, 0.0, 0.0], replicas=2, curve=FLAT, until=10.0)
+def test_capacity_is_replicas_times_the_measured_concurrency():
+    """Five simultaneous arrivals, two replicas, NARROW (measured to 2), so
+    capacity is 2*2 = 4: four are served at once at loads 1, 1, 2, 2 and
+    complete at 0.5, and the fifth is dispatched as the first slot frees and
+    completes at 1.0. Capacity = replicas alone would serve two and give
+    0.5, 0.5, 1.0, 1.0, 1.5; capacity = the curve's range alone would do the
+    same."""
+    result = run_fixed_capacity(arrivals=[0.0] * 5, replicas=2, curve=NARROW, until=10.0)
 
-    assert result.latencies == pytest.approx([0.5, 0.5, 1.0])
+    assert result.latencies == pytest.approx([0.5, 0.5, 0.5, 0.5, 1.0])
 
 
 def test_percentiles_over_zero_completions_refuse_rather_than_report_zeros():
