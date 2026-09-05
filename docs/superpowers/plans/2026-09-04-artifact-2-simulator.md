@@ -1018,12 +1018,35 @@ Create `autoscale/sim.py`:
 ```python
 """The simulation loop. Fixed capacity here; the policy-driven loop is Task 10.
 
-Concurrency is modeled at the fleet level: a request occupies one of
-`replicas x slots` service positions, and its service time is read from the
-measured curve at the concurrency actually in flight. That is coarser than
-modeling vLLM's scheduler, and deliberately so -- the curve already encodes what
-continuous batching does to latency, so re-deriving it from a model would
-replace a measurement with an assumption.
+Concurrency is modeled PER REPLICA, because that is what the service curve
+measures: one replica, concurrency swept. Fleet capacity is
+`serving_replicas x curve.max_measured_concurrency`, and a request's service
+time is read from the curve at the per-replica load under even balancing,
+`ceil(in_flight / serving_replicas)`.
+
+Getting this wrong is not subtle. An earlier version set capacity to the
+replica COUNT -- one request per replica -- then read the per-replica curve at
+FLEET concurrency. That caps a replica at a single concurrent request, which
+contradicts continuous batching outright: artifact 1 measured KV capacity
+supporting roughly 69-84 concurrent requests at this request shape. It would
+make the autoscaler add replicas far more aggressively than reality requires,
+and replica-seconds is the cost axis of every Pareto frontier, so H1, H2 and
+the H3 headline would all inherit the distortion.
+
+Two simplifications remain, both deliberate and both stated in the post:
+
+- **Even balancing.** Requests are assumed spread evenly across serving
+  replicas rather than assigned to specific ones. Real load balancers do
+  round-robin or least-connections, which is close; modeling individual
+  replica assignment would add a scheduler this experiment does not measure.
+- **Service time is frozen at dispatch.** A request dispatched into a busy
+  fleet stays slow after the fleet drains, and vice versa. The distortion is
+  two-sided rather than systematically flattering, and the open-loop
+  validation gate is exactly the measurement that says whether it matters.
+
+What is NOT modeled is vLLM's scheduler itself, deliberately: the curve
+already encodes what continuous batching does to latency, so re-deriving it
+from a model would replace a measurement with an assumption.
 """
 
 from dataclasses import dataclass, field
@@ -1079,13 +1102,16 @@ def run_fixed_capacity(
     waiting: list[float] = []  # arrival times of queued requests
     in_flight: dict[int, float] = {}  # completion event id -> arrival time
     next_id = 0
-    capacity = replicas
+    # Per replica, not per fleet: the curve measured ONE replica at a swept
+    # concurrency, so `max_measured_concurrency` is how many requests a single
+    # replica was actually observed serving.
+    capacity = replicas * curve.max_measured_concurrency
 
     def start_service(now: float) -> None:
         nonlocal next_id
         while waiting and len(in_flight) < capacity:
             arrived = waiting.pop(0)
-            concurrency = len(in_flight) + 1
+            concurrency = math.ceil((len(in_flight) + 1) / replicas)
             if curve.is_extrapolating(concurrency):
                 result.extrapolated_samples += 1
             service = curve.latency_at(concurrency)
@@ -1560,6 +1586,7 @@ Expected: FAIL with `ImportError: cannot import name 'run_with_policy'`
 Append to `autoscale/sim.py`, and extend its imports:
 
 ```python
+import math
 import random
 
 from autoscale.controller import Controller, Decision
@@ -1626,10 +1653,13 @@ def run_with_policy(
 
     def start_service(now: float) -> None:
         nonlocal next_request_id
-        capacity = serving_count(now)
+        serving = serving_count(now)
+        if serving == 0:
+            return  # nothing ready; requests stay queued and their wait accrues
+        capacity = serving * curve.max_measured_concurrency
         while waiting and len(in_flight) < capacity:
             arrived = waiting.pop(0)
-            concurrency = len(in_flight) + 1
+            concurrency = math.ceil((len(in_flight) + 1) / serving)
             if curve.is_extrapolating(concurrency):
                 result.extrapolated_samples += 1
             next_request_id += 1
