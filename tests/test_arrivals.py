@@ -1,3 +1,4 @@
+import math
 import random
 
 import pytest
@@ -80,3 +81,115 @@ def test_a_negative_until_is_rejected_rather_than_silently_returning_no_arrivals
     shape = SpikeShape(kind="step", baseline_rate=2.0, k=4.0, ramp=0.0, sustain=10.0)
     with pytest.raises(ValueError, match="until"):
         arrival_times(shape, until=-5.0, rng=random.Random(1))
+
+
+# -- previously-uncovered validation branches (FIX 2) -----------------------
+
+
+def test_an_unknown_kind_is_rejected():
+    """Mutation-tested uncovered: deleting the `kind` check left the suite
+    green. A mislabeled shape is exactly what H4's step-vs-ramp comparison
+    depends on not happening."""
+    with pytest.raises(ValueError, match="kind"):
+        SpikeShape(kind="linear", baseline_rate=2.0, k=4.0, ramp=0.0, sustain=10.0)
+
+
+def test_a_step_shape_with_nonzero_ramp_is_rejected():
+    """Mutation-tested uncovered: deleting the `ramp == 0` check for a step
+    left the suite green. A step with a nonzero ramp would rise gradually
+    while still being reported as an instantaneous jump."""
+    with pytest.raises(ValueError, match="ramp"):
+        SpikeShape(kind="step", baseline_rate=2.0, k=4.0, ramp=5.0, sustain=10.0)
+
+
+def test_k_below_one_is_rejected_as_a_dip_not_a_spike():
+    """Mutation-tested uncovered: deleting the `k >= 1` check left the suite
+    green. k < 1 inverts the shape into a dip, so a run labelled "spike"
+    would actually measure the autoscaler's response to a traffic drop."""
+    with pytest.raises(ValueError, match="k"):
+        SpikeShape(kind="step", baseline_rate=2.0, k=0.5, ramp=0.0, sustain=10.0)
+
+
+def test_nonpositive_baseline_rate_is_rejected():
+    """Mutation-tested uncovered: deleting the `baseline_rate > 0` check left
+    the suite green. A zero baseline_rate zeroes max_rate too, which divides
+    by zero in arrival_times."""
+    with pytest.raises(ValueError, match="baseline_rate"):
+        SpikeShape(kind="step", baseline_rate=0.0, k=4.0, ramp=0.0, sustain=10.0)
+
+
+def test_nonpositive_sustain_is_rejected():
+    """Mutation-tested uncovered: deleting the `sustain > 0` check left the
+    suite green. A non-positive sustain collapses the hold at peak to
+    nothing, so the shape produces no spike despite being labeled one."""
+    with pytest.raises(ValueError, match="sustain"):
+        SpikeShape(kind="step", baseline_rate=2.0, k=4.0, ramp=0.0, sustain=0.0)
+
+
+# -- non-finite parameters (FIX 1) -------------------------------------------
+
+
+def test_nan_sustain_is_rejected_instead_of_fabricating_an_endless_spike():
+    """sustain=nan used to pass every guard: elevated_until becomes NaN, so
+    `t > elevated_until` is never true and rate_at returns peak forever --
+    a spike that never ends, reported as a plausible-looking trace."""
+    with pytest.raises(ValueError, match="sustain"):
+        SpikeShape(kind="step", baseline_rate=2.0, k=4.0, ramp=0.0, sustain=float("nan"))
+
+
+def test_nan_k_is_rejected_instead_of_looping_arrival_times_forever():
+    with pytest.raises(ValueError, match="k"):
+        SpikeShape(kind="step", baseline_rate=2.0, k=float("nan"), ramp=0.0, sustain=10.0)
+
+
+def test_nan_baseline_rate_is_rejected():
+    with pytest.raises(ValueError, match="baseline_rate"):
+        SpikeShape(kind="step", baseline_rate=float("nan"), k=4.0, ramp=0.0, sustain=10.0)
+
+
+def test_infinite_baseline_rate_is_rejected():
+    with pytest.raises(ValueError, match="baseline_rate"):
+        SpikeShape(kind="step", baseline_rate=float("inf"), k=4.0, ramp=0.0, sustain=10.0)
+
+
+def test_nan_ramp_is_rejected():
+    with pytest.raises(ValueError, match="ramp"):
+        SpikeShape(kind="ramp", baseline_rate=2.0, k=4.0, ramp=float("nan"), sustain=10.0)
+
+
+def test_infinite_ramp_is_rejected():
+    with pytest.raises(ValueError, match="ramp"):
+        SpikeShape(kind="ramp", baseline_rate=2.0, k=4.0, ramp=float("inf"), sustain=10.0)
+
+
+def test_infinite_sustain_is_rejected():
+    with pytest.raises(ValueError, match="sustain"):
+        SpikeShape(kind="step", baseline_rate=2.0, k=4.0, ramp=0.0, sustain=float("inf"))
+
+
+def test_infinite_until_is_rejected_rather_than_looping_forever():
+    shape = SpikeShape(kind="step", baseline_rate=2.0, k=4.0, ramp=0.0, sustain=10.0)
+    with pytest.raises(ValueError, match="until"):
+        arrival_times(shape, until=float("inf"), rng=random.Random(1))
+
+
+def test_nan_until_is_rejected_rather_than_looping_forever():
+    shape = SpikeShape(kind="step", baseline_rate=2.0, k=4.0, ramp=0.0, sustain=10.0)
+    with pytest.raises(ValueError, match="until"):
+        arrival_times(shape, until=float("nan"), rng=random.Random(1))
+
+
+def test_rate_at_rejects_nan_time_instead_of_silently_returning_peak():
+    """Both `t < 0.0` and `t > elevated_until` are False for NaN, so without
+    a guard rate_at(shape, nan) falls through both branches and returns
+    peak -- silently, for any shape."""
+    shape = SpikeShape(kind="step", baseline_rate=2.0, k=4.0, ramp=0.0, sustain=10.0)
+    with pytest.raises(ValueError, match="NaN"):
+        rate_at(shape, float("nan"))
+
+
+def test_rate_at_still_works_at_ordinary_finite_times():
+    # Guarding NaN must not disturb the ordinary, already-covered behavior.
+    shape = SpikeShape(kind="step", baseline_rate=2.0, k=4.0, ramp=0.0, sustain=10.0)
+    assert rate_at(shape, 5.0) == 8.0
+    assert math.isfinite(rate_at(shape, -1.0))
