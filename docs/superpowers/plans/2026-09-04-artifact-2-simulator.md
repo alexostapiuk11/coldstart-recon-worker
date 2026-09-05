@@ -1923,6 +1923,28 @@ def _derive_seed(seed: int, signal: str, up: float, down: float, rep: int) -> in
     return int.from_bytes(hashlib.sha256(key).digest()[:8], "big")
 
 
+Task 5's review established that `ServiceCurve.measured` was inert — nothing read it, so the placeholder's "self-identifying" property prevented nothing. Task 5 made the flag *trustworthy* (frozen dataclass, tuple points, so it cannot be reassigned or bypassed). **This task is where it becomes load-bearing.** `run_sweep` refuses an unmeasured curve unless the caller says so in words, so invented numbers can only reach a result file deliberately:
+
+```python
+def _require_measured_curve(curve: ServiceCurve, allow_unmeasured: bool) -> None:
+    """The artifact's whole claim is that every parameter is measured and only
+    the control loop is modeled. Until plan 2's hardware sweep runs, the service
+    curve is invented placeholder points; a sweep against them produces
+    frontiers that look exactly like real ones. The flag is not a comment --
+    reaching a result from unmeasured points requires typing
+    `allow_unmeasured=True`, which is greppable in a way a stale comment is not.
+    """
+    if curve.measured or allow_unmeasured:
+        return
+    raise ValueError(
+        "refusing to sweep against an unmeasured service curve. These points "
+        "are invented placeholders and the frontiers derived from them would "
+        "be indistinguishable from measured ones in every output format. Pass "
+        "allow_unmeasured=True to run a layout or plumbing check against them."
+    )
+```
+
+
 @dataclass(frozen=True)
 class SweepConfig:
     shape: SpikeShape
@@ -1934,13 +1956,16 @@ class SweepConfig:
     scale_down_thresholds: tuple[float, ...]
 
 
-def run_sweep(config: SweepConfig, seed: int) -> tuple[list[PolicyPoint], list[str]]:
+def run_sweep(
+    config: SweepConfig, seed: int, allow_unmeasured: bool = False
+) -> tuple[list[PolicyPoint], list[str]]:
     """Every (signal, up, down) combination, `REPETITIONS` times each.
 
     Returns the policy points and the discard reasons encountered. Discards are
     returned rather than dropped so the count can be published per signal, as
     the pre-registration requires.
     """
+    _require_measured_curve(config.curve, allow_unmeasured)
     points: list[PolicyPoint] = []
     discards: list[str] = []
 
@@ -2284,6 +2309,7 @@ def main() -> None:
                 until=400.0, scale_up_thresholds=UP, scale_down_thresholds=DOWN,
             ),
             seed=17,
+            allow_unmeasured=True,  # placeholder curve; layout draft, not a result
         )
         print(f"arm {arm}: {len(points)} policy points, {len(discards)} discards")
         by_arm[arm] = {
@@ -2301,6 +2327,7 @@ def main() -> None:
                 until=400.0, scale_up_thresholds=UP, scale_down_thresholds=DOWN,
             ),
             seed=17,
+            allow_unmeasured=True,  # placeholder curve; layout draft, not a result
         )
         per_signal = {
             s: pareto_frontier([p for p in points if p.signal == s])
@@ -2396,6 +2423,7 @@ def _sweep(arm, lags, shape):
             until=400.0, scale_up_thresholds=UP, scale_down_thresholds=DOWN,
         ),
         seed=17,
+        allow_unmeasured=True,  # placeholder curve; this proves plumbing, not a result
     )
 
 
