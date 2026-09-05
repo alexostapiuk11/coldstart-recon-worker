@@ -198,8 +198,12 @@ def test_a_hand_computed_closed_loop_run_agrees_end_to_end():
     assert result.replica_seconds == pytest.approx(14.0)
     assert result.extrapolated_samples == 0
     # Replica 2 was launched at t=1, billed, and killed at t=2 while still
-    # starting -- it never served, which is a pre-registered discard.
-    assert result.discard_reason == "replica_never_served"
+    # starting -- it never served. But replica 1 (launched at t=0) DID reach
+    # SERVING at t=2 before it was removed at t=3, and the corrected rule
+    # (docs/experiment-a2.md, amendment 2026-09-05) only discards a run when
+    # NO launched replica ever served. One of two launched replicas serving is
+    # enough to keep the run: its cost is billed, not thrown away.
+    assert result.discard_reason is None
 
 
 def test_scale_down_takes_the_newest_replica_even_while_it_is_starting():
@@ -392,8 +396,12 @@ def test_the_rng_is_drawn_from_exactly_once_per_scale_up_in_launch_order():
 
 
 def test_a_run_whose_replica_never_serves_is_flagged_for_discard():
-    """The second pre-registered exclusion in docs/experiment-a2.md: 'if any
-    replica never reaches serving before the run ends'."""
+    """The corrected exclusion in docs/experiment-a2.md (amendment
+    2026-09-05): every replica the policy launches, over the whole 30 s
+    window, sits behind a 60 s lag -- none of them ever reaches SERVING, so
+    the fleet never effectively grew and the run is discarded. `peak_serving
+    == 1` pins that only the initial replica (always serving from t=0) ever
+    served."""
     result = run_with_policy(
         arrivals=[float(i) * 0.2 for i in range(150)],
         signal="queue_depth",
@@ -405,7 +413,7 @@ def test_a_run_whose_replica_never_serves_is_flagged_for_discard():
         rng=random.Random(1),
     )
 
-    assert result.scale_up_events > 0
+    assert result.scale_up_events > 1  # more than one launched replica, ALL failing
     assert result.peak_serving_replicas == 1
     assert result.discard_reason == "replica_never_served"
 
@@ -424,6 +432,57 @@ def test_a_run_where_every_replica_serves_is_not_flagged():
 
     assert result.scale_up_events > 0
     assert result.discard_reason is None
+
+
+def test_a_run_is_kept_when_some_launched_replicas_serve_and_others_do_not():
+    """The rule the amendment exists to fix: it must range over ALL replicas
+    the policy launches, not ANY of them. Two replicas launch back to back
+    with a 5 s lag; the first ripens and serves for a while before the run
+    ends, the second is scaled away (LIFO) while still starting and never
+    does. Under the old 'any' rule this run was discarded -- exactly the
+    defect that zeroed out the whole sweep. Under the corrected 'all' rule it
+    is kept, because the fleet DID effectively grow."""
+    result = run_with_policy(
+        arrivals=[0.0] * 8,
+        signal="queue_depth",
+        controller=_eager(cooldown=0.0, max_replicas=4),
+        lags=LagDistribution(samples=[5.0]),
+        curve=TINY,
+        until=20.0,
+        evaluate_every=1.0,
+        rng=random.Random(0),
+    )
+
+    assert result.scale_up_events >= 2
+    assert result.scale_down_events >= 1
+    # At least one launched replica reached SERVING and at least one did not,
+    # otherwise this test would not distinguish the corrected rule from the
+    # old one.
+    assert 1 <= result.peak_serving_replicas < result.peak_replicas
+    assert result.discard_reason is None
+
+
+def test_a_run_is_discarded_only_when_every_launched_replica_fails():
+    """The mirror of the test above, with the population made explicit: three
+    replicas launch, all behind a lag longer than the window, and none of
+    them is ever scaled down mid-start (a very long cooldown holds the fleet
+    still after the first decision). Every one of the launched replicas fails
+    to serve, so -- and only so -- the run is discarded."""
+    result = run_with_policy(
+        arrivals=[0.0] * 20,
+        signal="queue_depth",
+        controller=_eager(cooldown=0.0, max_replicas=4),
+        lags=LagDistribution(samples=[1000.0]),
+        curve=TINY,
+        until=10.0,
+        evaluate_every=1.0,
+        rng=random.Random(0),
+    )
+
+    assert result.scale_up_events >= 2
+    assert result.scale_down_events == 0
+    assert result.peak_serving_replicas == 1  # only the initial replica ever serves
+    assert result.discard_reason == "replica_never_served"
 
 
 def test_no_scaling_action_outranks_the_never_served_reason():

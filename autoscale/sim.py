@@ -305,15 +305,28 @@ def run_with_policy(
     cooldown clock, and a used one refuses to act for an entire second run.
 
     `discard_reason` records the first matching pre-registered exclusion
-    (docs/experiment-a2.md): `"no_scaling_action"` when the policy never scaled
-    up, then `"replica_never_served"` when some launched replica never reached
-    SERVING before it was removed or before the window ended. The third
-    pre-registered condition, an empty arrival trace, is refused outright below
-    rather than returned as a discard -- exactly as `run_fixed_capacity` refuses
-    it -- because a caller that built an empty trace has a bug upstream, and a
-    returned result would still expose `percentiles()` over zero completions.
-    The two reasons are disjoint in practice: with no scale-up the only replica
-    is the initial one, which is serving from t=0.
+    (docs/experiment-a2.md, amended 2026-09-05): `"no_scaling_action"` when the
+    policy never scaled up, then `"replica_never_served"` when NO replica the
+    policy launched during the run ever reached SERVING before it was removed
+    or before the window ended. The rule ranges only over replicas launched by
+    the POLICY -- the initial replica the fleet starts with is excluded from
+    the population, deliberately: it launches at t=0 with lag=0.0 and is
+    therefore always serving, so a rule that included it in an "all failed"
+    test could never fire and would be dead code. A run where SOME launched
+    replicas fail to serve and others do not is KEPT -- their cost stays
+    billed in `replica_seconds` from launch, because that cost (paying for a
+    replica that never serves) is exactly what a slow cold start does to an
+    operator, and is a measured finding rather than noise to exclude. The
+    original rule fired on ANY never-served replica, which discarded 100% of
+    runs on both of artifact 1's lag distributions -- see the amendment.
+    The third pre-registered condition, an empty arrival trace, is refused
+    outright below rather than returned as a discard -- exactly as
+    `run_fixed_capacity` refuses it -- because a caller that built an empty
+    trace has a bug upstream, and a returned result would still expose
+    `percentiles()` over zero completions. The two discard reasons are
+    disjoint: `scale_up_events == 0` implies no replica was ever launched by
+    the policy, so the launched population is empty and the never-served
+    check has nothing to range over.
     """
     if signal not in SIGNALS:
         raise KeyError(f"{signal!r} is not a signal; expected one of {sorted(SIGNALS)}")
@@ -449,9 +462,11 @@ def run_with_policy(
     replicas = [Replica(replica_id=0, started_at=0.0, lag=0.0)]
     # Every replica ever launched, with the time it was removed (None if it
     # survived the run). `replicas` alone cannot answer the pre-registered
-    # "any replica never reaches serving" question, because a replica killed
-    # while STARTING is gone from that list -- and it is precisely the one the
-    # rule is about.
+    # "did every launched replica fail to reach serving" question, because a
+    # replica killed while STARTING is gone from that list -- and it is
+    # precisely the one the rule is about. The initial replica is seeded here
+    # too (so `replicas` and `lifetimes` stay in sync), but the discard check
+    # below deliberately slices it back out: see that check for why.
     lifetimes: list[tuple[Replica, float | None]] = [(replicas[0], None)]
     waiting: list[float] = []
     in_flight: dict[int, float] = {}
@@ -582,13 +597,28 @@ def run_with_policy(
     result.unfinished = len(waiting) + len(in_flight)
     if result.scale_up_events == 0:
         result.discard_reason = "no_scaling_action"
-    elif any(
-        replica.ready_at > (until if removed_at is None else removed_at)
-        for replica, removed_at in lifetimes
-    ):
-        # A replica that never reached SERVING -- because the window ended
-        # first, or because LIFO scale-down killed it while it was still
-        # starting -- means the run measured the cold start rather than the
-        # signal. Pre-registered in docs/experiment-a2.md.
-        result.discard_reason = "replica_never_served"
+    else:
+        # `lifetimes[1:]`: the population this rule ranges over is replicas
+        # LAUNCHED BY THE POLICY during the run, not the initial replica the
+        # fleet starts with. `lifetimes[0]` is always that initial replica
+        # (started_at=0.0, lag=0.0), which is therefore always serving from
+        # t=0 -- including it here would make an "ALL of them failed" check
+        # unsatisfiable, and the rule would never fire. `scale_up_events > 0`
+        # (the `else` above) guarantees `lifetimes[1:]` is non-empty: every
+        # UP decision appends exactly one entry to it.
+        launched = lifetimes[1:]
+        if all(
+            replica.ready_at > (until if removed_at is None else removed_at)
+            for replica, removed_at in launched
+        ):
+            # NO replica the policy launched ever reached SERVING -- because
+            # the window ended first, or because LIFO scale-down killed it
+            # while it was still starting -- means the fleet never
+            # effectively grew, so the run measured the cold start rather
+            # than the signal. A run where SOME launched replicas served and
+            # others did not is kept: their cost stays billed, because that
+            # cost is what this artifact is measuring. Amended in
+            # docs/experiment-a2.md, 2026-09-05: the original rule fired on
+            # ANY never-served replica and discarded 100% of runs.
+            result.discard_reason = "replica_never_served"
     return result
