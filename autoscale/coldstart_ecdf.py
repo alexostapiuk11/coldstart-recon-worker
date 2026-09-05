@@ -7,10 +7,20 @@ disk and confines the pending harness extraction to one file.
 Resampling, not fitting. Artifact 1 measured p95/p50 of about 1.2 on both arms;
 fitting a parametric tail to that would invent structure the data does not show,
 and the tail is exactly where an autoscaling simulation is most sensitive.
+
+Two defects whose root cause lives in `coldstart/` are worked around here rather
+than there, because artifact 1 is published and is being corrected separately:
+the `run_index` merge in `load_measured_lags` (see its comment) and the sample
+validation in `LagDistribution.__post_init__`. Both are defensive local fixes.
+If artifact 1's versions are repaired, these stay -- they are cheap, and this
+module is the boundary where a bad number stops being artifact 1's problem and
+starts being a wrong simulation result.
 """
 
+import math
 import random
 from dataclasses import dataclass
+from pathlib import Path
 
 from coldstart.analysis.metrics import derive
 from coldstart.analysis.pipeline import (
@@ -18,9 +28,12 @@ from coldstart.analysis.pipeline import (
     annotate_first_touch,
     partition,
 )
+from coldstart.analysis.stats import median as _stats_median
 from coldstart.store import JsonlStore
 
 __all__ = ["LagDistribution", "load_measured_lags"]
+
+DEFAULT_EXPECTED_ARMS: tuple[str, ...] = ("A", "B", "C")
 
 
 @dataclass
@@ -40,6 +53,34 @@ class LagDistribution:
                 "would make every scale-up instantaneous and silently turn the "
                 "simulation into a no-cold-start baseline"
             )
+        for i, v in enumerate(self.samples):
+            # `None` and non-finite are rejected for the same reason
+            # `coldstart.analysis.stats._validate_samples` rejects them, checked
+            # here as well because a distribution is built once and then drawn
+            # from thousands of times: the stats call that would have caught a
+            # NaN might not run until after a whole sweep has been simulated on
+            # it. A NaN lag makes every `<`/`>` against a queue deadline
+            # silently False and medians to NaN; a negative one has no physical
+            # reading at all -- a replica cannot be ready before it was asked
+            # for -- and would credit the scheduler with time it never had.
+            if v is None:
+                raise ValueError(
+                    f"lag sample [{i}] is None; a None lag propagates as a "
+                    "TypeError from somewhere deep in the queue arithmetic, or "
+                    "worse, medians to None and is reported as a result"
+                )
+            if not math.isfinite(v):
+                raise ValueError(
+                    f"lag sample [{i}] is non-finite ({v!r}); it would make "
+                    "every queue-time comparison against it silently False and "
+                    "every percentile of this arm NaN"
+                )
+            if v < 0:
+                raise ValueError(
+                    f"lag sample [{i}] is negative ({v!r}); a negative scale-up "
+                    "lag means a replica became ready before it was requested, "
+                    "and would let the simulation serve requests early"
+                )
 
     def sample(self, rng: random.Random) -> float:
         """One draw. `rng` is supplied by the caller so a whole simulation run
@@ -47,14 +88,25 @@ class LagDistribution:
         return rng.choice(self.samples)
 
     def median(self) -> float:
-        ordered = sorted(self.samples)
-        mid = len(ordered) // 2
-        if len(ordered) % 2:
-            return ordered[mid]
-        return (ordered[mid - 1] + ordered[mid]) / 2
+        """Delegates to `coldstart.analysis.stats.median` deliberately.
+
+        That function's own docstring exists to stop a second definition of
+        "median" being written -- "they are one computation, not two
+        definitions of 'median' that usually happen to match". A local
+        implementation here would agree with it on essentially every input,
+        which is precisely why a divergence (percentile convention, even-length
+        handling, validation) would never be caught by a test. Delegating means
+        artifact 2's medians cannot silently disagree with artifact 1's
+        published medians on the same data. This module is already the one file
+        allowed to import `coldstart`, so nothing architectural is spent on it.
+        """
+        return _stats_median(self.samples)
 
 
-def load_measured_lags(store_path: str) -> dict[str, LagDistribution]:
+def load_measured_lags(
+    store_path: str | Path,
+    expected_arms: tuple[str, ...] = DEFAULT_EXPECTED_ARMS,
+) -> dict[str, LagDistribution]:
     """Artifact 1's per-arm lag distributions, keyed by arm.
 
     Repeat-host runs only. Artifact 1's one first-touch run took 2266.6 s
@@ -63,14 +115,91 @@ def load_measured_lags(store_path: str) -> dict[str, LagDistribution]:
     ECDF on a mechanical first-on-its-host rule applied to every run. The same
     rule applies here. Host novelty is carried as a named risk and recorded per
     replica during validation instead.
+
+    Raises rather than returning a partial dict on every input that cannot
+    produce a trustworthy distribution: a missing store, a store with no
+    publishable rows, a store with no repeat-host rows, and a store missing any
+    arm in `expected_arms`. Each of those used to return `{}` or a short dict,
+    and a short dict is the dangerous one -- a sweep over a silently absent arm
+    reports no cold-start cost for it rather than failing.
     """
-    records = JsonlStore(store_path).read_all()
-    rows = annotate_first_touch([derive(r) for r in records])
+    path = Path(store_path)
+    # Checked before JsonlStore is constructed: its __init__ mkdirs the parent,
+    # so constructing it on a typo'd path both creates directories on disk and
+    # then reads back an empty campaign.
+    if not path.exists():
+        raise FileNotFoundError(
+            f"no run store at {path}; without it there is no measured lag "
+            "distribution, and a simulation built on an empty one would report "
+            "an autoscaler that never pays a cold start"
+        )
+
+    records = JsonlStore(path).read_all()
+
+    # The `run_index` merge is load-bearing, not tidiness. `annotate_first_touch`
+    # documents its ordering as "deterministic and independent of read order"
+    # because it sorts by `run_index` -- but `metrics.derive()` does not emit a
+    # `run_index` key, so `r.get("run_index", 0)` returns 0 for every row, the
+    # sort is stable, and it degrades to whatever order the file happened to be
+    # in. Reversing this store moves the excluded run from arm A (the 2266.6 s
+    # first-touch one) to an unrelated 70.5 s arm-B run: the pool sizes still
+    # sum to 299 and the medians still land where they should, so the module's
+    # entire stated purpose stops happening without anything failing. The raw
+    # `RunRecord` still carries `run_index`, so it is carried across the
+    # `derive()` boundary by hand. The root defect is in `coldstart/` (either
+    # `derive()` should emit the key or `annotate_first_touch` should refuse a
+    # row without it); this is the defensive local fix.
+    rows = annotate_first_touch([{**derive(r), "run_index": r.run_index} for r in records])
     publishable = partition(rows, required=REQUIRED_FOR_T_TOTAL).publishable
 
+    if not publishable:
+        raise ValueError(
+            f"{path} yielded no publishable rows; there is nothing to resample "
+            "from, and every arm would draw a lag of zero"
+        )
+
     by_arm: dict[str, list[float]] = {}
+    first_touch_seen = 0
     for row in publishable:
+        # `is not False`, not `not row.get("first_touch")`: a row whose
+        # `first_touch` is None has no `host_id` at all, so whether it was first
+        # on its host is unknown, and unknown is excluded here rather than
+        # optimistically read as "repeat".
+        if row.get("first_touch") is True:
+            first_touch_seen += 1
         if row.get("first_touch") is not False:
             continue
         by_arm.setdefault(row["arm"], []).append(row["t_total"])
+
+    # `annotate_first_touch` marks exactly one run per distinct host as first
+    # touch, so this count is fully determined by the data. Asserting it turns a
+    # future ordering or key regression that silently excludes nothing (or the
+    # wrong thing) into a loud failure -- the defect above produced pools that
+    # looked entirely correct.
+    expected_first_touch = len({row["host_id"] for row in publishable if row.get("host_id")})
+    if first_touch_seen != expected_first_touch:
+        raise ValueError(
+            f"{path}: found {first_touch_seen} first-touch run(s) across "
+            f"{expected_first_touch} distinct host(s), expected one per host; "
+            "the first-on-its-host exclusion did not run as intended, so a "
+            "platform image-pull may be pooled into the cold-start ECDF"
+        )
+
+    if not by_arm:
+        raise ValueError(
+            f"{path} contains publishable rows but no repeat-host ones -- every "
+            "run was first on its host. That is a readable campaign, not an "
+            "unreadable store, but it measures image distribution rather than "
+            "cold start, so there is no lag distribution to build from it"
+        )
+
+    missing = [arm for arm in expected_arms if arm not in by_arm]
+    if missing:
+        raise ValueError(
+            f"{path} produced no repeat-host runs for arm(s) {', '.join(missing)} "
+            f"(got {', '.join(sorted(by_arm))}); a sweep over a silently absent "
+            "arm would report it as costing no cold-start time at all rather "
+            "than failing"
+        )
+
     return {arm: LagDistribution(samples=vals) for arm, vals in by_arm.items()}
