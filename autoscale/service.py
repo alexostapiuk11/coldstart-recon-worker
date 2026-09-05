@@ -9,12 +9,13 @@ samples, and the sweep is dense enough that straight segments are honest.
 
 import bisect
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 __all__ = ["SERVICE_CURVE_PLACEHOLDER", "ServiceCurve"]
 
 
-@dataclass
+@dataclass(frozen=True)
 class ServiceCurve:
     """`points` are (concurrency, latency_seconds, throughput_tps, gpu_utilization),
     ascending by concurrency.
@@ -22,10 +23,18 @@ class ServiceCurve:
     `measured` is False for the placeholder used until plan 2's sweep runs. Any
     figure or number derived from an unmeasured curve must say so -- the whole
     methodological claim is that every parameter is measured and only the
-    control loop is modeled.
+    control loop is modeled. This class only makes that flag trustworthy: it is
+    frozen and `points` is normalised to a tuple, so neither can be reassigned
+    or mutated past validation. Actually REFUSING to publish from an
+    unmeasured curve is enforced at the sweep boundary (not written yet), not
+    here -- this module makes `measured` tamper-evident, the sweep is what
+    makes it load-bearing.
+
+    The constructor accepts any sequence of points for ergonomics; `points` is
+    normalised to a tuple of tuples in `__post_init__`.
     """
 
-    points: list[tuple[int, float, float, float]]
+    points: Sequence[tuple[float, float, float, float]]
     measured: bool
 
     def __post_init__(self) -> None:
@@ -62,6 +71,45 @@ class ServiceCurve:
                         "plausible-looking but meaningless latency, "
                         "throughput, or utilization instead of raising here"
                     )
+            # Every field is a physical reading with a real-world floor (or,
+            # for utilization, a ceiling too). A value outside that range is
+            # not an ordinary measurement -- it is a measurement bug (a
+            # normalization error, a >100% nvidia-smi reading, a clock glitch
+            # producing negative latency) and must be caught here rather than
+            # silently accepted and later rendered invisible by a clamp.
+            if concurrency < 0:
+                raise ValueError(
+                    f"service curve point {point!r} has concurrency="
+                    f"{concurrency!r}, which is negative; a replica cannot "
+                    "serve at negative concurrency, and this value would "
+                    "flow straight into every interpolation as a bogus "
+                    "x-coordinate"
+                )
+            if latency < 0:
+                raise ValueError(
+                    f"service curve point {point!r} has latency="
+                    f"{latency!r}, which is negative; no request completes "
+                    "before it started, and this value would be returned "
+                    "from latency_at as a plausible-looking but impossible "
+                    "duration"
+                )
+            if throughput < 0:
+                raise ValueError(
+                    f"service curve point {point!r} has throughput="
+                    f"{throughput!r}, which is negative; a replica cannot "
+                    "emit negative tokens per second, and this value would "
+                    "be returned from throughput_at unchanged"
+                )
+            if not (0.0 <= utilization <= 1.0):
+                raise ValueError(
+                    f"service curve point {point!r} has utilization="
+                    f"{utilization!r}, which is outside [0, 1]; a utilization "
+                    "above 1 is exactly the measurement bug a hardware sweep "
+                    "might produce (a normalization error, a >100% "
+                    "nvidia-smi reading), and `min(1.0, ...)` in "
+                    "utilization_at would silently render it invisible "
+                    "instead of raising here"
+                )
         concurrencies = [p[0] for p in self.points]
         if concurrencies != sorted(concurrencies):
             raise ValueError("service curve points must be in ascending concurrency order")
@@ -72,12 +120,29 @@ class ServiceCurve:
                 "`(x1 - x0)` a division by zero for any query landing exactly "
                 "on that concurrency"
             )
+        # Normalise to a tuple of tuples so neither `points` itself nor any
+        # element within it can be mutated past the validation above -- a
+        # list survives dataclass field assignment as a reference, so
+        # `curve.points.append(...)` (or `[i] = ...`) would otherwise add or
+        # rewrite a point that every later query trusts as already validated
+        # and sorted. `object.__setattr__` is required because the dataclass
+        # is frozen.
+        object.__setattr__(self, "points", tuple(tuple(p) for p in self.points))
 
     @property
-    def max_measured_concurrency(self) -> int:
+    def max_measured_concurrency(self) -> float:
         return self.points[-1][0]
 
-    def is_extrapolating(self, concurrency: int) -> bool:
+    def is_extrapolating(self, concurrency: float) -> bool:
+        """True only when `concurrency` is ABOVE the measured range.
+
+        Deliberately asymmetric: below-range is ordinary clamping (see
+        `_interpolate`), not extrapolation, so it returns False there. A
+        caller using this as "is this query inside the validated range?"
+        will get False (i.e. "yes, safe") for a below-range query -- and the
+        simulator will plausibly query concurrency 0 for an idle replica, so
+        that below-range case is not a corner case.
+        """
         if math.isnan(concurrency):
             # `concurrency > self.max_measured_concurrency` is False for
             # NaN, so without this guard a caller checking "is this safe to
@@ -94,7 +159,24 @@ class ServiceCurve:
             )
         return concurrency > self.max_measured_concurrency
 
-    def _interpolate(self, concurrency: int, index: int) -> float:
+    def _interpolate(self, concurrency: float, index: int) -> float:
+        if math.isnan(concurrency):
+            # `concurrency <= xs[0]` and `concurrency >= xs[-1]` below are
+            # both False for NaN, so without this guard a NaN would fall
+            # through to `bisect_left`, which treats NaN as neither less
+            # than nor greater than any point and inserts it at a position
+            # that depends only on comparison order -- silently returning a
+            # plausible but meaningless value instead of raising. This is
+            # the single choke point every query method funnels through, so
+            # the guard lives here instead of being duplicated at each of
+            # them (and left absent, by default, from any query method added
+            # later).
+            raise ValueError(
+                "concurrency is NaN; NaN compares False against every "
+                "boundary check in _interpolate, so it would silently fall "
+                "through to bisect_left and return a plausible but "
+                "meaningless value instead of raising"
+            )
         xs = [p[0] for p in self.points]
         if concurrency <= xs[0]:
             return self.points[0][index]
@@ -105,40 +187,18 @@ class ServiceCurve:
         y0, y1 = self.points[i - 1][index], self.points[i][index]
         return y0 + (concurrency - x0) / (x1 - x0) * (y1 - y0)
 
-    def latency_at(self, concurrency: int) -> float:
-        if math.isnan(concurrency):
-            # `concurrency <= xs[0]` and `concurrency >= xs[-1]` in
-            # `_interpolate` are both False for NaN, so without this guard a
-            # NaN would fall through to `bisect_left`, which treats NaN as
-            # neither less than nor greater than any point and inserts it at
-            # a position that depends only on comparison order -- silently
-            # returning a real-looking latency instead of raising.
-            raise ValueError(
-                "concurrency is NaN; NaN compares False against every "
-                "boundary check in _interpolate, so it would silently fall "
-                "through to bisect_left and return a plausible but "
-                "meaningless latency instead of raising"
-            )
+    def latency_at(self, concurrency: float) -> float:
         return self._interpolate(concurrency, 1)
 
-    def throughput_at(self, concurrency: int) -> float:
-        if math.isnan(concurrency):
-            raise ValueError(
-                "concurrency is NaN; NaN compares False against every "
-                "boundary check in _interpolate, so it would silently fall "
-                "through to bisect_left and return a plausible but "
-                "meaningless throughput instead of raising"
-            )
+    def throughput_at(self, concurrency: float) -> float:
         return self._interpolate(concurrency, 2)
 
-    def utilization_at(self, concurrency: int) -> float:
-        if math.isnan(concurrency):
-            raise ValueError(
-                "concurrency is NaN; NaN compares False against every "
-                "boundary check in _interpolate, so it would silently fall "
-                "through to bisect_left and return a plausible but "
-                "meaningless utilization instead of raising"
-            )
+    def utilization_at(self, concurrency: float) -> float:
+        # `__post_init__` already rejects any measured utilization outside
+        # [0, 1], so the only way `_interpolate` can exceed 1.0 here is a
+        # float-epsilon overshoot from the linear interpolation arithmetic
+        # itself -- that is now this clamp's only job, not a backstop for an
+        # out-of-range measurement (which can no longer construct).
         return min(1.0, self._interpolate(concurrency, 3))
 
 

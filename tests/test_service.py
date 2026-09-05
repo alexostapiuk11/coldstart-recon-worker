@@ -60,10 +60,71 @@ def test_non_finite_point_fields_are_rejected(bad, field_index):
     the ascending-order check and every interpolation comparison, and +-inf
     poisons the interpolation arithmetic -- either way a non-finite field
     would silently produce a plausible-looking but meaningless curve."""
-    point = [1, 0.1, 100.0, 0.2]
+    # The bad value goes on the SECOND point. Putting it on the first point's
+    # concurrency (field_index 0) would make that point's concurrency `inf`,
+    # which is both non-finite AND out of ascending order against the second
+    # point's `10` -- two guards would fire on the same input, and if the
+    # ascending-order check ever moved above the finiteness loop this test
+    # would start failing on the wrong message for the wrong reason. Using
+    # the second point isolates the finiteness guard regardless of guard
+    # ordering.
+    good_point = (1, 0.1, 100.0, 0.2)
+    point = [10, 0.3, 400.0, 0.8]
     point[field_index] = bad
     with pytest.raises(ValueError, match="not finite"):
-        ServiceCurve(points=[tuple(point), (10, 0.3, 400.0, 0.8)], measured=True)
+        ServiceCurve(points=[good_point, tuple(point)], measured=True)
+
+
+def test_negative_concurrency_latency_or_throughput_is_rejected():
+    """A negative reading has no physical meaning for any of these fields --
+    a replica cannot serve at negative concurrency, take negative time, or
+    emit negative throughput -- and would silently poison every downstream
+    interpolation with a sign error instead of raising here."""
+    with pytest.raises(ValueError, match="concurrency"):
+        ServiceCurve(points=[(-1, 0.1, 100.0, 0.2), (10, 0.3, 400.0, 0.8)], measured=True)
+    with pytest.raises(ValueError, match="latency"):
+        ServiceCurve(points=[(1, -0.1, 100.0, 0.2), (10, 0.3, 400.0, 0.8)], measured=True)
+    with pytest.raises(ValueError, match="throughput"):
+        ServiceCurve(points=[(1, 0.1, -100.0, 0.2), (10, 0.3, 400.0, 0.8)], measured=True)
+
+
+def test_utilization_outside_zero_to_one_is_rejected():
+    """A utilization above 1 is exactly the measurement bug a hardware sweep
+    might produce -- a normalization error, a >100% nvidia-smi reading -- and
+    `min(1.0, ...)` in `utilization_at` would silently render it invisible if
+    it were allowed to construct at all."""
+    with pytest.raises(ValueError, match="utilization"):
+        ServiceCurve(points=[(1, 0.1, 100.0, 0.4), (10, 0.3, 400.0, 1.7)], measured=True)
+    with pytest.raises(ValueError, match="utilization"):
+        ServiceCurve(points=[(1, 0.1, 100.0, -0.1), (10, 0.3, 400.0, 0.8)], measured=True)
+
+
+def test_service_curve_is_frozen():
+    """`measured=False` on the placeholder is inert if the flag can just be
+    flipped after construction -- a frozen dataclass makes it tamper-evident
+    instead of merely a documented convention."""
+    curve = ServiceCurve(points=[(1, 0.1, 100.0, 0.2), (10, 0.3, 400.0, 0.8)], measured=True)
+    with pytest.raises(AttributeError):
+        curve.measured = False
+    with pytest.raises(AttributeError):
+        curve.points = ((1, 0.1, 100.0, 0.2), (10, 0.3, 400.0, 0.8))
+
+
+def test_service_curve_points_are_a_tuple_and_cannot_be_extended():
+    """A list can be mutated in place past every `__post_init__` guard --
+    `curve.points.append(...)` would add an unvalidated, unsorted point that
+    every later query trusts. Normalising to a tuple in `__post_init__`
+    closes that even though the constructor still accepts a list."""
+    curve = ServiceCurve(points=[(1, 0.1, 100.0, 0.2), (10, 0.3, 400.0, 0.8)], measured=True)
+    assert isinstance(curve.points, tuple)
+    with pytest.raises(AttributeError):
+        curve.points.append((20, 0.5, 500.0, 0.9))
+
+
+def test_max_measured_concurrency_matches_the_last_point():
+    curve = ServiceCurve(points=[(1, 0.1, 100.0, 0.2), (10, 0.3, 400.0, 0.8)], measured=True)
+    assert curve.max_measured_concurrency == 10
+    assert SERVICE_CURVE_PLACEHOLDER.max_measured_concurrency == SERVICE_CURVE_PLACEHOLDER.points[-1][0]
 
 
 def test_latency_at_rejects_nan_concurrency():
