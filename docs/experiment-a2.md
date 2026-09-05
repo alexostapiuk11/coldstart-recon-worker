@@ -54,6 +54,37 @@ shape only is published as a partial result, not rounded up to confirmation.
 **H4.** The ranking is stable across step and ramp, but margins shrink on the
 ramp.
 
+## Threshold grids, per signal
+
+The three signals do not share units, so one numeric grid cannot span all
+three:
+
+| signal | unit | range |
+|---|---|---|
+| queue depth | requests waiting per replica | 0 to unbounded |
+| in-flight concurrency | active requests per replica | 0 to the curve's measured maximum |
+| GPU utilization | a fraction | 0 to 1 |
+
+Each signal is therefore swept over a grid spanning its own range, fixed here
+before any sweep runs:
+
+| signal | scale-up grid | scale-down grid |
+|---|---|---|
+| queue depth | 1, 2, 4, 8, 16 | 0, 0.25, 0.5, 1 |
+| in-flight concurrency | 2, 4, 8, 12, 16 | 0.5, 1, 2, 4 |
+| GPU utilization | 0.50, 0.65, 0.80, 0.90, 0.95 | 0.05, 0.15, 0.30, 0.50 |
+
+**This is not the per-signal tuning the design rejects.** That rejection
+forbids hand-picking each signal's best operating point after seeing results.
+Giving each signal a grid that spans its own range is what makes the frontiers
+comparable at all: a single grid of 2 to 16 puts every threshold above
+utilization's maximum possible value of 1, so that policy never fires, its
+frontier collapses to one "never scale" point, and H2 is confirmed by a units
+mismatch rather than by the censoring mechanism this artifact exists to
+demonstrate. Verified against the simulator before these grids were fixed:
+utilization at a threshold of 2.0 produced 0 scale-ups and a p99 of 89.7 s,
+while at 0.5 through 0.95 it produced 4 scale-ups and a p99 of 58.4 s.
+
 ## Analysis plan
 
 Frontiers are compared, not points. The headline sentence comes from the

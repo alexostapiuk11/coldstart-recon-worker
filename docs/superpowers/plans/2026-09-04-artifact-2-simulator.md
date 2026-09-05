@@ -1975,6 +1975,33 @@ def _require_measured_curve(curve: ServiceCurve, allow_unmeasured: bool) -> None
 ```
 
 
+# PER-SIGNAL THRESHOLD GRIDS. The three signals do not share units, so one
+# numeric grid cannot span all three:
+#
+#   queue_depth            requests waiting per replica     0 .. unbounded
+#   in_flight_concurrency  active requests per replica      0 .. max_measured_concurrency
+#   utilization            a FRACTION                       0 .. 1
+#
+# Sweeping the single grid (2, 4, 8, 16) across all three -- the original
+# design -- puts every threshold above utilization's maximum possible value, so
+# that policy never fires and its whole frontier collapses to one "never scale"
+# point. H2 ("utilization is worst") would then be confirmed trivially by a
+# units mismatch rather than by the censoring mechanism the artifact publishes,
+# which would make the headline indefensible.
+#
+# This is NOT the per-signal tuning the design rejects. That rejection is about
+# refusing to hand-pick each signal's best operating point; giving each signal a
+# grid that spans its own range is what makes the frontiers comparable at all.
+# The grids are pre-registered in docs/experiment-a2.md before any sweep runs,
+# so they cannot be chosen to produce a result.
+THRESHOLDS: dict[str, tuple[tuple[float, ...], tuple[float, ...]]] = {
+    # signal: (scale_up_grid, scale_down_grid)
+    "queue_depth": ((1.0, 2.0, 4.0, 8.0, 16.0), (0.0, 0.25, 0.5, 1.0)),
+    "in_flight_concurrency": ((2.0, 4.0, 8.0, 12.0, 16.0), (0.5, 1.0, 2.0, 4.0)),
+    "utilization": ((0.50, 0.65, 0.80, 0.90, 0.95), (0.05, 0.15, 0.30, 0.50)),
+}
+
+
 @dataclass(frozen=True)
 class SweepConfig:
     shape: SpikeShape
@@ -1982,8 +2009,6 @@ class SweepConfig:
     curve: ServiceCurve
     arm: str
     until: float
-    scale_up_thresholds: tuple[float, ...]
-    scale_down_thresholds: tuple[float, ...]
 
 
 def run_sweep(
@@ -2000,8 +2025,9 @@ def run_sweep(
     discards: list[str] = []
 
     for signal in sorted(SIGNALS):
-        for up in config.scale_up_thresholds:
-            for down in config.scale_down_thresholds:
+        up_grid, down_grid = THRESHOLDS[signal]
+        for up in up_grid:
+            for down in down_grid:
                 if down >= up:
                     continue
                 costs: list[float] = []
@@ -2312,10 +2338,6 @@ from autoscale.frontier import gap_at_iso_cost, pareto_frontier
 from autoscale.service import SERVICE_CURVE_PLACEHOLDER
 from autoscale.sweep import SweepConfig, run_sweep
 
-UP = (2.0, 4.0, 8.0, 16.0)
-DOWN = (0.25, 0.5, 1.0)
-
-
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--store", default="data/campaign.jsonl")
@@ -2336,7 +2358,7 @@ def main() -> None:
         points, discards = run_sweep(
             SweepConfig(
                 shape=shape, lags=lags[arm], curve=SERVICE_CURVE_PLACEHOLDER, arm=arm,
-                until=400.0, scale_up_thresholds=UP, scale_down_thresholds=DOWN,
+                until=400.0,
             ),
             seed=17,
             allow_unmeasured=True,  # placeholder curve; layout draft, not a result
@@ -2354,7 +2376,7 @@ def main() -> None:
             SweepConfig(
                 shape=shape, lags=LagDistribution(samples=[lag_value]),
                 curve=SERVICE_CURVE_PLACEHOLDER, arm=f"synthetic-{lag_value}",
-                until=400.0, scale_up_thresholds=UP, scale_down_thresholds=DOWN,
+                until=400.0,
             ),
             seed=17,
             allow_unmeasured=True,  # placeholder curve; layout draft, not a result
@@ -2442,15 +2464,11 @@ from autoscale.frontier import gap_at_iso_cost, h3_verdict, pareto_frontier
 from autoscale.service import SERVICE_CURVE_PLACEHOLDER
 from autoscale.sweep import SweepConfig, run_sweep
 
-UP = (2.0, 8.0)
-DOWN = (0.5,)
-
-
 def _sweep(arm, lags, shape):
     return run_sweep(
         SweepConfig(
             shape=shape, lags=lags, curve=SERVICE_CURVE_PLACEHOLDER, arm=arm,
-            until=400.0, scale_up_thresholds=UP, scale_down_thresholds=DOWN,
+            until=400.0,
         ),
         seed=17,
         allow_unmeasured=True,  # placeholder curve; this proves plumbing, not a result
@@ -2518,8 +2536,8 @@ def test_the_sweep_reproduces_across_processes_not_just_within_one():
         "lags = load_measured_lags('data/campaign.jsonl');"
         "shape = SpikeShape(kind='step', baseline_rate=2.0, k=4.0, ramp=0.0, sustain=190.0);"
         "pts, _ = run_sweep(SweepConfig(shape=shape, lags=lags['A'],"
-        " curve=SERVICE_CURVE_PLACEHOLDER, arm='A', until=400.0,"
-        " scale_up_thresholds=(2.0, 8.0), scale_down_thresholds=(0.5,)), seed=17);"
+        " curve=SERVICE_CURVE_PLACEHOLDER, arm='A', until=400.0),"
+        " seed=17, allow_unmeasured=True);"
         "print(round(sum(p.p99 for p in pts), 6))"
     )
     runs = [
