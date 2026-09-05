@@ -54,6 +54,20 @@ shape only is published as a partial result, not rounded up to confirmation.
 **H4.** The ranking is stable across step and ramp, but margins shrink on the
 ramp.
 
+## Fixed control-loop parameters
+
+Not swept, and therefore invisible in every frontier, but they set every
+published cost and p99 as surely as the thresholds do. Fixed here rather than
+left implicit in the code, so that changing one is a change to the
+pre-registration rather than an edit nobody has to justify:
+
+| parameter | value | why this value |
+|---|---|---|
+| cooldown | 30 s | Without one, a policy fires on every evaluation while the signal stays high and every signal looks identically aggressive. Real autoscalers have one; modelling them without it would idealise away the constraint the comparison is about. |
+| evaluation interval | 5 s | The controller sees fleet state this often. Much finer and the cooldown alone governs; much coarser and a 190 s spike gets too few decisions to differentiate signals. |
+| max replicas | 12 | A ceiling well above the 3 additional replicas `k` is sized to require, so the cap does not bind in the normal case and a runaway policy is still bounded. |
+| repetitions per configuration | 30 | Fixed before any result is inspected. |
+
 ## Threshold grids, per signal
 
 The three signals do not share units, so one numeric grid cannot span all
