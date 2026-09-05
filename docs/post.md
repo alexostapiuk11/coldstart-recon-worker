@@ -11,7 +11,7 @@ date -- it is the publication date, not the date the draft was finished.
 
 # Where a vLLM cold start actually goes
 
-**Oleksii Ostapiuk** · 2026-09-03 · `/experiments/vllm-cold-start-decomposition`
+**Oleksii Ostapiuk** · 2026-09-04 · `/experiments/vllm-cold-start-decomposition`
 
 Three hundred measured cold starts on rented GPUs, decomposed into phases, with
 every published number re-derivable from committed data on a laptop.
