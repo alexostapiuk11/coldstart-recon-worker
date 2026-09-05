@@ -69,6 +69,18 @@ class LagDistribution:
                     "TypeError from somewhere deep in the queue arithmetic, or "
                     "worse, medians to None and is reported as a result"
                 )
+            if not isinstance(v, (int, float)):
+                # ValueError, not TypeError (noqa: TRY004): every sibling check
+                # in this validator -- None, non-finite, negative -- raises
+                # ValueError naming the index and value, and a caller iterating
+                # bad samples should be able to catch one exception type for
+                # all of them.
+                raise ValueError(  # noqa: TRY004
+                    f"lag sample [{i}] is not a number ({v!r}); "
+                    "math.isfinite raises a bare TypeError on anything that "
+                    "isn't, with no index or value attached to say which "
+                    "sample was bad"
+                )
             if not math.isfinite(v):
                 raise ValueError(
                     f"lag sample [{i}] is non-finite ({v!r}); it would make "
@@ -122,6 +134,11 @@ def load_measured_lags(
     arm in `expected_arms`. Each of those used to return `{}` or a short dict,
     and a short dict is the dangerous one -- a sweep over a silently absent arm
     reports no cold-start cost for it rather than failing.
+
+    `expected_arms` must be passed explicitly for any campaign whose arms are
+    not artifact 1's A/B/C -- the default is that specific tuple, not a
+    wildcard, so a differently-armed campaign left on the default would be
+    read as missing every arm it actually has.
     """
     path = Path(store_path)
     # Checked before JsonlStore is constructed: its __init__ mkdirs the parent,
@@ -159,27 +176,40 @@ def load_measured_lags(
         )
 
     by_arm: dict[str, list[float]] = {}
-    first_touch_seen = 0
     for row in publishable:
         # `is not False`, not `not row.get("first_touch")`: a row whose
         # `first_touch` is None has no `host_id` at all, so whether it was first
         # on its host is unknown, and unknown is excluded here rather than
         # optimistically read as "repeat".
-        if row.get("first_touch") is True:
-            first_touch_seen += 1
         if row.get("first_touch") is not False:
             continue
         by_arm.setdefault(row["arm"], []).append(row["t_total"])
 
-    # `annotate_first_touch` marks exactly one run per distinct host as first
-    # touch, so this count is fully determined by the data. Asserting it turns a
-    # future ordering or key regression that silently excludes nothing (or the
-    # wrong thing) into a loud failure -- the defect above produced pools that
-    # looked entirely correct.
-    expected_first_touch = len({row["host_id"] for row in publishable if row.get("host_id")})
-    if first_touch_seen != expected_first_touch:
+    # Both sides of this guard are computed over `rows` -- the full population
+    # `annotate_first_touch` actually annotated -- not over `publishable`. A
+    # host whose first-on-its-host run failed or was discarded still appears
+    # as a host in `publishable` (via its other, repeat-host rows) while its
+    # own `first_touch=True` row does not (it landed in `failed` or
+    # `discarded` instead), which used to undercount "seen" against
+    # "expected" on an entirely ordinary campaign. Failed and discarded runs
+    # are normal -- `partition()` has buckets for exactly this, and artifact 1
+    # publishes their rates -- so the guard must not treat one as evidence of
+    # its own malfunction.
+    #
+    # What this assertion actually checks: that `annotate_first_touch` marked
+    # exactly one first-touch run per distinct host, i.e. its own documented
+    # invariant held. It does NOT detect an ordering or key regression in that
+    # function -- an ordering bug still marks exactly one row per host, just
+    # the wrong one, so `seen == expected` here regardless. Protection against
+    # that class of defect comes from
+    # `test_the_same_run_is_excluded_when_the_store_is_read_backwards` in
+    # tests/test_coldstart_ecdf.py, not from this guard; do not read this
+    # guard's presence as covering that case and remove that test.
+    expected_first_touch = len({r["host_id"] for r in rows if r.get("host_id")})
+    seen_first_touch = sum(1 for r in rows if r.get("first_touch") is True)
+    if seen_first_touch != expected_first_touch:
         raise ValueError(
-            f"{path}: found {first_touch_seen} first-touch run(s) across "
+            f"{path}: found {seen_first_touch} first-touch run(s) across "
             f"{expected_first_touch} distinct host(s), expected one per host; "
             "the first-on-its-host exclusion did not run as intended, so a "
             "platform image-pull may be pooled into the cold-start ECDF"

@@ -59,6 +59,43 @@ def test_the_same_run_is_excluded_when_the_store_is_read_backwards(tmp_path):
     assert max(backward["A"].samples) < 200.0
 
 
+def test_a_failed_first_run_on_a_second_host_does_not_trip_the_guard(tmp_path):
+    """DEFECT 1 regression. `first_touch` is assigned by `annotate_first_touch`
+    over every derived row, but the guard in `load_measured_lags` used to count
+    its "expected" side (distinct hosts) over `publishable` rows only while
+    counting its "seen" side (`first_touch is True`) over that same
+    `publishable` set. A host whose first-on-its-host run failed still shows up
+    as a host in `publishable` -- it has other, later, repeat-host rows there
+    -- but its own `first_touch=True` row never reaches `publishable`, since a
+    failed run lands in `partition()`'s `failed` bucket, not `publishable`. So
+    "seen" undercounts relative to "expected" on an entirely ordinary campaign
+    that merely had a failed run. Failed and discarded runs are normal --
+    `partition()` has buckets for exactly this.
+
+    Splits the real campaign at run_index 150 (every real record shares one
+    host_id, so this cleanly produces two hosts) and gives the second half a
+    distinct host_id, then fails that host's first run (run_index 150, its
+    first-on-its-host run by `annotate_first_touch`'s own ordering). Before the
+    fix this raised `ValueError: found 1 first-touch run(s) across 2 distinct
+    host(s)`."""
+    lines = [json.loads(ln) for ln in _campaign_lines()]
+    lines.sort(key=lambda r: r["run_index"])
+    first_half, second_half = lines[:150], lines[150:]
+    for rec in second_half:
+        rec["host"]["host_id"] = "host-2"
+    second_half[0]["status"] = {
+        "outcome": "error",
+        "failure_class": "synthetic_test_failure",
+        "failure_detail": "injected by test_a_failed_first_run_on_a_second_host_does_not_trip_the_guard",
+    }
+    path = tmp_path / "two-host.jsonl"
+    path.write_text(
+        "\n".join(json.dumps(r, sort_keys=True) for r in first_half + second_half) + "\n"
+    )
+
+    load_measured_lags(path)  # must not raise
+
+
 def test_measured_medians_match_artifact_ones_published_numbers():
     lags = load_measured_lags(CAMPAIGN)
 
@@ -127,6 +164,16 @@ def test_a_negative_sample_refuses_to_be_built():
     for."""
     with pytest.raises(ValueError, match="negative"):
         LagDistribution(samples=[10.0, -3.0])
+
+
+def test_a_non_numeric_sample_refuses_to_be_built_with_a_named_error():
+    """MINOR fix. `math.isfinite` raises a bare `TypeError: must be real
+    number, not str` on a non-numeric sample, with no index or value -- every
+    other bad-sample case here names both. The validation must catch
+    non-numeric types explicitly and raise the same `ValueError` shape as its
+    neighbors."""
+    with pytest.raises(ValueError, match=r"\[1\].*80\.5"):
+        LagDistribution(samples=[10.0, "80.5"])
 
 
 def test_a_missing_store_is_an_error_not_an_empty_dict(tmp_path):
