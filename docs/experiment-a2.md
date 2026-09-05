@@ -108,11 +108,37 @@ generates thousands of requests, where artifact 1 had ~100 runs per arm.
 
 ## Exclusion rules
 
-A simulation run is discarded if the arrival trace is empty, if any replica
-never reaches serving before the run ends, or if the policy produces no scaling
-action across the entire spike -- each makes the run uninformative about the
-signal rather than an observation about it. Discards are counted and reported
-by signal, never silently dropped.
+A simulation run is discarded if the arrival trace is empty, if **no** replica
+launched during the run ever reaches serving, or if the policy produces no
+scaling action across the entire spike -- each makes the run uninformative
+about the signal rather than an observation about it. Discards are counted and
+reported by signal, never silently dropped.
+
+### Amendment, 2026-09-05: the never-served rule was fatally over-broad
+
+As first written this rule discarded a run if **any** replica failed to reach
+serving before the window closed. Measured against the simulator before any
+result existed: that discarded **100% of runs on both arms**, so the sweep
+produced nothing at all.
+
+The error was conceptual, not just arithmetic. In a closed loop with a
+realistic cold start, the last replica launched near the end of a spike
+essentially never ripens before the window closes -- that is the normal case,
+not a degenerate one. And paying for a replica that never serves is precisely
+what a slow cold start does to an operator: it is the artifact's subject, not
+noise to be excluded. The rule would also have bitten arm A (p50 lag 81.1 s)
+harder than arm C (39.4 s), biasing H3 -- the headline -- in the direction of
+its own confirmation.
+
+The rule now fires only when the fleet never effectively grew: no launched
+replica reached serving at all. A run containing some never-ready replicas is
+**kept**, and their cost is billed in `replica_seconds` from launch, because
+that cost is a measured finding.
+
+Amended before any sweep was run for results and before the service curve was
+measured, so there was no result to tune it against. The only sweeps executed
+to this point used the explicitly-unmeasured placeholder curve, under
+`allow_unmeasured=True`, to check figure layout.
 
 ## Stopping rule
 
