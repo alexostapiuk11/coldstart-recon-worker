@@ -169,6 +169,66 @@ spread sits on a 1.60 s floor: a *relative* effect of over 200%, against the
 6.04 s spread on a 3.23 s floor that the widest-spread row offers with only two
 buckets.
 
+## The candidate regime, measured at full strength
+
+The table above is one trace per configuration. Running the full diagnostic at
+the 40% / 0.5 candidate — 10 master seeds × 30 repetitions, both arms — gives:
+
+```bash
+.venv/bin/python scripts/a2_gap_noise_floor.py --seeds 10 --reps 30 \
+  --baseline-fraction 0.40 --additional-replicas 0.5
+```
+
+| | arm A (lag p50 81.1 s) | arm C (lag p50 39.4 s) |
+|---|---|---|
+| queue depth | 2.8023 ± 0.0611 | 2.7032 ± 0.0449 |
+| in-flight concurrency | **1.1195 ± 0.0096** | 0.9672 ± 0.0081 |
+| GPU utilization | 1.1408 ± 0.0104 | **0.9575 ± 0.0079** |
+| **iso-cost gap** | **1.6957 ± 0.0639** | **1.7549 ± 0.0492** |
+
+(± is the standard error across master seeds; p99 in seconds.)
+
+The gap is now **26× its own standard error**, against the pre-registered
+regime's 0.314 ± 0.078 around a true zero. The ranking is identical in all 20
+runs. The comparison is defined here.
+
+**And it refutes all three testable hypotheses.**
+
+- **H1** (in-flight concurrency dominates) — **not supported.** In-flight and
+  utilization are a tie: paired difference +0.0213 ± 0.0172 on arm A and
+  −0.0098 ± 0.0110 on arm C, both inside 2 sem, and *the sign flips between
+  arms*. What dominates is neither: both beat queue depth by ~1.7 s.
+- **H2** (utilization is the worst of the three, by censoring) — **refuted.**
+  Utilization is tied for *best*. Queue depth is worst, by 1.66 ± 0.07 s on
+  arm A and 1.75 ± 0.05 s on arm C.
+- **H3** (the gap at least halves from arm A to arm C) — **refuted.** Halving
+  would need arm C ≤ 0.848. Measured: 1.755. The paired change is
+  **+0.0592 ± 0.0614** — the gap does not shrink, it does not move at all.
+- **H4** (ranking stable across shapes, margins shrink on the ramp) — untested;
+  needs the ramp sweep from the statistical-layer plan.
+
+### Why choosing this regime is not result-shopping
+
+Selecting an operating point after seeing that it produces an effect is a real
+researcher-degrees-of-freedom hazard, and it deserves a direct answer rather
+than a disclaimer. Three things make this defensible, and the third is the
+strongest:
+
+1. The selection metric was **ranking-blind**: `distinct_p99`, a count of how
+   many different values the 55 policies produce. Nothing in it can express a
+   preference for a signal.
+2. The search was over the **full grid**, run once, and is committed — not a
+   sequence of tries stopped when one looked good.
+3. **It refuted every hypothesis the artifact pre-registered.** A regime chosen
+   to produce a result would produce the *predicted* result. This one says the
+   headline is wrong, the mechanism in H2 is backwards, and the winner is a tie
+   between two signals rather than the one predicted.
+
+All of it against the **placeholder service curve**. These are not results;
+they are a demonstration that the machinery can now produce results. Plan 2's
+measured curve is what would make them real, and it could move every number
+here.
+
 ## Candidate fixes (none chosen — this needs a decision)
 
 Each changes a pre-registered quantity and so requires a dated amendment
