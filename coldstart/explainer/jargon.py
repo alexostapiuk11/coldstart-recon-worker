@@ -49,12 +49,11 @@ def undefined_terms(html: str) -> list[str]:
     closes that gap while staying a plain substring check: no natural-language
     parsing, just "is this exact text present."
     """
-    haystack = html.lower()
     haystack = _normalize(html)
     missing = []
     for term, definition in TERMS.items():
-        if term.lower() not in haystack:
+        if _normalize(term) not in haystack:
             continue
-        if definition.lower() not in haystack:
+        if _normalize(definition) not in haystack:
             missing.append(term)
     return missing
