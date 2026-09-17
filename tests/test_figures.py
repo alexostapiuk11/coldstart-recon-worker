@@ -960,6 +960,8 @@ def test_kv_dividend_states_both_directions_of_the_comparison(tmp_path):
     text = " ".join(t.get_text() for t in ax.texts) + ax.get_title()
     assert "20.3" in text
     assert "16.8" in text
+    assert "-16.8" not in text, "the caption inverted the direction: '-16.8% smaller' means larger"
+    assert "16.8% smaller" in text
     for label, size in [(t.get_text(), t.get_fontsize()) for t in ax.texts]:
         if label.strip():
             assert size * PHONE_WIDTH_PX / (72 * fig.get_size_inches()[0]) >= MIN_PHONE_TEXT_PX

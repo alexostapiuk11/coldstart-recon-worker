@@ -614,7 +614,7 @@ def kv_dividend(rows, out_path) -> Path:
     ax.text(
         0.5,
         0.025,
-        f"Equivalently: a cold compile sizes the cache {cold / warm - 1:.1%} smaller —\n"
+        f"Equivalently: a cold compile sizes the cache {abs(cold / warm - 1):.1%} smaller —\n"
         "permanently, for the life of that replica.",
         transform=fig.transFigure,
         ha="center",
