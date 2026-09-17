@@ -271,26 +271,34 @@ are a demonstration that the machinery can now produce results. Plan 2's
 measured curve is what would make them real, and it could move every number
 here.
 
-## Candidate fixes (none chosen — this needs a decision)
+## The options considered, and the one taken
 
-Each changes a pre-registered quantity and so requires a dated amendment
-disclosing this search.
+Each changes a pre-registered quantity, so the choice is disclosed in
+`docs/experiment-a2.md`'s 2026-09-17 amendment along with this search.
 
-1. **Lower the peak** — `k` sized to require ~0.5 additional replicas instead
-   of 3, keeping baseline at 40% of saturation. Supported by the probe above,
-   and the smallest edit to the pre-registration that produces an evaluable
-   experiment. **Recommended.**
+1. **Lower the peak.** **Taken** — but not at the setting this section
+   originally recommended. The first draft of this list proposed `k` at ~0.5
+   additional replicas with baseline held at 40% of saturation, on the strength
+   of the one-trace screen alone. Stage 2 disqualified it: at 40% / 0.5 queue
+   depth survives fewer than 3 of its 19 policies, so its frontier is three
+   points against nineteen and part of the gap is that mismatch. The adopted
+   setting is **baseline 70% of saturation, `k` = 0.25 additional replicas**,
+   the widest-separating candidate that leaves every signal its full grid. See
+   "The candidate regime, measured at full strength" above.
 2. ~~Raise the replica ceiling~~ — **disproven.** The cap never binds; 12, 24
    and 64 give identical results.
 3. **Widen the threshold grids upward** so some thresholds sit above the peak
-   signal value. Keeps the traffic model; changes what "spans its own range"
-   means, which the pre-registration argued for at length. Untested.
-4. **Report the degeneracy as the result.** "Under a spike this far above
-   capacity, the autoscaling signal is irrelevant to tail latency and matters
-   only for cost" is a defensible and genuinely useful finding — and the cost
-   axis *does* separate the signals (8 distinct costs on one trace). It is not
-   the artifact that was pre-registered, and the probe shows a nearby regime
-   where the pre-registered question does have an answer.
+   signal value. Not taken, and untested: it keeps the traffic model but
+   changes what "spans its own range" means, which the pre-registration argued
+   for at length. Option 1 reached an evaluable experiment without touching the
+   grids, so this stayed unexercised.
+4. **Report the degeneracy as the result.** Not taken as the headline, and not
+   discarded either: "under a spike this far above capacity the autoscaling
+   signal is irrelevant to tail latency and matters only for cost" is true,
+   measured, and worth publishing as a secondary finding — the cost axis does
+   separate the signals even where p99 does not. It is not the artifact that
+   was pre-registered, and option 1 reached a regime where the pre-registered
+   question has an answer.
 
 ## How to reproduce
 
