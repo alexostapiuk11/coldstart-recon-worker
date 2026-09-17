@@ -6,6 +6,7 @@ from collections import Counter
 
 import pytest
 
+import autoscale.sweep
 from autoscale.arrivals import SpikeShape, arrival_times
 from autoscale.coldstart_ecdf import LagDistribution
 from autoscale.controller import Controller
@@ -451,7 +452,7 @@ def _recompute_repetitions(config, seed, signal, up, down, repetitions):
     """One configuration's repetitions, replayed independently of run_sweep."""
     costs, p99s = [], []
     for rep in range(repetitions):
-        rng = random.Random(_derive_seed(seed, signal, up, down, rep))
+        rng = random.Random(_derive_seed(seed, up, down, rep))
         arrivals = arrival_times(config.shape, until=config.until, rng=rng)
         if not arrivals:
             continue
@@ -548,7 +549,7 @@ json.dump(
         ],
         "discards": discards,
         "seeds": [
-            sweep._derive_seed(11, "queue_depth", 2.0, 0.5, rep) for rep in range(3)
+            sweep._derive_seed(11, 2.0, 0.5, rep) for rep in range(3)
         ],
     },
     sys.stdout,
@@ -582,12 +583,17 @@ def test_the_sweep_is_reproducible_across_processes():
     assert first["points"], "a sweep that produced no points would compare equal trivially"
 
 
-def test_derived_seeds_differ_across_configurations():
+def test_derived_seeds_differ_across_threshold_pairs_and_repetitions():
     """Every repetition of every threshold pair draws its own arrival trace; a
-    collision would silently make two configurations share a trace."""
+    collision would silently make two THRESHOLD PAIRS share a trace.
+
+    The signal is deliberately not part of this: sharing a trace ACROSS SIGNALS
+    at one threshold pair is the common-random-number coupling H3's gap is read
+    from, not a collision. See
+    `test_the_three_signals_are_scored_on_one_shared_arrival_trace`.
+    """
     seeds = [
-        _derive_seed(1, signal, up, down, rep)
-        for signal in sorted(SIGNALS)
+        _derive_seed(1, up, down, rep)
         for up in (1.0, 2.0)
         for down in (0.0, 0.5)
         for rep in range(5)
@@ -599,7 +605,51 @@ def test_derived_seeds_differ_across_configurations():
 def test_the_derived_seed_is_a_fixed_value():
     """Pinned so a change to the derivation shows up as a failing test rather
     than as a quietly different published sweep."""
-    assert _derive_seed(11, "queue_depth", 2.0, 0.5, 0) == 1514556148127504100
+    assert _derive_seed(11, 2.0, 0.5, 0) == 15743821937205418989
+
+
+def test_the_three_signals_are_scored_on_one_shared_arrival_trace(monkeypatch):
+    """The defect: `signal` was part of the seed key, so at the same
+    (seed, up, down, rep) the three signals were replayed against three
+    COMPLETELY DIFFERENT random spikes -- measured over 30 repetitions of the
+    published shape, queue_depth and in_flight_concurrency shared 0 of ~24,600
+    arrival timestamps per repetition. The H3 headline is the p99 spread BETWEEN
+    signals, so every bit of traffic-to-traffic variance landed directly on the
+    published number: per-signal sems of 0.33-0.53 s, and max-minus-min is
+    biased upward by noise, so a non-zero gap was reported no matter what.
+    Sharing the trace makes the gap a paired within-trace difference and cancels
+    the traffic variance -- at one threshold pair (4.0, 0.5) the same two
+    signals' p99 then agree to the last digit in all 30 repetitions, where
+    unpaired they differed by ~1 s of pure noise.
+
+    `arrivals.arrival_times` already documents this coupling as deliberate
+    variance reduction, and the seed key already preserved it for arm A vs arm C
+    (no `arm` in the key) and for step vs ramp (no `kind`) -- it destroyed it for
+    the one axis the headline measures.
+    """
+    monkeypatch.setattr("autoscale.sweep.REPETITIONS", 3)
+    # One threshold pair, shared by all three signals, so the comparison this
+    # test makes is possible at all: the published grids are in three different
+    # units and `utilization` overlaps neither of the other two.
+    monkeypatch.setattr("autoscale.sweep.THRESHOLDS", {s: ((4.0,), (0.5,)) for s in SIGNALS})
+    replayed: dict[str, list[tuple[float, ...]]] = {}
+    real = autoscale.sweep.run_with_policy
+
+    def spy(**kwargs):
+        replayed.setdefault(kwargs["signal"], []).append(tuple(kwargs["arrivals"]))
+        return real(**kwargs)
+
+    monkeypatch.setattr("autoscale.sweep.run_with_policy", spy)
+
+    run_sweep(_config(until=120.0), seed=13)
+
+    assert set(replayed) == set(SIGNALS), "every signal must have been run"
+    traces = list(replayed.values())
+    assert traces[0] == traces[1] == traces[2]
+    assert len(set(traces[0])) == 3, (
+        "the three repetitions collapsed onto one trace; the signals would be "
+        "paired but the sweep would be replaying a single spike 30 times"
+    )
 
 
 def test_the_sweep_feeds_the_frontier(monkeypatch):

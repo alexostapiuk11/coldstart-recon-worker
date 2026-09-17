@@ -27,16 +27,52 @@ EVALUATE_EVERY_SECONDS = 5.0
 MAX_REPLICAS = 12
 
 
-def _derive_seed(seed: int, signal: str, up: float, down: float, rep: int) -> int:
+def _derive_seed(seed: int, up: float, down: float, rep: int) -> int:
     """A per-configuration seed that is stable ACROSS PROCESSES.
 
-    Not `hash((seed, signal, up, down, rep))`: Python randomizes string hashing
-    per process unless PYTHONHASHSEED is set, so a hash-derived seed would give
-    a different sweep on every invocation while looking deterministic inside any
+    Not `hash((seed, up, down, rep))`: Python randomizes string hashing per
+    process unless PYTHONHASHSEED is set, so a hash-derived seed would give a
+    different sweep on every invocation while looking deterministic inside any
     single run -- including inside the test that checks reproducibility. The
     artifact's whole claim is that a reader re-running this gets these numbers.
+
+    THE SIGNAL IS DELIBERATELY NOT IN THE KEY. It was, and that put the whole
+    of traffic-to-traffic variance directly onto the published H3 number: at one
+    (seed, up, down, rep) the three signals were replayed against three
+    completely different random spikes -- queue_depth and in_flight_concurrency
+    shared zero arrival timestamps out of ~24,500 each. H3's metric is
+    max-minus-min of the three signals' p99, which is positively biased by that
+    noise, so a non-zero inter-signal gap came out no matter what: three
+    independent means whose per-signal sem was ~0.4 s span ~0.6 s under a true
+    gap of exactly zero, and the gap the draft reported was ~0.44 s.
+
+    How much of that gap was noise, measured against the PLACEHOLDER service
+    curve: on one fixed arrival trace, all 55 policies in the grid -- all three
+    signals, every threshold pair -- produce the SAME p99 to the last digit
+    (they differ on cost, which is what the frontier is for). Under that curve
+    the inter-signal p99 gap is therefore entirely an artefact of which trace
+    each signal happened to draw. Whether a measured curve separates the signals
+    is exactly what plan 2 is for; this seeding is what makes the answer
+    readable when it lands.
+
+    Dropping it makes the three signals replay the IDENTICAL trace, so the gap
+    is a paired within-trace difference and the traffic variance cancels --
+    the common-random-number coupling `arrivals.arrival_times` documents, which
+    the key already preserved for arm A vs arm C (no `arm` in it) and for step
+    vs ramp (no `kind`), and destroyed only for the axis the headline is read
+    along.
+
+    What it does NOT pair: the three grids below are in three different units,
+    and `utilization`'s shares no (up, down) with either counting signal, so
+    utilization is still scored on different traces from the other two. `up` and
+    `down` stay in the key -- each threshold pair remains an independent draw --
+    so the pairing this buys is real for queue_depth vs in_flight_concurrency at
+    their overlapping thresholds and absent for every comparison involving
+    utilization. Removing them too would put all 55 policies of a repetition on
+    one trace; that is a bigger change to what the sweep estimates, and it is
+    not made here.
     """
-    key = f"{seed}|{signal}|{up}|{down}|{rep}".encode()
+    key = f"{seed}|{up}|{down}|{rep}".encode()
     return int.from_bytes(hashlib.sha256(key).digest()[:8], "big")
 
 
@@ -163,7 +199,7 @@ def run_sweep(
                 costs: list[float] = []
                 p99s: list[float] = []
                 for rep in range(REPETITIONS):
-                    rng = random.Random(_derive_seed(seed, signal, up, down, rep))
+                    rng = random.Random(_derive_seed(seed, up, down, rep))
                     arrivals = arrival_times(config.shape, until=config.until, rng=rng)
                     if not arrivals:
                         discards.append(f"{signal}:empty_trace")
