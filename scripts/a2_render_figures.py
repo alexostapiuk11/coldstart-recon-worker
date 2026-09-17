@@ -25,8 +25,10 @@ from autoscale.coldstart_ecdf import LagDistribution, load_measured_lags
 from autoscale.figures import SIGNAL_ORDER, convergence, frontiers
 from autoscale.frontier import (
     PolicyPoint,
+    gap_at_iso_cost,
     gap_interval,
     h3_verdict,
+    iso_cost_budget,
     pareto_frontier,
 )
 from autoscale.service import SERVICE_CURVE_PLACEHOLDER
@@ -132,14 +134,32 @@ def _run_everything(store: str):
         # the "iso-cost slice" constrained nothing. Any signal whose frontier
         # cannot reach the budget makes the gap undefined rather than smaller --
         # `gap_at_iso_cost` says so and raises.
-        swept[lag] = gap_interval(
-            per_signal, iterations=GAP_BOOTSTRAP_ITERATIONS, seed=SEED
-        )
-        print(
-            f"{label}: gap={swept[lag]['point']:.4f}s "
-            f"[{swept[lag]['lo']:.4f}, {swept[lag]['hi']:.4f}] "
-            f"at budget {swept[lag]['budget']:.1f}"
-        )
+        budget = iso_cost_budget(per_signal)
+        try:
+            swept[lag] = gap_interval(
+                per_signal, iterations=GAP_BOOTSTRAP_ITERATIONS, seed=SEED
+            )
+            print(
+                f"{label}: gap={swept[lag]['point']:.4f}s "
+                f"[{swept[lag]['lo']:.4f}, {swept[lag]['hi']:.4f}] at budget "
+                f"{budget:.1f} over {swept[lag]['paired_repetitions']} paired repetitions"
+            )
+        except ValueError as exc:
+            # A paired bootstrap draws only from the repetitions EVERY frontier
+            # point kept, and the exclusion rules can leave fewer of those than
+            # the bootstrap floor. For the four measured gaps that is fatal and
+            # stays fatal -- the headline does not get published without an
+            # interval. This panel is different in kind: it is the explicitly
+            # NOT MEASURED sensitivity sweep over invented lag values, and a
+            # point without an interval there is a weaker claim, not a
+            # dishonest one. `figures.convergence` draws a bare float without a
+            # band and says so in its note, so the degradation is visible on
+            # the chart rather than only here.
+            swept[lag] = gap_at_iso_cost(per_signal, cost=budget)
+            print(
+                f"{label}: gap={swept[lag]:.4f}s at budget {budget:.1f} -- "
+                f"NO INTERVAL ({exc.args[0].split(';')[0]})"
+            )
 
     # H3 is evaluated under BOTH shapes or not at all -- the pre-registration
     # fixes that, because H4 already predicts the ramp's margins shrink, so a
@@ -165,7 +185,8 @@ def _run_everything(store: str):
         reps = {s: f[0].n for s, f in sorted(per_signal.items())}
         print(
             f"{label}: gap={got['point']:.4f}s [{got['lo']:.4f}, {got['hi']:.4f}] "
-            f"at budget {got['budget']:.1f} replica-seconds (repetitions {reps})"
+            f"at budget {got['budget']:.1f} replica-seconds "
+            f"({got['paired_repetitions']} paired repetitions; per-signal {reps})"
         )
 
     verdict = h3_verdict(
@@ -197,7 +218,7 @@ def _dump(path: Path, sources, swept, gaps) -> None:
                     label: [
                         [
                             list(p.cost_samples), list(p.p99_samples), p.signal,
-                            p.scale_up_at, p.scale_down_at,
+                            p.scale_up_at, p.scale_down_at, list(p.rep_indices),
                         ]
                         for p in points
                     ]
@@ -217,9 +238,9 @@ def _load(path: Path):
         label: [
             PolicyPoint(
                 cost_samples=tuple(c), p99_samples=tuple(p), signal=s,
-                scale_up_at=u, scale_down_at=d,
+                scale_up_at=u, scale_down_at=d, rep_indices=tuple(r),
             )
-            for c, p, s, u, d in rows
+            for c, p, s, u, d, r in rows
         ]
         for label, rows in raw["sources"].items()
     }

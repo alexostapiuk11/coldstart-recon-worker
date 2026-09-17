@@ -62,10 +62,27 @@ class PolicyPoint:
     signal: str
     scale_up_at: float
     scale_down_at: float
+    # WHICH repetitions these samples came from, not merely how many. The
+    # pre-registered exclusion rules discard runs, and they discard different
+    # runs for different policies -- a real sweep comes back with 26, 29 and 30
+    # surviving repetitions on three policies of the same arm. Positions in
+    # `p99_samples` are then NOT comparable across policies: index 3 might be
+    # repetition 3 for one policy and repetition 4 for another that lost an
+    # earlier run. Since the whole point of the shared seed is that repetition
+    # r is the same arrival trace for every policy, `gap_interval` has to pair
+    # on the repetition's identity rather than on its position.
+    #
+    # Defaults to `range(len(samples))`, which is right for a point built by
+    # hand and for any sweep that discarded nothing.
+    rep_indices: tuple[int, ...] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cost_samples", tuple(self.cost_samples))
         object.__setattr__(self, "p99_samples", tuple(self.p99_samples))
+        if self.rep_indices is None:
+            object.__setattr__(self, "rep_indices", tuple(range(len(self.p99_samples))))
+        else:
+            object.__setattr__(self, "rep_indices", tuple(self.rep_indices))
 
         if not self.cost_samples or not self.p99_samples:
             raise ValueError(
@@ -81,6 +98,21 @@ class PolicyPoint:
                 "SAME runs, and `gap_interval` resamples one index list for "
                 "both -- unequal lengths mean the two axes were computed over "
                 "different repetition sets, and pairing them is meaningless"
+            )
+        if len(self.rep_indices) != len(self.p99_samples):
+            raise ValueError(
+                f"rep_indices has {len(self.rep_indices)} entries and there are "
+                f"{len(self.p99_samples)} samples; the indices say WHICH "
+                "repetition each sample came from, so one per sample or the "
+                "pairing `gap_interval` depends on is built on a mislabelled "
+                "correspondence"
+            )
+        if len(set(self.rep_indices)) != len(self.rep_indices):
+            raise ValueError(
+                f"rep_indices {self.rep_indices} contains duplicates; two "
+                "samples cannot both be repetition r, and a duplicate would let "
+                "one run be drawn twice per bootstrap resample while another is "
+                "never drawn at all"
             )
 
         # The same guards this class has always had, applied to the samples the
@@ -312,11 +344,21 @@ def gap_at_iso_cost(
     return max(achieved) - min(achieved)
 
 
-def _take(samples: tuple[float, ...], index: tuple[int, ...]) -> list[float]:
-    """Indexed separately so a test can prove one index list is shared across
+def _take(point: "PolicyPoint", field: str, reps: tuple[int, ...]) -> list[float]:
+    """This point's `field` values at the given REPETITION IDS.
+
+    By id, not by position. The exclusion rules discard different runs for
+    different policies, so position 3 is not repetition 3 once anything has
+    been dropped -- and pairing on position would silently compare repetition 3
+    of one signal against repetition 4 of another, which is precisely the
+    cross-trace comparison the shared seed exists to prevent.
+
+    Separate function so a test can prove one repetition list is shared across
     every policy in a draw -- see
-    `test_the_gap_interval_resamples_one_index_list_for_every_policy`."""
-    return [samples[i] for i in index]
+    `test_the_gap_interval_resamples_one_index_list_for_every_policy`.
+    """
+    lookup = dict(zip(point.rep_indices, getattr(point, field), strict=True))
+    return [lookup[r] for r in reps]
 
 
 def gap_interval(
@@ -349,7 +391,10 @@ def gap_interval(
     it. NOTE: this makes the bias VISIBLE, not corrected; a correction needs a
     held-out selection split and is not attempted here.
 
-    Returns `{"point", "lo", "hi", "budget"}`. `point` and `budget` are the
+    Returns `{"point", "lo", "hi", "budget", "paired_repetitions"}`.
+    `paired_repetitions` is how many repetitions every policy had in common
+    -- the sample the bootstrap actually drew from, which is smaller than 30
+    whenever the exclusion rules bit. `point` and `budget` are the
     OBSERVED values, not bootstrap centres: the draws estimate spread, and
     reporting their centre would publish a different estimator from the one
     named.
@@ -372,16 +417,33 @@ def gap_interval(
     all_points = [p for f in frontiers.values() for p in f]
     if not all_points:
         raise ValueError("every frontier is empty; there is no gap to put an interval on")
-    counts = {p.n for p in all_points}
-    if len(counts) > 1:
+
+    # Resample over the repetitions EVERY policy kept. The exclusion rules
+    # discard different runs for different policies -- a real sweep comes back
+    # with 26, 29 and 30 survivors on three policies of the same arm -- and a
+    # paired bootstrap can only draw repetitions that all of them have. An
+    # earlier version of this function demanded equal counts instead and
+    # refused to run on any real sweep: ragged discards are the normal case
+    # here, not an anomaly, and the pre-registration already requires them to
+    # be counted and reported rather than treated as an error.
+    #
+    # Taking the intersection rather than each policy's own repetitions is what
+    # keeps the pairing exact. It costs coverage, so the count is returned as
+    # `paired_repetitions` for the caller to report.
+    common = set(all_points[0].rep_indices)
+    for point in all_points[1:]:
+        common &= set(point.rep_indices)
+    reps_available = sorted(common)
+    if len(reps_available) < stats.MIN_BOOTSTRAP_SAMPLES:
         raise ValueError(
-            f"policies have different numbers of repetitions ({sorted(counts)}); "
-            "one shared index list per draw requires equal counts. Unequal "
-            "counts mean the pre-registered exclusion rules bit the signals "
-            "differently, which is a finding to publish about those signals, "
-            "not something to paper over by truncating to the shortest"
+            f"only {len(reps_available)} repetitions are common to every policy "
+            f"(the bootstrap floor is {stats.MIN_BOOTSTRAP_SAMPLES}); the "
+            "pre-registered exclusion rules discarded so much that there is no "
+            "paired sample left to resample from. That is a finding about this "
+            "sweep -- check the per-signal discard counts -- and not an "
+            "interval to widen until it fits"
         )
-    n = counts.pop()
+    n = len(reps_available)
 
     observed_budget = iso_cost_budget(frontiers)
     point = gap_at_iso_cost(frontiers, cost=observed_budget, expected=wanted)
@@ -389,16 +451,20 @@ def gap_interval(
     rng = random.Random(seed)
     draws: list[float] = []
     for _ in range(iterations):
-        index = tuple(rng.randrange(n) for _ in range(n))
+        drawn = tuple(reps_available[rng.randrange(n)] for _ in range(n))
         resampled = {
             signal: pareto_frontier(
                 [
                     PolicyPoint(
-                        cost_samples=tuple(_take(p.cost_samples, index)),
-                        p99_samples=tuple(_take(p.p99_samples, index)),
+                        cost_samples=tuple(_take(p, "cost_samples", drawn)),
+                        p99_samples=tuple(_take(p, "p99_samples", drawn)),
                         signal=p.signal,
                         scale_up_at=p.scale_up_at,
                         scale_down_at=p.scale_down_at,
+                        # The draw is with replacement, so `drawn` repeats -- a
+                        # resampled point's samples are not one-per-repetition
+                        # any more and must not claim to be.
+                        rep_indices=tuple(range(n)),
                     )
                     for p in f
                 ]
@@ -409,7 +475,13 @@ def gap_interval(
         draws.append(gap_at_iso_cost(resampled, cost=budget, expected=wanted))
 
     lo, hi = stats._percentile_interval(draws, alpha)
-    return {"point": point, "lo": lo, "hi": hi, "budget": observed_budget}
+    return {
+        "point": point,
+        "lo": lo,
+        "hi": hi,
+        "budget": observed_budget,
+        "paired_repetitions": n,
+    }
 
 
 def _validate_gap(label: str, value: float) -> None:

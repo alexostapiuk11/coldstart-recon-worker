@@ -206,6 +206,14 @@ def run_sweep(
                     continue
                 costs: list[float] = []
                 p99s: list[float] = []
+                # WHICH repetitions survived, not just how many. Repetition r is
+                # the same arrival trace for every policy (see `_derive_seed`),
+                # and the exclusion rules discard different runs for different
+                # policies -- so without the ids, position 3 is repetition 3 for
+                # one policy and repetition 4 for another that lost an earlier
+                # run, and anything pairing on position compares two different
+                # traces.
+                kept_reps: list[int] = []
                 for rep in range(REPETITIONS):
                     rng = random.Random(_derive_seed(seed, up, down, rep))
                     arrivals = arrival_times(config.shape, until=config.until, rng=rng)
@@ -255,6 +263,7 @@ def run_sweep(
                         continue
                     costs.append(result.replica_seconds)
                     p99s.append(result.percentiles()["p99"])
+                    kept_reps.append(rep)
                 if not costs:
                     continue
                 points.append(
@@ -264,6 +273,7 @@ def run_sweep(
                         signal=signal,
                         scale_up_at=up,
                         scale_down_at=down,
+                        rep_indices=tuple(kept_reps),
                     )
                 )
     return points, discards

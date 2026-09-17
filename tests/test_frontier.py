@@ -996,9 +996,9 @@ def test_the_gap_interval_resamples_one_index_list_for_every_policy(monkeypatch)
     seen = []
     real = autoscale.frontier._take
 
-    def spy(samples, index):
-        seen.append(tuple(index))
-        return real(samples, index)
+    def spy(point, field, reps):
+        seen.append(tuple(reps))
+        return real(point, field, reps)
 
     monkeypatch.setattr("autoscale.frontier._take", spy)
     frontiers = {
@@ -1009,9 +1009,64 @@ def test_the_gap_interval_resamples_one_index_list_for_every_policy(monkeypatch)
         frontiers, iterations=3, seed=0, expected=("queue_depth", "in_flight_concurrency")
     )
     # Three policies x two sample fields x three draws, but only three DISTINCT
-    # index lists -- one per draw, shared by every policy in it.
+    # repetition lists -- one per draw, shared by every policy in it.
     assert len(seen) == 18
     assert len(set(seen)) <= 3
+
+
+def test_the_gap_interval_pairs_on_repetition_identity_not_position():
+    """The exclusion rules discard different runs for different policies, so
+    position 3 is repetition 3 for one policy and repetition 4 for another that
+    lost an earlier run. Pairing on position would compare two different arrival
+    traces -- the exact thing the shared seed exists to prevent."""
+    full = tuple(range(30))
+    # This policy lost repetition 0; its samples are shifted by one position.
+    ragged = tuple(range(1, 31))
+
+    a = PolicyPoint(
+        cost_samples=(10.0,) * 30,
+        p99_samples=tuple(float(r) for r in full),
+        signal="queue_depth",
+        scale_up_at=2.0,
+        scale_down_at=0.5,
+        rep_indices=full,
+    )
+    b = PolicyPoint(
+        cost_samples=(10.0,) * 30,
+        p99_samples=tuple(float(r) for r in ragged),
+        signal="in_flight_concurrency",
+        scale_up_at=2.0,
+        scale_down_at=0.5,
+        rep_indices=ragged,
+    )
+    # p99_samples[i] == rep_indices[i] for both, so a correctly paired draw sees
+    # the SAME number from both policies and the gap is exactly zero in every
+    # draw. Pairing on position would see a constant difference of 1.
+    got = gap_interval(
+        {"queue_depth": [a], "in_flight_concurrency": [b]},
+        iterations=200,
+        seed=0,
+        expected=("queue_depth", "in_flight_concurrency"),
+    )
+    assert got["lo"] == got["hi"] == pytest.approx(0.0)
+    # 29 repetitions in common (1..29), not 30: the intersection is what is
+    # drawn from, and the count is reported so a caller can say so.
+    assert got["paired_repetitions"] == 29
+
+
+def test_ragged_repetition_counts_are_normal_and_not_refused():
+    """An earlier version demanded equal counts and refused to run on any real
+    sweep: a real arm comes back with 26, 29 and 30 survivors across policies.
+    Ragged discards are the normal case here, and the pre-registration already
+    requires them to be counted and reported rather than treated as an error."""
+    frontiers = {
+        "queue_depth": [_p(10, 4.0, "queue_depth", n=26)],
+        "in_flight_concurrency": [_p(14, 3.5, "in_flight_concurrency", n=29)],
+        "utilization": [_p(25, 9.0, "utilization", n=30)],
+    }
+    got = gap_interval(frontiers, iterations=200, seed=0)
+    assert got["paired_repetitions"] == 26
+    assert got["point"] == pytest.approx(5.5)
 
 
 def test_the_gap_interval_refuses_an_incomplete_signal_set():
@@ -1022,18 +1077,44 @@ def test_the_gap_interval_refuses_an_incomplete_signal_set():
         gap_interval({"queue_depth": [_p(10, 4.0)]}, iterations=100, seed=0)
 
 
-def test_the_gap_interval_requires_equal_repetition_counts():
-    """Resampling one index list across policies requires the policies to have
-    the same number of repetitions. Unequal counts mean the exclusion rules bit
-    the signals differently -- publishable, and not something to paper over by
-    truncating to the shortest."""
+def test_too_few_paired_repetitions_is_refused():
+    """Ragged counts are fine; a ragged count that leaves fewer repetitions in
+    common than the bootstrap floor is not. Below it the resampled distribution
+    is a handful of repeated values and the interval comes out
+    confident-looking and meaningless."""
     frontiers = {
         "queue_depth": [_p(10, 4.0, "queue_depth", n=30)],
         "in_flight_concurrency": [_p(14, 3.5, "in_flight_concurrency", n=12)],
         "utilization": [_p(25, 9.0, "utilization", n=30)],
     }
-    with pytest.raises(ValueError, match="different numbers of repetitions"):
+    with pytest.raises(ValueError, match="common to every policy"):
         gap_interval(frontiers, iterations=100, seed=0)
+
+
+def test_rep_indices_must_match_the_sample_count():
+    with pytest.raises(ValueError, match="rep_indices has"):
+        PolicyPoint(
+            cost_samples=(1.0, 2.0),
+            p99_samples=(1.0, 2.0),
+            signal="queue_depth",
+            scale_up_at=2.0,
+            scale_down_at=0.5,
+            rep_indices=(0,),
+        )
+
+
+def test_duplicate_rep_indices_are_refused():
+    """Two samples cannot both be repetition r, and a duplicate would let one
+    run be drawn twice per resample while another is never drawn at all."""
+    with pytest.raises(ValueError, match="duplicates"):
+        PolicyPoint(
+            cost_samples=(1.0, 2.0),
+            p99_samples=(1.0, 2.0),
+            signal="queue_depth",
+            scale_up_at=2.0,
+            scale_down_at=0.5,
+            rep_indices=(3, 3),
+        )
 
 
 def test_the_gap_interval_is_reproducible_from_its_seed():
