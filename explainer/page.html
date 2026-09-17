@@ -46,7 +46,15 @@
   .apparatus { margin: 3rem 0; }
   .spine-col { min-width: 0; }
   #spine { display: block; width: 100%; height: auto; color: var(--ink); }
-  #spine .dim { opacity: .28; transition: opacity .35s ease; }
+  /* Progressive enhancement: the diagram is fully legible by default, and the
+     dimming only switches on once the observer has actually fired once. If the
+     script never runs, or the viewer's environment suspends IntersectionObserver
+     (a hidden document does exactly that -- callbacks ride the same rendering
+     pipeline as requestAnimationFrame), the reader gets a complete diagram
+     rather than one stuck at 28% opacity forever. */
+  #spine .dim { transition: opacity .35s ease; }
+  #spine.choreo .dim { opacity: .28; }
+  #spine.choreo .dim.lit { opacity: 1; }
   #spine .lit { opacity: 1; }
   .beat { border-top: 1px solid var(--rule); padding: 1rem 0; }
   .beat h2 {
@@ -147,10 +155,12 @@ seconds, against {{median_t_total_A}} with nothing cached.</p>
   // The band is the middle 10% of the viewport, so a beat lights when it is
   // the thing being read, not when it first peeks in at the bottom.
   (function () {
+    var spine = document.getElementById("spine");
     var groups = document.querySelectorAll("#spine g");
     var io = new IntersectionObserver(function (entries) {
       for (var i = 0; i < entries.length; i++) {
         if (!entries[i].isIntersecting) continue;
+        spine.classList.add("choreo");
         groups.forEach(function (g) { g.classList.remove("lit"); });
         entries[i].target.dataset.lights.split(",").forEach(function (id) {
           var el = document.getElementById(id.trim());
