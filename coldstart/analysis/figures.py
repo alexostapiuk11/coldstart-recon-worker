@@ -1,5 +1,6 @@
-"""The four public-post figures: waterfall decomposition, warmup curve, ECDF,
-and per-host medians.
+"""The figures: four for the published post — waterfall decomposition, warmup
+curve, ECDF, per-host medians — and three for the explainer that teaches it:
+the KV dividend, the resample frames, and the shortcut panels.
 
 These charts are the artifact for most readers — more people will look at
 the waterfall than will read the method section — so every aggregate drawn
