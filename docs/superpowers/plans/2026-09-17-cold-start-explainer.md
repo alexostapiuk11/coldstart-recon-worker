@@ -177,7 +177,8 @@ def test_kv_dividend_states_both_directions_of_the_comparison(tmp_path):
     fig, ax = _call_capturing_axes(kv_dividend, data, tmp_path / "kv.png")
     text = " ".join(t.get_text() for t in ax.texts) + ax.get_title()
     assert "20.3" in text
-    assert "16.8" in text
+    assert "16.8% smaller" in text
+    assert "-16.8" not in text, "a minus here inverts the direction: '-16.8% smaller' reads as larger"
     for label, size in [(t.get_text(), t.get_fontsize()) for t in ax.texts]:
         if label.strip():
             assert size * PHONE_WIDTH_PX / (72 * fig.get_size_inches()[0]) >= MIN_PHONE_TEXT_PX
@@ -223,7 +224,7 @@ def kv_dividend(rows, out_path) -> Path:
         f"({int(warm // 8192)} concurrent requests vs {int(cold // 8192)} at 8192 context)",
         fontsize=phone_pt(8.6, fig_w),
     )
-    ax.text(0.5, -0.32, f"Equivalently: a cold compile sizes the cache {cold / warm - 1:.1%} smaller — "
+    ax.text(0.5, -0.32, f"Equivalently: a cold compile sizes the cache {abs(cold / warm - 1):.1%} smaller — "
                         "permanently, for the life of that replica.",
             transform=ax.transAxes, ha="center", fontsize=phone_pt(7.6, fig_w), style="italic")
     fig.tight_layout()
