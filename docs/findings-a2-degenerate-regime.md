@@ -63,7 +63,7 @@ peak needs 3.4 replicas; cap is 12
 arm A lag p50 = 81.1 s, spike sustain = 190 s
 ```
 
-Every policy scales up **8 or 9 times** and hits the 12-replica ceiling:
+Every policy scales up **8 or 9 times**:
 
 ```
 (scale_up, scale_down) -> policies
@@ -78,10 +78,23 @@ Every policy scales up **8 or 9 times** and hits the 12-replica ceiling:
 The peak is 3.4× one replica's capacity, so **every signal is past every
 threshold in its own grid from the first evaluation onward and stays there**.
 A saturated signal carries no information, and three saturated signals carry
-the same none. Meanwhile the 81 s cold-start lag means the fleet cannot grow
-for the first 81 s of a 190 s spike, so a backlog builds that is identical
-regardless of which signal ordered the (identically timed) scale-ups. The p99
-is set by the lag and the arrival trace; the policy has no purchase on it.
+the same none.
+
+**The replica cap is not the binding constraint.** Net fleet growth is 2 to 9
+replicas plus the initial one, against a ceiling of 12 — so the cap is never
+reached, and raising it changes nothing. Measured directly at
+`max_replicas` ∈ {12, 24, 64}: identical scale-up counts, identical fleet
+growth, and still exactly **one** distinct p99 across all 55 policies at every
+ceiling. (An earlier draft of this finding asserted the policies "hit the
+12-replica ceiling". They do not; the probe in the next section disproved it.)
+
+The real mechanism is the cold start. The 81 s lag means no added capacity
+arrives for the first 81 s of a 190 s spike, so the backlog that sets the p99
+is already built before any policy's decisions can matter — and the request at
+the 99th percentile is one queued during that window, whose wait is fixed by
+the lag alone. Whether the fleet later reaches 3 replicas or 10 changes how
+fast the *rest* of the queue drains, not the tail. The p99 is set by the lag
+and the arrival trace; the policy has no purchase on it.
 
 The differences that survive are all in scale-**down**, which moves cost (8
 distinct values) and not latency.
@@ -115,26 +128,67 @@ placeholder's invented latency points.
 - The simulator itself is **not** implicated. It is doing exactly what it was
   asked to: replaying a load no policy can serve.
 
+## A regime where the comparison IS defined
+
+`scripts/a2_regime_probe.py` sweeps the two traffic-model knobs and the replica
+cap, and asks one deliberately ranking-blind question per configuration: how
+many *distinct* p99 values do the 55 policies produce on a single fixed trace?
+The metric cannot be read as "signal X is better", so searching for a large
+spread cannot smuggle in a preferred winner — it can only locate a regime where
+the signals are distinguishable from one another at all.
+
+**10 of 40 configurations separate the policies. Every one of them has
+`peak / saturation` between 0.35 and 1.20. Every configuration at
+`peak / saturation ≥ 1.4` gives a spread of exactly zero.**
+
+The candidates that keep all 55 policies (lower loads lose policies to the
+pre-registered exclusion rules):
+
+| baseline | additional replicas | peak/sat | distinct p99 | p99 spread | p99 floor |
+|---|---|---|---|---|---|
+| 70% | 0.25 | 0.95 | 2 | 6.04 s | 3.23 s |
+| **40%** | **0.5** | **0.90** | **5** | **3.37 s** | **1.60 s** |
+| 10% | 1 | 1.10 | 3 | 1.87 s | 15.98 s |
+| 20% | 1 | 1.20 | 2 | 1.35 s | 21.69 s |
+| 70% | 0.5 | 1.20 | 2 | 1.27 s | 21.40 s |
+
+The replica cap is irrelevant throughout: 12 and 24 give byte-identical results
+in all 40 rows.
+
+The mechanism is exactly the theory. Separation needs the spike to carry the
+fleet from comfortably-under capacity to *roughly at* capacity, so that a
+threshold is sometimes crossed and sometimes not. Push the peak past ~1.4×
+saturation and every signal is pinned high for the whole spike; three pinned
+signals are one signal.
+
+**The 40% / 0.5 row is the strongest candidate**, and notably it keeps the
+pre-registered baseline fraction untouched — only `k` moves, from 3 additional
+replicas to 0.5. It resolves the 55 policies into 5 distinct p99 values rather
+than 2, which is what a Pareto frontier needs to have shape, and its 3.37 s
+spread sits on a 1.60 s floor: a *relative* effect of over 200%, against the
+6.04 s spread on a 3.23 s floor that the widest-spread row offers with only two
+buckets.
+
 ## Candidate fixes (none chosen — this needs a decision)
 
-Each changes a pre-registered quantity and so requires a dated amendment.
+Each changes a pre-registered quantity and so requires a dated amendment
+disclosing this search.
 
-1. **Lower the peak** so the signals operate below saturation for part of the
-   spike. The comparison needs a regime where a threshold is sometimes crossed
-   and sometimes not. `k` sized to require 3 additional replicas is the
-   pre-registered rule; the problem is that 3 *additional* replicas against a
-   40%-of-one-replica baseline is a 8.5× jump.
-2. **Raise the replica ceiling** above 12 so the cap stops binding. Cheapest
-   change, but it does not address signal saturation — every threshold is still
-   crossed immediately.
+1. **Lower the peak** — `k` sized to require ~0.5 additional replicas instead
+   of 3, keeping baseline at 40% of saturation. Supported by the probe above,
+   and the smallest edit to the pre-registration that produces an evaluable
+   experiment. **Recommended.**
+2. ~~Raise the replica ceiling~~ — **disproven.** The cap never binds; 12, 24
+   and 64 give identical results.
 3. **Widen the threshold grids upward** so some thresholds sit above the peak
    signal value. Keeps the traffic model; changes what "spans its own range"
-   means, which the pre-registration argued for at length.
+   means, which the pre-registration argued for at length. Untested.
 4. **Report the degeneracy as the result.** "Under a spike this far above
    capacity, the autoscaling signal is irrelevant to tail latency and matters
    only for cost" is a defensible and genuinely useful finding — and the cost
    axis *does* separate the signals (8 distinct costs on one trace). It is not
-   the artifact that was pre-registered.
+   the artifact that was pre-registered, and the probe shows a nearby regime
+   where the pre-registered question does have an answer.
 
 ## How to reproduce
 
@@ -144,3 +198,10 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/a2_gap_noise_floor.py --seeds
 
 Roughly 40 minutes of CPU. `--seeds 2 --reps 3` reproduces the shape of the
 result in under a minute.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/a2_regime_probe.py
+```
+
+Roughly 3 minutes. Prints the table above and names the widest-separating
+configuration.
