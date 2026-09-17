@@ -390,7 +390,7 @@ def _measured_curve():
 
 def _config(**overrides):
     kwargs = {
-        "shape": SpikeShape(kind="step", baseline_rate=2.0, k=4.0, ramp=0.0, sustain=30.0),
+        "shape": SpikeShape(kind="step", baseline_rate=12.0, k=4.0, ramp=0.0, sustain=30.0),
         "lags": LagDistribution(samples=[40.0, 80.0]),
         "curve": _measured_curve(),
         "arm": "A",
@@ -518,6 +518,13 @@ def test_the_fixed_control_loop_parameters_are_pinned():
     assert (COOLDOWN_SECONDS, EVALUATE_EVERY_SECONDS, MAX_REPLICAS) == (30.0, 5.0, 12)
 
 
+def _spread(values) -> float:
+    """Range of a sample. Used to decide whether a set of repetitions varies
+    enough to distinguish one aggregator from another -- see the comment at its
+    call site for why exact float distinctness is not that test."""
+    return max(values) - min(values)
+
+
 def _recompute_repetitions(config, seed, signal, up, down, repetitions):
     """One configuration's repetitions, replayed independently of run_sweep."""
     costs, p99s = [], []
@@ -566,9 +573,17 @@ def test_a_policy_point_is_the_mean_across_repetitions(monkeypatch):
         costs, p99s = _recompute_repetitions(
             config, 4, point.signal, point.scale_up_at, point.scale_down_at, 4
         )
-        if len(set(costs)) < 2 or len(set(p99s)) < 2:
-            # A configuration whose repetitions all landed on the same number
-            # cannot tell a mean from a max, so it proves nothing either way.
+        # A configuration whose repetitions all landed on the same number
+        # cannot tell a mean from a max, so it proves nothing either way.
+        #
+        # `len(set(...)) < 2` is NOT the right test for that: replica-seconds is
+        # a sum of floats, so four repetitions identical in every way a reader
+        # cares about still come back as four DISTINCT floats
+        # (269.9999999999996 through 270.00000000000034 on this config). They
+        # pass a distinctness check and then fail the "not a max" assertion
+        # below, because at that spread the mean and the max are the same number
+        # to any tolerance. Require real spread instead.
+        if _spread(costs) < 1e-6 or _spread(p99s) < 1e-6:
             continue
         checked += 1
         assert point.cost == pytest.approx(sum(costs) / len(costs))
@@ -605,7 +620,7 @@ from autoscale.service import SERVICE_CURVE_PLACEHOLDER, ServiceCurve
 
 sweep.REPETITIONS = 2
 config = sweep.SweepConfig(
-    shape=SpikeShape(kind="step", baseline_rate=2.0, k=4.0, ramp=0.0, sustain=30.0),
+    shape=SpikeShape(kind="step", baseline_rate=12.0, k=4.0, ramp=0.0, sustain=30.0),
     lags=LagDistribution(samples=[40.0, 80.0]),
     curve=ServiceCurve(points=SERVICE_CURVE_PLACEHOLDER.points, measured=True),
     arm="A",

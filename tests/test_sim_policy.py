@@ -68,13 +68,19 @@ def test_replicas_do_not_serve_before_their_lag_elapses():
 
 def test_shorter_lag_produces_lower_p99_all_else_equal():
     """The composition claim in miniature: the only difference between these two
-    runs is the lag distribution."""
-    arrivals = [float(i) * 0.2 for i in range(400)]
+    runs is the lag distribution.
+
+    700 arrivals over a 200 s window, not 400 over 120 s: `percentiles()`
+    enforces artifact 1's sample floors and p99 needs 500 completions. The
+    point of this test is a p99 comparison, so it has to clear the bar that
+    reporting a p99 requires.
+    """
+    arrivals = [float(i) * 0.2 for i in range(700)]
     kwargs = {
         "arrivals": arrivals,
         "signal": "queue_depth",
         "curve": SLOW,
-        "until": 120.0,
+        "until": 200.0,
         "evaluate_every": 1.0,
     }
     slow = run_with_policy(

@@ -18,6 +18,7 @@ from autoscale.frontier import PolicyPoint
 from autoscale.service import ServiceCurve
 from autoscale.signals import SIGNALS
 from autoscale.sim import run_with_policy
+from autoscale.stats import MIN_SAMPLES
 
 __all__ = ["SweepConfig", "run_sweep"]
 
@@ -221,6 +222,29 @@ def run_sweep(
                     )
                     if result.discard_reason:
                         discards.append(f"{signal}:{result.discard_reason}")
+                        continue
+                    if len(result.latencies) < MIN_SAMPLES["p99"]:
+                        # A run that completed fewer requests than a p99 needs
+                        # has no p99 to contribute -- it has a handful of order
+                        # statistics. The pre-registration's stated
+                        # justification for reporting p99 at all is that "a
+                        # spike generates thousands of requests", and a run
+                        # that did not is outside the regime that
+                        # justification describes.
+                        #
+                        # Caught HERE rather than in `run_with_policy`, and as
+                        # a discard rather than the exception `percentiles()`
+                        # would otherwise raise. Here, because
+                        # `run_with_policy` is a simulator primitive whose own
+                        # tests legitimately replay a dozen requests to check
+                        # the scaling rules -- a floor about publishing a
+                        # percentile does not belong in the thing that
+                        # simulates. As a discard, because every other way a
+                        # run can be uninformative about its signal is a
+                        # counted, per-signal-reported discard, and letting
+                        # this one surface as a raise would abort an entire
+                        # sweep on one short run instead of reporting it.
+                        discards.append(f"{signal}:insufficient_completions")
                         continue
                     costs.append(result.replica_seconds)
                     p99s.append(result.percentiles()["p99"])

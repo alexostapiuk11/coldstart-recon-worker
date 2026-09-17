@@ -46,6 +46,7 @@ from autoscale.events import Event, EventQueue
 from autoscale.replica import Replica, ReplicaState
 from autoscale.service import ServiceCurve
 from autoscale.signals import SIGNALS, FleetState
+from autoscale.stats import percentiles as _percentiles
 
 __all__ = ["SimResult", "run_fixed_capacity", "run_with_policy"]
 
@@ -75,7 +76,17 @@ class SimResult:
 
         p99 is supported here and was not in artifact 1: a spike generates
         thousands of requests, where artifact 1 had ~100 runs per arm and
-        published no p99 for exactly that reason.
+        published no p99 for exactly that reason. "Thousands" is the
+        justification, so `autoscale.stats.percentiles` enforces it -- a run
+        that completed a dozen requests has a second-worst latency, not a p99,
+        and before the floor the sweep averaged that into the same estimate as
+        a run that completed four thousand.
+
+        Routed through `autoscale.stats` rather than computed here so that
+        artifact 2's p50 and artifact 1's p50 are one convention. This was
+        `ordered[min(len - 1, int(p * len))]` -- nearest-rank, which disagrees
+        with artifact 1's linear interpolation by up to a whole order statistic
+        on the same data (p50 of 0..999: 500.0 against 499.5).
         """
         if not self.latencies:
             # Returning zeros here would report a run that completed NOTHING
@@ -91,13 +102,7 @@ class SimResult:
                 "`completed` before calling, and discard or widen the run "
                 "rather than publishing zeros"
             )
-        ordered = sorted(self.latencies)
-
-        def q(p: float) -> float:
-            idx = min(len(ordered) - 1, int(p * len(ordered)))
-            return ordered[idx]
-
-        return {"p50": q(0.50), "p90": q(0.90), "p95": q(0.95), "p99": q(0.99)}
+        return _percentiles(self.latencies, want=("p50", "p90", "p95", "p99"))
 
 
 def run_fixed_capacity(
