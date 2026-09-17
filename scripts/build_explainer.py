@@ -31,6 +31,36 @@ PLACEHOLDER = re.compile(r"\{\{([^}]+)\}\}")
 FIRST_TOUCH_THRESHOLD_S = 200.0
 
 
+_METADATA = re.compile(r"<metadata>.*?</metadata>", re.DOTALL)
+_SVG_ID = re.compile(r'\bid="([^"]+)"')
+
+
+def _namespace_ids(svg: str, prefix: str) -> str:
+    """Prefix every element id in one chart's SVG, and every reference to it.
+
+    matplotlib names glyph definitions deterministically (`id="DejaVuSans-48"`),
+    so two charts inlined into the same document both declare them. A browser
+    resolves `xlink:href="#DejaVuSans-48"` to whichever came first, which
+    silently makes the second chart render the first chart's glyphs. The
+    outlines happen to be identical today, so it would look correct and be
+    wrong -- exactly the class of defect this page is about.
+
+    Longest ids first: `#p123` must not be rewritten by a pass over `#p12`.
+
+    The prefix is an opaque counter, not the chart's name: naming it `ecdf-`
+    put the string "ecdf" into the markup, and the jargon gate -- correctly
+    case-insensitive -- then reported ECDF as an undefined term. A chart name
+    is allowed to be a word the page owes a definition for; an element id is
+    not the place to say it.
+    """
+    ids = sorted(set(_SVG_ID.findall(svg)), key=len, reverse=True)
+    for raw in ids:
+        svg = svg.replace(f'id="{raw}"', f'id="{prefix}-{raw}"')
+        svg = svg.replace(f'#{raw}"', f'#{prefix}-{raw}"')
+        svg = svg.replace(f"url(#{raw})", f"url(#{prefix}-{raw})")
+    return svg
+
+
 def _fmt(value) -> str:
     if isinstance(value, dict) and {"lo", "hi"} <= set(value):
         return f"[{value['lo']:.2f}, {value['hi']:.2f}]"
@@ -46,6 +76,7 @@ class _Charts:
         self.repo = repo
         self.tmp = tmp
         self._rows: list[dict] | None = None
+        self._chart_index = 0
 
     def rows(self) -> list[dict]:
         if self._rows is None:
@@ -80,7 +111,10 @@ class _Charts:
         svg = out.read_text()
         # matplotlib writes an XML declaration and a DOCTYPE ahead of the root
         # element; neither is legal inside an HTML document, so drop them.
-        return svg[svg.index("<svg") :]
+        svg = svg[svg.index("<svg") :]
+        svg = _METADATA.sub("", svg)
+        self._chart_index += 1
+        return _namespace_ids(svg, f"c{self._chart_index}")
 
 
 def main() -> int:
