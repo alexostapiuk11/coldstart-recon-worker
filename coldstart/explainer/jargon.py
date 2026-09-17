@@ -13,6 +13,31 @@ TERMS: dict[str, str] = json.loads(
 )
 
 
+_TYPOGRAPHIC = {
+    "\u2019": "'",
+    "\u2018": "'",
+    "\u201c": '"',
+    "\u201d": '"',
+    "\u2014": "-",
+    "\u2013": "-",
+    "\u00a0": " ",
+}
+
+
+def _normalize(text: str) -> str:
+    """Fold typographic punctuation to ASCII before matching.
+
+    The definitions are authored with straight quotes and hyphens; the rendered
+    page uses curly quotes and em dashes. Without this, a definition that IS
+    present fails the check purely on punctuation, and the build stops for a
+    reason that has nothing to do with jargon. Fails loudly rather than
+    silently, but it would still waste the author's time on every edit.
+    """
+    for fancy, plain in _TYPOGRAPHIC.items():
+        text = text.replace(fancy, plain)
+    return " ".join(text.lower().split())
+
+
 def undefined_terms(html: str) -> list[str]:
     """Listed terms that appear in `html` without their definition nearby.
 
@@ -25,6 +50,7 @@ def undefined_terms(html: str) -> list[str]:
     parsing, just "is this exact text present."
     """
     haystack = html.lower()
+    haystack = _normalize(html)
     missing = []
     for term, definition in TERMS.items():
         if term.lower() not in haystack:
