@@ -1,9 +1,11 @@
 """Assemble the explainer page from committed data.
 
-Three substitutions, all derivations rather than transcriptions:
+Four substitutions, all derivations rather than transcriptions:
 {{key}} for a number on the key list, {{chart:name}} for an SVG rendered from
-the campaign, {{excerpt:slug}} for code pulled from the running source. An
-unknown placeholder is a build failure, not a silently empty page.
+the campaign, {{excerpt:slug}} for code pulled from the running source, and
+{{spine}} for the hand-authored apparatus diagram, kept in its own file so it
+stays editable as a drawing. An unknown placeholder is a build failure, not a
+silently empty page.
 
     .venv/bin/python scripts/build_explainer.py --out build/explainer/index.html
 """
@@ -133,6 +135,13 @@ def main() -> int:
     def substitute(m: re.Match) -> str:
         token = m.group(1).strip()
         try:
+            if token == "spine":
+                # Not escaped, and deliberately not id-namespaced the way charts
+                # are: the scroll choreography looks these groups up by their
+                # literal ids, so rewriting them would silently unwire the page.
+                # Chart ids get namespaced because matplotlib picks them; these
+                # are picked by hand, and there is exactly one spine.
+                return (REPO / "explainer" / "spine.svg").read_text().strip()
             if token.startswith("chart:"):
                 # Not escaped: the SVG has to reach the page as markup.
                 return charts.render(token.split(":", 1)[1])

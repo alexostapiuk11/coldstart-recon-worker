@@ -1,8 +1,138 @@
 <title>Where a Cold Start Goes</title>
+<!-- Without this a phone lays the page out at 980 CSS px, takes the wide
+     branch of the media queries, and renders the spine into a side rail it
+     is not readable in. The Artifact host supplies one too; this makes the
+     fragment correct on its own. -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --ink: #1b1b1d;
+    --ink-soft: #55565b;
+    --rule: #d9d9de;
+    --page: #ffffff;
+    --clk-a: #1f5fc4;
+    --clk-b: #a8460b;
+    --clk-c: #6d28a8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e8e8ea;
+      --ink-soft: #a6a7ad;
+      --rule: #34353a;
+      --page: #141416;
+      /* Lifted, not the same hues dimmed: the light-theme accents are dark
+         enough to vanish against a dark page. */
+      --clk-a: #79b0f5;
+      --clk-b: #f5a361;
+      --clk-c: #c79af0;
+    }
+  }
+  body {
+    margin: 0 auto;
+    padding: 2rem 1.25rem 6rem;
+    max-width: 1180px;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+  }
+  h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 1rem; }
+  figure { margin: 2.5rem 0; }
+  figure svg { max-width: 100%; height: auto; }
+  figcaption { color: var(--ink-soft); font-size: .95rem; }
+  pre { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; padding: 1rem; }
+
+  /* --- the spine, and the beats that light it ------------------------- */
+  .apparatus { margin: 3rem 0; }
+  .spine-col { min-width: 0; }
+  #spine { display: block; width: 100%; height: auto; color: var(--ink); }
+  #spine .dim { opacity: .28; transition: opacity .35s ease; }
+  #spine .lit { opacity: 1; }
+  .beat { border-top: 1px solid var(--rule); padding: 1rem 0; }
+  .beat h2 {
+    font-size: .8rem; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-soft); margin: 0 0 .4rem; font-weight: 600;
+  }
+  .beat p { margin: 0; }
+
+  @media (max-width: 767px) {
+    /* Static, not sticky. At this width the diagram cannot be shrunk into a
+       side rail and stay readable, so it is shown once at full width and the
+       beats follow it. The cap is deliberately loose: if it binds, the 26-unit
+       type in the SVG drops under the legibility floor. */
+    body { padding-left: .75rem; padding-right: .75rem; }
+    #spine { position: static; max-height: 62vh; }
+    .beat { min-height: 0; }
+  }
+  @media (min-width: 768px) {
+    .apparatus { display: grid; grid-template-columns: minmax(0, 46%) minmax(0, 1fr); gap: 2.5rem; }
+    #spine { position: sticky; top: 1.5rem; max-height: calc(100vh - 3rem); }
+    .beat { min-height: 62vh; display: flex; flex-direction: column; justify-content: center; }
+  }
+</style>
+
 <h1>Where a cold start goes</h1>
 <p>A cold start is the wait while a machine boots and loads a model, before
 anyone gets an answer. Arm C's median cold start is {{median_t_total_C}}
 seconds, against {{median_t_total_A}} with nothing cached.</p>
+
+<div class="apparatus">
+  <div class="spine-col">
+    {{spine}}
+  </div>
+  <div class="beats">
+    <section class="beat" data-lights="zone-1">
+      <h2>Beat 1</h2>
+      <p>The schedule says run 147 is arm B.</p>
+    </section>
+    <section class="beat" data-lights="zone-1">
+      <h2>Beat 2</h2>
+      <p>Preflight refuses, or it allows.</p>
+    </section>
+    <section class="beat" data-lights="zone-1,clock-A,edge-1">
+      <h2>Beat 3</h2>
+      <p>The job is stamped and sent.</p>
+    </section>
+    <section class="beat" data-lights="zone-2,clock-C,edge-2">
+      <h2>Beat 4</h2>
+      <p>RunPod queues it, rents a GPU, and boots the image.</p>
+    </section>
+    <section class="beat" data-lights="zone-3">
+      <h2>Beat 5</h2>
+      <p>The container prepares arm B's cache state, and snapshots it before running.</p>
+    </section>
+    <section class="beat" data-lights="zone-3,clock-B,edge-3">
+      <h2>Beat 6</h2>
+      <p>The probe starts the server and begins watching its output.</p>
+    </section>
+    <section class="beat" data-lights="zone-4,clock-B,edge-4">
+      <h2>Beat 7</h2>
+      <p>vLLM does its four things, and its own log lines become marks.</p>
+    </section>
+    <section class="beat" data-lights="zone-3,clock-B">
+      <h2>Beat 8</h2>
+      <p>Ten requests go in, and the engine is timed warm.</p>
+    </section>
+    <section class="beat" data-lights="zone-3,edge-5">
+      <h2>Beat 9</h2>
+      <p>The result returns on the result channel, not the log channel.</p>
+    </section>
+    <section class="beat" data-lights="zone-5,edge-6">
+      <h2>Beat 10</h2>
+      <p>Nothing is judged yet: the row goes down raw, valid or not.</p>
+    </section>
+    <section class="beat" data-lights="zone-5">
+      <h2>Beat 11</h2>
+      <p>One self-describing row is appended.</p>
+    </section>
+    <section class="beat" data-lights="zone-6,clock-A,clock-B,clock-C,edge-7,edge-8">
+      <h2>Beat 12</h2>
+      <p>Offline, with no GPU: reconcile the three clocks, gate the run, derive
+      the numbers, draw the chart.</p>
+    </section>
+  </div>
+</div>
+
 <figure>
   {{chart:kv_dividend}}
   <figcaption>What the saved time buys: a KV cache is per-conversation scratch
@@ -10,3 +140,24 @@ seconds, against {{median_t_total_A}} with nothing cached.</p>
   compiling is space left for it.</figcaption>
 </figure>
 <pre><code>{{excerpt:preflight-refuses}}</code></pre>
+
+<script>
+  // No scrollytelling library: this page is published as an Artifact, where a
+  // strict CSP blocks every external host. IntersectionObserver is enough.
+  // The band is the middle 10% of the viewport, so a beat lights when it is
+  // the thing being read, not when it first peeks in at the bottom.
+  (function () {
+    var groups = document.querySelectorAll("#spine g");
+    var io = new IntersectionObserver(function (entries) {
+      for (var i = 0; i < entries.length; i++) {
+        if (!entries[i].isIntersecting) continue;
+        groups.forEach(function (g) { g.classList.remove("lit"); });
+        entries[i].target.dataset.lights.split(",").forEach(function (id) {
+          var el = document.getElementById(id.trim());
+          if (el) el.classList.add("lit");
+        });
+      }
+    }, { rootMargin: "-45% 0px -45% 0px" });
+    document.querySelectorAll("[data-lights]").forEach(function (b) { io.observe(b); });
+  })();
+</script>
