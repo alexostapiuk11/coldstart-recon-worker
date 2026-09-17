@@ -57,6 +57,7 @@ does not couple this module to ``derive()``'s output shape the way the
 (deliberately *not* imported) ``S4_SUBPHASE_KEYS`` would.
 """
 
+import random
 from pathlib import Path
 
 import matplotlib
@@ -66,7 +67,7 @@ import matplotlib.pyplot as plt
 
 from coldstart.analysis.metrics import FAST_TOLERANCE, steady_state_latency, time_to_fast_index
 from coldstart.analysis.pipeline import NotPublishableError
-from coldstart.analysis.stats import ecdf, median
+from coldstart.analysis.stats import bootstrap_median_ci, ecdf, median
 
 ARMS = ["A", "B", "C"]
 ARM_LABEL = {"A": "A — nothing cached", "B": "B — weights cached", "C": "C — weights + compile"}
@@ -664,6 +665,96 @@ def per_host_medians(rows, out_path) -> Path:
         )
     else:
         ax.set_title("Host heterogeneity", fontsize=phone_pt(9.4, fig_w))
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    return Path(out_path)
+
+
+def resample_frames(values, out_path, frames: int = 10, seed: int = 0) -> Path:
+    """`frames` imaginary campaigns, each contributing one median.
+
+    Deliberately shows medians on a number line rather than a histogram of runs:
+    the misconception this chart exists to break is that an interval describes
+    where the runs landed, and a chart of runs would confirm it. `values` is a
+    plain list of measurements, not rows -- this one is about the numbers, not
+    about which arm or host they came from.
+    """
+    xs = sorted(float(v) for v in values)
+    if not xs:
+        raise ValueError("resample_frames needs at least one value")
+    rng = random.Random(seed)
+    n = len(xs)
+    meds = [median([xs[rng.randrange(n)] for _ in range(n)]) for _ in range(frames)]
+    ci = bootstrap_median_ci(xs, seed=seed)
+
+    # Four vertical bands, top to bottom, each with its own label directly
+    # above it so the eye never has to hop between a legend and the data:
+    # real-run ticks, imaginary-campaign medians, the caption (two lines,
+    # because the full sentence plus both numbers overflows one line at any
+    # phone-legible font size -- an earlier version let it run past the right
+    # edge of the canvas instead of wrapping), then the interval bracket
+    # sitting right above the x-axis. Fixed y-slots rather than fractions of
+    # `frames` keep the bands from colliding regardless of how many frames
+    # are requested.
+    y_ticks_label, y_ticks = 1.24, 1.14
+    y_dots_label = 0.92
+    dots_top, dots_bottom = 0.82, 0.40
+    y_caption1, y_caption2 = 0.26, 0.15
+    y_bracket = 0.03
+
+    fig_w = 8.0
+    fig, ax = plt.subplots(figsize=(fig_w, 5.2))
+    ax.scatter(xs, [y_ticks] * n, marker="|", s=260, color="#2f6fb5", alpha=0.35)
+    ax.text(
+        0.01,
+        y_ticks_label,
+        f"the {n} real runs",
+        transform=ax.get_yaxis_transform(),
+        fontsize=phone_pt(7.6, fig_w),
+        color="#2f6fb5",
+    )
+    dot_step = (dots_top - dots_bottom) / max(frames - 1, 1)
+    for i, m in enumerate(meds):
+        ax.scatter([m], [dots_top - i * dot_step], marker="o", s=40, color="#c0392b", zorder=5)
+    ax.text(
+        0.01,
+        y_dots_label,
+        f"one median from each of {frames} imaginary campaigns",
+        transform=ax.get_yaxis_transform(),
+        fontsize=phone_pt(7.6, fig_w),
+        color="#c0392b",
+    )
+    ax.text(
+        0.01,
+        y_caption1,
+        "the interval: middle 95% of 10,000 such medians",
+        transform=ax.get_yaxis_transform(),
+        fontsize=phone_pt(7.8, fig_w),
+        fontweight="bold",
+    )
+    ax.text(
+        0.01,
+        y_caption2,
+        f"(only {frames} shown above, to stay readable) [{ci['lo']:.2f}, {ci['hi']:.2f}]",
+        transform=ax.get_yaxis_transform(),
+        fontsize=phone_pt(7.8, fig_w),
+        fontweight="bold",
+    )
+    ax.plot([ci["lo"], ci["hi"]], [y_bracket, y_bracket], color="black", linewidth=2.6, zorder=6)
+    for x in (ci["lo"], ci["hi"]):
+        ax.plot(
+            [x, x],
+            [y_bracket - 0.035, y_bracket + 0.035],
+            color="black",
+            linewidth=2.6,
+            zorder=6,
+        )
+    ax.set_ylim(-0.08, 1.38)
+    ax.set_yticks([])
+    ax.set_xlabel("seconds", fontsize=phone_pt(8.2, fig_w))
+    ax.tick_params(axis="x", labelsize=phone_pt(7.6, fig_w))
+    ax.set_title("The interval ranges over medians, never over runs", fontsize=phone_pt(9.4, fig_w))
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)

@@ -30,6 +30,7 @@ from coldstart.analysis.figures import (
     ecdf_plot,
     kv_dividend,
     per_host_medians,
+    resample_frames,
     warmup_curve,
     waterfall,
 )
@@ -965,3 +966,45 @@ def test_kv_dividend_states_both_directions_of_the_comparison(tmp_path):
     for label, size in [(t.get_text(), t.get_fontsize()) for t in ax.texts]:
         if label.strip():
             assert size * PHONE_WIDTH_PX / (72 * fig.get_size_inches()[0]) >= MIN_PHONE_TEXT_PX
+
+
+def test_resample_frames_plots_one_median_per_frame_not_per_run(tmp_path):
+    """The misconception this chart exists to break is 'the interval is where
+    the runs landed'. If the chart plotted runs it would confirm it."""
+    values = [81.0] * 51 + [86.0] * 48
+    _fig, ax = _call_capturing_axes(
+        lambda d, p: resample_frames(d, p, frames=10), values, tmp_path / "r.png"
+    )
+    plotted = [c for c in ax.collections] + [
+        l for l in ax.lines if l.get_marker() not in ("", "None")
+    ]
+    assert plotted, "nothing was drawn"
+    text = " ".join(t.get_text() for t in ax.texts) + ax.get_title()
+    assert "median" in text.lower()
+    assert "10" in text
+
+
+def test_resample_frames_clears_the_phone_text_floor(tmp_path):
+    """resample_frames takes a plain list of floats, not rows, so it does not
+    fit test_every_figure_clears_the_phone_text_floor's shared fixture shape.
+    Same assertion, run against this renderer on its own."""
+    values = [81.0] * 51 + [86.0] * 48
+    fig, ax = _call_capturing_axes(
+        lambda d, p: resample_frames(d, p, frames=10), values, tmp_path / "r.png"
+    )
+    width_in = fig.get_size_inches()[0]
+
+    texts = [(t.get_text(), t.get_fontsize()) for t in ax.texts]
+    texts += [(ax.get_title(), ax.title.get_fontsize())]
+    texts += [(ax.get_xlabel(), ax.xaxis.label.get_fontsize())]
+    texts += [(lab.get_text(), lab.get_fontsize()) for lab in ax.get_xticklabels()]
+
+    for label, pt in texts:
+        if not label.strip():
+            continue
+        rendered_px = pt * PHONE_WIDTH_PX / (72 * width_in)
+        assert rendered_px >= MIN_PHONE_TEXT_PX, (
+            f"resample_frames: {label!r} renders at {rendered_px:.1f}px at phone "
+            f"width ({pt:.1f}pt on a {width_in:.1f}in canvas); "
+            f"floor is {MIN_PHONE_TEXT_PX}px"
+        )
