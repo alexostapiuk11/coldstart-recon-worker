@@ -100,6 +100,7 @@ calls**. That single fact assigns the work:
 | | handles | because |
 |---|---|---|
 | **in-page tutor** (`sample`) | "what does KV cache mean again?", "say this differently", "another example" | always available, instant, needs no session — but cannot know what was already covered |
+| **Claude, in session** | "I still don't get *why*", checkpoint judging, teach-back critique | reads the actual source, and carries history across sessions |
 
 **Grounding contract.** Every number on this page is policed by an explicit key
 list and a test; a free-running tutor reintroduces exactly the drift that guards
@@ -108,7 +109,7 @@ against. So: the tutor is invoked with the current section's rendered text
 refuse any figure not in that block and say it is refusing. **Placement is
 per-card and per-chart, never a single global button** — a footer widget cannot
 answer "what does *this paragraph* mean", which is the entire request.
-| **Claude, in session** | "I still don't get *why*", checkpoint judging, teach-back critique | reads the actual source, and carries history across sessions |
+
 
 ### Modules
 
