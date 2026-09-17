@@ -317,13 +317,58 @@ def test_bootstrap_median_diff_matches_an_independent_replay_of_the_resample_loo
     and `b` have different lengths so a bug that resampled the wrong side
     to the wrong length (I7) would also break this replay match."""
     a = [
-        10.0, 12.0, 15.0, 20.0, 22.0, 25.0, 30.0, 33.0, 40.0, 45.0,
-        50.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0, 95.0,
+        10.0,
+        12.0,
+        15.0,
+        20.0,
+        22.0,
+        25.0,
+        30.0,
+        33.0,
+        40.0,
+        45.0,
+        50.0,
+        55.0,
+        60.0,
+        65.0,
+        70.0,
+        75.0,
+        80.0,
+        85.0,
+        90.0,
+        95.0,
     ]  # n=20
     b = [
-        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
-        11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0,
-        21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        5.0,
+        6.0,
+        7.0,
+        8.0,
+        9.0,
+        10.0,
+        11.0,
+        12.0,
+        13.0,
+        14.0,
+        15.0,
+        16.0,
+        17.0,
+        18.0,
+        19.0,
+        20.0,
+        21.0,
+        22.0,
+        23.0,
+        24.0,
+        25.0,
+        26.0,
+        27.0,
+        28.0,
+        29.0,
+        30.0,
     ]  # n=30
     iterations, seed, alpha = 40, 314, 0.5
 
@@ -531,7 +576,9 @@ def test_contrast_difference_uses_median_not_mean_on_skewed_data():
 
 def test_contrast_difference_rejects_empty_sample():
     with pytest.raises(ValueError, match="empty"):
-        bootstrap_contrast_difference([], [1.0] * MIN_BOOTSTRAP_SAMPLES, [1.0] * MIN_BOOTSTRAP_SAMPLES)
+        bootstrap_contrast_difference(
+            [], [1.0] * MIN_BOOTSTRAP_SAMPLES, [1.0] * MIN_BOOTSTRAP_SAMPLES
+        )
 
 
 def test_contrast_difference_rejects_below_the_bootstrap_sample_floor():
@@ -787,9 +834,7 @@ def test_paired_median_diff_accepts_a_different_key_name():
     """M4: `value`'s string-key branch was only ever exercised with
     't_total' — the docstring promises t_weights works too."""
     triples = _const_triples(20, 100.0, 70.0, 60.0, field="t_weights")
-    res = bootstrap_paired_median_diff(
-        triples, "A", "B", value="t_weights", iterations=20, seed=1
-    )
+    res = bootstrap_paired_median_diff(triples, "A", "B", value="t_weights", iterations=20, seed=1)
     assert res["point"] == pytest.approx(30.0)
 
 
@@ -892,9 +937,7 @@ def test_paired_contrast_difference_same_seed_reproducible_different_seed_is_not
 def test_paired_contrast_difference_wider_alpha_gives_narrower_interval():
     rng = random.Random(33)
     triples = _gauss_triples(rng, 40, 100.0, 70.0, 60.0, sd=10.0)
-    narrow_conf = bootstrap_paired_contrast_difference(
-        triples, iterations=800, seed=18, alpha=0.20
-    )
+    narrow_conf = bootstrap_paired_contrast_difference(triples, iterations=800, seed=18, alpha=0.20)
     wide_conf = bootstrap_paired_contrast_difference(triples, iterations=800, seed=18, alpha=0.01)
     assert (narrow_conf["hi"] - narrow_conf["lo"]) < (wide_conf["hi"] - wide_conf["lo"])
 

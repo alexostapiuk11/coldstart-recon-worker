@@ -371,7 +371,9 @@ def _paired_contrast_delta(triple: list[dict], arms: tuple[str, str, str], value
     return (a_val - b_val) - (b_val - c_val)
 
 
-def _bootstrap_median_of_units(deltas: list[float], iterations: int, seed: int, alpha: float) -> dict:
+def _bootstrap_median_of_units(
+    deltas: list[float], iterations: int, seed: int, alpha: float
+) -> dict:
     """Shared engine for both paired bootstraps: `deltas` already holds one
     scalar per independent unit (one per triple). Resampling this list with
     replacement is what makes the unit of resampling the triple rather than
