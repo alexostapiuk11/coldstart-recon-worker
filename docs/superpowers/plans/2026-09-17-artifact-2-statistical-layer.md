@@ -1246,6 +1246,157 @@ git commit -m "feat: an interval on H3's gap, bootstrapped through the frontier 
 
 ---
 
+### Task 7b: `h3_verdict`'s unevaluable guard must test the interval, not equality
+
+`h3_verdict` returns `evaluable=False` when the arm-A gap is **exactly** `0`.
+The case it exists to catch is "there was no gap to halve" — and a measured gap
+around a true zero is never exactly zero. Under the original traffic model the
+true gap *was* zero and the measurement came out at 0.314, so the guard walked
+straight past the one situation it was written for and would have returned an
+ordinary verdict on a quantity that has none.
+
+Task 7 gives the gap an interval. The guard can now test that instead.
+
+**Files:**
+- Modify: `autoscale/frontier.py` (`h3_verdict`)
+- Test: `tests/test_frontier.py`
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+def test_a_gap_whose_interval_covers_zero_is_unevaluable():
+    """The defect: `evaluable=False` fired only on an EXACT zero arm-A gap, and
+    a gap measured around a true zero is never exactly zero. Under artifact 2's
+    original traffic model the true gap was zero and the measurement came out
+    at 0.314 -- the guard passed it through and reported an ordinary verdict on
+    a quantity that had none."""
+    verdict = h3_verdict(
+        step_gap_a=0.314,
+        step_gap_c=0.120,
+        ramp_gap_a=0.290,
+        ramp_gap_c=0.110,
+        step_gap_a_interval=(0.0, 0.86),  # covers zero
+        ramp_gap_a_interval=(0.0, 0.79),
+    )
+    assert not verdict.evaluable
+    assert not verdict.holds
+    assert "indistinguishable from zero" in verdict.detail
+
+
+def test_a_gap_whose_interval_excludes_zero_is_evaluated_normally():
+    verdict = h3_verdict(
+        step_gap_a=3.0681,
+        step_gap_c=2.6094,
+        ramp_gap_a=3.0,
+        ramp_gap_c=2.5,
+        step_gap_a_interval=(2.94, 3.20),
+        ramp_gap_a_interval=(2.87, 3.13),
+    )
+    assert verdict.evaluable
+    assert not verdict.holds  # 2.6094 > 3.0681 / 2
+    assert not verdict.partial
+
+
+def test_the_intervals_are_optional_and_an_exact_zero_is_still_unevaluable():
+    """Callers without intervals keep the old behaviour, so this is an added
+    guard rather than a replaced one."""
+    verdict = h3_verdict(0.0, 0.0, 1.0, 0.4)
+    assert not verdict.evaluable
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_frontier.py -k "covers_zero or excludes_zero" -x`
+Expected: FAIL — `h3_verdict() got an unexpected keyword argument 'step_gap_a_interval'`
+
+- [ ] **Step 3: Extend the guard**
+
+Add the two keyword-only parameters to `h3_verdict` and widen the unevaluable
+branch:
+
+```python
+def h3_verdict(
+    step_gap_a: float,
+    step_gap_c: float,
+    ramp_gap_a: float,
+    ramp_gap_c: float,
+    *,
+    step_gap_a_interval: tuple[float, float] | None = None,
+    ramp_gap_a_interval: tuple[float, float] | None = None,
+) -> H3Verdict:
+```
+
+and replace the `unevaluable` computation:
+
+```python
+    # "The gap at least halved" has no truth value when there was no gap under
+    # arm A to halve. The original test for that was `gap_a == 0`, which is the
+    # right IDEA and the wrong PREDICATE: a gap estimated around a true zero is
+    # never exactly zero. Artifact 2's own original traffic model produced a
+    # true gap of exactly zero and a measured gap of 0.314, so the equality
+    # walked straight past the one case it was written for.
+    #
+    # With an interval, the honest test is whether the arm-A gap is
+    # distinguishable from zero at all. Without one, the equality is kept --
+    # this is an added guard, not a replaced one, and a caller with no interval
+    # is no worse off than before.
+    unevaluable = []
+    for shape, gap_a, interval in (
+        ("step", step_gap_a, step_gap_a_interval),
+        ("ramp", ramp_gap_a, ramp_gap_a_interval),
+    ):
+        if interval is not None and interval[0] <= 0.0:
+            unevaluable.append((shape, "indistinguishable from zero", interval))
+        elif interval is None and gap_a == 0:
+            unevaluable.append((shape, "exactly zero", None))
+
+    if unevaluable:
+        detail = "; ".join(
+            f"{shape}: the arm-A gap is {why}"
+            + (f" (95% interval [{iv[0]:.4f}, {iv[1]:.4f}])" if iv else "")
+            for shape, why, iv in unevaluable
+        )
+        return H3Verdict(
+            False,
+            False,
+            f"H3 is not evaluable under {detail}. There was no inter-signal gap "
+            "to halve, and `gap_c <= gap_a / 2` is satisfied by two zeros -- so "
+            "reporting this as confirmed would confirm the headline out of an "
+            "absence of any effect",
+            evaluable=False,
+        )
+```
+
+- [ ] **Step 4: Run to verify the tests pass**
+
+Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_frontier.py -x && .venv/bin/ruff check .`
+Expected: PASS.
+
+- [ ] **Step 5: Pass the intervals at the call site**
+
+In `scripts/a2_render_figures.py`, Task 8 computes `gaps[label]` with `lo`/`hi`.
+Pass them:
+
+```python
+    verdict = h3_verdict(
+        step_gap_a=gaps["arm A"]["point"],
+        step_gap_c=gaps["arm C"]["point"],
+        ramp_gap_a=gaps["ramp arm A"]["point"],
+        ramp_gap_c=gaps["ramp arm C"]["point"],
+        step_gap_a_interval=(gaps["arm A"]["lo"], gaps["arm A"]["hi"]),
+        ramp_gap_a_interval=(gaps["ramp arm A"]["lo"], gaps["ramp arm A"]["hi"]),
+    )
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add autoscale/frontier.py scripts/a2_render_figures.py tests/test_frontier.py
+git commit -m "fix: a gap around a true zero walked past the unevaluable guard"
+```
+
+---
+
 ### Task 8: The ramp sweep, and H3's verdict on the production path
 
 `h3_verdict` is called only from tests. No ramp sweep exists. The pre-registration requires the gap "computed separately for step and ramp, both reported", and H3 holds only if the halving occurs under both — so as things stand the headline hypothesis cannot be evaluated at all by running the artifact.
@@ -1891,4 +2042,5 @@ git add -A && git commit -m "chore: artifact 2 statistical layer, final verifica
 | #6 convergence stamps MEASURED over placeholder-derived axes | 10 | closed |
 | #7 percentile convention differs from artifact 1, no sample floor | 2, 3 | closed |
 | #8 winner's curse with unequal candidate counts (19/17/19) | 7 | **made visible, not corrected** — stated as a non-goal |
+| `h3_verdict`'s unevaluable guard tests `== 0`, which noise defeats | 7b | closed |
 | #9 stale `blocked` rationale, `D`/`R` literals, third copy of the traffic derivation | — | **open** — not in scope; `RAMP_SECONDS` in Task 8 removes one of the three literal sites |
