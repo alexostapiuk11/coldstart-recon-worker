@@ -1,0 +1,15 @@
+{
+  "cold start": "the wait while a machine boots and loads a model, before anyone gets an answer",
+  "HBM": "the GPU's own memory, separate from the computer's RAM",
+  "KV cache": "per-conversation scratch space the model keeps on the GPU while generating",
+  "torch.compile": "a step that turns the model into faster GPU code before serving",
+  "CUDA graph capture": "recording a fixed sequence of GPU operations so they replay without per-step overhead",
+  "continuous batching": "serving many users' requests through one copy of the model at once",
+  "forward pass": "running the model once, start to finish, on some input",
+  "bootstrap interval": "a range showing how much a summary number could move if the measurements had come out slightly differently",
+  "percentile": "the value below which a given share of measurements fall",
+  "ECDF": "a chart showing what share of runs finished by each time",
+  "contrast": "the difference between two arms, measured on the same quantity",
+  "pre-registration": "writing down what counts as a result before looking at the data",
+  "drawing with replacement": "picking a value, writing it down, putting it back, and picking again"
+}
