@@ -322,14 +322,20 @@ def main() -> None:
     if blocked:
         why = (
             "These are the figures' own guards refusing to draw a chart that "
-            "would read as a comparison it is not. Against the PLACEHOLDER "
-            "service curve the slow arm's replicas are killed by LIFO "
-            "scale-down before they serve, so whole signals are excluded by "
-            "the pre-registered `replica_never_served` rule and the arms end "
-            "up compared over different signal sets. Re-run with --refresh "
-            "once plan 2's measured service curve lands; if signals are still "
-            "missing then, the spike window or the exclusion rules -- not this "
-            "script -- are what need revisiting."
+            "would read as a comparison it is not.\n\n"
+            "Under the amended traffic model (docs/experiment-a2.md, "
+            "2026-09-17) all three signals survive on both arms and both "
+            "shapes, so reaching here means something changed. The likely "
+            "causes, in order: a signal whose whole grid was excluded -- read "
+            "the per-signal discard counts printed above, since "
+            "`no_scaling_action` means its thresholds were never crossed and "
+            "`replica_never_served` means the fleet never effectively grew; or "
+            "a policy left with fewer surviving repetitions than a bootstrap "
+            "interval needs. Either is a finding about that signal, not a "
+            "figure to draw around.\n\n"
+            "The previous text here blamed LIFO scale-down under the "
+            "pre-registered traffic model, which was true of the regime that "
+            "model produced and is no longer the regime being swept."
         )
         raise SystemExit("\n\n".join(["", *blocked, why]))
 
