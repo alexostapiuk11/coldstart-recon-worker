@@ -28,6 +28,7 @@ from coldstart.analysis.figures import (
     PHONE_WIDTH_PX,
     RESIDUAL_COLOR,
     ecdf_plot,
+    kv_dividend,
     per_host_medians,
     warmup_curve,
     waterfall,
@@ -56,6 +57,11 @@ _WARMUP_SPIKE = {"A": 3.5, "B": 2.5, "C": 1.6}
 # so ecdf_plot's three per-arm distributions stay visually separated
 # instead of bleeding into each other.
 _HOST_OFFSET = {"h0": -10.0, "h1": -5.0, "h2": 0.0, "h3": 5.0, "h4": 10.0}
+
+# Real campaign figures (spec: KV dividend finding) -- arm C's warm compile
+# cache leaves more GPU memory free when vLLM sizes the KV cache from a real
+# forward pass, so arms A and B (cold compile) share the smaller capacity.
+_KV_CAPACITY_TOKENS = {"A": 35792, "B": 35792, "C": 43040}
 
 # Per-arm chronological stage breakdown, replacing the old {"S4c","S4e"}-only
 # fixture now that waterfall() draws every named stage (B2 fix) instead of
@@ -130,6 +136,7 @@ def rows(n=30):
                 {"req_index": k, "end_to_end": steady + spike * 0.55**k + row_jitter}
                 for k in range(10)
             ],
+            "kv_capacity_tokens": _KV_CAPACITY_TOKENS[arm],
         }
         for key, val in st["subphases"].items():
             row[f"t_{key.lower()}"] = val
@@ -897,6 +904,7 @@ def test_every_figure_clears_the_phone_text_floor(tmp_path):
         (warmup_curve, rows()),
         (ecdf_plot, rows()),
         (per_host_medians, rows()),
+        (kv_dividend, rows()),
     )
     for render, data in renderers:
         fig, ax = _call_capturing_axes(render, data, tmp_path / "f.png")
@@ -937,3 +945,21 @@ def test_figures_do_not_widen_the_canvas_on_save(tmp_path):
         assert actual == expected, (
             f"{render.__name__}: saved {actual}px wide but figsize declares {expected}px"
         )
+
+
+def test_kv_dividend_states_both_directions_of_the_comparison(tmp_path):
+    """The spec had this percentage inverted once (cold is 16.8% smaller; warm
+    is 20.3% larger). Both numbers appear on the chart so neither can be quoted
+    alone in the wrong direction."""
+    data = [
+        {"arm": "A", "kv_capacity_tokens": 35792},
+        {"arm": "B", "kv_capacity_tokens": 35792},
+        {"arm": "C", "kv_capacity_tokens": 43040},
+    ]
+    fig, ax = _call_capturing_axes(kv_dividend, data, tmp_path / "kv.png")
+    text = " ".join(t.get_text() for t in ax.texts) + ax.get_title()
+    assert "20.3" in text
+    assert "16.8" in text
+    for label, size in [(t.get_text(), t.get_fontsize()) for t in ax.texts]:
+        if label.strip():
+            assert size * PHONE_WIDTH_PX / (72 * fig.get_size_inches()[0]) >= MIN_PHONE_TEXT_PX

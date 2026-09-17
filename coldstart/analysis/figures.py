@@ -567,6 +567,66 @@ def ecdf_plot(rows, out_path) -> Path:
     return Path(out_path)
 
 
+def kv_dividend(rows, out_path) -> Path:
+    """Arm C's larger KV cache, stated in both directions and in requests.
+
+    Both percentages appear because the direction is genuinely easy to invert:
+    43040/35792 is +20.3% (warm vs cold) while 35792/43040 is -16.8% (cold vs
+    warm). A chart carrying one of them alone invites the other to be quoted.
+    """
+    rows = _validate_rows(rows)
+    fig_w = 8.0
+    fig, ax = plt.subplots(figsize=(fig_w, 4.3))
+    by = _by_arm(rows)
+    caps = {a: median([_required_field(r, "kv_capacity_tokens") for r in by[a]]) for a in ARMS}
+    cold, warm = caps["A"], caps["C"]
+
+    ax.barh([0, 1], [cold, warm], height=0.45, color=["#9e9e9e", "#4a8c5f"])
+    ax.set_yticks(
+        [0, 1],
+        ["cold compile\n(arms A, B)", "warm compile\n(arm C)"],
+        fontsize=phone_pt(7.8, fig_w),
+    )
+    ax.set_xlabel("KV cache capacity (tokens)", fontsize=phone_pt(8.2, fig_w))
+    ax.tick_params(axis="x", labelsize=phone_pt(7.6, fig_w))
+    for y, v in ((0, cold), (1, warm)):
+        ax.text(
+            v * 0.98,
+            y,
+            f"{int(v):,}",
+            ha="right",
+            va="center",
+            color="white",
+            fontweight="bold",
+            fontsize=phone_pt(7.8, fig_w),
+        )
+    ax.set_title(
+        f"A warm compile cache leaves {warm / cold - 1:+.1%} more KV cache\n"
+        f"({int(warm // 8192)} concurrent requests vs {int(cold // 8192)} at 8192 context)",
+        fontsize=phone_pt(8.6, fig_w),
+    )
+    # Anchored to the *figure*, not the axes: an ax.transAxes offset is a
+    # fraction of the axes' own height, which tight_layout resizes to fit
+    # everything inside `rect` -- so a fixed transAxes offset lands in a
+    # different place depending on how much room the title/xlabel end up
+    # needing, and it collided with the xlabel here. transFigure coordinates
+    # are stable regardless of how tight_layout resizes the axes above them.
+    ax.text(
+        0.5,
+        0.025,
+        f"Equivalently: a cold compile sizes the cache {cold / warm - 1:.1%} smaller —\n"
+        "permanently, for the life of that replica.",
+        transform=fig.transFigure,
+        ha="center",
+        fontsize=phone_pt(7.6, fig_w),
+        style="italic",
+    )
+    fig.tight_layout(rect=(0.0, 0.17, 1.0, 1.0))
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    return Path(out_path)
+
+
 def per_host_medians(rows, out_path) -> Path:
     rows = _validate_rows(rows)
     hosts = sorted({r["host_id"] for r in rows})
