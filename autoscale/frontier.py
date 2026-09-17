@@ -358,7 +358,38 @@ def _take(point: "PolicyPoint", field: str, reps: tuple[int, ...]) -> list[float
     `test_the_gap_interval_resamples_one_index_list_for_every_policy`.
     """
     lookup = dict(zip(point.rep_indices, getattr(point, field), strict=True))
-    return [lookup[r] for r in reps]
+    # `r in lookup`: a policy that lost repetition r to a pre-registered
+    # exclusion simply has no value for it in this draw, and contributes the
+    # ones it does have. Requiring every policy to hold every drawn repetition
+    # is what an intersection does, and on real sweeps it is ruinous -- one
+    # frontier point that lost run 7 removes run 7 from EVERY policy, so ten
+    # points each missing a few different runs collapse 30 repetitions to 19.
+    # Pairing is preserved exactly where the data exists, which is the property
+    # that matters: wherever two signals both have repetition r, they are
+    # compared on the same arrival trace.
+    return [lookup[r] for r in reps if r in lookup]
+
+
+def _resample(point: "PolicyPoint", drawn: tuple[int, ...]) -> "PolicyPoint":
+    """One bootstrap replicate of `point`, over the drawn repetition ids.
+
+    Carries only the drawn repetitions this point HAS, so a policy that lost
+    runs contributes fewer values to the replicate -- which is the honest
+    reflection of its having fewer observations. The replicate's own
+    `rep_indices` are positional: the draw is with replacement, so `drawn`
+    repeats, and a resampled point's samples are no longer one-per-repetition
+    and must not claim to be.
+    """
+    costs = _take(point, "cost_samples", drawn)
+    p99s = _take(point, "p99_samples", drawn)
+    return PolicyPoint(
+        cost_samples=tuple(costs),
+        p99_samples=tuple(p99s),
+        signal=point.signal,
+        scale_up_at=point.scale_up_at,
+        scale_down_at=point.scale_down_at,
+        rep_indices=tuple(range(len(p99s))),
+    )
 
 
 def gap_interval(
@@ -392,9 +423,8 @@ def gap_interval(
     held-out selection split and is not attempted here.
 
     Returns `{"point", "lo", "hi", "budget", "paired_repetitions"}`.
-    `paired_repetitions` is how many repetitions every policy had in common
-    -- the sample the bootstrap actually drew from, which is smaller than 30
-    whenever the exclusion rules bit. `point` and `budget` are the
+    `paired_repetitions` is the size of the repetition population drawn from.
+    `point` and `budget` are the
     OBSERVED values, not bootstrap centres: the draws estimate spread, and
     reporting their centre would publish a different estimator from the one
     named.
@@ -418,30 +448,44 @@ def gap_interval(
     if not all_points:
         raise ValueError("every frontier is empty; there is no gap to put an interval on")
 
-    # Resample over the repetitions EVERY policy kept. The exclusion rules
-    # discard different runs for different policies -- a real sweep comes back
-    # with 26, 29 and 30 survivors on three policies of the same arm -- and a
-    # paired bootstrap can only draw repetitions that all of them have. An
-    # earlier version of this function demanded equal counts instead and
-    # refused to run on any real sweep: ragged discards are the normal case
-    # here, not an anomaly, and the pre-registration already requires them to
-    # be counted and reported rather than treated as an error.
+    # Resample over the repetition POPULATION -- every repetition any policy
+    # kept -- rather than over the repetitions all of them kept in common.
     #
-    # Taking the intersection rather than each policy's own repetitions is what
-    # keeps the pairing exact. It costs coverage, so the count is returned as
-    # `paired_repetitions` for the caller to report.
-    common = set(all_points[0].rep_indices)
-    for point in all_points[1:]:
-        common &= set(point.rep_indices)
-    reps_available = sorted(common)
-    if len(reps_available) < stats.MIN_BOOTSTRAP_SAMPLES:
+    # The intersection is the obvious construction and it is unusable here: one
+    # frontier point that lost run 7 to a pre-registered exclusion removes run 7
+    # from every OTHER policy too, so ten points each missing a few different
+    # runs collapse 30 repetitions to 19 and the bootstrap refuses. Measured on
+    # the real sweep, every signal's frontier had points with all 30 while the
+    # intersection across them was 19-25.
+    #
+    # Drawing from the population and letting each policy contribute the drawn
+    # repetitions it HAS keeps the property that actually matters: wherever two
+    # signals both hold repetition r, they are compared on the same arrival
+    # trace, which is the whole point of the shared seed. What it gives up is
+    # balance -- a policy that lost runs contributes fewer values per draw --
+    # and that is the honest reflection of its having fewer observations, the
+    # same thing its point estimate already reflects.
+    #
+    # It assumes a discarded run is missing for reasons uncorrelated with the
+    # value it would have had. That is NOT strictly true here: `no_scaling_action`
+    # fires on traces where the policy never crossed its threshold, which are
+    # the quieter traces. The bias this introduces is toward the policy looking
+    # better than it is on the runs it kept, and it is the same bias the point
+    # estimate carries -- the interval inherits it rather than creating it.
+    population = set()
+    for point in all_points:
+        population |= set(point.rep_indices)
+    reps_available = sorted(population)
+    thin = [p for p in all_points if p.n < stats.MIN_BOOTSTRAP_SAMPLES]
+    if thin:
         raise ValueError(
-            f"only {len(reps_available)} repetitions are common to every policy "
-            f"(the bootstrap floor is {stats.MIN_BOOTSTRAP_SAMPLES}); the "
-            "pre-registered exclusion rules discarded so much that there is no "
-            "paired sample left to resample from. That is a finding about this "
-            "sweep -- check the per-signal discard counts -- and not an "
-            "interval to widen until it fits"
+            f"{len(thin)} of {len(all_points)} frontier points have fewer than "
+            f"{stats.MIN_BOOTSTRAP_SAMPLES} surviving repetitions (fewest: "
+            f"{min(p.n for p in thin)}); below that floor a policy's resampled "
+            "median is a handful of repeated values and the gap's interval "
+            "inherits that. Check the per-signal discard counts: this is the "
+            "pre-registered exclusions biting, and it is a finding about those "
+            "policies rather than an interval to widen until it fits"
         )
     n = len(reps_available)
 
@@ -453,22 +497,7 @@ def gap_interval(
     for _ in range(iterations):
         drawn = tuple(reps_available[rng.randrange(n)] for _ in range(n))
         resampled = {
-            signal: pareto_frontier(
-                [
-                    PolicyPoint(
-                        cost_samples=tuple(_take(p, "cost_samples", drawn)),
-                        p99_samples=tuple(_take(p, "p99_samples", drawn)),
-                        signal=p.signal,
-                        scale_up_at=p.scale_up_at,
-                        scale_down_at=p.scale_down_at,
-                        # The draw is with replacement, so `drawn` repeats -- a
-                        # resampled point's samples are not one-per-repetition
-                        # any more and must not claim to be.
-                        rep_indices=tuple(range(n)),
-                    )
-                    for p in f
-                ]
-            )
+            signal: pareto_frontier([_resample(p, drawn) for p in f])
             for signal, f in frontiers.items()
         }
         budget = iso_cost_budget(resampled)

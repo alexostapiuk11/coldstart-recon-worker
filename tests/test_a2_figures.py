@@ -325,12 +325,21 @@ def test_no_text_runs_off_the_canvas(tmp_path, figure, case):
         )
 
 
-def test_the_banners_and_notes_fit_inside_the_panel_they_describe(tmp_path):
+@pytest.mark.parametrize("curve_measured", [True, False])
+def test_the_banners_and_notes_fit_inside_the_panel_they_describe(curve_measured, tmp_path):
     """A banner wider than its own panel spills across the divider and starts
     describing the other half of the figure -- which, on the one figure whose
-    job is to separate measurement from model, is the worst place for it."""
+    job is to separate measurement from model, is the worst place for it.
+
+    Parameterised over `curve_measured` because it was NOT, and that was the
+    blind spot: the unmeasured branch draws a different, longer banner, and its
+    first draft ("MEASURED LAG, MODELED LATENCY") overflowed the panel and
+    rendered clipped to "...SURED LAG, MODELED LAT" while this guard passed on
+    the measured branch it was only ever given.
+    """
     fig = convergence(
-        FRONTIERS_A, FRONTIERS_C, swept=SWEPT, path=tmp_path / "c.png", curve_measured=True, return_figure=True
+        FRONTIERS_A, FRONTIERS_C, swept=SWEPT, path=tmp_path / "c.png",
+        curve_measured=curve_measured, return_figure=True,
     )
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
@@ -507,9 +516,9 @@ def test_the_measured_banner_requires_a_measured_service_curve(tmp_path):
         curve_measured=False, return_figure=True,
     )
     words = [t.get_text() for t in fig.findobj(plt.Text)]
-    assert "MEASURED LAG, MODELED LATENCY" in words
+    assert "LAG MEASURED" in words
     assert "MEASURED" not in words
-    assert any("placeholder service curve" in w for w in words)
+    assert any("placeholder curve" in w for w in words)
     plt.close(fig)
 
 
@@ -520,7 +529,7 @@ def test_the_measured_banner_is_restored_by_a_measured_curve(tmp_path):
     )
     words = [t.get_text() for t in fig.findobj(plt.Text)]
     assert "MEASURED" in words
-    assert "MEASURED LAG, MODELED LATENCY" not in words
+    assert "LAG MEASURED" not in words
     plt.close(fig)
 
 
@@ -567,3 +576,23 @@ def test_the_opt_out_is_off_by_default(tmp_path):
     thin = {s: [_point(100.0 * (i + 1), 2.0 + i, s, n=3) for i in range(3)] for s in SIGNAL_ORDER}
     with pytest.raises(ValueError, match="surviving repetitions"):
         frontiers(thin, path=tmp_path / "f.png")
+
+
+def test_a_signal_that_could_not_be_banded_is_named_on_the_figure(tmp_path):
+    """A signal drawn without a band beside two that have one reads as the
+    CERTAIN one, which is exactly backwards: it is the one whose runs the
+    pre-registered exclusions ate."""
+    arm_a = {s: list(_points(s, i)) for i, s in enumerate(SIGNAL_ORDER)}
+    arm_a["queue_depth"] = [_point(c, 9.0 - c / 200, "queue_depth", n=4) for c in (100.0, 200.0)]
+    fig = convergence(
+        arm_a,
+        {s: list(_points(s, i * 0.3)) for i, s in enumerate(SIGNAL_ORDER)},
+        swept=SWEPT_WITH_INTERVALS,
+        path=tmp_path / "c.png",
+        curve_measured=False,
+        return_figure=True,
+    )
+    text = " ".join(t.get_text() for t in fig.findobj(plt.Text))
+    assert "no interval (too few reps)" in text
+    assert "queue depth" in text
+    plt.close(fig)

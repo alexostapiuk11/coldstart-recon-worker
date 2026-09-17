@@ -209,6 +209,26 @@ def _percentile_interval(draws: list[float], alpha: float) -> tuple[float, float
     return xs[lo_idx], xs[hi_idx]
 
 
+def bootstrap_median_ci(values, iterations=10000, seed=0, alpha=0.05) -> dict:
+    """Percentile-method interval on a single sample's median.
+
+    The module's other bootstraps all answer "how big is the difference between
+    these groups". This one answers "how well pinned is this one number" — the
+    question the explainer teaches, and the one a reader confuses with the
+    spread of the data. Same `_quantile` median, same `_percentile_interval`
+    endpoints and same `MIN_BOOTSTRAP_SAMPLES` floor as every other interval
+    here, so a number from this function and a number from `percentiles()` are
+    the same computation rather than two definitions that usually agree.
+    """
+    _check_iterations_and_alpha(iterations, alpha)
+    xs = _validate_bootstrap_sample(values, "values")
+    rng = random.Random(seed)
+    n = len(xs)
+    draws = [_median([xs[rng.randrange(n)] for _ in range(n)]) for _ in range(iterations)]
+    lo, hi = _percentile_interval(draws, alpha)
+    return {"point": _median(xs), "lo": lo, "hi": hi}
+
+
 def bootstrap_median_diff(a, b, iterations=10000, seed=0, alpha=0.05) -> dict:
     """Non-parametric interval on median(a) - median(b). No distributional assumption.
 

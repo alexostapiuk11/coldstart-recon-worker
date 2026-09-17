@@ -1014,44 +1014,63 @@ def test_the_gap_interval_resamples_one_index_list_for_every_policy(monkeypatch)
     assert len(set(seen)) <= 3
 
 
-def test_the_gap_interval_pairs_on_repetition_identity_not_position():
+def test_a_points_samples_are_read_by_repetition_id_not_by_position():
     """The exclusion rules discard different runs for different policies, so
     position 3 is repetition 3 for one policy and repetition 4 for another that
     lost an earlier run. Pairing on position would compare two different arrival
     traces -- the exact thing the shared seed exists to prevent."""
-    full = tuple(range(30))
-    # This policy lost repetition 0; its samples are shifted by one position.
-    ragged = tuple(range(1, 31))
-
-    a = PolicyPoint(
-        cost_samples=(10.0,) * 30,
-        p99_samples=tuple(float(r) for r in full),
+    point = PolicyPoint(
+        cost_samples=(1.0, 2.0, 3.0),
+        p99_samples=(10.0, 20.0, 30.0),
         signal="queue_depth",
         scale_up_at=2.0,
         scale_down_at=0.5,
-        rep_indices=full,
+        rep_indices=(5, 7, 9),
     )
-    b = PolicyPoint(
-        cost_samples=(10.0,) * 30,
-        p99_samples=tuple(float(r) for r in ragged),
-        signal="in_flight_concurrency",
+
+    # By id: repetition 9 is 30.0, not "position 9" (which does not exist).
+    assert autoscale.frontier._take(point, "p99_samples", (9, 5)) == [30.0, 10.0]
+    # Repeats are kept -- the draw is with replacement.
+    assert autoscale.frontier._take(point, "p99_samples", (7, 7)) == [20.0, 20.0]
+
+
+def test_a_repetition_this_point_lost_is_omitted_rather_than_mispaired():
+    """A policy that lost repetition r contributes the drawn ones it has. The
+    alternative -- requiring every policy to hold every drawn repetition -- is
+    an intersection, and on real sweeps it is ruinous."""
+    point = PolicyPoint(
+        cost_samples=(1.0, 2.0),
+        p99_samples=(10.0, 20.0),
+        signal="queue_depth",
         scale_up_at=2.0,
         scale_down_at=0.5,
-        rep_indices=ragged,
+        rep_indices=(5, 7),
     )
-    # p99_samples[i] == rep_indices[i] for both, so a correctly paired draw sees
-    # the SAME number from both policies and the gap is exactly zero in every
-    # draw. Pairing on position would see a constant difference of 1.
-    got = gap_interval(
-        {"queue_depth": [a], "in_flight_concurrency": [b]},
-        iterations=200,
-        seed=0,
-        expected=("queue_depth", "in_flight_concurrency"),
-    )
-    assert got["lo"] == got["hi"] == pytest.approx(0.0)
-    # 29 repetitions in common (1..29), not 30: the intersection is what is
-    # drawn from, and the count is reported so a caller can say so.
-    assert got["paired_repetitions"] == 29
+
+    assert autoscale.frontier._take(point, "p99_samples", (5, 6, 7)) == [10.0, 20.0]
+
+
+def test_signals_sharing_a_repetition_are_scored_on_it_together():
+    """The property the pairing buys, end to end: two policies whose values
+    agree repetition-by-repetition produce a gap of exactly zero in every draw,
+    however their repetitions are labelled."""
+    reps = tuple(range(30))
+    same = {
+        s: [
+            PolicyPoint(
+                cost_samples=(10.0,) * 30,
+                p99_samples=tuple(float(r) for r in reps),
+                signal=s,
+                scale_up_at=2.0,
+                scale_down_at=0.5,
+                rep_indices=reps,
+            )
+        ]
+        for s in SIGNALS
+    }
+
+    got = gap_interval(same, iterations=200, seed=0)
+    assert got["point"] == got["lo"] == got["hi"] == pytest.approx(0.0)
 
 
 def test_ragged_repetition_counts_are_normal_and_not_refused():
@@ -1065,7 +1084,10 @@ def test_ragged_repetition_counts_are_normal_and_not_refused():
         "utilization": [_p(25, 9.0, "utilization", n=30)],
     }
     got = gap_interval(frontiers, iterations=200, seed=0)
-    assert got["paired_repetitions"] == 26
+    # 30, not 26: the population is every repetition any policy kept, and each
+    # policy contributes the drawn ones it has. The intersection (26) is what
+    # an earlier version drew from, and on a real sweep it collapsed to 19.
+    assert got["paired_repetitions"] == 30
     assert got["point"] == pytest.approx(5.5)
 
 
@@ -1077,18 +1099,42 @@ def test_the_gap_interval_refuses_an_incomplete_signal_set():
         gap_interval({"queue_depth": [_p(10, 4.0)]}, iterations=100, seed=0)
 
 
-def test_too_few_paired_repetitions_is_refused():
-    """Ragged counts are fine; a ragged count that leaves fewer repetitions in
-    common than the bootstrap floor is not. Below it the resampled distribution
-    is a handful of repeated values and the interval comes out
-    confident-looking and meaningless."""
+def test_a_policy_below_the_bootstrap_floor_is_refused():
+    """Ragged counts are fine; a POLICY with fewer repetitions than the
+    bootstrap floor is not. Below it that policy's resampled median is a
+    handful of repeated values, and the gap's interval inherits it."""
     frontiers = {
         "queue_depth": [_p(10, 4.0, "queue_depth", n=30)],
         "in_flight_concurrency": [_p(14, 3.5, "in_flight_concurrency", n=12)],
         "utilization": [_p(25, 9.0, "utilization", n=30)],
     }
-    with pytest.raises(ValueError, match="common to every policy"):
+    with pytest.raises(ValueError, match="surviving repetitions"):
         gap_interval(frontiers, iterations=100, seed=0)
+
+
+def test_one_policys_lost_run_does_not_remove_it_from_the_others():
+    """The defect that forced this design. An intersection over frontier points
+    drops repetition r from EVERY policy as soon as ONE lost it, so ten points
+    each missing a few different runs collapse 30 repetitions to 19 and the
+    bootstrap refuses -- on a sweep where every signal had points with all 30."""
+    everything = tuple(range(30))
+    missing_one = {
+        s: [
+            PolicyPoint(
+                cost_samples=(10.0,) * 29,
+                p99_samples=(4.0,) * 29,
+                signal=s,
+                scale_up_at=2.0,
+                scale_down_at=0.5,
+                # Each signal lost a DIFFERENT run, so the intersection is 27
+                # while the population is still 30.
+                rep_indices=tuple(r for r in everything if r != i),
+            )
+        ]
+        for i, s in enumerate(SIGNALS)
+    }
+    got = gap_interval(missing_one, iterations=100, seed=0)
+    assert got["paired_repetitions"] == 30
 
 
 def test_rep_indices_must_match_the_sample_count():

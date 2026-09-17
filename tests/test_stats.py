@@ -10,6 +10,7 @@ from coldstart.analysis.stats import (
     MIN_SAMPLES,
     _percentile_interval,
     bootstrap_contrast_difference,
+    bootstrap_median_ci,
     bootstrap_median_diff,
     bootstrap_paired_contrast_difference,
     bootstrap_paired_median_diff,
@@ -1112,3 +1113,33 @@ def test_paired_contrast_difference_rejects_non_distinct_arms():
     triples = _const_triples(20, 100.0, 70.0, 60.0)
     with pytest.raises(ValueError):
         bootstrap_paired_contrast_difference(triples, arms=("A", "A", "A"))
+
+
+def test_bootstrap_median_ci_on_a_flat_sample_has_zero_width():
+    """Every value identical: the median cannot move under resampling, so the
+    interval must collapse rather than manufacture width."""
+    out = bootstrap_median_ci([81.0] * 99)
+    assert out["point"] == 81.0
+    assert out["lo"] == 81.0
+    assert out["hi"] == 81.0
+
+
+def test_bootstrap_median_ci_widens_when_the_median_sits_on_a_knife_edge():
+    """Same two clusters in both cases; only the split changes. This is the
+    controlled test the explainer's statistics module is built on, so it is
+    pinned here rather than computed in the page."""
+    knife = bootstrap_median_ci([81.0] * 51 + [86.0] * 48)
+    safe = bootstrap_median_ci([81.0] * 70 + [86.0] * 29)
+    assert (knife["lo"], knife["hi"]) == (81.0, 86.0)
+    assert (safe["lo"], safe["hi"]) == (81.0, 81.0)
+
+
+def test_bootstrap_median_ci_is_deterministic_for_a_seed():
+    a = bootstrap_median_ci([1.0, 2.0, 3.0] * 20, seed=7)
+    b = bootstrap_median_ci([1.0, 2.0, 3.0] * 20, seed=7)
+    assert a == b
+
+
+def test_bootstrap_median_ci_refuses_a_thin_sample():
+    with pytest.raises(ValueError, match="bootstrap interval needs at least"):
+        bootstrap_median_ci([1.0, 2.0, 3.0])

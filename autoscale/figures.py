@@ -220,7 +220,7 @@ def _span(values) -> str:
     return f"p99 spans {low:.3g}–{high:.3g} s"
 
 
-def _band(axis, front, color, allow_missing_intervals: bool) -> None:
+def _band(axis, front, color, allow_missing_intervals: bool) -> bool:
     """A signal's bootstrap interval, as a band rather than error bars.
 
     A frontier is a curve, and per-point bars on three overlapping curves are
@@ -234,8 +234,10 @@ def _band(axis, front, color, allow_missing_intervals: bool) -> None:
         # real code path on a deliberately reduced sweep. It draws NO band at
         # all rather than a partial one, so what comes out is visibly a chart
         # without intervals rather than a chart whose intervals are quietly
-        # wrong.
-        return
+        # wrong. The caller is told, so the figure can say so: a signal with no
+        # band beside two that have one reads as "this one is certain", which
+        # is the opposite of the truth.
+        return False
     if thin:
         # Refusing rather than drawing the band without them, and rather than
         # pinching it to zero width at those points. Both alternatives publish
@@ -264,6 +266,7 @@ def _band(axis, front, color, allow_missing_intervals: bool) -> None:
     axis.fill_between(
         [p.cost for p in front], lo, hi, color=color, alpha=BAND_ALPHA, linewidth=0
     )
+    return True
 
 
 def _reps_text(points) -> str:
@@ -354,9 +357,18 @@ def convergence(frontiers_a, frontiers_c, swept, path, *, curve_measured, return
     n_a = sum(len(v) for v in frontiers_a.values())
     n_c = sum(len(v) for v in frontiers_c.values())
 
+    unbanded: set[str] = set()
     for arm, data in (("A", frontiers_a), ("C", frontiers_c)):
         for signal in signals:
             front = pareto_frontier(data[signal])
+            # Six overlapping bands on one half-width panel would be mud, so
+            # only arm A is banded: it is the reference the halving in H3 is
+            # measured FROM, and the arms are already distinguished by line
+            # style. The note says which.
+            if arm == "A" and not _band(
+                left, front, SIGNAL_COLOR.get(signal, UNKNOWN_SIGNAL_COLOR), True
+            ):
+                unbanded.add(SIGNAL_LABEL.get(signal, signal))
             left.plot(
                 [p.cost for p in front],
                 [p.p99 for p in front],
@@ -385,10 +397,17 @@ def convergence(frontiers_a, frontiers_c, swept, path, *, curve_measured, return
     if curve_measured:
         _banner(left, "MEASURED", "artifact 1's two lag arms", MEASURED_BANNER)
     else:
+        # "LAG MEASURED", not "MEASURED LAG, MODELED LATENCY": the strip is
+        # pinned to the panel's width and the panel is half the canvas, so the
+        # long form overflowed into the modeled panel and was clipped to
+        # "...SURED LAG, MODELED LAT" -- illegible, on the figure whose whole
+        # job is to separate measurement from model. Twelve characters, the
+        # same length as "NOT MEASURED", which is the width this strip is known
+        # to hold. The qualification it drops is carried by the subtitle.
         _banner(
             left,
-            "MEASURED LAG, MODELED LATENCY",
-            "artifact 1's lag arms; p99 from the placeholder service curve",
+            "LAG MEASURED",
+            "p99 modeled: placeholder curve",
             MODELED_BANNER,
         )
     measured_p99 = [p.p99 for data in (frontiers_a, frontiers_c) for v in data.values() for p in v]
@@ -404,7 +423,7 @@ def convergence(frontiers_a, frontiers_c, swept, path, *, curve_measured, return
         left,
         f"n={n_a + n_c} policy points ({n_a} A, {n_c} C)\n"
         f"{_reps_text(measured_points)}\n"
-        f"{_span(measured_p99)}",
+f"{_span(measured_p99)}",
     )
 
     lags = sorted(swept)
@@ -437,11 +456,21 @@ def convergence(frontiers_a, frontiers_c, swept, path, *, curve_measured, return
     # least legible part of it. "modeled" is still stated, in the subtitle.
     _banner(right, "NOT MEASURED", "modeled: lag swept, invented", MODELED_BANNER)
     banded = all(isinstance(swept[k], dict) for k in lags)
-    _note(
-        right,
-        f"n={len(lags)} modeled lag values"
-        + ("\nshaded: 95% bootstrap interval" if banded else ""),
-    )
+    # Both panels' shading is described here rather than once per panel. It
+    # belongs on the left too, but the left note is already three lines and a
+    # fourth collided with the legend beneath it -- and the vocabulary
+    # ("shaded", "95%") is the same for both, so saying it twice earns nothing.
+    shading = []
+    if banded:
+        shading.append("shaded: 95% bootstrap interval")
+    if any(p.n >= MIN_BOOTSTRAP_SAMPLES for p in measured_points):
+        shading.append("left: arm A only")
+    if unbanded:
+        # Naming them, not just omitting them. A signal drawn without a band
+        # beside two that have one reads as the CERTAIN one, which is exactly
+        # backwards -- it is the one whose runs the exclusion rules ate.
+        shading.append("no interval (too few reps): " + ", ".join(sorted(unbanded)))
+    _note(right, "\n".join([f"n={len(lags)} modeled lag values", *shading]))
 
     # Proxy handles, because the measured panel draws one line per
     # (signal, arm) and a legend with an entry for each is both wider than the
