@@ -27,9 +27,23 @@ def _close_figures():
     plt.close("all")
 
 
+def _point(cost, p99, signal, n=30):
+    """A policy point from repetition samples. `n` copies of one value means the
+    median is that value, so every figure fixture in this file draws exactly
+    what it drew when PolicyPoint carried scalars -- while clearing the
+    bootstrap floor for the interval bands the figures now render."""
+    return PolicyPoint(
+        cost_samples=(float(cost),) * n,
+        p99_samples=(float(p99),) * n,
+        signal=signal,
+        scale_up_at=1.0,
+        scale_down_at=0.1,
+    )
+
+
 def _points(signal, offset):
     return [
-        PolicyPoint(cost=c, p99=c / 10 + offset, signal=signal, scale_up_at=1.0, scale_down_at=0.1)
+        _point(c, c / 10 + offset, signal)
         for c in (100.0, 200.0, 400.0)
     ]
 
@@ -56,10 +70,7 @@ def _frontier_shaped(signal, offset, scale=1.0):
     point per series has short tick labels and no crowding, so it clears every
     legibility and overlap check a real frontier would fail."""
     return [
-        PolicyPoint(
-            cost=c, p99=(9000.0 / c) * scale + offset, signal=signal,
-            scale_up_at=1.0, scale_down_at=0.1,
-        )
+        _point(c, (9000.0 / c) * scale + offset, signal)
         for c in (120.0, 240.0, 480.0, 960.0, 1680.0)
     ]
 
@@ -383,7 +394,7 @@ def test_the_span_reports_a_flat_frontier_as_flat_not_as_a_range(tmp_path):
     """The degenerate case the note exists for: every point at the same p99."""
     flat = {
         s: [
-            PolicyPoint(cost=c, p99=4.0, signal=s, scale_up_at=1.0, scale_down_at=0.1)
+            _point(c, 4.0, s)
             for c in (100.0, 200.0)
         ]
         for s in SIGNAL_ORDER

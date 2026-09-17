@@ -130,7 +130,11 @@ def _dump(path: Path, sources, swept) -> None:
             {
                 "sources": {
                     label: [
-                        [p.cost, p.p99, p.signal, p.scale_up_at, p.scale_down_at] for p in points
+                        [
+                            list(p.cost_samples), list(p.p99_samples), p.signal,
+                            p.scale_up_at, p.scale_down_at,
+                        ]
+                        for p in points
                     ]
                     for label, points in sources.items()
                 },
@@ -144,8 +148,13 @@ def _dump(path: Path, sources, swept) -> None:
 def _load(path: Path):
     raw = json.loads(path.read_text())
     sources = {
-        label: [PolicyPoint(cost=c, p99=p, signal=s, scale_up_at=u, scale_down_at=d)
-                for c, p, s, u, d in rows]
+        label: [
+            PolicyPoint(
+                cost_samples=tuple(c), p99_samples=tuple(p), signal=s,
+                scale_up_at=u, scale_down_at=d,
+            )
+            for c, p, s, u, d in rows
+        ]
         for label, rows in raw["sources"].items()
     }
     return sources, {float(k): v for k, v in raw["swept"].items()}

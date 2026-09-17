@@ -172,15 +172,22 @@ def run_sweep(
     would have been unkeepable and "reported by signal" would have quietly
     become "reported in total".
 
-    `cost` and `p99` are the MEAN across repetitions of each run's own value.
-    For p99 that is deliberately a mean of per-run tail statistics, not the p99
-    of the pooled latencies: pooling estimates the tail of the mixture over
-    runs (dominated by the few worst runs, and weighting each run by how many
-    requests it happened to complete), whereas the design here is 30 equally
-    weighted repetitions of one configuration, whose estimand is the p99 a
-    typical run of that policy delivers. The pre-registration fixes the
-    repetition count but not the aggregator, so this choice is documented here
-    and reported alongside the frontiers.
+    `cost` and `p99` are the MEDIAN across the repetitions each point carries,
+    computed by `PolicyPoint` from the samples this returns rather than
+    collapsed here. They were means, and they were collapsed here: the sweep
+    emitted two scalars and discarded the 30 values behind them, which is why
+    nothing downstream could attach an interval to anything.
+
+    Median rather than mean for the reason artifact 1 gives for never
+    publishing one: these are per-run p99s of a heavy-tailed workload, and a
+    single catastrophic repetition moves a 30-run mean by a thirtieth of its
+    own excess. The estimand is unchanged and is still per-run, not pooled --
+    pooling latencies across runs estimates the tail of the mixture over runs,
+    weighting each run by how many requests it happened to complete, whereas
+    the design is 30 equally weighted repetitions whose estimand is the p99 a
+    TYPICAL run of that policy delivers, and "typical" is what a median
+    reports. The pre-registration fixes the repetition count but not the
+    aggregator; the change is disclosed in docs/experiment-a2.md.
     """
     _require_measured_curve(config.curve, allow_unmeasured)
     points: list[PolicyPoint] = []
@@ -252,8 +259,8 @@ def run_sweep(
                     continue
                 points.append(
                     PolicyPoint(
-                        cost=sum(costs) / len(costs),
-                        p99=sum(p99s) / len(p99s),
+                        cost_samples=tuple(costs),
+                        p99_samples=tuple(p99s),
                         signal=signal,
                         scale_up_at=up,
                         scale_down_at=down,

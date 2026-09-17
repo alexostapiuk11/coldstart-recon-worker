@@ -7,6 +7,7 @@ from collections import Counter
 import pytest
 
 import autoscale.sweep
+from autoscale import stats
 from autoscale.arrivals import SpikeShape, arrival_times
 from autoscale.coldstart_ecdf import LagDistribution
 from autoscale.controller import Controller
@@ -32,8 +33,21 @@ from autoscale.sweep import (
 )
 
 
-def _p(cost, p99, signal="queue_depth"):
-    return PolicyPoint(cost=cost, p99=p99, signal=signal, scale_up_at=1.0, scale_down_at=0.1)
+def _p(cost, p99, signal="queue_depth", up=1.0, down=0.1, n=30):
+    """A policy point from repetition samples rather than scalars.
+
+    `n` copies of one value keeps every frontier test asserting exactly what it
+    asserted when these were scalars -- the median of n identical values is that
+    value -- while clearing the bootstrap's sample floor wherever a test asks
+    for an interval.
+    """
+    return PolicyPoint(
+        cost_samples=(float(cost),) * n,
+        p99_samples=(float(p99),) * n,
+        signal=signal,
+        scale_up_at=up,
+        scale_down_at=down,
+    )
 
 
 def test_frontier_keeps_only_non_dominated_points():
@@ -132,7 +146,7 @@ def test_the_frontier_is_returned_ascending_by_cost_and_descending_by_p99():
 def test_the_frontier_carries_the_thresholds_not_just_the_axes():
     """A frontier point has to say which policy produced it; the sweep's whole
     output is (signal, thresholds) -> (cost, p99)."""
-    point = PolicyPoint(cost=1.0, p99=2.0, signal="utilization", scale_up_at=0.8, scale_down_at=0.3)
+    point = _p(1.0, 2.0, signal="utilization", up=0.8, down=0.3)
 
     (survivor,) = pareto_frontier([point])
 
@@ -143,29 +157,39 @@ def test_the_frontier_carries_the_thresholds_not_just_the_axes():
     )
 
 
+def _kwargs(**overrides):
+    base = {
+        "cost_samples": (1.0, 1.5),
+        "p99_samples": (2.0, 2.5),
+        "signal": "queue_depth",
+        "scale_up_at": 1.0,
+        "scale_down_at": 0.1,
+    }
+    return base | overrides
+
+
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
-@pytest.mark.parametrize("field", ["cost", "p99", "scale_up_at", "scale_down_at"])
+@pytest.mark.parametrize("field", ["cost_samples", "p99_samples", "scale_up_at", "scale_down_at"])
 def test_a_non_finite_policy_point_is_refused(field, bad):
     """A NaN p99 fails `p99 < best_p99`, so the point would silently vanish
-    from its own frontier rather than raising."""
-    kwargs = {"cost": 1.0, "p99": 2.0, "signal": "queue_depth", "scale_up_at": 1.0,
-              "scale_down_at": 0.1}
-    kwargs[field] = bad
+    from its own frontier rather than raising.
+
+    The two sample fields are checked per ELEMENT: the bad value goes in beside
+    a good one, so this pins that every repetition is validated rather than
+    just the first.
+    """
+    value = (1.0, bad) if field.endswith("_samples") else bad
 
     with pytest.raises(ValueError, match="not finite"):
-        PolicyPoint(**kwargs)
+        PolicyPoint(**_kwargs(**{field: value}))
 
 
-@pytest.mark.parametrize("field", ["cost", "p99"])
+@pytest.mark.parametrize("field", ["cost_samples", "p99_samples"])
 def test_a_negative_cost_or_p99_is_refused(field):
     """Lower is better on both axes, so a negative value dominates every
     honest point rather than reading as a small one."""
-    kwargs = {"cost": 1.0, "p99": 2.0, "signal": "queue_depth", "scale_up_at": 1.0,
-              "scale_down_at": 0.1}
-    kwargs[field] = -1.0
-
     with pytest.raises(ValueError, match="negative"):
-        PolicyPoint(**kwargs)
+        PolicyPoint(**_kwargs(**{field: (1.0, -1.0)}))
 
 
 # --- gap_at_iso_cost ----------------------------------------------------------
@@ -555,14 +579,18 @@ def _recompute_repetitions(config, seed, signal, up, down, repetitions):
     return costs, p99s
 
 
-def test_a_policy_point_is_the_mean_across_repetitions(monkeypatch):
+def test_a_policy_point_is_the_median_across_repetitions(monkeypatch):
     """Recomputed independently from the same derived seeds. Pins the
     aggregator, which the pre-registration fixes the repetition count for but
-    not the summary: a mean of per-run p99s (the p99 a typical run of this
-    policy delivers, 30 runs weighted equally) rather than the p99 of the
+    not the summary: the MEDIAN of per-run p99s (the p99 a typical run of this
+    policy delivers, repetitions weighted equally) rather than the p99 of the
     pooled latencies (the tail of the mixture over runs, dominated by the worst
     few and weighting each run by how many requests it happened to complete).
-    Either is defensible; which one was used must not be silently swappable."""
+
+    It was the mean until 2026-09-17. Artifact 1's standing rule is that a mean
+    is never published for right-skewed data, and per-run p99s of a
+    heavy-tailed workload are right-skewed. Either is defensible; which one was
+    used must not be silently swappable, which is what this test enforces."""
     monkeypatch.setattr("autoscale.sweep.REPETITIONS", 4)
     config = _config(until=150.0)
 
@@ -586,8 +614,8 @@ def test_a_policy_point_is_the_mean_across_repetitions(monkeypatch):
         if _spread(costs) < 1e-6 or _spread(p99s) < 1e-6:
             continue
         checked += 1
-        assert point.cost == pytest.approx(sum(costs) / len(costs))
-        assert point.p99 == pytest.approx(sum(p99s) / len(p99s))
+        assert point.cost == pytest.approx(stats.median(costs))
+        assert point.p99 == pytest.approx(stats.median(p99s))
         assert point.cost != pytest.approx(max(costs))
         assert point.p99 != pytest.approx(max(p99s))
     assert checked, "no configuration had repetitions that varied; the aggregator is untested"
@@ -757,3 +785,96 @@ def test_the_sweep_feeds_the_frontier(monkeypatch):
     # default set is what guards the published number.
     assert gap_at_iso_cost(frontiers, cost=budget, expected=tuple(frontiers)) >= 0.0
 
+
+
+# --- PolicyPoint carries its repetitions -------------------------------------
+
+
+def test_a_policy_point_carries_its_repetitions():
+    p = PolicyPoint(
+        cost_samples=(10.0, 12.0, 14.0),
+        p99_samples=(1.0, 2.0, 3.0),
+        signal="queue_depth",
+        scale_up_at=2.0,
+        scale_down_at=0.5,
+    )
+    assert p.n == 3
+    assert p.cost == pytest.approx(12.0)  # median, not mean
+    assert p.p99 == pytest.approx(2.0)
+
+
+def test_the_point_estimate_is_a_median_not_a_mean():
+    """Artifact 1's rule -- never a mean for right-skewed data -- applies to the
+    per-run p99s too. One catastrophic repetition should not move a policy's
+    published p99 by a thirtieth of its own excess."""
+    p = PolicyPoint(
+        cost_samples=(10.0,) * 30,
+        p99_samples=(1.0,) * 29 + (100.0,),
+        signal="queue_depth",
+        scale_up_at=2.0,
+        scale_down_at=0.5,
+    )
+    assert p.p99 == pytest.approx(1.0)
+    assert sum(p.p99_samples) / len(p.p99_samples) > 4.0  # the mean it is not
+
+
+def test_a_policy_point_with_no_repetitions_is_refused():
+    with pytest.raises(ValueError, match="no repetitions"):
+        PolicyPoint(
+            cost_samples=(),
+            p99_samples=(),
+            signal="queue_depth",
+            scale_up_at=2.0,
+            scale_down_at=0.5,
+        )
+
+
+def test_mismatched_sample_counts_are_refused():
+    """cost and p99 come from the same runs, so unequal lengths mean the two
+    axes of one point were computed over different repetition sets -- and
+    `gap_interval` resamples ONE index list for both."""
+    with pytest.raises(ValueError, match="SAME runs"):
+        PolicyPoint(
+            cost_samples=(1.0, 2.0),
+            p99_samples=(1.0,),
+            signal="queue_depth",
+            scale_up_at=2.0,
+            scale_down_at=0.5,
+        )
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+def test_a_non_finite_sample_is_still_refused(bad):
+    with pytest.raises(ValueError, match="not finite"):
+        PolicyPoint(
+            cost_samples=(1.0, bad),
+            p99_samples=(1.0, 2.0),
+            signal="queue_depth",
+            scale_up_at=2.0,
+            scale_down_at=0.5,
+        )
+
+
+def test_a_negative_sample_is_still_refused():
+    with pytest.raises(ValueError, match="negative"):
+        PolicyPoint(
+            cost_samples=(1.0, 2.0),
+            p99_samples=(1.0, -2.0),
+            signal="queue_depth",
+            scale_up_at=2.0,
+            scale_down_at=0.5,
+        )
+
+
+def test_a_policy_points_interval_brackets_its_point_estimate():
+    p = PolicyPoint(
+        cost_samples=tuple(float(i) for i in range(30)),
+        p99_samples=tuple(float(i) for i in range(30)),
+        signal="queue_depth",
+        scale_up_at=2.0,
+        scale_down_at=0.5,
+    )
+    lo, hi = p.p99_interval(iterations=500, seed=0)
+    assert lo <= p.p99 <= hi
+    lo_c, hi_c = p.cost_interval(iterations=500, seed=0)
+    assert lo_c <= p.cost <= hi_c

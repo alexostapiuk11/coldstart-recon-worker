@@ -9,6 +9,7 @@ import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from autoscale import stats
 from autoscale.signals import SIGNALS
 
 __all__ = [
@@ -29,56 +30,122 @@ COMPARED_SIGNALS = frozenset(SIGNALS)
 
 @dataclass(frozen=True)
 class PolicyPoint:
-    cost: float  # replica-seconds
-    p99: float  # seconds of request latency
+    """One policy's outcome, carrying the repetitions it was estimated from.
+
+    It used to carry two scalars -- the MEAN cost and MEAN p99 across
+    repetitions -- and nothing else. A 30-repetition estimate and a
+    1-repetition estimate were then indistinguishable to every consumer, so no
+    figure could show an interval and the published H3 gap had no uncertainty
+    attached to it at all. The samples are kept instead, and the scalars are
+    derived: 55 policies x 30 repetitions x 2 floats is nothing to hold, and it
+    is what lets `gap_interval` resample repetitions and rebuild the frontier
+    inside each draw, propagating uncertainty THROUGH the frontier selection
+    rather than around it.
+
+    The point estimate is the MEDIAN, not the mean it used to be. Artifact 1's
+    standing rule -- never a mean or a standard deviation for right-skewed data
+    -- applies to per-run p99s as much as to raw latencies: a single
+    catastrophic repetition moves a 30-run mean by a thirtieth of its own
+    excess, and under a heavy-tailed workload that repetition is the normal
+    case, not an outlier. The estimand is unchanged and still per-run -- the p99
+    a TYPICAL run of this policy delivers -- and "typical" is what a median
+    reports. The pre-registration fixes the repetition count but not the
+    aggregator, so this is a documented change of estimator, disclosed in
+    docs/experiment-a2.md rather than made silently.
+    """
+
+    cost_samples: tuple[float, ...]  # replica-seconds, one per kept repetition
+    p99_samples: tuple[float, ...]  # seconds of request latency, the same runs
     signal: str
     scale_up_at: float
     scale_down_at: float
 
     def __post_init__(self) -> None:
-        """Frozen and validated for the same reason as `ServiceCurve` and
-        `FleetState`: this record is built once and then compared thousands of
-        times by `pareto_frontier`, which is nothing but comparisons.
+        object.__setattr__(self, "cost_samples", tuple(self.cost_samples))
+        object.__setattr__(self, "p99_samples", tuple(self.p99_samples))
 
-        A NaN is the dangerous case and it is silent in both directions. A NaN
-        `p99` fails `point.p99 < best_p99`, so the point is DROPPED from its own
-        frontier -- an arm whose runs produced garbage would publish a frontier
-        that simply omits them, looking like a sparser sweep rather than a
-        broken one, and if every point were NaN the frontier would come back
-        empty from a non-empty input, which `pareto_frontier`'s own emptiness
-        guard would then never see. A NaN `cost` fails `p.cost <= cost` in
-        `_p99_at_cost`, so the point is invisible at every iso-cost slice. An
-        infinite cost passes every comparison as an ordinary extreme value and
-        would sit on the frontier as an affordable-at-infinity point.
-        """
+        if not self.cost_samples or not self.p99_samples:
+            raise ValueError(
+                "a policy point with no repetitions is a configuration that "
+                "produced nothing, not a policy that scored zero; `run_sweep` "
+                "skips those rather than emitting a point, so reaching here "
+                "means a caller built one by hand"
+            )
+        if len(self.cost_samples) != len(self.p99_samples):
+            raise ValueError(
+                f"cost has {len(self.cost_samples)} samples and p99 has "
+                f"{len(self.p99_samples)}; both axes of a point come from the "
+                "SAME runs, and `gap_interval` resamples one index list for "
+                "both -- unequal lengths mean the two axes were computed over "
+                "different repetition sets, and pairing them is meaningless"
+            )
+
+        # The same guards this class has always had, applied to the samples the
+        # scalars are now computed from. A NaN is the dangerous case and it is
+        # silent in both directions: a NaN p99 fails `point.p99 < best_p99`, so
+        # the point is DROPPED from its own frontier -- an arm whose runs
+        # produced garbage would publish a frontier that simply omits them,
+        # looking sparser rather than broken. A NaN cost fails `p.cost <= cost`
+        # in `_p99_at_cost`, so the point is invisible at every iso-cost slice.
+        # An infinite cost passes every comparison as an ordinary extreme value
+        # and would sit on the frontier as affordable-at-infinity.
+        for field_name, samples in (("cost", self.cost_samples), ("p99", self.p99_samples)):
+            for i, value in enumerate(samples):
+                if not math.isfinite(value):
+                    raise ValueError(
+                        f"{field_name}_samples[{i}] is {value!r}, which is not "
+                        "finite; a NaN compares False against every ordering "
+                        "test in pareto_frontier and _p99_at_cost, so the point "
+                        "would be silently dropped from its own frontier "
+                        "instead of raising here, and an infinity would sit on "
+                        "the frontier as an ordinary extreme value"
+                    )
+                # Both axes are physical readings with a floor: replica-seconds
+                # is an integral of a non-negative replica count, latency is a
+                # duration. Lower is better on both, so a negative value does
+                # not read as a small one but as a WINNING one, dominating
+                # every honest point on the frontier.
+                if value < 0:
+                    raise ValueError(
+                        f"{field_name}_samples[{i}] is {value!r}, which is "
+                        "negative; lower is better on both frontier axes, so a "
+                        "negative value does not read as a small one but as a "
+                        "point that dominates every honest policy in the sweep"
+                    )
         for field_name, value in (
-            ("cost", self.cost),
-            ("p99", self.p99),
             ("scale_up_at", self.scale_up_at),
             ("scale_down_at", self.scale_down_at),
         ):
             if not math.isfinite(value):
                 raise ValueError(
-                    f"{field_name} is {value!r}, which is not finite; a NaN "
-                    "compares False against every ordering test in "
-                    "pareto_frontier and _p99_at_cost, so the point would be "
-                    "silently dropped from its own frontier instead of "
-                    "raising here, and an infinity would sit on the frontier "
-                    "as an ordinary extreme value"
+                    f"{field_name} is {value!r}, which is not finite; a policy "
+                    "threshold is a number the controller compares against, and "
+                    "a NaN one never fires while an infinite one never stops"
                 )
-        # Both axes are physical readings with a floor: replica-seconds is an
-        # integral of a non-negative replica count, latency is a duration. A
-        # negative one is a bookkeeping bug, and on these axes -- where lower
-        # is better on both -- it does not read as a small value but as a
-        # WINNING one, dominating every honest point on the frontier.
-        for field_name, value in (("cost", self.cost), ("p99", self.p99)):
-            if value < 0:
-                raise ValueError(
-                    f"{field_name} is {value!r}, which is negative; lower is "
-                    "better on both frontier axes, so a negative value does "
-                    "not read as a small one but as a point that dominates "
-                    "every honest policy in the sweep"
-                )
+
+    @property
+    def n(self) -> int:
+        """Repetitions kept. NOT the pre-registered 30 -- the exclusion rules
+        discard runs, and a point built from 4 surviving repetitions has to be
+        distinguishable from one built from 30."""
+        return len(self.p99_samples)
+
+    @property
+    def cost(self) -> float:
+        return stats.median(self.cost_samples)
+
+    @property
+    def p99(self) -> float:
+        return stats.median(self.p99_samples)
+
+    def p99_interval(self, iterations: int = 10000, seed: int = 0) -> tuple[float, float]:
+        """A 95% percentile-bootstrap interval on this policy's p99."""
+        got = stats.bootstrap_interval(self.p99_samples, iterations=iterations, seed=seed)
+        return got["lo"], got["hi"]
+
+    def cost_interval(self, iterations: int = 10000, seed: int = 0) -> tuple[float, float]:
+        got = stats.bootstrap_interval(self.cost_samples, iterations=iterations, seed=seed)
+        return got["lo"], got["hi"]
 
 
 @dataclass(frozen=True)
