@@ -1226,3 +1226,45 @@ def test_an_interval_that_only_touches_zero_is_still_unevaluable():
     )
     assert not verdict.evaluable
     assert "step" in verdict.detail
+
+
+def test_costs_differing_only_by_floating_point_dust_are_one_operating_point():
+    """`replica_seconds` is an integral accumulated by float addition, so two
+    policies that cost the SAME 670 replica-seconds physically come back as
+    669.9999999999985 and 670.000000000001. Sorting on that dust turned 19
+    queue_depth policies into a three-point "Pareto frontier" whose staircase
+    was ordered by the 13th significant digit -- measured on the real arm-A
+    sweep, build/a2-figures-final/sweep-cache.json.
+
+    Two consequences, one cosmetic and one not. The figure drew that signal as
+    a vertical smear with no interval band, on the very series carrying the
+    artifact's headline finding. And `gap_at_iso_cost` reads
+    `min(p99 for affordable)`, so a budget landing BETWEEN two dust values
+    would silently change the published gap. It does not today -- the budget
+    sits well above the tied cluster -- which is exactly why this needs a test
+    rather than a reader noticing later.
+    """
+    dust = [
+        _p(669.9999999999985, 6.24, "queue_depth", up=16.0, down=0.0),
+        _p(670.0, 6.02, "queue_depth", up=1.0, down=0.0),
+        _p(670.000000000001, 5.88, "queue_depth", up=4.0, down=1.0),
+    ]
+
+    front = pareto_frontier(dust)
+
+    assert len(front) == 1, (
+        f"kept {len(front)} points at one physical cost; costs "
+        f"{[p.cost for p in front]} differ by ~1e-12, which is float noise in "
+        "an accumulated integral, not a cost/latency tradeoff"
+    )
+    assert front[0].p99 == pytest.approx(5.88), "the survivor must be the best of the tied set"
+
+
+def test_a_real_cost_difference_is_still_a_frontier_step():
+    """The tolerance must not swallow differences that are physically real. One
+    replica-second apart on a ~670 s integral is 1.5e-3 relative -- six orders
+    of magnitude above the dust above."""
+    front = pareto_frontier(
+        [_p(670.0, 6.0, "queue_depth"), _p(671.0, 5.0, "queue_depth")]
+    )
+    assert len(front) == 2

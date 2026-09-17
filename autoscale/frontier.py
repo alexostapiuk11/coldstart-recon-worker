@@ -197,16 +197,61 @@ class H3Verdict:
     evaluable: bool = True
 
 
+# Two costs closer than this, relatively, are the SAME operating point.
+#
+# `replica_seconds` is an integral accumulated by float addition over the
+# event loop, so two policies that hold an identical fleet for an identical
+# time come back differing in the last few bits: 669.9999999999985 against
+# 670.000000000001, about 4e-15 relative. Anything a physical difference could
+# produce is enormously larger -- one replica-second on a 670 s integral is
+# 1.5e-3 -- so 1e-9 sits six orders of magnitude above the noise and six below
+# the smallest real step, and nothing in the sweep lands in between.
+COST_TIE_RELATIVE_TOLERANCE = 1e-9
+
+
 def pareto_frontier(points: list[PolicyPoint]) -> list[PolicyPoint]:
     """Non-dominated points, ascending by cost. Lower cost and lower p99 are
     both better, so a point is dominated when another is at least as good on
-    both axes."""
+    both axes.
+
+    Costs within `COST_TIE_RELATIVE_TOLERANCE` count as EQUAL, and only the
+    best-p99 point of a tied group survives. Comparing them exactly was a real
+    defect, not a theoretical one: on the arm-A sweep all 19 queue_depth
+    policies cost the same 670 replica-seconds, but float dust in the 13th
+    significant digit made three of them a strictly-improving staircase, and
+    `pareto_frontier` published that as a Pareto frontier. Which three survived
+    was decided by rounding error.
+
+    It did two kinds of damage. `figures.frontiers` drew the signal as a
+    vertical smear of dots with no interval band -- `fill_between` over a
+    zero-width x-range draws nothing -- on the series carrying this artifact's
+    headline finding, that queue depth is the WORST signal and no hypothesis
+    named it. And `gap_at_iso_cost` takes `min(p99)` over affordable points, so
+    an iso-cost budget landing between two dust values would have moved the
+    published gap. Measured on the committed sweep, it does not today: the
+    budget sits well above the tied cluster and the gap is identical to four
+    decimals either way. A silent dependency on the 13th digit that happens not
+    to fire is still one worth removing.
+    """
     if not points:
         raise ValueError("cannot compute a frontier from an empty point set")
     ordered = sorted(points, key=lambda p: (p.cost, p.p99))
     frontier: list[PolicyPoint] = []
     best_p99 = float("inf")
     for point in ordered:
+        # A tie is resolved in place rather than skipped: `ordered` sorts ties
+        # by p99 ascending, so the first of a tied group is already its best
+        # and later members are dominated -- but only exactly-equal costs sort
+        # that way, and two dust-separated costs do not tie under `sorted`.
+        # Comparing against the point actually on the frontier is what makes
+        # the grouping independent of how the dust happened to fall.
+        if frontier and math.isclose(
+            point.cost, frontier[-1].cost, rel_tol=COST_TIE_RELATIVE_TOLERANCE
+        ):
+            if point.p99 < frontier[-1].p99:
+                frontier[-1] = point
+                best_p99 = point.p99
+            continue
         if point.p99 < best_p99:
             frontier.append(point)
             best_p99 = point.p99

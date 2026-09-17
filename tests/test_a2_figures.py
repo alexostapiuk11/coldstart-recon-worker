@@ -191,7 +191,11 @@ def test_frontiers_figure_draws_a_line_and_a_legend_entry_per_signal(tmp_path):
     """A chart that appears to compare three signals while showing two is a
     misleading chart, not a smaller one. Refusing on a MISSING key is not
     enough -- the drawing loop must actually put all three on the canvas."""
-    fig = frontiers(ALL_THREE, path=tmp_path / "f.png", return_figure=True)
+    # WIDE_A, not ALL_THREE: ALL_THREE's frontiers collapse to one point each,
+    # which `_band` now draws as an error bar -- several Line2D artists per
+    # signal -- so counting lines there measures the error bars, not the
+    # series. A multi-point fixture is what this test means by "a line".
+    fig = frontiers(WIDE_A, path=tmp_path / "f.png", return_figure=True)
     axis = fig.axes[0]
 
     assert len(axis.get_lines()) == len(SIGNAL_ORDER)
@@ -246,8 +250,11 @@ def test_the_two_arms_are_distinguishable_without_colour(tmp_path):
     """The measured panel separates arm A from arm C by line style as well as by
     legend text; colour alone encodes the signal, so a greyscale print or a
     colourblind reader would otherwise see the two arms as identical lines."""
+    # Multi-point frontiers, so the only Line2D artists are the two arms'
+    # series: single-point frontiers draw error bars, whose own lines carry a
+    # third linestyle ("none") and break the count.
     fig = convergence(
-        FRONTIERS_A, FRONTIERS_C, swept=SWEPT, path=tmp_path / "c.png", curve_measured=True, return_figure=True
+        WIDE_A, WIDE_C, swept=WIDE_SWEPT, path=tmp_path / "c.png", curve_measured=True, return_figure=True
     )
     styles = {line.get_linestyle() for line in fig.axes[0].get_lines()}
     assert len(styles) == 2
@@ -437,9 +444,24 @@ def _bands(axis):
 
 def test_the_frontier_figure_draws_an_interval_band_per_signal(tmp_path):
     """Spec 11 requires an interval on every published figure. Without one, a
-    30-repetition frontier and a 1-repetition frontier are the same picture."""
-    fig = frontiers(ALL_THREE, path=tmp_path / "f.png", return_figure=True)
-    assert len(_bands(fig.axes[0])) == len(SIGNAL_ORDER)
+    30-repetition frontier and a 1-repetition frontier are the same picture.
+
+    This test used ALL_THREE and was VACUOUS. Those frontiers collapse to one
+    point per signal, and `fill_between` over a single x-coordinate returns a
+    PolyCollection that paints nothing -- so it counted three band objects
+    while the rendered figure showed zero bands, which is exactly the defect it
+    was written to catch. Presence of the artist is not presence of the band;
+    the extent assertion below is what makes it a real check.
+    """
+    fig = frontiers(WIDE_A, path=tmp_path / "f.png", return_figure=True)
+    bands = _bands(fig.axes[0])
+    assert len(bands) == len(SIGNAL_ORDER)
+    for band in bands:
+        (x0, y0), (x1, y1) = band.get_datalim(fig.axes[0].transData).get_points()
+        assert x1 - x0 > 0 and y1 - y0 > 0, (
+            "the band has zero extent, so it paints nothing -- the artist "
+            "exists and the figure shows no interval"
+        )
     plt.close(fig)
 
 
@@ -595,4 +617,31 @@ def test_a_signal_that_could_not_be_banded_is_named_on_the_figure(tmp_path):
     text = " ".join(t.get_text() for t in fig.findobj(plt.Text))
     assert "no interval (too few reps)" in text
     assert "queue depth" in text
+    plt.close(fig)
+
+
+def test_a_single_point_frontier_still_shows_its_interval(tmp_path):
+    """`fill_between` over one x-coordinate has zero width and paints nothing,
+    so a signal whose frontier collapses to one operating point was drawn as a
+    bare marker beside two banded curves -- and a series with no band beside
+    two that have one reads as the CERTAIN one, which `_band`'s own refusal
+    path exists to prevent.
+
+    Not hypothetical: on the arm-A sweep every queue_depth policy costs the
+    same 670 replica-seconds, so its frontier is exactly one point, and
+    queue_depth is the signal carrying this artifact's headline finding.
+    """
+    one_point = {
+        "queue_depth": [_point(670.0, 6.0, "queue_depth")],
+        "in_flight_concurrency": _frontier_shaped("in_flight_concurrency", 1.0),
+        "utilization": _frontier_shaped("utilization", 2.0),
+    }
+
+    fig = frontiers(one_point, path=tmp_path / "f.png", return_figure=True)
+    axis = fig.axes[0]
+    bars = [c for c in axis.containers if type(c).__name__ == "ErrorbarContainer"]
+    assert bars, (
+        "the single-point frontier drew no interval at all; a bare marker "
+        "beside two banded curves reads as the certain one"
+    )
     plt.close(fig)

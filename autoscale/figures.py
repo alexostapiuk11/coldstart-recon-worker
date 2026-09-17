@@ -263,9 +263,33 @@ def _band(axis, front, color, allow_missing_intervals: bool) -> bool:
         a, b = point.p99_interval(iterations=BAND_ITERATIONS, seed=BAND_SEED)
         lo.append(a)
         hi.append(b)
-    axis.fill_between(
-        [p.cost for p in front], lo, hi, color=color, alpha=BAND_ALPHA, linewidth=0
-    )
+    costs = [p.cost for p in front]
+    if len(front) == 1:
+        # `fill_between` over one x-coordinate has zero width and paints
+        # NOTHING, so this signal used to arrive as a bare marker beside two
+        # banded curves -- which reads as the certain one, the exact misreading
+        # the refusal path above exists to prevent, arrived at by a different
+        # route. A frontier legitimately collapses to one point whenever every
+        # policy of a signal costs the same, which is not a corner case: on the
+        # arm-A sweep all 19 queue_depth policies do, and queue_depth is the
+        # signal carrying the artifact's headline finding.
+        #
+        # An error bar rather than a band because there is no curve to band --
+        # one operating point has an interval, not an envelope. The module
+        # docstring's preference for bands is about three OVERLAPPING curves at
+        # 375 px; a lone vertical bar has none of that crowding.
+        axis.errorbar(
+            costs,
+            [p.p99 for p in front],
+            yerr=[[front[0].p99 - lo[0]], [hi[0] - front[0].p99]],
+            color=color,
+            capsize=4,
+            elinewidth=2,
+            linestyle="none",
+            zorder=2,
+        )
+        return True
+    axis.fill_between(costs, lo, hi, color=color, alpha=BAND_ALPHA, linewidth=0)
     return True
 
 
