@@ -188,6 +188,82 @@ iso-cost slice. Percentiles reported: p50, p90, p95, p99 of request latency
 within a spike. p99 is supported here and was not in artifact 1: a spike
 generates thousands of requests, where artifact 1 had ~100 runs per arm.
 
+### Amendment, 2026-09-17: the statistical layer
+
+Four changes. None alters a quantity this document fixes; all four alter how a
+published number is computed, which is the kind of thing that must not move
+silently. Made while the service curve was still the explicitly-unmeasured
+placeholder, under `allow_unmeasured=True`, so no measured result existed to
+tune them against.
+
+**1. Aggregator: mean → median.** Each policy's published cost and p99 were the
+arithmetic MEAN of its 30 per-run values. This document fixes the repetition
+count but not the aggregator, so no pre-registered quantity changes — but the
+estimator does, and artifact 1's standing rule is that a mean is never published
+for right-skewed data. Per-run p99s under a heavy-tailed workload are
+right-skewed, and a single catastrophic repetition moves a 30-run mean by a
+thirtieth of its own excess. The estimand is unchanged and still per-run: the
+p99 a *typical* run of that policy delivers, which is what a median reports.
+
+**2. Intervals on every published quantity.** Percentile-method bootstrap, the
+same convention as artifact 1 and pinned equal to it by a conformance test
+(`autoscale` cannot import `coldstart`, so the conventions are implemented
+twice and that test is what stops them drifting).
+
+The gap's interval resamples repetition *identities* — one shared draw across
+every policy, so that wherever two signals both kept repetition r they are
+scored on the same arrival trace — and rebuilds the frontiers and re-derives the
+budget inside each draw. Propagating uncertainty *through* the frontier
+selection is what makes the winner's-curse bias visible: each frontier is a
+minimum over 17–19 noisy estimates, so the point gap is biased upward. The
+interval inherits that bias; it does not correct it. A correction needs a
+held-out selection split and is not attempted.
+
+A policy that lost repetitions to the exclusion rules contributes the drawn ones
+it has. That assumes a discarded run is missing for reasons uncorrelated with
+the value it would have had, which is **not strictly true**:
+`no_scaling_action` fires on the quieter traces, where the policy never crossed
+its threshold. The bias runs toward a policy looking better than it is on the
+runs it kept, and it is the same bias the point estimate already carries.
+
+**3. Percentile convention and sample floors.** Artifact 2 used nearest-rank
+(`sorted[int(q·n)]`) where artifact 1 interpolates between order statistics;
+on the same data those disagree by up to a whole order statistic. Artifact 2
+also applied no sample floor, so a run that completed a dozen requests reported
+its second-worst latency as a "p99" into the same field as one backed by
+thousands. Both are now artifact 1's, including `MIN_SAMPLES["p99"] = 500` —
+which is what holds this document's own justification for reporting p99 ("a
+spike generates thousands of requests") to account.
+
+**4. The iso-cost budget is now a rule.** It was not pre-registered at all, and
+was implemented two incompatible ways: `min(cost) × 2` in the render script and
+the maximum of the per-signal cheapest points in a test. Against the sweep the
+script's version left every frontier fully affordable, so the "inter-signal gap
+at iso-cost" was in fact the spread between each signal's *unconstrained* best
+— a different quantity under the published name, and the more flattering one,
+since it removes the cost axis from a comparison whose premise is a cost/latency
+tradeoff.
+
+The budget is now **the cheapest spend at which every compared signal has at
+least one policy**: the maximum over signals of that signal's cheapest frontier
+point. Derivable from the sweep rather than chosen after seeing it, and it binds
+by construction — at exactly this budget the most expensive-floor signal has
+precisely one affordable policy. Any lower budget is not a stricter comparison
+but an undefined one.
+
+**Effect on the reported numbers** (placeholder curve, both shapes, both arms):
+
+| | arm A | arm C | halving needs |
+|---|---|---|---|
+| step | 2.7542 [1.4815, 4.1501] | 1.9083 [1.2124, 2.6515] | ≤ 1.3771 — not met |
+| ramp | 4.0766 [3.1358, 4.5537] | 1.7870 [1.4784, 2.8918] | ≤ 2.0383 — met |
+
+H3 is therefore **partial**: the gap at least halved under the ramp and not
+under the step, which this document requires be published as a partial result
+rather than rounded up to confirmation. The step-shape intervals overlap
+substantially, so the step arm-A/arm-C difference is not itself resolved at this
+sample size; the ramp intervals do not overlap.
+
 ## Exclusion rules
 
 A simulation run is discarded if the arrival trace is empty, if **no** replica
