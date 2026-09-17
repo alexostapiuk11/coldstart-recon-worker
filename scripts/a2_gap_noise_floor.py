@@ -33,9 +33,16 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts"))
 
-from a2_render_figures import UNTIL, _by_signal, _preregistered_shape
+import a2_render_figures as render_mod
+from a2_render_figures import (
+    UNTIL,
+    _by_signal,
+    _preregistered_shape,
+    _saturation_rps,
+)
 
 import autoscale.sweep as sweep_mod
+from autoscale.arrivals import SpikeShape
 from autoscale.coldstart_ecdf import load_measured_lags
 from autoscale.frontier import pareto_frontier
 from autoscale.service import SERVICE_CURVE_PLACEHOLDER
@@ -67,6 +74,13 @@ def main() -> None:
     ap.add_argument("--arm", default="A")
     ap.add_argument("--store", default="data/campaign.jsonl")
     ap.add_argument("--out", default="build/a2-gap-noise-floor.json")
+    # Candidate regimes from scripts/a2_regime_probe.py. Defaulting to the
+    # pre-registered values means the no-flag invocation measures what the
+    # artifact currently claims; passing them measures a candidate BEFORE the
+    # pre-registration is amended to adopt it, which is the order that keeps
+    # the amendment a disclosure rather than a result-driven edit.
+    ap.add_argument("--baseline-fraction", type=float, default=None)
+    ap.add_argument("--additional-replicas", type=float, default=None)
     args = ap.parse_args()
 
     # Reaching into the module rather than passing a parameter: REPETITIONS is
@@ -76,7 +90,31 @@ def main() -> None:
         print(f"NOTE: repetitions lowered to {args.reps} from the pre-registered 30")
     sweep_mod.REPETITIONS = args.reps
 
-    shape = _preregistered_shape(SERVICE_CURVE_PLACEHOLDER, kind="step", ramp=0.0)
+    if args.baseline_fraction is not None or args.additional_replicas is not None:
+        saturation = _saturation_rps(SERVICE_CURVE_PLACEHOLDER)
+        fraction = (
+            args.baseline_fraction
+            if args.baseline_fraction is not None
+            else render_mod.BASELINE_FRACTION_OF_SATURATION
+        )
+        additional = (
+            args.additional_replicas
+            if args.additional_replicas is not None
+            else render_mod.ADDITIONAL_REPLICAS_AT_PEAK
+        )
+        baseline = fraction * saturation
+        peak = baseline + additional * saturation
+        shape = SpikeShape(
+            kind="step", baseline_rate=baseline, k=peak / baseline, ramp=0.0, sustain=190.0
+        )
+        print(
+            f"NOT the pre-registered traffic model: baseline={fraction:.0%} of "
+            f"saturation, {additional} additional replicas at peak "
+            f"(peak/saturation={peak / saturation:.2f})"
+        )
+    else:
+        shape = _preregistered_shape(SERVICE_CURVE_PLACEHOLDER, kind="step", ramp=0.0)
+
     lags = load_measured_lags(args.store)[args.arm]
     print(
         f"arm {args.arm}: {args.seeds} master seeds x {args.reps} reps, "
