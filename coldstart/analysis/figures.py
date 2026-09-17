@@ -760,3 +760,115 @@ def resample_frames(values, out_path, frames: int = 10, seed: int = 0) -> Path:
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
     return Path(out_path)
+
+
+def _draw_interval(ax, y, lo, hi, color, label, fig_w):
+    ax.plot([lo, hi], [y, y], color=color, linewidth=2.6)
+    for x in (lo, hi):
+        ax.plot([x, x], [y - 0.09, y + 0.09], color=color, linewidth=2.6)
+    ax.text(
+        hi,
+        y + 0.16,
+        f"{label}  [{lo:.2f}, {hi:.2f}]",
+        color=color,
+        fontsize=phone_pt(7.4, fig_w),
+        ha="right",
+    )
+
+
+def shortcut_panels(intervals, out_path) -> Path:
+    """Two panels: the shortcut landing, then the same shortcut failing.
+
+    An earlier design called this the "overlap trap" and claimed a reader
+    could not get the difference by eyeballing the two contrasts. On this
+    campaign that is false -- the intervals do not overlap at all and naive
+    endpoint subtraction lands within 0.04s -- so the chart would have taught
+    the shortcut it meant to forbid. The honest lesson needs both panels: the
+    shortcut works here, fails on correlated estimates, and nothing visible
+    in the two intervals says which case you are in.
+    """
+    ab, bc, diff = intervals["ab"], intervals["bc"], intervals["diff"]
+    corr = shortcut_panels.correlated_example()
+    fig_w = 8.0
+    fig, axes = plt.subplots(2, 1, figsize=(fig_w, 7.4))
+
+    for ax, data, title, verdict in (
+        (
+            axes[0],
+            {"ab": ab, "bc": bc, "diff": diff},
+            "This campaign — the shortcut worked",
+            "the shortcut worked here: naive subtraction lands within 0.04 s",
+        ),
+        (
+            axes[1],
+            corr,
+            "Correlated estimates — same arithmetic, wrong",
+            "naive subtraction is several times too wide",
+        ),
+    ):
+        d = data
+        naive_lo, naive_hi = d["ab"][0] - d["bc"][1], d["ab"][1] - d["bc"][0]
+        _draw_interval(ax, 3.0, d["ab"][0], d["ab"][1], "#2f6fb5", "first contrast", fig_w)
+        _draw_interval(ax, 2.2, d["bc"][0], d["bc"][1], "#e0a43a", "second contrast", fig_w)
+        _draw_interval(ax, 1.4, d["diff"][0], d["diff"][1], "#4a8c5f", "true difference", fig_w)
+        _draw_interval(ax, 0.6, naive_lo, naive_hi, "#c0392b", "naive subtraction", fig_w)
+        span = max(d["ab"][1], d["bc"][1], naive_hi) - min(d["ab"][0], d["bc"][0], naive_lo)
+        pad = span * 0.08 if span else 1.0
+        ax.set_xlim(
+            min(d["ab"][0], d["bc"][0], naive_lo) - pad,
+            max(d["ab"][1], d["bc"][1], naive_hi) + pad,
+        )
+        ax.set_ylim(0.15, 3.55)
+        ax.set_yticks([])
+        ax.tick_params(axis="x", labelsize=phone_pt(7.6, fig_w))
+        ax.set_title(title, fontsize=phone_pt(8.8, fig_w))
+        ax.text(
+            0.5,
+            0.03,
+            verdict,
+            transform=ax.transAxes,
+            ha="center",
+            fontsize=phone_pt(7.6, fig_w),
+            style="italic",
+        )
+
+    # Two lines, not one: the full sentence at any phone-legible font size
+    # runs past the right edge of an 8-inch-wide canvas (as it did in an
+    # earlier version of this figure), so it is wrapped manually rather
+    # than left to overflow.
+    fig.text(
+        0.5,
+        0.045,
+        "Nothing visible in the two contrasts tells you which case you are in.",
+        ha="center",
+        fontsize=phone_pt(7.6, fig_w),
+        fontweight="bold",
+    )
+    fig.text(
+        0.5,
+        0.012,
+        "That is why the difference is computed, not derived.",
+        ha="center",
+        fontsize=phone_pt(7.6, fig_w),
+        fontweight="bold",
+    )
+    fig.tight_layout(rect=(0.0, 0.09, 1.0, 1.0))
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    return Path(out_path)
+
+
+def _correlated_example() -> dict:
+    """Two contrasts sharing a host effect, so the difference is far better
+    pinned than either part and naive subtraction is grossly too wide. Built
+    from the campaign's own paired design, which exists for this exact
+    reason.
+    """
+    return {
+        "ab": (2.0, 28.0),
+        "bc": (6.0, 32.0),
+        "diff": (-5.2, -2.8),
+    }
+
+
+shortcut_panels.correlated_example = _correlated_example

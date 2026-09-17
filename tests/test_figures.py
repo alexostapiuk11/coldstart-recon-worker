@@ -31,6 +31,7 @@ from coldstart.analysis.figures import (
     kv_dividend,
     per_host_medians,
     resample_frames,
+    shortcut_panels,
     warmup_curve,
     waterfall,
 )
@@ -235,6 +236,46 @@ def test_waterfall_arm_c_segments_are_pinned_with_a_much_smaller_compile_term(tm
     s4b_a, s4b_b, s4b_c = arm_a[4].get_width(), arm_b[4].get_width(), arm_c[4].get_width()
     assert s4b_c < s4b_b < s4b_a
     assert s4b_c == pytest.approx(1.5)
+
+
+def test_shortcut_panels_panel_one_shows_the_naive_method_succeeding(tmp_path):
+    """Panel 1 is the real campaign, where endpoint subtraction lands within
+    0.04s. This is asserted, not assumed: an earlier spec draft claimed the
+    opposite and would have taught a shortcut it meant to forbid."""
+    ab, bc = (10.6683, 20.4687), (25.9701, 31.0050)
+    true_diff = (-20.298, -5.537)
+    naive = (ab[0] - bc[1], ab[1] - bc[0])
+    assert abs(naive[0] - true_diff[0]) < 0.05
+    assert abs(naive[1] - true_diff[1]) < 0.05
+
+    # shortcut_panels calls plt.subplots(2, 1, ...) once, so the spy in
+    # _call_capturing_axes captures a single (fig, axes) pair where `axes`
+    # is the array of both subplot Axes -- not one Axes like every other
+    # renderer here. Index into it rather than treating it as a lone Axes.
+    fig, axes = _call_capturing_axes(
+        lambda d, p: shortcut_panels(d, p),
+        {"ab": ab, "bc": bc, "diff": true_diff},
+        tmp_path / "s.png",
+    )
+    ax = axes[0]
+    text = " ".join(t.get_text() for t in fig.texts) + " ".join(t.get_text() for t in ax.texts)
+    assert "worked" in text.lower()
+
+
+def test_shortcut_panels_panel_two_shows_the_naive_method_failing(tmp_path):
+    """The standing rule, executable: panel 2 must be a case where the naive
+    method a learner would actually try visibly fails. If it ever stops
+    failing, this test fails and the example must be replaced rather than
+    quietly shipped."""
+    correlated = shortcut_panels.correlated_example()
+    naive_width = (correlated["ab"][1] - correlated["bc"][0]) - (
+        correlated["ab"][0] - correlated["bc"][1]
+    )
+    true_width = correlated["diff"][1] - correlated["diff"][0]
+    assert naive_width > true_width * 3, (
+        f"panel 2's naive interval is {naive_width:.2f} wide against a true "
+        f"{true_width:.2f} -- not a visible enough failure to teach with"
+    )
 
 
 def test_waterfall_yticklabels_carry_each_arms_n(tmp_path):
