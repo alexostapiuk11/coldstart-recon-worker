@@ -34,8 +34,14 @@ def _points(signal, offset):
     ]
 
 
-FRONTIERS_A = {s: _points(s, i) for i, s in enumerate(["queue_depth", "utilization"], start=1)}
-FRONTIERS_C = {
+FRONTIERS_A = {s: _points(s, i) for i, s in enumerate(SIGNAL_ORDER, start=1)}
+FRONTIERS_C = {s: _points(s, i * 0.3) for i, s in enumerate(SIGNAL_ORDER, start=1)}
+# Two signals, on BOTH arms. The arms agree, so the asymmetry guard is silent,
+# and until the completeness guard existed this rendered as a three-signal
+# comparison showing two -- the same defect `frontiers` has always refused, on
+# the figure that carries the artifact's argument.
+TWO_SIGNAL_A = {s: _points(s, i) for i, s in enumerate(["queue_depth", "utilization"], start=1)}
+TWO_SIGNAL_C = {
     s: _points(s, i * 0.3) for i, s in enumerate(["queue_depth", "utilization"], start=1)
 }
 ALL_THREE = {s: _points(s, i + 1) for i, s in enumerate(SIGNAL_ORDER)}
@@ -186,8 +192,18 @@ def test_convergence_refuses_an_asymmetric_comparison(tmp_path):
     present on one arm and absent from the other, the chart still draws -- and
     reads as though both arms were compared on the same signals, with the
     missing one invisible rather than reported."""
+    with pytest.raises(ValueError, match="different signals"):
+        convergence(ALL_THREE, TWO_SIGNAL_C, swept=SWEPT, path=tmp_path / "c.png")
+
+
+def test_convergence_refuses_two_arms_that_agree_on_an_INCOMPLETE_signal_set(tmp_path):
+    """The guarding was backwards. `convergence` checked only that the two arms
+    AGREE on their signal set, never that either set is complete -- so a
+    two-signal "three-signal comparison" rendered without complaint, on the one
+    figure that carries the artifact's argument, while `frontiers` next to it
+    refused exactly that input. Agreement is not coverage."""
     with pytest.raises(ValueError, match="in_flight_concurrency"):
-        convergence(ALL_THREE, FRONTIERS_C, swept=SWEPT, path=tmp_path / "c.png")
+        convergence(TWO_SIGNAL_A, TWO_SIGNAL_C, swept=SWEPT, path=tmp_path / "c.png")
 
 
 def test_convergence_refuses_an_empty_arm(tmp_path):

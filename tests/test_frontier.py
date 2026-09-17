@@ -10,7 +10,13 @@ import autoscale.sweep
 from autoscale.arrivals import SpikeShape, arrival_times
 from autoscale.coldstart_ecdf import LagDistribution
 from autoscale.controller import Controller
-from autoscale.frontier import PolicyPoint, gap_at_iso_cost, h3_verdict, pareto_frontier
+from autoscale.frontier import (
+    COMPARED_SIGNALS,
+    PolicyPoint,
+    gap_at_iso_cost,
+    h3_verdict,
+    pareto_frontier,
+)
 from autoscale.service import SERVICE_CURVE_PLACEHOLDER, ServiceCurve
 from autoscale.signals import SIGNALS
 from autoscale.sim import run_with_policy
@@ -173,11 +179,67 @@ def test_the_gap_slices_below_the_budget_not_at_it():
         "utilization": [_p(10, 9.0, "utilization"), _p(20, 7.0, "utilization")],
     }
 
-    assert gap_at_iso_cost(frontiers, cost=19.9) == pytest.approx(5.0)
+    assert gap_at_iso_cost(
+        frontiers, cost=19.9, expected=("queue_depth", "utilization")
+    ) == pytest.approx(5.0)
 
 
-def test_a_single_signal_has_no_gap():
-    assert gap_at_iso_cost({"queue_depth": [_p(10, 4.0)]}, cost=10) == 0.0
+def test_a_gap_over_fewer_than_the_compared_signals_is_refused():
+    """The defect: a one-signal dict returned 0.0, and `h3_verdict` reads a zero
+    arm-C gap as a halving. So an arm that LOST signals -- every run discarded --
+    confirmed the artifact's headline out of missing data, while the arm that
+    kept all three supplied the numerator. `figures.frontiers` already refuses to
+    DRAW a chart missing a signal; the number it is drawn from had no such
+    guard."""
+    with pytest.raises(ValueError, match="in_flight_concurrency"):
+        gap_at_iso_cost({"queue_depth": [_p(10, 4.0)]}, cost=10)
+
+
+def test_the_incompleteness_refusal_names_every_missing_signal():
+    with pytest.raises(ValueError, match="utilization"):
+        gap_at_iso_cost(
+            {
+                "queue_depth": [_p(10, 4.0, "queue_depth")],
+                "in_flight_concurrency": [_p(10, 3.0, "in_flight_concurrency")],
+            },
+            cost=10,
+        )
+
+
+def test_the_compared_signal_set_defaults_to_the_three_the_artifact_compares():
+    assert COMPARED_SIGNALS == set(SIGNALS)
+
+
+def test_a_deliberately_narrower_comparison_has_to_be_asked_for():
+    """The guard is a default, not a wall: a caller comparing a stated subset
+    says so, and the narrowed set is then what the completeness check enforces --
+    so a signal missing from the SUBSET is still refused."""
+    two = {
+        "queue_depth": [_p(10, 4.0, "queue_depth")],
+        "utilization": [_p(10, 9.0, "utilization")],
+    }
+
+    assert gap_at_iso_cost(two, cost=10, expected=("queue_depth", "utilization")) == pytest.approx(
+        5.0
+    )
+    with pytest.raises(ValueError, match="utilization"):
+        gap_at_iso_cost(
+            {"queue_depth": [_p(10, 4.0)]}, cost=10, expected=("queue_depth", "utilization")
+        )
+
+
+def test_an_extra_signal_beyond_the_compared_set_is_not_silently_ignored():
+    """Completeness is checked, not equality-with-a-shrug: a fourth frontier
+    handed in is still scored, so it cannot be added and then quietly dropped
+    from a spread published as a three-signal comparison."""
+    frontiers = {
+        "queue_depth": [_p(10, 4.0, "queue_depth")],
+        "in_flight_concurrency": [_p(10, 3.0, "in_flight_concurrency")],
+        "utilization": [_p(10, 9.0, "utilization")],
+        "future_signal": [_p(10, 20.0, "future_signal")],
+    }
+
+    assert gap_at_iso_cost(frontiers, cost=10) == pytest.approx(17.0)
 
 
 def test_a_signal_that_can_only_operate_above_the_budget_refuses_the_slice():
@@ -189,15 +251,19 @@ def test_a_signal_that_can_only_operate_above_the_budget_refuses_the_slice():
         "utilization": [_p(50, 9.0, "utilization")],
     }
 
-    with pytest.raises(ValueError, match="utilization"):
-        gap_at_iso_cost(frontiers, cost=10)
+    with pytest.raises(ValueError, match="cannot operate"):
+        gap_at_iso_cost(frontiers, cost=10, expected=("queue_depth", "utilization"))
 
 
 def test_the_refusal_names_the_cheapest_policy_that_signal_has():
     """So the finding -- "this signal cannot operate below X" -- is readable
     off the error rather than requiring a re-run to discover."""
     with pytest.raises(ValueError, match="50"):
-        gap_at_iso_cost({"utilization": [_p(50, 9.0, "utilization")]}, cost=10)
+        gap_at_iso_cost(
+            {"utilization": [_p(50, 9.0, "utilization")]},
+            cost=10,
+            expected=("utilization",),
+        )
 
 
 def test_an_empty_frontier_in_the_comparison_is_refused():
@@ -206,7 +272,11 @@ def test_an_empty_frontier_in_the_comparison_is_refused():
     iterable argument is empty" from the builtin, which would satisfy a looser
     match and let the missing guard pass as if it were present."""
     with pytest.raises(ValueError, match="no p99 to read"):
-        gap_at_iso_cost({"queue_depth": [_p(10, 4.0)], "utilization": []}, cost=10)
+        gap_at_iso_cost(
+            {"queue_depth": [_p(10, 4.0)], "utilization": []},
+            cost=10,
+            expected=("queue_depth", "utilization"),
+        )
 
 
 def test_a_gap_over_no_frontiers_at_all_is_refused():
@@ -219,7 +289,7 @@ def test_a_gap_over_no_frontiers_at_all_is_refused():
 @pytest.mark.parametrize("bad", [float("nan"), float("inf")])
 def test_a_non_finite_iso_cost_budget_is_refused(bad):
     with pytest.raises(ValueError, match="not finite"):
-        gap_at_iso_cost({"queue_depth": [_p(10, 4.0)]}, cost=bad)
+        gap_at_iso_cost({"queue_depth": [_p(10, 4.0)]}, cost=bad, expected=("queue_depth",))
 
 
 # --- h3_verdict ---------------------------------------------------------------
@@ -664,5 +734,11 @@ def test_the_sweep_feeds_the_frontier(monkeypatch):
     frontiers = {signal: pareto_frontier(pts) for signal, pts in by_signal.items()}
 
     budget = max(f[0].cost for f in frontiers.values())
-    assert gap_at_iso_cost(frontiers, cost=budget) >= 0.0
+    # `expected` is the set this reduced sweep actually produced, stated rather
+    # than defaulted: at 2 repetitions over a 120 s window a signal can be swept
+    # out entirely by the pre-registered exclusions, and this test is about the
+    # sweep -> frontier -> gap PLUMBING, not about coverage. Coverage of all
+    # three is asserted on the real path in tests/test_a2_end_to_end.py, and the
+    # default set is what guards the published number.
+    assert gap_at_iso_cost(frontiers, cost=budget, expected=tuple(frontiers)) >= 0.0
 

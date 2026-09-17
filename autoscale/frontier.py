@@ -6,9 +6,25 @@ comparison fair and robust to the objection that the loser was mistuned.
 """
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 
-__all__ = ["H3Verdict", "PolicyPoint", "gap_at_iso_cost", "h3_verdict", "pareto_frontier"]
+from autoscale.signals import SIGNALS
+
+__all__ = [
+    "COMPARED_SIGNALS",
+    "H3Verdict",
+    "PolicyPoint",
+    "gap_at_iso_cost",
+    "h3_verdict",
+    "pareto_frontier",
+]
+
+# The signal set every published gap is a spread ACROSS. Taken from the signal
+# registry rather than written out, so it is the same three the sweep runs and
+# the same three `figures` refuses to draw without -- a fourth signal added to
+# the registry is then compared, not silently left out of the headline.
+COMPARED_SIGNALS = frozenset(SIGNALS)
 
 
 @dataclass(frozen=True)
@@ -126,8 +142,31 @@ def _p99_at_cost(frontier: list[PolicyPoint], cost: float, signal: str) -> float
     return min(p.p99 for p in affordable)
 
 
-def gap_at_iso_cost(frontiers: dict[str, list[PolicyPoint]], cost: float) -> float:
-    """The H3 metric: p99 spread between the best and worst signal at equal spend."""
+def gap_at_iso_cost(
+    frontiers: dict[str, list[PolicyPoint]],
+    cost: float,
+    expected: Iterable[str] = COMPARED_SIGNALS,
+) -> float:
+    """The H3 metric: p99 spread between the best and worst signal at equal spend.
+
+    `expected` is the signal set the spread is claimed to be across, and a
+    frontier dict missing any of it is refused rather than scored -- for the
+    same reason `_p99_at_cost` refuses a signal that cannot reach the budget,
+    and with the more dangerous consequence. A spread over what is left is a
+    spread between a DIFFERENT set of signals reported under the same name, and
+    here the arithmetic makes the error one-directional: a single-signal dict
+    has `max == min`, so it returns 0.0, and `h3_verdict` reads a zero arm-C gap
+    as a halving under `gap_c <= gap_a / 2`. An arm that LOST signals -- every
+    run of them discarded by a pre-registered exclusion -- would therefore
+    CONFIRM the artifact's headline out of missing data, while the arm that kept
+    all three supplied the numerator. `figures.frontiers` has always refused to
+    draw a chart missing a signal; until this guard, the number that chart is
+    about had no equivalent.
+
+    A caller comparing a deliberately narrower set passes it here, which is a
+    statement in the code about what the returned number is a spread over --
+    not a way around the check, since the narrowed set is then what is enforced.
+    """
     if not frontiers:
         raise ValueError(
             "cannot compute a gap with no frontiers; a spread between zero "
@@ -139,6 +178,22 @@ def gap_at_iso_cost(frontiers: dict[str, list[PolicyPoint]], cost: float) -> flo
             "for every point under a NaN budget, so every frontier would look "
             "unaffordable, and an infinite budget silently slices at the most "
             "expensive policy each signal happens to have"
+        )
+    # Materialised once: `expected` is an Iterable, and a caller who passes a
+    # generator would otherwise have it consumed by the set difference and find
+    # the error message reporting an empty expected set.
+    wanted = set(expected)
+    missing = sorted(wanted - set(frontiers))
+    if missing:
+        raise ValueError(
+            f"no frontier for signal(s) {missing}; this gap is published as the "
+            f"p99 spread across {sorted(wanted)} and the ones present are "
+            f"{sorted(frontiers)}. A spread over the survivors is a spread "
+            "between a different set of signals reported under the same name, "
+            "and it fails in the flattering direction: one signal left standing "
+            "gives max == min == 0.0, which `h3_verdict` reads as the gap "
+            "having halved. Pass `expected` to compare a deliberately narrower "
+            "set, or publish the missing signals as the finding they are"
         )
     achieved = [_p99_at_cost(f, cost, signal) for signal, f in frontiers.items()]
     return max(achieved) - min(achieved)

@@ -40,6 +40,11 @@ Refusals rather than best-effort drawing, in four places:
   two halves of one comparison; a signal drawn on one arm and absent from the
   other still renders, and reads as though both arms were compared on the same
   signals with the missing one simply overlapping.
+- `convergence` also refuses an incomplete signal set that both arms SHARE.
+  Agreement is not coverage: two arms that each lost the same signal agree
+  perfectly, and the check above passes on them, so this figure drew a
+  two-signal "three-signal comparison" without complaint -- the exact input
+  `frontiers` below refuses, on the figure that carries the argument.
 - `convergence` refuses an empty arm, and refuses an empty sweep. Both draw a
   blank panel that reads as "the model showed nothing" rather than "nothing was
   run".
@@ -245,6 +250,20 @@ def convergence(frontiers_a, frontiers_c, swept, path, return_figure=False):
             f"(only in A: {only_a}, only in C: {only_c}); the measured panel "
             "would draw both arms as though they were compared on the same "
             "signals, with the missing one invisible rather than reported"
+        )
+    # Agreement is not coverage. The check above only says the two arms were
+    # swept over the SAME signals; two arms that both lost a signal agree
+    # perfectly, and this figure -- the one that carries the artifact's argument
+    # -- rendered that as a three-signal comparison showing two, while
+    # `frontiers` a few lines down has always refused exactly that input.
+    missing = [s for s in SIGNAL_ORDER if s not in frontiers_a]
+    if missing:
+        raise ValueError(
+            f"no frontier for signal(s) {missing} on either arm; both arms "
+            "agreeing on an incomplete signal set is not a smaller comparison, "
+            "it is a chart that appears to compare three signals while showing "
+            "fewer -- and the agreement check above passes on it precisely "
+            "because BOTH arms lost the same signal"
         )
     if not swept:
         raise ValueError(
