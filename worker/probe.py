@@ -33,6 +33,7 @@ WARMUP_REQUESTS = 10
 MAX_TOKENS = int(os.environ.get("WARMUP_MAX_TOKENS") or 16)
 PROMPT = "Explain what a key-value cache does, in two sentences."
 
+# explainer:probe-markers
 # Predicates read off the real captures in fixtures/vllm_logs/ (vLLM 0.27.1),
 # same discipline as coldstart/vllm_logs.py: message text, never invented.
 #
@@ -49,6 +50,7 @@ _LOAD_COMPLETE = re.compile(r"Model loading took\s", re.IGNORECASE)
 _ENGINE_UP = re.compile(
     r"init engine \(profile, create kv cache, warmup model\) took\s", re.IGNORECASE
 )
+# explainer:end
 
 
 def _is_load_complete(line: str) -> bool:

@@ -53,9 +53,11 @@ def assert_endpoint_matches(endpoint: dict, pinned: dict | None = None) -> None:
     prevent, so it is rejected outright below rather than allowed to iterate
     zero times.
     """
+    # explainer:preflight-refuses
     pinned = PINNED if pinned is None else pinned
     if not pinned:
         raise ValueError("pinned configuration is empty; refusing to check nothing")
+    # explainer:end
     problems = []
     for key, expected in pinned.items():
         if key not in endpoint:

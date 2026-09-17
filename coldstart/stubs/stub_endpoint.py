@@ -67,6 +67,7 @@ class VirtualClock:
         self._t += seconds
 
 
+# explainer:stub-endpoint
 class StubEndpoint:
     """In-process stand-in for the RunPod endpoint. No network, no cost."""
 
@@ -76,6 +77,10 @@ class StubEndpoint:
         self._seen: set[str] = set()
         self._clock = clock
 
+    # Stands in for the real endpoint's start()+poll(status()) round trip:
+    # one call, no network, no GPU. It replays a real captured vLLM log
+    # instead of running the engine, and draws this run's weight-load time
+    # from a per-arm profile instead of measuring one.
     def run(self, arm: str, run_id: str) -> dict:
         prof = ARM_PROFILE[arm]
         config = resolve(arm)
@@ -85,6 +90,7 @@ class StubEndpoint:
         host_factor = 1.0 + 0.15 * self._hosts.index(host)
 
         t_weights = prof["t_weights"] * jitter * host_factor
+# explainer:end
         s1 = 4.0 * jitter
         # The bracket is the sub-phases the replayed capture actually reports,
         # plus a positive unattributed remainder -- so what derive() computes as

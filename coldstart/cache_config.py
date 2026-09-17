@@ -28,6 +28,7 @@ class CacheConfig:
     weights_source: str  # "hub" | "volume"
     compile_cache_warm: bool
 
+    # explainer:cache-config-env
     def env(self, run_id: str) -> dict[str, str]:
         """Every arm sets the same variable names. Only values differ.
 
@@ -53,6 +54,7 @@ class CacheConfig:
             else f"{COLD_VLLM_CACHE_ROOT}/{run_id}"
         )
         return {"HF_HOME": hf_home, "VLLM_CACHE_ROOT": cache_root}
+    # explainer:end
 
 
 # Arm C is settled. The reconnaissance run (spec 5, 6.8) asked whether the pinned vLLM
