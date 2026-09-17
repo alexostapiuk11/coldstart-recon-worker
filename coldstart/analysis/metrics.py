@@ -556,3 +556,15 @@ def derive(record: RunRecord) -> DerivedRow:
         "inconsistency_reason": reason,
         "discard_reason": discard_reason,
     }
+
+
+def rows_for_arm(rows: list[DerivedRow], arm: str) -> list[DerivedRow]:
+    """Derived rows belonging to one arm.
+
+    The arm-isolation invariant (spec 6.3, enforced by
+    `tests/test_arm_isolation.py`) confines arm-conditional branching to
+    `analysis/`. Callers elsewhere in the codebase (e.g. the explainer) get
+    an arm-filtered slice through here rather than comparing `row["arm"]`
+    to a literal themselves.
+    """
+    return [r for r in rows if r["arm"] == arm]

@@ -1,0 +1,25 @@
+{
+  "runs_total": { "source": "campaign", "kind": "count" },
+  "runs_per_arm": { "source": "campaign", "kind": "count_per_arm" },
+  "median_t_total_A": { "source": "analysis", "path": "distributions.A.p50" },
+  "median_t_total_B": { "source": "analysis", "path": "distributions.B.p50" },
+  "median_t_total_C": { "source": "analysis", "path": "distributions.C.p50" },
+  "p95_t_total_A": { "source": "analysis", "path": "distributions.A.p95" },
+  "contrast_ab_total": { "source": "analysis", "path": "contrast_A_to_B_t_total" },
+  "contrast_bc_total": { "source": "analysis", "path": "contrast_B_to_C_t_total" },
+  "difference_of_contrasts": { "source": "analysis", "path": "difference_of_contrasts_t_total" },
+  "kv_cold": { "source": "analysis", "path": "kv_capacity_median.A.point" },
+  "kv_warm": { "source": "analysis", "path": "kv_capacity_median.C.point" },
+  "concurrency_cold": {
+    "source": "analysis",
+    "path": "economics.supported_concurrency_at_8192.A.concurrent_requests"
+  },
+  "concurrency_warm": {
+    "source": "analysis",
+    "path": "economics.supported_concurrency_at_8192.C.concurrent_requests"
+  },
+  "arm_a_ci_n99": { "source": "computed", "fn": "arm_a_ci_n99" },
+  "first_touch_seconds": { "source": "computed", "fn": "first_touch_seconds" },
+  "gpu_hours_a_n99": { "source": "computed", "fn": "gpu_hours_a_n99" },
+  "hosts_observed": { "source": "computed", "fn": "hosts_observed" }
+}
