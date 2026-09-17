@@ -61,6 +61,7 @@ from matplotlib.patches import Rectangle
 from matplotlib.ticker import MaxNLocator
 
 from autoscale.frontier import pareto_frontier
+from autoscale.stats import MIN_BOOTSTRAP_SAMPLES
 
 __all__ = ["SIGNAL_ORDER", "convergence", "frontiers"]
 
@@ -81,6 +82,15 @@ UNKNOWN_SIGNAL_COLOR = "#555555"
 
 FIG_WIDTH_IN = 11.0
 FIG_HEIGHT_IN = 8.0
+# Bands are drawn once per render and the sweep behind them is minutes of
+# CPU, so 2000 draws costs nothing noticeable here and matches the
+# iterations the published gap interval uses.
+BAND_ITERATIONS = 2000
+BAND_SEED = 0
+# Low enough that three overlapping bands stay distinguishable from one
+# another and from the lines they belong to.
+BAND_ALPHA = 0.18
+
 MEASURED_BG = "#eef7ee"
 MODELED_BG = "#e8f1ff"
 MEASURED_BANNER = "#2f6b34"
@@ -210,6 +220,68 @@ def _span(values) -> str:
     return f"p99 spans {low:.3g}–{high:.3g} s"
 
 
+def _band(axis, front, color, allow_missing_intervals: bool) -> None:
+    """A signal's bootstrap interval, as a band rather than error bars.
+
+    A frontier is a curve, and per-point bars on three overlapping curves are
+    unreadable at 375 px -- which spec 7 requires them to be legible at. Drawn
+    before the line so the line stays on top of its own band.
+    """
+    thin = [p for p in front if p.n < MIN_BOOTSTRAP_SAMPLES]
+    if thin and allow_missing_intervals:
+        # The opt-out, named after `sweep.run_sweep`'s `allow_unmeasured` and
+        # there for the same kind of caller: a plumbing check that renders the
+        # real code path on a deliberately reduced sweep. It draws NO band at
+        # all rather than a partial one, so what comes out is visibly a chart
+        # without intervals rather than a chart whose intervals are quietly
+        # wrong.
+        return
+    if thin:
+        # Refusing rather than drawing the band without them, and rather than
+        # pinching it to zero width at those points. Both alternatives publish
+        # a narrower interval than the data supports, which is the flattering
+        # direction: a zero-width pinch reads as CERTAINTY about exactly the
+        # policy we know least about. A policy with too few surviving
+        # repetitions is a finding -- the pre-registered exclusion rules bit it
+        # hard -- and belongs in the discard counts the sweep reports, not
+        # smoothed into a chart.
+        worst = min(p.n for p in thin)
+        raise ValueError(
+            f"{len(thin)} of {len(front)} points on the {front[0].signal!r} "
+            f"frontier have fewer than {MIN_BOOTSTRAP_SAMPLES} surviving "
+            f"repetitions (fewest: {worst}), so no bootstrap interval can be "
+            "drawn for them. Below that floor the resampled distribution is a "
+            "handful of repeated values and the interval comes out "
+            "confident-looking and meaningless. Check the per-signal discard "
+            "counts: this is the exclusion rules biting, and it is a finding "
+            "about that policy rather than a figure to draw around"
+        )
+    lo, hi = [], []
+    for point in front:
+        a, b = point.p99_interval(iterations=BAND_ITERATIONS, seed=BAND_SEED)
+        lo.append(a)
+        hi.append(b)
+    axis.fill_between(
+        [p.cost for p in front], lo, hi, color=color, alpha=BAND_ALPHA, linewidth=0
+    )
+
+
+def _reps_text(points) -> str:
+    """How many repetitions the points were estimated from.
+
+    `n=55 policy points` said how many policies were drawn and never how many
+    runs each was estimated from, so a 1-repetition sweep and a 30-repetition
+    sweep carried identical annotations. The exclusion rules discard runs, so
+    this is a range more often than a single number.
+    """
+    reps = sorted({p.n for p in points})
+    if not reps:
+        return "no repetitions"
+    if len(reps) == 1:
+        return f"{reps[0]} repetitions each"
+    return f"{reps[0]}-{reps[-1]} repetitions each"
+
+
 def _tidy(axis, xlabel: str, ylabel: str, facecolor: str) -> None:
     axis.set_facecolor(facecolor)
     axis.set_xlabel(xlabel, fontsize=_pt(PX_AXIS_LABEL))
@@ -234,7 +306,7 @@ def _finish(fig, path, return_figure):
     return Path(path)
 
 
-def convergence(frontiers_a, frontiers_c, swept, path, return_figure=False):
+def convergence(frontiers_a, frontiers_c, swept, path, *, curve_measured, return_figure=False):
     """Figure 1. Left panel measured, right panel modeled, boundary on the chart."""
     if not frontiers_a or not frontiers_c:
         raise ValueError(
@@ -295,17 +367,68 @@ def convergence(frontiers_a, frontiers_c, swept, path, return_figure=False):
                 color=SIGNAL_COLOR.get(signal, UNKNOWN_SIGNAL_COLOR),
                 label=f"{SIGNAL_LABEL.get(signal, signal)} {arm}",
             )
-    _tidy(left, "cost (replica-seconds)", "p99 request latency (s)", MEASURED_BG)
-    _banner(left, "MEASURED", "artifact 1's two lag arms", MEASURED_BANNER)
+    _tidy(
+        left,
+        "cost (replica-seconds)",
+        "p99 request latency (s)",
+        MEASURED_BG if curve_measured else MODELED_BG,
+    )
+    # The lag arms ARE measured; the p99 axis they are drawn against is not,
+    # unless the service curve behind the sweep was measured too. Stamping
+    # MEASURED over a placeholder-derived axis is the precise claim this banner
+    # system exists to prevent, made by the banner system.
+    #
+    # No default on `curve_measured`, deliberately: a default of True publishes
+    # an unmeasured curve as measured whenever a caller forgets to pass it,
+    # which is the flattering direction, and a default of False silently
+    # downgrades a real result. The caller knows which curve it swept.
+    if curve_measured:
+        _banner(left, "MEASURED", "artifact 1's two lag arms", MEASURED_BANNER)
+    else:
+        _banner(
+            left,
+            "MEASURED LAG, MODELED LATENCY",
+            "artifact 1's lag arms; p99 from the placeholder service curve",
+            MODELED_BANNER,
+        )
     measured_p99 = [p.p99 for data in (frontiers_a, frontiers_c) for v in data.values() for p in v]
     # Two lines, not one: the panel is half the canvas and the guards caught
     # the single-line version spilling past it and into the modeled panel's own
     # note.
-    _note(left, f"n={n_a + n_c} policy points ({n_a} A, {n_c} C)\n{_span(measured_p99)}")
+    measured_points = [p for data in (frontiers_a, frontiers_c) for v in data.values() for p in v]
+    # Three short lines rather than two longer ones. The panel is half the
+    # canvas and its note sits under it; adding the repetition count to the
+    # first line pushed that line wide enough to collide with the modeled
+    # panel's own note, which the overlap guard caught.
+    _note(
+        left,
+        f"n={n_a + n_c} policy points ({n_a} A, {n_c} C)\n"
+        f"{_reps_text(measured_points)}\n"
+        f"{_span(measured_p99)}",
+    )
 
     lags = sorted(swept)
+    # `swept` values may be a bare float (the gap) or a mapping carrying an
+    # interval. Both are accepted because the modeled panel is a sensitivity
+    # sweep over invented lags and a caller sweeping it cheaply without
+    # bootstrapping each point is doing something reasonable -- but a value
+    # WITH an interval must never be drawn without it, which is why the band
+    # below is keyed on the values themselves rather than on a flag.
+    def _point(value):
+        return value["point"] if isinstance(value, dict) else value
+
+    if all(isinstance(swept[k], dict) for k in lags):
+        right.fill_between(
+            lags,
+            [swept[k]["lo"] for k in lags],
+            [swept[k]["hi"] for k in lags],
+            color=MODELED_BANNER,
+            alpha=BAND_ALPHA,
+            linewidth=0,
+        )
     right.plot(
-        lags, [swept[k] for k in lags], "o-", markersize=5, linewidth=2, color=MODELED_BANNER
+        lags, [_point(swept[k]) for k in lags], "o-", markersize=5, linewidth=2,
+        color=MODELED_BANNER,
     )
     _tidy(right, "cold-start lag (s)", "inter-signal gap (s)", MODELED_BG)
     # "NOT MEASURED" rather than "MODELED" as the banner word: at a glance
@@ -313,7 +436,12 @@ def convergence(frontiers_a, frontiers_c, swept, path, return_figure=False):
     # the strip that is supposed to make the boundary unmissable would be the
     # least legible part of it. "modeled" is still stated, in the subtitle.
     _banner(right, "NOT MEASURED", "modeled: lag swept, invented", MODELED_BANNER)
-    _note(right, f"n={len(lags)} modeled lag values")
+    banded = all(isinstance(swept[k], dict) for k in lags)
+    _note(
+        right,
+        f"n={len(lags)} modeled lag values"
+        + ("\nshaded: 95% bootstrap interval" if banded else ""),
+    )
 
     # Proxy handles, because the measured panel draws one line per
     # (signal, arm) and a legend with an entry for each is both wider than the
@@ -360,12 +488,20 @@ def convergence(frontiers_a, frontiers_c, swept, path, return_figure=False):
     return _finish(fig, path, return_figure)
 
 
-def frontiers(by_signal, path, return_figure=False, context=""):
+def frontiers(
+    by_signal, path, return_figure=False, context="", allow_missing_intervals=False
+):
     """Figure 2. All three signals, or it refuses to draw.
 
     `context` is appended to the N statement. Optional, but a reader who only
     looks at figures cannot tell which lag arm or spike shape a bare frontier
     chart came from, and this figure has no other place to say so.
+
+    `allow_missing_intervals` lets a caller draw without the bootstrap bands
+    when the points cannot support them -- a plumbing check on a one-repetition
+    sweep, not a publication. Opt-in and named after `run_sweep`'s
+    `allow_unmeasured` for the same reason: the default has to be the one that
+    refuses, so an under-powered sweep cannot reach a figure by accident.
     """
     missing = [s for s in SIGNAL_ORDER if s not in by_signal]
     if missing:
@@ -383,6 +519,7 @@ def frontiers(by_signal, path, return_figure=False, context=""):
         front = pareto_frontier(by_signal[signal])
         total += len(front)
         drawn_p99 += [p.p99 for p in front]
+        _band(axis, front, SIGNAL_COLOR[signal], allow_missing_intervals)
         axis.plot(
             [p.cost for p in front],
             [p.p99 for p in front],
@@ -407,5 +544,11 @@ def frontiers(by_signal, path, return_figure=False, context=""):
     note = f"n={total} frontier points across {len(SIGNAL_ORDER)} signals"
     if context:
         note = f"{note} — {context}"
-    _note(axis, f"{note} · {_span(drawn_p99)}", y=-0.245)
+    all_points = [p for v in by_signal.values() for p in v]
+    _note(
+        axis,
+        f"{note} · {_reps_text(all_points)}\n{_span(drawn_p99)} · "
+        "shaded: 95% bootstrap interval",
+        y=-0.245,
+    )
     return _finish(fig, path, return_figure)

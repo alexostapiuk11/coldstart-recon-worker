@@ -23,7 +23,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from autoscale.arrivals import SpikeShape
 from autoscale.coldstart_ecdf import LagDistribution, load_measured_lags
 from autoscale.figures import SIGNAL_ORDER, convergence, frontiers
-from autoscale.frontier import PolicyPoint, gap_at_iso_cost, pareto_frontier
+from autoscale.frontier import (
+    PolicyPoint,
+    gap_interval,
+    h3_verdict,
+    pareto_frontier,
+)
 from autoscale.service import SERVICE_CURVE_PLACEHOLDER
 from autoscale.sweep import SweepConfig, run_sweep
 
@@ -32,6 +37,11 @@ UNTIL = 400.0
 SWEPT_LAGS = (20.0, 40.0, 60.0, 80.0, 120.0)
 BASELINE_FRACTION_OF_SATURATION = 0.70  # docs/experiment-a2.md, amended 2026-09-17
 ADDITIONAL_REPLICAS_AT_PEAK = 0.25  # docs/experiment-a2.md, amended 2026-09-17
+RAMP_SECONDS = 95.0  # docs/experiment-a2.md, "Traffic model": R = D / 2
+# 2000 draws is enough for 95% percentile endpoints (the 50th and 1950th
+# order statistics) without the bootstrap dominating a sweep that is
+# already minutes of CPU.
+GAP_BOOTSTRAP_ITERATIONS = 2000
 
 
 def _saturation_rps(curve) -> float:
@@ -111,20 +121,75 @@ def _run_everything(store: str):
     for arm in ("A", "C"):
         sources[f"arm {arm}"] = _sweep(f"arm {arm}", shape, lags[arm], arm)
 
-    swept: dict[float, float] = {}
+    swept: dict[float, dict] = {}
     for lag in SWEPT_LAGS:
         label = f"modeled lag {lag:g}s"
         points = _sweep(label, shape, LagDistribution(samples=[lag]), f"synthetic-{lag}")
         sources[label] = points
         per_signal = {s: pareto_frontier(ps) for s, ps in _by_signal(points).items()}
-        # The iso-cost slice is twice the cheapest policy in the sweep. Any
-        # signal whose frontier does not reach that budget makes the gap
-        # undefined rather than smaller -- `gap_at_iso_cost` says so and raises.
-        swept[lag] = gap_at_iso_cost(per_signal, cost=min(p.cost for p in points) * 2)
-    return sources, swept
+        # `iso_cost_budget`, not `min(cost) * 2`: the latter was written here,
+        # pre-registered nowhere, and left every frontier fully affordable, so
+        # the "iso-cost slice" constrained nothing. Any signal whose frontier
+        # cannot reach the budget makes the gap undefined rather than smaller --
+        # `gap_at_iso_cost` says so and raises.
+        swept[lag] = gap_interval(
+            per_signal, iterations=GAP_BOOTSTRAP_ITERATIONS, seed=SEED
+        )
+        print(
+            f"{label}: gap={swept[lag]['point']:.4f}s "
+            f"[{swept[lag]['lo']:.4f}, {swept[lag]['hi']:.4f}] "
+            f"at budget {swept[lag]['budget']:.1f}"
+        )
+
+    # H3 is evaluated under BOTH shapes or not at all -- the pre-registration
+    # fixes that, because H4 already predicts the ramp's margins shrink, so a
+    # ramp-only halving is both the easier outcome and the less interesting
+    # one. Until this existed the script swept only the step, and `h3_verdict`
+    # was reachable from tests and from nowhere else: running the artifact
+    # could not evaluate its own headline hypothesis.
+    ramp_shape = _preregistered_shape(SERVICE_CURVE_PLACEHOLDER, kind="ramp", ramp=RAMP_SECONDS)
+    print(
+        f"ramp spike: baseline={ramp_shape.baseline_rate:.1f} rps, k={ramp_shape.k:.1f}, "
+        f"ramp={ramp_shape.ramp:g}s, sustain={ramp_shape.sustain:g}s"
+    )
+    for arm in ("A", "C"):
+        sources[f"ramp arm {arm}"] = _sweep(
+            f"ramp arm {arm}", ramp_shape, lags[arm], f"ramp-{arm}"
+        )
+
+    gaps: dict[str, dict] = {}
+    for label in ("arm A", "arm C", "ramp arm A", "ramp arm C"):
+        per_signal = {s: pareto_frontier(ps) for s, ps in _by_signal(sources[label]).items()}
+        got = gap_interval(per_signal, iterations=GAP_BOOTSTRAP_ITERATIONS, seed=SEED)
+        gaps[label] = got
+        reps = {s: f[0].n for s, f in sorted(per_signal.items())}
+        print(
+            f"{label}: gap={got['point']:.4f}s [{got['lo']:.4f}, {got['hi']:.4f}] "
+            f"at budget {got['budget']:.1f} replica-seconds (repetitions {reps})"
+        )
+
+    verdict = h3_verdict(
+        step_gap_a=gaps["arm A"]["point"],
+        step_gap_c=gaps["arm C"]["point"],
+        ramp_gap_a=gaps["ramp arm A"]["point"],
+        ramp_gap_c=gaps["ramp arm C"]["point"],
+        step_gap_a_interval=(gaps["arm A"]["lo"], gaps["arm A"]["hi"]),
+        ramp_gap_a_interval=(gaps["ramp arm A"]["lo"], gaps["ramp arm A"]["hi"]),
+    )
+    print(
+        f"\nH3: holds={verdict.holds} partial={verdict.partial} "
+        f"evaluable={verdict.evaluable}\n  {verdict.detail}"
+    )
+    # The verdict is computed from POINT gaps and every one of them has an
+    # interval printed above. A halving that is inside the noise is not a
+    # halving; the intervals are what a reader checks that against, and they
+    # stay printed rather than being folded into the boolean, because a
+    # three-state verdict with an interval quietly absorbed into it is a
+    # four-state verdict nobody declared.
+    return sources, swept, gaps
 
 
-def _dump(path: Path, sources, swept) -> None:
+def _dump(path: Path, sources, swept, gaps) -> None:
     path.write_text(
         json.dumps(
             {
@@ -139,6 +204,7 @@ def _dump(path: Path, sources, swept) -> None:
                     for label, points in sources.items()
                 },
                 "swept": {str(k): v for k, v in swept.items()},
+                "gaps": gaps,
             },
             indent=1,
         )
@@ -157,7 +223,7 @@ def _load(path: Path):
         ]
         for label, rows in raw["sources"].items()
     }
-    return sources, {float(k): v for k, v in raw["swept"].items()}
+    return sources, {float(k): v for k, v in raw["swept"].items()}, raw.get("gaps", {})
 
 
 def _first_complete(sources) -> str | None:
@@ -197,10 +263,10 @@ def main() -> None:
     cache = out / "sweep-cache.json"
     if cache.exists() and not args.refresh:
         print(f"reusing the cached sweep at {cache} (--refresh to re-run it)")
-        sources, swept = _load(cache)
+        sources, swept, gaps = _load(cache)
     else:
-        sources, swept = _run_everything(args.store)
-        _dump(cache, sources, swept)
+        sources, swept, gaps = _run_everything(args.store)
+        _dump(cache, sources, swept, gaps)
         print(f"cached the sweep to {cache}")
 
     # Figure 2 first: it needs one sweep with all three signals, which is a
@@ -220,7 +286,15 @@ def main() -> None:
 
     arm_a, arm_c = _by_signal(sources["arm A"]), _by_signal(sources["arm C"])
     try:
-        print(convergence(arm_a, arm_c, swept, out / "convergence.png"))
+        print(
+            convergence(
+                arm_a,
+                arm_c,
+                swept,
+                out / "convergence.png",
+                curve_measured=SERVICE_CURVE_PLACEHOLDER.measured,
+            )
+        )
     except ValueError as exc:
         blocked.append(f"convergence figure: {exc}")
 

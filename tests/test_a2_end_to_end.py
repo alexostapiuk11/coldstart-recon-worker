@@ -251,7 +251,17 @@ def test_the_real_frontiers_render_a_figure(swept, tmp_path):
     points, _ = swept[("step", "A")]
     out = tmp_path / "frontiers.png"
 
-    render_frontiers(_by_signal(points), out, context="arm A, step (reduced sweep)")
+    # `allow_missing_intervals`: this gate runs one repetition per policy, so
+    # no point can support a bootstrap interval (the floor is 20). That is a
+    # property of the REDUCED sweep, not of the artifact -- the published run
+    # does 30 -- and the flag says so rather than the figure silently drawing
+    # bands from a single observation.
+    render_frontiers(
+        _by_signal(points),
+        out,
+        context="arm A, step (reduced sweep)",
+        allow_missing_intervals=True,
+    )
 
     assert out.exists() and out.stat().st_size > 0
 
@@ -418,3 +428,44 @@ def test_the_traffic_constants_match_the_render_script_and_the_preregistration()
         "Changing the traffic model is an amendment to a pre-registered "
         "quantity, not a code edit"
     )
+
+
+def test_the_render_script_evaluates_h3_under_both_shapes():
+    """H3 is the headline and `h3_verdict` was reachable only from tests: no
+    ramp sweep existed, and nothing on the production path called it. Running
+    the artifact could not evaluate its own headline hypothesis."""
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    import a2_render_figures as render
+
+    assert render.RAMP_SECONDS == 95.0  # docs/experiment-a2.md, "Traffic model"
+
+    src = Path(render.__file__).read_text()
+    assert "h3_verdict(" in src, (
+        "the render script never computes H3's verdict, so the artifact's "
+        "headline hypothesis cannot be evaluated by running it"
+    )
+    assert 'kind="ramp"' in src, "no ramp sweep; H3 requires the gap under both shapes"
+    assert "iso_cost_budget" in src or "gap_interval" in src, (
+        "the iso-cost budget is still computed ad hoc in the script rather "
+        "than by the pre-registered rule"
+    )
+    assert "min(p.cost for p in points) * 2" not in src, (
+        "the un-pre-registered `min(cost) * 2` budget is still in use; against "
+        "the sweep it leaves every frontier affordable, so the slice constrains "
+        "nothing and the published gap is the spread between each signal's "
+        "unconstrained best"
+    )
+
+
+def test_the_ramp_is_half_the_sustain_as_the_pre_registration_states():
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    import a2_render_figures as render
+
+    shape = render._preregistered_shape(
+        render.SERVICE_CURVE_PLACEHOLDER, kind="ramp", ramp=render.RAMP_SECONDS
+    )
+    assert shape.ramp == pytest.approx(shape.sustain / 2)
