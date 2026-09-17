@@ -54,6 +54,11 @@ def assert_endpoint_matches(endpoint: dict, pinned: dict | None = None) -> None:
     zero times.
     """
     # explainer:preflight-refuses
+    # A guard handed nothing to check could simply check nothing and pass --
+    # iterating zero times over an empty pin set reports success on any
+    # endpoint at all, which is the exact false pass this module exists to
+    # prevent. It refuses instead. Same instinct one line down: a key absent
+    # from the endpoint counts as a mismatch rather than being assumed fine.
     pinned = PINNED if pinned is None else pinned
     if not pinned:
         raise ValueError("pinned configuration is empty; refusing to check nothing")
