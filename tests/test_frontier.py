@@ -6,6 +6,7 @@ from collections import Counter
 
 import pytest
 
+import autoscale.frontier
 import autoscale.sweep
 from autoscale import stats
 from autoscale.arrivals import SpikeShape, arrival_times
@@ -15,7 +16,9 @@ from autoscale.frontier import (
     COMPARED_SIGNALS,
     PolicyPoint,
     gap_at_iso_cost,
+    gap_interval,
     h3_verdict,
+    iso_cost_budget,
     pareto_frontier,
 )
 from autoscale.service import SERVICE_CURVE_PLACEHOLDER, ServiceCurve
@@ -878,3 +881,221 @@ def test_a_policy_points_interval_brackets_its_point_estimate():
     assert lo <= p.p99 <= hi
     lo_c, hi_c = p.cost_interval(iterations=500, seed=0)
     assert lo_c <= p.cost <= hi_c
+
+
+# --- iso_cost_budget ---------------------------------------------------------
+
+
+def test_the_budget_is_the_cheapest_at_which_every_signal_can_operate():
+    """The rule: max over signals of that signal's cheapest frontier point. Any
+    lower and some signal has nothing affordable, so the gap is undefined
+    rather than smaller."""
+    frontiers = {
+        "queue_depth": [_p(10, 4.0, "queue_depth"), _p(20, 3.0, "queue_depth")],
+        "in_flight_concurrency": [_p(14, 3.5, "in_flight_concurrency")],
+        "utilization": [_p(25, 9.0, "utilization"), _p(40, 7.0, "utilization")],
+    }
+    assert iso_cost_budget(frontiers) == pytest.approx(25.0)
+
+
+def test_the_budget_binds_on_at_least_one_signal():
+    """The defect this rule replaces: at `min(cost) * 2` every frontier was
+    fully affordable, so the slice constrained nothing and the "iso-cost gap"
+    was the spread between each signal's unconstrained best. At this rule the
+    most expensive-floor signal has exactly one affordable policy, by
+    construction."""
+    frontiers = {
+        "queue_depth": [_p(10, 4.0, "queue_depth"), _p(20, 3.0, "queue_depth")],
+        "utilization": [_p(25, 9.0, "utilization"), _p(40, 7.0, "utilization")],
+    }
+    budget = iso_cost_budget(frontiers)
+    affordable = {s: [p for p in f if p.cost <= budget] for s, f in frontiers.items()}
+    assert min(len(v) for v in affordable.values()) == 1
+    assert all(v for v in affordable.values())
+
+
+def test_the_budget_of_an_empty_frontier_set_is_refused():
+    with pytest.raises(ValueError, match="no frontiers"):
+        iso_cost_budget({})
+
+
+def test_the_budget_of_a_frontier_with_no_points_is_refused():
+    with pytest.raises(ValueError, match="utilization"):
+        iso_cost_budget({"queue_depth": [_p(10, 4.0)], "utilization": []})
+
+
+def test_the_budget_is_always_sliceable_by_gap_at_iso_cost():
+    """The two functions are a pair: a budget this returns must never make
+    `gap_at_iso_cost` raise `no point costs X or less`."""
+    frontiers = {
+        "queue_depth": [_p(10, 4.0, "queue_depth")],
+        "in_flight_concurrency": [_p(14, 3.5, "in_flight_concurrency")],
+        "utilization": [_p(25, 9.0, "utilization")],
+    }
+    assert gap_at_iso_cost(frontiers, cost=iso_cost_budget(frontiers)) == pytest.approx(5.5)
+
+
+# --- gap_interval ------------------------------------------------------------
+
+
+def test_the_gap_interval_brackets_the_point_gap():
+    frontiers = {
+        "queue_depth": [_p(10, 4.0, "queue_depth"), _p(20, 3.0, "queue_depth")],
+        "in_flight_concurrency": [_p(14, 3.5, "in_flight_concurrency")],
+        "utilization": [_p(25, 9.0, "utilization")],
+    }
+    got = gap_interval(frontiers, iterations=400, seed=0)
+    assert got["lo"] <= got["point"] <= got["hi"]
+    assert got["point"] == pytest.approx(gap_at_iso_cost(frontiers, iso_cost_budget(frontiers)))
+    assert got["budget"] == pytest.approx(iso_cost_budget(frontiers))
+
+
+def test_identical_repetitions_give_a_zero_width_gap_interval():
+    """Not a corner case -- it is what a degenerate operating regime produces,
+    and a reader must be able to tell "the gap is 0.5 s and certain" from "the
+    gap is 0.5 s and we have no idea"."""
+    frontiers = {
+        "queue_depth": [_p(10, 4.0, "queue_depth")],
+        "in_flight_concurrency": [_p(10, 4.0, "in_flight_concurrency")],
+        "utilization": [_p(10, 4.5, "utilization")],
+    }
+    got = gap_interval(frontiers, iterations=400, seed=0)
+    assert got["lo"] == got["hi"] == pytest.approx(0.5)
+
+
+def test_the_gap_interval_widens_with_noisier_repetitions():
+    """The property that makes the interval worth publishing."""
+
+    def noisy(spread, signal):
+        return PolicyPoint(
+            cost_samples=(10.0,) * 30,
+            p99_samples=tuple(4.0 + spread * (i % 5) for i in range(30)),
+            signal=signal,
+            scale_up_at=2.0,
+            scale_down_at=0.5,
+        )
+
+    def width(spread):
+        f = {
+            "queue_depth": [noisy(spread, "queue_depth")],
+            "in_flight_concurrency": [noisy(spread * 2, "in_flight_concurrency")],
+            "utilization": [noisy(spread * 3, "utilization")],
+        }
+        got = gap_interval(f, iterations=800, seed=3)
+        return got["hi"] - got["lo"]
+
+    assert width(1.0) > width(0.1)
+
+
+def test_the_gap_interval_resamples_one_index_list_for_every_policy(monkeypatch):
+    """The pairing the seed fix bought is destroyed by resampling each policy's
+    repetitions independently: repetition r of queue_depth and repetition r of
+    in_flight_concurrency are the SAME arrival trace, and a bootstrap that
+    breaks that correspondence re-introduces exactly the traffic variance
+    `_derive_seed` was changed to cancel."""
+    seen = []
+    real = autoscale.frontier._take
+
+    def spy(samples, index):
+        seen.append(tuple(index))
+        return real(samples, index)
+
+    monkeypatch.setattr("autoscale.frontier._take", spy)
+    frontiers = {
+        "queue_depth": [_p(10, 4.0, "queue_depth"), _p(20, 3.0, "queue_depth")],
+        "in_flight_concurrency": [_p(14, 3.5, "in_flight_concurrency")],
+    }
+    gap_interval(
+        frontiers, iterations=3, seed=0, expected=("queue_depth", "in_flight_concurrency")
+    )
+    # Three policies x two sample fields x three draws, but only three DISTINCT
+    # index lists -- one per draw, shared by every policy in it.
+    assert len(seen) == 18
+    assert len(set(seen)) <= 3
+
+
+def test_the_gap_interval_refuses_an_incomplete_signal_set():
+    """Same reason `gap_at_iso_cost` does, and it matters more here: an interval
+    on a spread between the wrong set of signals reads as an interval on the
+    headline."""
+    with pytest.raises(ValueError, match="in_flight_concurrency"):
+        gap_interval({"queue_depth": [_p(10, 4.0)]}, iterations=100, seed=0)
+
+
+def test_the_gap_interval_requires_equal_repetition_counts():
+    """Resampling one index list across policies requires the policies to have
+    the same number of repetitions. Unequal counts mean the exclusion rules bit
+    the signals differently -- publishable, and not something to paper over by
+    truncating to the shortest."""
+    frontiers = {
+        "queue_depth": [_p(10, 4.0, "queue_depth", n=30)],
+        "in_flight_concurrency": [_p(14, 3.5, "in_flight_concurrency", n=12)],
+        "utilization": [_p(25, 9.0, "utilization", n=30)],
+    }
+    with pytest.raises(ValueError, match="different numbers of repetitions"):
+        gap_interval(frontiers, iterations=100, seed=0)
+
+
+def test_the_gap_interval_is_reproducible_from_its_seed():
+    frontiers = {
+        "queue_depth": [_p(10, 4.0, "queue_depth")],
+        "in_flight_concurrency": [_p(14, 3.5, "in_flight_concurrency")],
+        "utilization": [_p(25, 9.0, "utilization")],
+    }
+    assert gap_interval(frontiers, iterations=200, seed=5) == gap_interval(
+        frontiers, iterations=200, seed=5
+    )
+
+
+# --- h3_verdict's unevaluable guard ------------------------------------------
+
+
+def test_a_gap_whose_interval_covers_zero_is_unevaluable():
+    """The defect: `evaluable=False` fired only on an EXACT zero arm-A gap, and
+    a gap measured around a true zero is never exactly zero. Under artifact 2's
+    original traffic model the true gap was zero and the measurement came out
+    at 0.314 -- the guard passed it through and reported an ordinary verdict on
+    a quantity that had none."""
+    verdict = h3_verdict(
+        step_gap_a=0.314,
+        step_gap_c=0.120,
+        ramp_gap_a=0.290,
+        ramp_gap_c=0.110,
+        step_gap_a_interval=(0.0, 0.86),
+        ramp_gap_a_interval=(0.0, 0.79),
+    )
+    assert not verdict.evaluable
+    assert not verdict.holds
+    assert "indistinguishable from zero" in verdict.detail
+
+
+def test_a_gap_whose_interval_excludes_zero_is_evaluated_normally():
+    verdict = h3_verdict(
+        step_gap_a=3.0681,
+        step_gap_c=2.6094,
+        ramp_gap_a=3.0,
+        ramp_gap_c=2.5,
+        step_gap_a_interval=(2.94, 3.20),
+        ramp_gap_a_interval=(2.87, 3.13),
+    )
+    assert verdict.evaluable
+    assert not verdict.holds  # 2.6094 > 3.0681 / 2
+    assert not verdict.partial
+
+
+def test_the_intervals_are_optional_and_an_exact_zero_is_still_unevaluable():
+    """Callers without intervals keep the old behaviour, so this is an added
+    guard rather than a replaced one."""
+    verdict = h3_verdict(0.0, 0.0, 1.0, 0.4)
+    assert not verdict.evaluable
+    assert "exactly zero" in verdict.detail
+
+
+def test_an_interval_that_only_touches_zero_is_still_unevaluable():
+    """`lo == 0.0` exactly. A lower bound sitting ON zero does not exclude it,
+    and the bootstrap produces exactly this when the sample is degenerate."""
+    verdict = h3_verdict(
+        1.0, 0.4, 1.0, 0.4, step_gap_a_interval=(0.0, 2.0), ramp_gap_a_interval=(0.5, 2.0)
+    )
+    assert not verdict.evaluable
+    assert "step" in verdict.detail

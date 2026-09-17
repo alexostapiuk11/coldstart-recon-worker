@@ -6,6 +6,7 @@ comparison fair and robust to the objection that the loser was mistuned.
 """
 
 import math
+import random
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -17,7 +18,9 @@ __all__ = [
     "H3Verdict",
     "PolicyPoint",
     "gap_at_iso_cost",
+    "gap_interval",
     "h3_verdict",
+    "iso_cost_budget",
     "pareto_frontier",
 ]
 
@@ -178,6 +181,49 @@ def pareto_frontier(points: list[PolicyPoint]) -> list[PolicyPoint]:
     return frontier
 
 
+def iso_cost_budget(frontiers: dict[str, list[PolicyPoint]]) -> float:
+    """The pre-registered iso-cost budget: the cheapest spend at which EVERY
+    compared signal has at least one policy.
+
+    `max` over each signal's cheapest frontier point. Two properties make this
+    a rule rather than a number someone picked:
+
+    - It is derivable from the sweep, not chosen after seeing it. Nothing about
+      where the gap lands can influence it.
+    - It BINDS. At exactly this budget the most expensive-floor signal has
+      precisely one affordable policy, so the slice is a real constraint on at
+      least one signal. The rule it replaces -- `min(cost) * 2`, written in the
+      render script and pre-registered nowhere -- left every frontier fully
+      affordable, which quietly turned "the inter-signal gap at iso-cost" into
+      "the spread between each signal's UNCONSTRAINED best". That is a
+      different quantity under the published name, and the more flattering one:
+      it removes the cost axis from a comparison whose whole premise is a
+      cost/latency tradeoff.
+
+    Going any LOWER is not a stricter comparison, it is an undefined one:
+    `gap_at_iso_cost` refuses a budget some signal cannot reach, because
+    dropping that signal would report a spread between the survivors under the
+    same name. This is therefore the lowest budget at which H3 has an answer at
+    all.
+    """
+    if not frontiers:
+        raise ValueError(
+            "no frontiers, so there is no budget every signal can operate at; "
+            "a gap needs at least two frontiers to be a spread between anything"
+        )
+    floors = {}
+    for signal, frontier in frontiers.items():
+        if not frontier:
+            raise ValueError(
+                f"the frontier for {signal!r} is empty, so it has no cheapest "
+                "policy and there is no budget at which every signal can "
+                "operate. An empty frontier is a finding about that signal, not "
+                "a signal to compute the budget without"
+            )
+        floors[signal] = min(p.cost for p in frontier)
+    return max(floors.values())
+
+
 def _p99_at_cost(frontier: list[PolicyPoint], cost: float, signal: str) -> float:
     """The best p99 achievable at or below `cost` on this frontier.
 
@@ -266,6 +312,106 @@ def gap_at_iso_cost(
     return max(achieved) - min(achieved)
 
 
+def _take(samples: tuple[float, ...], index: tuple[int, ...]) -> list[float]:
+    """Indexed separately so a test can prove one index list is shared across
+    every policy in a draw -- see
+    `test_the_gap_interval_resamples_one_index_list_for_every_policy`."""
+    return [samples[i] for i in index]
+
+
+def gap_interval(
+    frontiers: dict[str, list[PolicyPoint]],
+    iterations: int = 2000,
+    seed: int = 0,
+    alpha: float = 0.05,
+    expected: Iterable[str] = COMPARED_SIGNALS,
+) -> dict:
+    """A percentile-bootstrap interval on the iso-cost gap.
+
+    Resamples REPETITION INDICES -- not policies, not latencies -- and uses ONE
+    index list per draw across every policy in every signal. That is not an
+    implementation convenience: repetition r of queue_depth and repetition r of
+    in_flight_concurrency are replays of the same arrival trace (see
+    `sweep._derive_seed`), and resampling each policy independently would break
+    that correspondence and re-introduce precisely the traffic-to-traffic
+    variance the shared seed was changed to cancel. The bootstrap would then
+    report an interval wider than the design achieves, on a gap that is a
+    paired difference.
+
+    Each draw REBUILDS the frontiers and re-derives the budget from the
+    resampled repetitions rather than reusing the observed ones. That is the
+    expensive choice and it is the honest one: which policy sits on a frontier
+    is itself estimated, and a bootstrap that holds the frontier fixed reports
+    the uncertainty of a slice through a curve it pretends was known in
+    advance. It also lets the winner's curse show up in the interval -- each
+    frontier is a minimum over 17 to 19 noisy estimates, so the point gap is
+    biased upward, and the resampled draws inherit that bias rather than hiding
+    it. NOTE: this makes the bias VISIBLE, not corrected; a correction needs a
+    held-out selection split and is not attempted here.
+
+    Returns `{"point", "lo", "hi", "budget"}`. `point` and `budget` are the
+    OBSERVED values, not bootstrap centres: the draws estimate spread, and
+    reporting their centre would publish a different estimator from the one
+    named.
+    """
+    if iterations <= 0:
+        raise ValueError(f"iterations must be positive, got {iterations}")
+    if not (0.0 < alpha < 1.0):
+        raise ValueError(f"alpha must be strictly between 0 and 1, got {alpha}")
+
+    wanted = set(expected)
+    missing = sorted(wanted - set(frontiers))
+    if missing:
+        raise ValueError(
+            f"no frontier for signal(s) {missing}; an interval on a spread "
+            f"across {sorted(wanted)} cannot be computed from the ones present "
+            f"({sorted(frontiers)}), and an interval on the wrong signal set "
+            "reads as an interval on the headline"
+        )
+
+    all_points = [p for f in frontiers.values() for p in f]
+    if not all_points:
+        raise ValueError("every frontier is empty; there is no gap to put an interval on")
+    counts = {p.n for p in all_points}
+    if len(counts) > 1:
+        raise ValueError(
+            f"policies have different numbers of repetitions ({sorted(counts)}); "
+            "one shared index list per draw requires equal counts. Unequal "
+            "counts mean the pre-registered exclusion rules bit the signals "
+            "differently, which is a finding to publish about those signals, "
+            "not something to paper over by truncating to the shortest"
+        )
+    n = counts.pop()
+
+    observed_budget = iso_cost_budget(frontiers)
+    point = gap_at_iso_cost(frontiers, cost=observed_budget, expected=wanted)
+
+    rng = random.Random(seed)
+    draws: list[float] = []
+    for _ in range(iterations):
+        index = tuple(rng.randrange(n) for _ in range(n))
+        resampled = {
+            signal: pareto_frontier(
+                [
+                    PolicyPoint(
+                        cost_samples=tuple(_take(p.cost_samples, index)),
+                        p99_samples=tuple(_take(p.p99_samples, index)),
+                        signal=p.signal,
+                        scale_up_at=p.scale_up_at,
+                        scale_down_at=p.scale_down_at,
+                    )
+                    for p in f
+                ]
+            )
+            for signal, f in frontiers.items()
+        }
+        budget = iso_cost_budget(resampled)
+        draws.append(gap_at_iso_cost(resampled, cost=budget, expected=wanted))
+
+    lo, hi = stats._percentile_interval(draws, alpha)
+    return {"point": point, "lo": lo, "hi": hi, "budget": observed_budget}
+
+
 def _validate_gap(label: str, value: float) -> None:
     if not math.isfinite(value):
         raise ValueError(
@@ -291,7 +437,13 @@ def _halved(gap_a: float, gap_c: float) -> bool:
 
 
 def h3_verdict(
-    step_gap_a: float, step_gap_c: float, ramp_gap_a: float, ramp_gap_c: float
+    step_gap_a: float,
+    step_gap_c: float,
+    ramp_gap_a: float,
+    ramp_gap_c: float,
+    *,
+    step_gap_a_interval: tuple[float, float] | None = None,
+    ramp_gap_a_interval: tuple[float, float] | None = None,
 ) -> H3Verdict:
     """H3 holds only if the gap at least halves under BOTH spike shapes.
 
@@ -320,18 +472,41 @@ def h3_verdict(
         # unevaluable and one wrongly unevaluable).
         _validate_gap(label, value)
 
-    unevaluable = [
-        shape for shape, gap_a in (("step", step_gap_a), ("ramp", ramp_gap_a)) if gap_a == 0
-    ]
+    # "The gap at least halved" has no truth value when there was no gap under
+    # arm A to halve. The original test for that was `gap_a == 0`, which is the
+    # right IDEA and the wrong PREDICATE: a gap estimated around a true zero is
+    # never exactly zero. Artifact 2's own original traffic model produced a
+    # true gap of exactly zero and a MEASURED gap of 0.314, so the equality
+    # walked straight past the one case it was written for and would have
+    # returned an ordinary verdict on a quantity that has none.
+    #
+    # With an interval, the honest test is whether the arm-A gap is
+    # distinguishable from zero at all. Without one the equality is kept, so
+    # this is an added guard rather than a replaced one and a caller with no
+    # interval is no worse off than before.
+    unevaluable = []
+    for shape, gap_a, interval in (
+        ("step", step_gap_a, step_gap_a_interval),
+        ("ramp", ramp_gap_a, ramp_gap_a_interval),
+    ):
+        if interval is not None and interval[0] <= 0.0:
+            unevaluable.append((shape, "indistinguishable from zero", interval))
+        elif interval is None and gap_a == 0:
+            unevaluable.append((shape, "exactly zero", None))
+
     if unevaluable:
+        detail = "; ".join(
+            f"{shape}: the arm-A gap is {why}"
+            + (f" (95% interval [{iv[0]:.4f}, {iv[1]:.4f}])" if iv else "")
+            for shape, why, iv in unevaluable
+        )
         return H3Verdict(
             False,
             False,
-            "H3 is not evaluable under "
-            + " and ".join(unevaluable)
-            + ": the arm-A gap was zero, so there was no inter-signal gap to "
-            "halve. Reported as unevaluable rather than confirmed, because "
-            "`gap_c <= gap_a / 2` is satisfied by two zeros",
+            f"H3 is not evaluable under {detail}. There was no inter-signal gap "
+            "to halve, and `gap_c <= gap_a / 2` is satisfied by two zeros -- so "
+            "reporting this as confirmed would confirm the headline out of an "
+            "absence of any effect to measure",
             evaluable=False,
         )
 
