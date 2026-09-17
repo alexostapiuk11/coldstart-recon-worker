@@ -1,0 +1,12 @@
+<title>Where a Cold Start Goes</title>
+<h1>Where a cold start goes</h1>
+<p>A cold start is the wait while a machine boots and loads a model, before
+anyone gets an answer. Arm C's median cold start is {{median_t_total_C}}
+seconds, against {{median_t_total_A}} with nothing cached.</p>
+<figure>
+  {{chart:kv_dividend}}
+  <figcaption>What the saved time buys: a KV cache is per-conversation scratch
+  space the model keeps on the GPU while generating, and time not spent
+  compiling is space left for it.</figcaption>
+</figure>
+<pre><code>{{excerpt:preflight-refuses}}</code></pre>
