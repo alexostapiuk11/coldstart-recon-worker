@@ -1,8 +1,10 @@
 # Finding — artifact 2's pre-registered traffic model makes the signal comparison degenerate
 
 **Date:** 2026-09-17
-**Status:** open. Blocks H1, H2 and H3 from being evaluable. Not fixed by plan 2's
-measured service curve.
+**Status:** resolved by amendment. The pre-registered traffic model is replaced
+(docs/experiment-a2.md, amended 2026-09-17); this file is the evidence behind
+that amendment and the record of how the replacement was chosen. Not fixed by
+plan 2's measured service curve — the degeneracy is in the traffic model.
 
 ## The finding, in one sentence
 
@@ -112,21 +114,27 @@ measured and fixed already.
 The degeneracy is a property of that ratio against that lag, not of the
 placeholder's invented latency points.
 
-## What this does and does not invalidate
+## What this invalidates, under the ORIGINAL traffic model
 
 - **H1** (in-flight concurrency dominates) — not evaluable. No signal dominates
   on p99 because p99 does not vary.
 - **H2** (utilization is worst, by censoring) — not evaluable for the same
   reason. Ironically the *mechanism* H2 predicts is real and present: every
   signal is censored, not just utilization.
-- **H3** (the gap halves between arms) — not evaluable. `h3_verdict`'s
-  `evaluable=False` guard fires only on an **exact** zero arm-A gap, and noise
-  around a true zero is not exactly zero — so the guard would let a spurious
-  verdict through. That is a defect in the guard, surfaced by this finding.
+- **H3** (the gap halves between arms) — not evaluable.
 - **H4** (ranking stable across shapes) — not evaluable; there is no stable
   ranking to be stable.
 - The simulator itself is **not** implicated. It is doing exactly what it was
   asked to: replaying a load no policy can serve.
+
+### A defect this surfaced in `h3_verdict`
+
+`h3_verdict`'s `evaluable=False` guard fires only on an **exact** zero arm-A
+gap. Noise around a true zero is not exactly zero — the original model's gap
+came out at 0.314 — so the guard walks straight past the case it exists to
+catch and returns an ordinary verdict on a quantity that has none. Still open;
+scheduled in the statistical-layer plan, where the gap gains an interval that
+the guard can test against instead of an equality against 0.0.
 
 ## A regime where the comparison IS defined
 
@@ -141,8 +149,10 @@ the signals are distinguishable from one another at all.
 `peak / saturation` between 0.35 and 1.20. Every configuration at
 `peak / saturation ≥ 1.4` gives a spread of exactly zero.**
 
-The candidates that keep all 55 policies (lower loads lose policies to the
-pre-registered exclusion rules):
+The separating candidates, as the **one-trace screen** scores them. `kept` here
+counts policies surviving on that single trace and is NOT a real survival rate
+— the next section shows what happens when these are re-run through real
+sweeps, and it changes the answer:
 
 | baseline | additional replicas | peak/sat | distinct p99 | p99 spread | p99 floor |
 |---|---|---|---|---|---|
@@ -161,49 +171,79 @@ threshold is sometimes crossed and sometimes not. Push the peak past ~1.4×
 saturation and every signal is pinned high for the whole spike; three pinned
 signals are one signal.
 
-**The 40% / 0.5 row is the strongest candidate**, and notably it keeps the
-pre-registered baseline fraction untouched — only `k` moves, from 3 additional
-replicas to 0.5. It resolves the 55 policies into 5 distinct p99 values rather
-than 2, which is what a Pareto frontier needs to have shape, and its 3.37 s
-spread sits on a 1.60 s floor: a *relative* effect of over 200%, against the
-6.04 s spread on a 3.23 s floor that the widest-spread row offers with only two
-buckets.
+On this table alone, 40% / 0.5 looks strongest: 5 distinct p99 values rather
+than 2, and a 3.37 s spread on a 1.60 s floor. **That reading is wrong**, and
+the next section is what corrects it — a screen answers "can these signals
+differ at all", and nothing more.
 
 ## The candidate regime, measured at full strength
 
-The table above is one trace per configuration. Running the full diagnostic at
-the 40% / 0.5 candidate — 10 master seeds × 30 repetitions, both arms — gives:
+### First candidate, and why it was rejected
 
-```bash
-.venv/bin/python scripts/a2_gap_noise_floor.py --seeds 10 --reps 30 \
-  --baseline-fraction 0.40 --additional-replicas 0.5
-```
+The screen's table is one trace per configuration, and its `kept` column counts
+policies that survived the exclusion rules **on that one trace**. Read as a real
+survival rate — which it is not, since a real sweep draws a fresh trace per
+repetition — it recommended **baseline 40% / 0.5 additional replicas** on a
+`kept` of 55/55.
+
+Re-running the candidates through the real sweep shows why that was wrong
+(5 repetitions, 3 seeds, arm A; counts are mean surviving policies out of
+19 / 17 / 19):
+
+| baseline | additional | peak/sat | queue depth | in-flight | utilization | gap |
+|---|---|---|---|---|---|---|
+| 40% | 0.5 | 0.90 | **2.7** | 17.0 | 19.0 | 2.143 |
+| 40% | 0.75 | 1.15 | 19.0 | 17.0 | 19.0 | 0.634 |
+| 20% | 1.0 | 1.20 | 19.0 | 17.0 | 19.0 | 0.925 |
+| 10% | 1.0 | 1.10 | 19.0 | 17.0 | 19.0 | 0.956 |
+| **70%** | **0.25** | **0.95** | **19.0** | **17.0** | **19.0** | **1.618** |
+| 40% | 1.0 | 1.40 | 19.0 | 17.0 | 19.0 | 1.930 |
+
+At 40% / 0.5 queue depth keeps under three of its nineteen policies: the load is
+low enough that its lowest threshold (1 request waiting per replica) usually is
+never crossed, so almost every run is excluded as `no_scaling_action`. Its
+"frontier" is then three points against nineteen, and part of that 2.143 s gap
+is just the mismatch — not a comparison this artifact can claim to make.
+
+The 40% / 1.0 row is a different trap: its 1.930 s gap is noise. The one-trace
+screen says every policy there produces an *identical* p99 (peak/sat 1.40 is
+past the saturation threshold), so the apparent gap is the frontier selecting on
+noise — the same winner's-curse effect that produced the original 0.44 s.
+
+`a2_regime_probe.py` now runs both stages, and stage 2 is what decides.
+
+### Adopted: baseline 70% of saturation, k = 0.25 additional replicas
+
+Every signal keeps its full grid, and the separation is the largest of any
+candidate that does. At full strength — 10 master seeds × 30 repetitions, both
+arms:
 
 | | arm A (lag p50 81.1 s) | arm C (lag p50 39.4 s) |
 |---|---|---|
-| queue depth | 2.8023 ± 0.0611 | 2.7032 ± 0.0449 |
-| in-flight concurrency | **1.1195 ± 0.0096** | 0.9672 ± 0.0081 |
-| GPU utilization | 1.1408 ± 0.0104 | **0.9575 ± 0.0079** |
-| **iso-cost gap** | **1.6957 ± 0.0639** | **1.7549 ± 0.0492** |
+| queue depth | 5.9707 ± 0.0440 | 4.2340 ± 0.0383 |
+| in-flight concurrency | **2.9758 ± 0.0606** | **1.6807 ± 0.0548** |
+| GPU utilization | 3.0284 ± 0.0537 | 1.7094 ± 0.0355 |
+| **iso-cost gap** | **3.0681 ± 0.0649** | **2.6094 ± 0.0450** |
 
 (± is the standard error across master seeds; p99 in seconds.)
 
-The gap is now **26× its own standard error**, against the pre-registered
-regime's 0.314 ± 0.078 around a true zero. The ranking is identical in all 20
-runs. The comparison is defined here.
+The gap is **47× its own standard error**, against the pre-registered regime's
+0.314 ± 0.078 around a true zero. The ranking is identical in all 20 runs.
 
-**And it refutes all three testable hypotheses.**
+**What it says about the hypotheses.**
 
-- **H1** (in-flight concurrency dominates) — **not supported.** In-flight and
-  utilization are a tie: paired difference +0.0213 ± 0.0172 on arm A and
-  −0.0098 ± 0.0110 on arm C, both inside 2 sem, and *the sign flips between
-  arms*. What dominates is neither: both beat queue depth by ~1.7 s.
+- **H1** (in-flight concurrency dominates) — **not supported.** In-flight is
+  numerically best on both arms, but not distinguishably: paired against
+  utilization it is +0.0527 ± 0.0794 on arm A and +0.0287 ± 0.0575 on arm C,
+  both inside 2 sem. The two are a tie.
 - **H2** (utilization is the worst of the three, by censoring) — **refuted.**
-  Utilization is tied for *best*. Queue depth is worst, by 1.66 ± 0.07 s on
-  arm A and 1.75 ± 0.05 s on arm C.
-- **H3** (the gap at least halves from arm A to arm C) — **refuted.** Halving
-  would need arm C ≤ 0.848. Measured: 1.755. The paired change is
-  **+0.0592 ± 0.0614** — the gap does not shrink, it does not move at all.
+  Utilization is tied for *best*. The worst signal, by 2.99 ± 0.07 s on arm A
+  and 2.55 ± 0.05 s on arm C, is **queue depth** — which no hypothesis named.
+- **H3** (the gap at least halves from arm A to arm C) — **refuted, but
+  directionally right.** The gap does shrink, significantly: −0.4587 ± 0.0596
+  paired, about 15% of the arm-A gap. Halving would need arm C at or below
+  1.534; it is 2.609. Faster cold starts *do* narrow the spread between signals,
+  by nowhere near half.
 - **H4** (ranking stable across shapes, margins shrink on the ramp) — untested;
   needs the ramp sweep from the statistical-layer plan.
 
@@ -214,18 +254,20 @@ researcher-degrees-of-freedom hazard, and it deserves a direct answer rather
 than a disclaimer. Three things make this defensible, and the third is the
 strongest:
 
-1. The selection metric was **ranking-blind**: `distinct_p99`, a count of how
+1. The screening metric was **ranking-blind**: `distinct_p99`, a count of how
    many different values the 55 policies produce. Nothing in it can express a
-   preference for a signal.
+   preference for a signal. The stage-2 tiebreak was *grid completeness* — that
+   every signal keeps its policies — which is likewise not a preference for any
+   one of them.
 2. The search was over the **full grid**, run once, and is committed — not a
    sequence of tries stopped when one looked good.
-3. **It refuted every hypothesis the artifact pre-registered.** A regime chosen
-   to produce a result would produce the *predicted* result. This one says the
-   headline is wrong, the mechanism in H2 is backwards, and the winner is a tie
-   between two signals rather than the one predicted.
+3. **It refutes the hypotheses the artifact pre-registered.** A regime chosen to
+   produce a result would produce the *predicted* result. This one says the
+   predicted loser is tied for best, the worst signal is one no hypothesis
+   named, and the headline effect is 15% where at least 50% was predicted.
 
-All of it against the **placeholder service curve**. These are not results;
-they are a demonstration that the machinery can now produce results. Plan 2's
+All of it against the **placeholder service curve**. These are not results; they
+are a demonstration that the machinery can now produce results. Plan 2's
 measured curve is what would make them real, and it could move every number
 here.
 

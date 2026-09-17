@@ -30,8 +30,8 @@ from autoscale.sweep import SweepConfig, run_sweep
 SEED = 17
 UNTIL = 400.0
 SWEPT_LAGS = (20.0, 40.0, 60.0, 80.0, 120.0)
-BASELINE_FRACTION_OF_SATURATION = 0.40  # docs/experiment-a2.md, "Traffic model"
-ADDITIONAL_REPLICAS_AT_PEAK = 3  # docs/experiment-a2.md, "Traffic model"
+BASELINE_FRACTION_OF_SATURATION = 0.70  # docs/experiment-a2.md, amended 2026-09-17
+ADDITIONAL_REPLICAS_AT_PEAK = 0.25  # docs/experiment-a2.md, amended 2026-09-17
 
 
 def _saturation_rps(curve) -> float:

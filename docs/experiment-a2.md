@@ -27,12 +27,94 @@ signal matters?
   and held constant across both distributions so the composition comparison
   varies exactly one thing.
 - `R` ramp = `D`/2 = **95 s**.
-- baseline = **40%** of measured saturation.
-- `k` = magnitude requiring **3 additional replicas** at the measured service
-  rate.
+- baseline = **70%** of measured saturation.
+- `k` = magnitude requiring **0.25 additional replicas** at the measured
+  service rate.
+
+  *Both amended 2026-09-17, from 40% and 3 additional replicas. As
+  originally registered they made the experiment unanswerable — see the
+  amendment immediately below, which states the old values, the evidence,
+  and how the replacements were chosen.*
 
 The two absolute rates are computed from the service curve and committed
 **before any policy sweep runs**.
+
+### Amendment, 2026-09-17: the traffic model made the experiment unanswerable
+
+**Changed:** baseline **40% → 70%** of measured saturation; `k` from **3 → 0.25**
+additional replicas at peak. Peak load moves from 3.40× to **0.95×** one
+replica's saturation.
+
+**Why.** As pre-registered, this traffic model makes the experiment
+*unanswerable*, and not marginally so: on any fixed arrival trace, all 55
+policies in the threshold grid — all three signals, every threshold pair —
+deliver an **identical p99 to nine decimal places**, while producing 8 distinct
+costs. The inter-signal gap H3 is built on is exactly zero by construction, so
+H1, H2, H3 and H4 have no answers to find. The 0.44 s gap an earlier draft
+reported was a single draw from a noise distribution measured at
+0.314 ± 0.078 across ten master seeds.
+
+The mechanism: `k` sized for 3 additional replicas against a baseline of 40% of
+*one* replica's saturation puts the peak at 3.4× that saturation. Every signal
+is then past every threshold in its own grid from the first evaluation onward
+and stays there for the whole spike, and a saturated signal carries no
+information. The measured 81.1 s cold start compounds it — no added capacity
+arrives for the first 81 s of a 190 s spike, so the backlog that sets the p99 is
+already built before any policy's decisions can take effect.
+
+This is **not** an artefact of the unmeasured placeholder service curve. The
+traffic model is a rule scaled to measured saturation, so a measured curve
+changes the absolute rates and leaves the ratio — and the degeneracy — exactly
+where they are. The replica cap is not implicated either: it never binds, and
+`max_replicas` of 12, 24 and 64 give identical results down to the p99.
+
+**How the replacement was chosen.** `scripts/a2_regime_probe.py` runs two
+stages. Stage 1 screens a grid of candidates on one fixed trace each, asking a
+deliberately **ranking-blind** question: how many *distinct* p99 values do the
+55 policies produce? That metric cannot express a preference for any signal, so
+it can locate a regime where the signals are distinguishable but cannot select
+which one wins. 10 of 40 configurations separate the policies, and every one has
+peak/saturation between 0.35 and 1.20; every configuration at ≥ 1.4 gives a
+spread of exactly zero.
+
+Stage 2 re-runs the survivors through the real sweep and reports **surviving
+policies per signal**. It exists because stage 1 misled once: read as though its
+one-trace `kept` count were a real survival rate, it recommended baseline 40% /
+0.5 additional replicas, where real sweeps give `queue_depth` only **2.7 of its
+19 policies**. A three-point frontier against nineteen-point ones is not the
+comparison this artifact claims to make, and part of that candidate's apparent
+gap was just the mismatch. **baseline 70% / 0.25 additional replicas** is
+adopted instead: every signal keeps its full grid (19/17/19), and the separation
+is larger anyway.
+
+**Measured at the adopted regime** (10 master seeds × 30 repetitions, both arms,
+placeholder curve):
+
+| | arm A (lag p50 81.1 s) | arm C (lag p50 39.4 s) |
+|---|---|---|
+| queue depth | 5.9707 ± 0.0440 | 4.2340 ± 0.0383 |
+| in-flight concurrency | 2.9758 ± 0.0606 | 1.6807 ± 0.0548 |
+| GPU utilization | 3.0284 ± 0.0537 | 1.7094 ± 0.0355 |
+| **iso-cost gap** | **3.0681 ± 0.0649** | **2.6094 ± 0.0450** |
+
+The gap is 47× its own standard error, and the ranking is identical in all 20
+runs. The comparison is defined here.
+
+**Selecting an operating point after seeing that it produces an effect is a real
+researcher-degrees-of-freedom hazard**, and the honest answer is not a
+disclaimer but the outcome: this regime **refutes the hypotheses below**. H2's
+predicted loser (utilization) is statistically tied for *best*, and the worst
+signal by a wide margin is queue depth, which no hypothesis named. H1's
+predicted winner is not distinguishable from utilization on either arm. H3's gap
+does shrink — significantly, by 0.4587 ± 0.0596, about 15% — but halving would
+need arm C at or below 1.534 and it is 2.609. A regime chosen to manufacture a
+result would produce the *predicted* result.
+
+Amended while the service curve was still the explicitly-unmeasured placeholder,
+under `allow_unmeasured=True`, so no measured result existed to tune it against.
+Plan 2's measured curve could move every number above.
+
+Full evidence and reproduction: `docs/findings-a2-degenerate-regime.md`.
 
 ## Hypotheses
 
@@ -65,7 +147,7 @@ pre-registration rather than an edit nobody has to justify:
 |---|---|---|
 | cooldown | 30 s | Without one, a policy fires on every evaluation while the signal stays high and every signal looks identically aggressive. Real autoscalers have one; modelling them without it would idealise away the constraint the comparison is about. |
 | evaluation interval | 5 s | The controller sees fleet state this often. Much finer and the cooldown alone governs; much coarser and a 190 s spike gets too few decisions to differentiate signals. |
-| max replicas | 12 | A ceiling well above the 3 additional replicas `k` is sized to require, so the cap does not bind in the normal case and a runaway policy is still bounded. |
+| max replicas | 12 | A ceiling well above what `k` is sized to require, so the cap does not bind in the normal case and a runaway policy is still bounded. Verified not to bind under either traffic model: `max_replicas` of 12, 24 and 64 give identical scale-up counts, identical fleet growth and identical p99 (2026-09-17). |
 | repetitions per configuration | 30 | Fixed before any result is inspected. |
 
 ## Threshold grids, per signal

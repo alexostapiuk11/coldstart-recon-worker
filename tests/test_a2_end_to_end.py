@@ -56,13 +56,21 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 STORE = REPO_ROOT / "data" / "campaign.jsonl"
 
 SEED = 17
-UNTIL = 120.0
-SUSTAIN = 60.0
-RAMP = 30.0
+# Exactly half the real sweep's window (400 / 190 / 95), not an arbitrary
+# shrink. At the pre-registered traffic model a shorter window was fine because
+# every signal saturated instantly; at the amended one (peak at 0.95x a
+# replica's saturation) `queue_depth` needs a real spike before its queue
+# crosses even the lowest threshold in its grid, and at 120/60 it was excluded
+# as `no_scaling_action` in 5 of 20 (seed, arm, shape) combinations -- so this
+# gate certified a two-signal sweep. At 200/95 all three signals survive in
+# 20/20, with queue_depth keeping 8-14 of its 19 policies.
+UNTIL = 200.0
+SUSTAIN = 95.0
+RAMP = 47.5
 REPETITIONS_UNDER_TEST = 1
 
-BASELINE_FRACTION_OF_SATURATION = 0.40  # docs/experiment-a2.md, "Traffic model"
-ADDITIONAL_REPLICAS_AT_PEAK = 3  # docs/experiment-a2.md, "Traffic model"
+BASELINE_FRACTION_OF_SATURATION = 0.70  # docs/experiment-a2.md, amended 2026-09-17
+ADDITIONAL_REPLICAS_AT_PEAK = 0.25  # docs/experiment-a2.md, amended 2026-09-17
 
 # Threshold combinations one sweep actually runs: the pre-registered grids,
 # less the pairs `Controller` refuses outright (`scale_down_at >= scale_up_at`
@@ -377,3 +385,36 @@ def test_the_sweep_reproduces_across_processes_not_just_within_one():
     assert first["samples"] == second["samples"]
     assert first["points"] == second["points"]
     assert first["discards"] == second["discards"]
+
+
+def test_the_traffic_constants_match_the_render_script_and_the_preregistration():
+    """The traffic derivation lives in three places -- this file, the render
+    script, and docs/experiment-a2.md -- and the first two are duplicated rather
+    than shared. A duplicated constant that nothing compares is two constants.
+
+    This bit for real: the pre-registered `k` (3 additional replicas at peak)
+    put the peak at 3.4x one replica's saturation, which made every signal
+    saturate for the whole spike and every policy deliver an identical p99, and
+    the amendment that fixed it had to be applied by hand in both copies. A
+    third place that quietly kept the old value would have produced a sweep
+    disagreeing with the gate that is supposed to certify it.
+    """
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    import a2_render_figures as render
+
+    assert BASELINE_FRACTION_OF_SATURATION == render.BASELINE_FRACTION_OF_SATURATION
+    assert ADDITIONAL_REPLICAS_AT_PEAK == render.ADDITIONAL_REPLICAS_AT_PEAK
+
+    prereg = (REPO_ROOT / "docs" / "experiment-a2.md").read_text()
+    assert "baseline = **70%** of measured saturation" in prereg, (
+        "the pre-registration no longer states the baseline fraction these "
+        "constants implement; one of the two moved without the other"
+    )
+    assert "**0.25 additional replicas**" in prereg, (
+        f"the pre-registration does not state the amended k that "
+        f"ADDITIONAL_REPLICAS_AT_PEAK={ADDITIONAL_REPLICAS_AT_PEAK} implements. "
+        "Changing the traffic model is an amendment to a pre-registered "
+        "quantity, not a code edit"
+    )
