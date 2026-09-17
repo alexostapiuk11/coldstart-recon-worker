@@ -35,6 +35,97 @@ and describe how the measurement was taken without modifying vLLM.
 **Part II** — the reader can look at any performance claim and ask the four
 questions in the closing card.
 
+## Calibration — what the diagnostic found
+
+Run 2026-09-17, before any material was written: four self-assessments and
+three open probes. It changed the plan in five places, which is the argument for
+running it first.
+
+| area | measured level | consequence |
+|---|---|---|
+| serverless, containers | **comfortable** — explained cold start correctly and unprompted, including warming | **Cut.** Budgeted a section; needs one sentence. |
+| GPU memory, weights | **better than self-reported** — named activations and K/Q/V unprompted | Don't re-teach the parts. Teach the *consequence chain* he stopped short of: 24 GB total − 15 GB weights = a hard ceiling on conversation length, fixed at startup. One correction owed: **Q is not cached**, only K and V. |
+| intervals | **specific misconception**, see below | Promoted to the highest-value module in the plan. |
+| the repo | **unread** — directed the work, didn't read the source | Deep cards are new material. Each needs setup before code appears; dropping the reader into `handler.py` cold is the boring failure. |
+
+### The interval misconception, and the sequence that fixed it
+
+Stated belief: *"the interval shows where the majority of numbers landed —
+a bell curve, most values in that range."* This is the most common
+misunderstanding of a confidence interval, and it survived a first, abstract
+explanation. It was then restated almost unchanged — evidence that defining the
+concept does not shift it.
+
+What worked, in order, and therefore what the module must do:
+
+1. **Refute with his own data.** Arm A's interval `[80.92, 85.88]` spans 82–85s
+   where *zero* runs landed, and excludes 96s where 9 runs landed. A "where most
+   values land" reading cannot survive that chart.
+2. **Shrink the example until the mechanism is visible.** Five numbers, not 99.
+   Show six imaginary campaigns drawn from a bag, each producing one median.
+3. **Name the word that misleads.** "Shuffling" is wrong — reordering never
+   moves a median. It is **drawing with replacement**: pull a number, write it
+   down, *put it back*, repeat as many times as you have runs.
+4. **Break the wrong model with a controlled test.** Same two clusters at 81s
+   and 86s; change only the split. 51/48 → interval 5.00s wide. 70/29 → 0.00s
+   wide. Identical clusters, identical gap, collapsing interval. The interval was
+   never measuring the gap between groups.
+5. **Separate evidence from computation.** 99 real runs = 2.34 GPU-hours and real
+   money, and they set the interval's width. 10,000 resamples = 0.19s on a
+   laptop and free, and they change nothing past a point. Only the expensive
+   number carries information.
+
+Step 4 is load-bearing: the arm A example accidentally *confirms* the wrong
+model, because its interval happens to run from 81 to 86 and so looks exactly
+like the gap between clusters. Any teaching of this concept that uses only arm A
+will reinforce the error it means to correct.
+
+## The learning plan and the tutoring loop
+
+The author asked to be taught, not handed a document. Material cannot notice a
+misconception; the section above is proof that the misconception was only found
+by asking, and only fixed by iterating.
+
+### Two tutors, split by one constraint
+
+The in-page tutor uses the `sample` capability and **has no memory between
+calls**. That single fact assigns the work:
+
+| | handles | because |
+|---|---|---|
+| **in-page tutor** (`sample`) | "what does KV cache mean again?", "say this differently", "another example" | always available, instant, needs no session — but cannot know what was already covered |
+| **Claude, in session** | "I still don't get *why*", checkpoint judging, teach-back critique | reads the actual source, and carries history across sessions |
+
+### Modules
+
+| # | module | checkpoint |
+|---|---|---|
+| 0 | diagnostic | done — see Calibration |
+| 1 | GPU memory, weights, and the ceiling | finish the consequence chain unaided |
+| 2 | one run's journey | narrate a run end to end, naming which clock is running |
+| 3 | vLLM's four steps; the KV dividend | explain why profiling needs a real forward pass |
+| 4 | the six components | for any card, state the failure it prevents |
+| 5 | **spread vs interval** | the controlled-test prediction: same clusters, different split — what happens? |
+| 6 | three arms; the difference of contrasts | judge a claim from two intervals, and say what's missing |
+| 7 | what could *not* be concluded | name a limit the artifact states about itself |
+| 8 | **teach it back** | draft the LinkedIn version; Claude plays an audience member who doesn't know the material |
+
+Checkpoints require **production, not recognition** — answers in the reader's
+own words, never multiple choice. Recognising an explanation and being able to
+give one are different skills, and only the second is the stated goal.
+
+Module 8 is the real assessment. The author's end goal is to teach this to
+others, and preparing to teach is the most reliable way to discover what is not
+actually understood — as module 5 demonstrated within this very session.
+
+### Progress state
+
+`docs/learning/progress.md` — what is solid, what is fuzzy, what was corrected
+and when. Updated by Claude at each checkpoint, readable by the author, and the
+thing that keeps a later session calibrated instead of re-teaching what already
+landed. Re-explaining known material is the specific boredom failure the author
+warned against.
+
 ## The two organizing ideas
 
 Everything in Part I hangs off these. Neither is optional; without them the map
