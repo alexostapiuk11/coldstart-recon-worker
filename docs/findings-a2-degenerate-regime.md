@@ -244,8 +244,50 @@ The gap is **47× its own standard error**, against the pre-registered regime's
   paired, about 15% of the arm-A gap. Halving would need arm C at or below
   1.534; it is 2.609. Faster cold starts *do* narrow the spread between signals,
   by nowhere near half.
-- **H4** (ranking stable across shapes, margins shrink on the ramp) — untested;
-  needs the ramp sweep from the statistical-layer plan.
+- **H4** (ranking stable across shapes, margins shrink on the ramp) — **half
+  supported, half contradicted.** See the ramp results below.
+
+### Both shapes, measured (seed 17, 30 repetitions, arm A and arm C)
+
+The ramp sweep the statistical-layer plan added, run on the production path.
+p99 in seconds at each sweep's own iso-cost budget:
+
+| sweep | budget | queue depth | in-flight | utilization | ranking, best → worst |
+|---|---|---|---|---|---|
+| step, arm A | 917.5 | 5.883 | **3.128** | 3.532 | in-flight < utilization < queue depth |
+| step, arm C | 725.0 | 4.265 | 2.651 | **2.356** | utilization < in-flight < queue depth |
+| ramp, arm A | 912.5 | 5.817 | **1.741** | 1.759 | in-flight < utilization < queue depth |
+| ramp, arm C | 772.5 | 3.958 | 2.197 | **2.170** | utilization < in-flight < queue depth |
+
+**H3 under both shapes.** Step: 2.754 → 1.908, where halving needs ≤ 1.377 —
+**not halved**. Ramp: 4.077 → 1.787, where halving needs ≤ 2.038 — **halved**.
+`h3_verdict` returns `holds=False, partial=True, evaluable=True`: "gap halved
+under ramp only; published as a partial result, not as confirmation". That is
+the pre-registered treatment of a single-shape halving, applied by the code
+rather than by a judgement call after the fact.
+
+**H4, clause by clause.**
+
+- *Ranking stable across shapes* — **supported**, exactly. Each arm's ordering
+  is identical on step and ramp, and queue depth is worst in all four sweeps.
+  (The top two swap between *arms*, not between shapes, and by margins well
+  inside the tie established above.)
+- *Margins shrink on the ramp* — **contradicted on arm A**, which is where the
+  prediction mattered. The gap does not shrink there; it **grows by 48%**,
+  2.754 → 4.077. On arm C it is roughly flat, 1.908 → 1.787. The ramp was
+  predicted to be the gentler test that compresses the differences between
+  signals; on the slow-cold-start arm it separates them further than the step
+  does.
+
+This is also what produces the split H3 verdict: the ramp "halves" largely
+because its arm-A gap is so much *larger*, not because its arm-C gap is
+smaller. Reading the partial confirmation as evidence that faster cold starts
+help more under a ramp would invert the mechanism.
+
+One master seed with bootstrap intervals over its 30 repetitions, not the ten
+independent master seeds behind the arm-A/arm-C table above — so the four gaps
+carry the wider uncertainty printed by the render script, and the shape
+comparison has not been repeated across master seeds.
 
 ### Why choosing this regime is not result-shopping
 
