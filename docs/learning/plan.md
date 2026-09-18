@@ -1,5 +1,8 @@
 # Learning plan — the cold-start artifact
 
+**The material:** https://claude.ai/code/artifact/40e49d9f-dbe5-453e-b753-0572b19d2486
+
+
 Nine modules, about two hours total. The material is the explainer; this file is
 the path through it and the record of what counts as understanding.
 
