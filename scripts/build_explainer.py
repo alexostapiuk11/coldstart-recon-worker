@@ -67,6 +67,13 @@ def _fmt(value) -> str:
     if isinstance(value, dict) and {"lo", "hi"} <= set(value):
         return f"[{value['lo']:.2f}, {value['hi']:.2f}]"
     if isinstance(value, float):
+        # A count that arrives as a float -- kv_capacity_tokens comes through
+        # median(), which returns one -- is still a count. Rendering it as
+        # "35792.0 tokens" reads as a measurement with spurious precision, and
+        # disagrees with the same figure formatted "35,792" inside the chart
+        # right next to it. Seconds keep the one decimal place.
+        if value.is_integer():
+            return f"{int(value):,}"
         return f"{value:.1f}"
     return str(value)
 

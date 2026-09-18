@@ -41,6 +41,9 @@
   figure svg { max-width: 100%; height: auto; }
   figcaption { color: var(--ink-soft); font-size: .95rem; }
   pre { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; padding: 1rem; }
+  /* The UA default link blue is near-unreadable on the dark page background,
+     and there are few enough links here that an underline is signal enough. */
+  a { color: inherit; text-decoration-color: var(--clk-a); text-underline-offset: 2px; }
 
   /* --- the spine, and the beats that light it ------------------------- */
   .apparatus { margin: 3rem 0; }
@@ -61,7 +64,11 @@
     font-size: .8rem; letter-spacing: .08em; text-transform: uppercase;
     color: var(--ink-soft); margin: 0 0 .4rem; font-weight: 600;
   }
+  /* Beats now run to several paragraphs; without this they butt together,
+     since the base rule zeroes the margin so a single-paragraph beat sits
+     flush under its label. */
   .beat p { margin: 0; }
+  .beat p + p { margin-top: .9rem; }
 
   @media (max-width: 767px) {
     /* Static, not sticky. At this width the diagram cannot be shrunk into a
@@ -77,6 +84,36 @@
     #spine { position: sticky; top: 1.5rem; max-height: calc(100vh - 3rem); }
     .beat { min-height: 62vh; display: flex; flex-direction: column; justify-content: center; }
   }
+
+  /* --- prose sections and code cards ---------------------------------- */
+  /* The body is sized for the two-column apparatus; prose run at that full
+     width is ~150 characters a line, which is well past readable. */
+  .zone { margin: 4rem 0 0; max-width: 46rem; }
+  .zone > h2 { font-size: 1.45rem; line-height: 1.25; margin: 0 0 .9rem; }
+  .zone h3 { font-size: 1.05rem; margin: 2rem 0 .5rem; }
+  .zone p { margin: 0 0 1rem; }
+  ul.steps { padding-left: 1.1rem; }
+  ul.steps li { margin-bottom: .65rem; }
+  .card {
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 1.1rem 1.25rem 1.25rem;
+    margin: 1.75rem 0;
+  }
+  .card h3 { margin-top: 0; margin-bottom: .15rem; }
+  .card .where {
+    color: var(--ink-soft); font-size: .82rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .card dl { margin: .9rem 0 0; }
+  .card dt {
+    font-weight: 600; font-size: .72rem; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--ink-soft); margin-top: .9rem;
+  }
+  .card dd { margin: .2rem 0 0; }
+  .card details { margin-top: 1.1rem; }
+  .card summary { cursor: pointer; color: var(--ink-soft); font-size: .9rem; }
+  .card pre { margin: .75rem 0 0; font-size: .8rem; line-height: 1.45; }
 </style>
 
 <h1>Where a cold start goes</h1>
@@ -90,64 +127,443 @@ seconds, against {{median_t_total_A}} with nothing cached.</p>
   </div>
   <div class="beats">
     <section class="beat" data-lights="zone-1">
-      <h2>Beat 1</h2>
-      <p>The schedule says run 147 is arm B.</p>
+      <h2>Beat 1 &middot; the schedule</h2>
+      <p>Run 147 is arm B, and it was arm B before the campaign started. The
+      scheduler draws the whole order once, from a seed: {{runs_total}} runs as
+      randomised triples, one of each arm in every triple, shuffled within it.</p>
+      <p>Running all of arm A, then all of arm B, then all of arm C would have
+      been simpler and worthless. A rented GPU at 3am is not the same machine as
+      one at noon &mdash; different neighbours, different network, different luck
+      of the draw on which host you land. Blocking hands that drift to whichever
+      arm happened to run through it. Interleaving spreads it across all three.</p>
     </section>
     <section class="beat" data-lights="zone-1">
-      <h2>Beat 2</h2>
-      <p>Preflight refuses, or it allows.</p>
+      <h2>Beat 2 &middot; preflight</h2>
+      <p>Before any money moves, preflight fetches the live endpoint from
+      RunPod's API and compares it, field by field, against a dict of pinned
+      values: platform snapshotting off, this GPU type, this network volume,
+      this container template. One difference and the campaign does not start.</p>
+      <p>The guard exists because the failure it catches is invisible
+      afterwards. An endpoint with the platform's own boot-acceleration switched
+      back on returns a complete, plausible, entirely wrong dataset &mdash; it
+      measures RunPod's cache instead of the three arms, and nothing in the
+      numbers says so.</p>
     </section>
     <section class="beat" data-lights="zone-1,clock-A,edge-1">
-      <h2>Beat 3</h2>
-      <p>The job is stamped and sent.</p>
+      <h2>Beat 3 &middot; submit</h2>
+      <p>The submitter stamps the job with its two facts &mdash;
+      <code>{arm, run_id}</code> &mdash; and posts it.</p>
+      <p><strong>Clock A starts here.</strong> It is the laptop's stopwatch:
+      submit to result, queueing and scheduling and network included. It is the
+      only one of the three clocks that sees the wait before a container exists,
+      and therefore the only one measuring what a user would actually feel.</p>
     </section>
     <section class="beat" data-lights="zone-2,clock-C,edge-2">
-      <h2>Beat 4</h2>
-      <p>RunPod queues it, rents a GPU, and boots the image.</p>
+      <h2>Beat 4 &middot; the platform</h2>
+      <p>RunPod accepts the job, queues it, finds a free 4090, and boots the
+      container image onto it. You are comfortable with this part already: it is
+      a cold start in the ordinary serverless sense, the one you avoid in
+      production by keeping a worker warm. Here it is the thing under the
+      microscope, so nothing is kept warm on purpose.</p>
+      <p><strong>Clock C</strong> is the platform's own account of that stretch,
+      and it is an odd instrument: it reports durations &mdash; how long the job
+      waited, how long it ran &mdash; and never timestamps. There is no instant
+      to line up against clock A. Only two lengths that ought to add up.</p>
     </section>
     <section class="beat" data-lights="zone-3">
-      <h2>Beat 5</h2>
-      <p>The container prepares arm B's cache state, and snapshots it before running.</p>
+      <h2>Beat 5 &middot; the handler prepares</h2>
+      <p>Inside the container, the handler turns arm B's configuration into two
+      environment variables, creates the directories it is allowed to create,
+      and refuses outright if a path claims to be on the network volume and the
+      volume is not mounted &mdash; silently landing that cache on container
+      disk would make arms B and C run cold while reporting themselves warm.</p>
+      <p>Then, <em>before</em> starting anything, it records whether this arm's
+      compile cache directory already exists. The ordering is the entire point.
+      Why that ordering matters is card 4's lesson &mdash; for now, just note
+      that the snapshot happens first, and that moving it later would look like
+      a tidy-up.</p>
     </section>
     <section class="beat" data-lights="zone-3,clock-B,edge-3">
-      <h2>Beat 6</h2>
-      <p>The probe starts the server and begins watching its output.</p>
+      <h2>Beat 6 &middot; the probe starts the engine</h2>
+      <p>The probe launches <code>vllm serve</code> as a subprocess and hands
+      its stdout to a thread that reads line by line, forever.</p>
+      <p><strong>Clock B starts at that instant.</strong> A monotonic stopwatch
+      inside the box, in the same process as the thing it times, with no network
+      between the clock and the event. That is why clock B can name phase
+      boundaries to the millisecond while clock A can only bracket the whole
+      run &mdash; and why the two are never added together.</p>
     </section>
     <section class="beat" data-lights="zone-4,clock-B,edge-4">
-      <h2>Beat 7</h2>
-      <p>vLLM does its four things, and its own log lines become marks.</p>
+      <h2>Beat 7 &middot; vLLM does four things</h2>
+      <p>Load the weights. Compile the model. Size the cache that holds
+      conversations. Capture the GPU call sequences. None of that is this
+      repo's code, and the probe never patches the engine to find out where it
+      is &mdash; it reads the log lines vLLM already prints about itself and
+      promotes two of them to marks.</p>
+      <p>This is where the bulk of a cold start lives: with nothing cached, the
+      median run takes {{median_t_total_A}} seconds, and the tail reaches
+      {{p95_t_total_A}}. The section below this diagram opens the box.</p>
     </section>
     <section class="beat" data-lights="zone-3,clock-B">
-      <h2>Beat 8</h2>
-      <p>Ten requests go in, and the engine is timed warm.</p>
+      <h2>Beat 8 &middot; ten requests</h2>
+      <p>The health endpoint answers, so the engine now calls itself ready. Ten
+      requests go in anyway, one after another, each one timed on clock B.</p>
+      <p>The engine is warm by any reasonable definition, and we time it warm on
+      purpose. The question is whether &ldquo;ready&rdquo; and &ldquo;fast&rdquo;
+      are the same moment &mdash; whether a replica that has just announced
+      itself is fit to take traffic, or whether the first few users quietly pay
+      for the rest.</p>
     </section>
     <section class="beat" data-lights="zone-3,edge-5">
-      <h2>Beat 9</h2>
-      <p>The result returns on the result channel, not the log channel.</p>
+      <h2>Beat 9 &middot; the result channel</h2>
+      <p>The probe hands the entire bundle back as the job's <em>result</em>
+      &mdash; the JSON RunPod returns to the submitter &mdash; and not as log
+      output.</p>
+      <p>Logs are a lossy channel. They truncate, they interleave two workers'
+      lines, they arrive late or not at all, and a run whose only telemetry
+      lived in stdout is a run you paid for and cannot use. A result either
+      comes back whole or fails loudly enough to retry.</p>
     </section>
     <section class="beat" data-lights="zone-5,edge-6">
-      <h2>Beat 10</h2>
-      <p>Nothing is judged yet: the row goes down raw, valid or not.</p>
+      <h2>Beat 10 &middot; nothing is judged yet</h2>
+      <p>The row is written whether the run succeeded, failed its health check,
+      timed out, or came back internally contradictory. Raw fields, no verdict.</p>
+      <p>Validity is decided later, offline, by code that can be re-run against
+      the same file as many times as you like. Judging at write time inverts
+      that: a bug in the judge no longer produces a wrong answer you can find
+      and fix, it produces <em>no data</em> &mdash; the evidence that would have
+      exposed the bug was discarded by the bug.</p>
+      <p>One run in this campaign took {{first_touch_seconds}} seconds, because
+      it was the first time that model had ever been pulled to that region. It
+      is in the file. It is labelled, and excluded downstream by a rule written
+      in advance. It was never deleted.</p>
     </section>
     <section class="beat" data-lights="zone-5">
-      <h2>Beat 11</h2>
-      <p>One self-describing row is appended.</p>
+      <h2>Beat 11 &middot; one row appended</h2>
+      <p>A single line of JSON, appended to the campaign file. Self-describing:
+      every field the analysis needs is named in the row itself, so the file
+      still means something without the code that wrote it.</p>
+      <p>Append-only carries more weight than it sounds like. A
+      {{runs_total}}-run campaign spans hours of paid GPU time; workers recycle,
+      laptops sleep, the first attempt died of a full disk. The only recovery
+      that actually works is &ldquo;stop, then start again after the last row
+      on disk.&rdquo;</p>
     </section>
     <section class="beat" data-lights="zone-6,clock-A,clock-B,clock-C,edge-7,edge-8">
-      <h2>Beat 12</h2>
-      <p>Offline, with no GPU: reconcile the three clocks, gate the run, derive
-      the numbers, draw the chart.</p>
+      <h2>Beat 12 &middot; offline, no GPU</h2>
+      <p>Everything from here runs on a laptop and touches nothing but that
+      file. The three clocks are reconciled against each other; runs that break
+      the rules fixed in advance are discarded with a named reason rather than
+      quietly repaired; per-phase durations are derived; ranges are computed by
+      resampling the measurements; the charts are drawn.</p>
+      <p>The medians land at {{median_t_total_A}} seconds with nothing cached,
+      {{median_t_total_B}} with the weights already on the volume, and
+      {{median_t_total_C}} with the compiled artifacts there too.</p>
+      <p>Every number published anywhere about this experiment comes out of this
+      stage &mdash; not out of a notebook someone ran once. That is the point of
+      pushing the whole judgement downstream: clone the repo, run the pipeline,
+      and you re-derive all of it, including the numbers in this sentence,
+      without renting anything.</p>
     </section>
   </div>
 </div>
 
-<figure>
-  {{chart:kv_dividend}}
-  <figcaption>What the saved time buys: a KV cache is per-conversation scratch
-  space the model keeps on the GPU while generating, and time not spent
-  compiling is space left for it.</figcaption>
-</figure>
-<pre><code>{{excerpt:preflight-refuses}}</code></pre>
+<section class="zone" id="vllm">
+  <h2>Zone 4 &mdash; what is actually in the box</h2>
+
+  <p>Everything above treats vLLM as a box that takes eighty-odd seconds to
+  open. It is worth knowing what it is, because two of its four startup steps
+  are the entire experiment.</p>
+
+  <h3>What it replaces</h3>
+  <p>The obvious way to serve a model is a loop: read a request, call
+  <code>model.generate()</code>, write the answer back, read the next request.
+  That works, and it is what every tutorial shows. It also holds one
+  conversation at a time, leaves the GPU idle between a user's tokens, and gives
+  you no way to serve two people at once short of loading the weights twice.</p>
+
+  <h3>What it is</h3>
+  <p>An HTTP server wrapped around the model. This repo starts it as a
+  subprocess &mdash; literally <code>vllm serve &lt;model&gt; --port 8000</code>
+  &mdash; polls <code>http://127.0.0.1:8000/health</code> until it answers, and
+  then sends its warmup traffic to <code>/v1/completions</code>. That is the
+  whole interface the probe needs: a process, a port, a health route, and an
+  OpenAI-shaped completions route.</p>
+  <p>What you get for it is one copy of the weights with many users' requests
+  multiplexed over it. That is continuous batching &mdash; serving many users'
+  requests through one copy of the model at once &mdash; and requests join and
+  leave the running batch between decode steps rather than waiting for a batch
+  to fill. It is also why a fresh replica is useful the moment it reports ready:
+  it does not need traffic to warm itself into efficiency. It needs memory.</p>
+
+  <h3>What it is not</h3>
+  <p>Not a model. The weights are a separate download, pinned to a revision, and
+  vLLM will happily serve a different one. Not a trainer &mdash; nothing in it
+  computes a gradient. It is a scheduler and a memory manager with an HTTP front
+  door.</p>
+
+  <h3>Why starting it costs real time</h3>
+  <ul class="steps">
+    <li><strong>Load the weights.</strong> Roughly 15&nbsp;GB moved off disk, or
+    off the network volume, into HBM &mdash; the GPU's own memory, separate from
+    the computer's RAM. This is the step arms B and C shorten by having the file
+    already staged on the volume.</li>
+    <li><strong>Compile the model.</strong> torch.compile &mdash; a step that
+    turns the model into faster GPU code before serving &mdash; traces the model
+    and generates kernels for it. Slow once; reusable afterwards if the output
+    is kept. Keeping it is the only thing arm C has that arm B does not.</li>
+    <li><strong>Size the cache that holds conversations.</strong> Measured, not
+    configured. See below &mdash; this is where the interesting failure is.</li>
+    <li><strong>Capture the GPU call sequences.</strong> CUDA graph capture
+    &mdash; recording a fixed sequence of GPU operations so they replay without
+    per-step overhead &mdash; costs a flat four seconds here, identical in all
+    three arms because it depends on the shapes captured rather than on anything
+    cached, and pays itself back on every token afterwards.</li>
+  </ul>
+
+  <h3>The consequence you already have the parts for</h3>
+  <p>You can already list what sits in GPU memory beside the weights:
+  activations, and the K/Q/V matrices. One correction is owed. Q is not kept
+  &mdash; it is computed fresh for the token being generated and thrown away.
+  Only K and V are retained, which is why it is called the KV cache and not the
+  QKV cache: per-conversation scratch space the model keeps on the GPU while
+  generating. It grows by a slice per token, and every slice stays until the
+  conversation ends.</p>
+  <p>Now finish the chain, because this is the part that bites. The card holds
+  24&nbsp;GB. The weights take ~15&nbsp;GB and never move. What remains, after
+  activations and working space, is the <em>entire</em> budget for every
+  conversation the replica will ever hold simultaneously. Context length
+  multiplied by concurrent conversations is a hard ceiling &mdash; and vLLM
+  computes that ceiling once, during startup, and never revisits it. The replica
+  you boot at second zero has a fixed conversational capacity for its whole
+  life.</p>
+
+  <h3>The dividend: a compile cache buys capacity, not just seconds</h3>
+  <p>How does vLLM decide how much memory the cache gets? It cannot ask. No API
+  reports &ldquo;free memory for a KV cache.&rdquo; The only way to find out is
+  to run the model once on the largest batch it must support &mdash; a forward
+  pass, running the model once, start to finish, on some input &mdash; record
+  peak usage, and hand the remainder to the cache.</p>
+  <p>On a cold-compile arm, the compiler's own working set is still resident
+  while that measurement runs. The profiler is not wrong; it accurately reports
+  less free memory than the replica will have a second later. vLLM sizes the
+  cache to what it saw: {{kv_cold}} tokens instead of {{kv_warm}}. At the
+  context length held fixed across all three arms, that is
+  {{concurrency_cold}} concurrent conversations instead of
+  {{concurrency_warm}} &mdash; one whole request of capacity, on the same card,
+  for the life of that replica. Nothing later reclaims it.</p>
+
+  <figure>
+    {{chart:kv_dividend}}
+    <figcaption>The same fact stated in both directions, because it is easy to
+    invert: the warm arm gets that much more, the cold arm is sized that much
+    smaller.</figcaption>
+  </figure>
+
+  <h3>The instrumentation point</h3>
+  <p>vLLM was never modified, forked, or monkey-patched to produce any of this.
+  The phase boundaries come from lines the engine already prints about itself,
+  matched by pattern against real captured logs held as fixtures.</p>
+  <p>That is the transferable trick, and the code below shows the half of it
+  that is easy to miss: most of those comments are about the lines that were
+  <em>rejected</em>. There is a plausible-looking line a few entries earlier
+  that reports the weight loader finishing, and another pair a few entries later
+  that report the HTTP server binding. Matching either would shift a boundary by
+  seconds and produce a clean, confident, wrong number. Choosing a marker in a
+  black box is mostly choosing which neighbour you refuse.</p>
+
+  <div class="card" id="card-3">
+    <h3>Card 3 &mdash; the two lines the probe watches for</h3>
+    <p class="where">worker/probe.py</p>
+    <dl>
+      <dt>What it is</dt>
+      <dd>Two compiled regular expressions, and the reasoning for each.</dd>
+      <dt>Its one job</dt>
+      <dd>Turn the engine's own chatter into two timestamped marks on clock B:
+      weights resident on the device, and engine fully initialised.</dd>
+      <dt>Why it exists</dt>
+      <dd>Without it the only measurable thing is &ldquo;the whole startup took
+      N seconds,&rdquo; and the experiment cannot say which arm bought which
+      part. With the wrong two lines it is worse than that: a boundary drawn at
+      the wrong log entry folds one phase into its neighbour, and the arm
+      difference lands on whichever phase absorbed it.</dd>
+      <dt>Hands off to</dt>
+      <dd>The stage recorder, which stores the marks relative to a single
+      origin, and then to the offline derivation that subtracts them.</dd>
+    </dl>
+    <details>
+      <summary>Show the code</summary>
+      <pre><code>{{excerpt:probe-markers}}</code></pre>
+    </details>
+  </div>
+</section>
+
+<section class="zone" id="cards">
+  <h2>Six pieces of code worth reading</h2>
+  <p>Each one is small, and each one exists because of a specific way this
+  experiment could have produced confident nonsense.</p>
+
+  <div class="card" id="card-1">
+    <h3>Card 1 &mdash; a guard that refuses to check nothing</h3>
+    <p class="where">coldstart/preflight.py</p>
+    <dl>
+      <dt>What it is</dt>
+      <dd>A dict of pinned endpoint settings, and a function comparing the live
+      endpoint against it.</dd>
+      <dt>Its one job</dt>
+      <dd>Refuse to open a paid run window if the endpoint has drifted from the
+      configuration the experiment was designed around.</dd>
+      <dt>Why it exists</dt>
+      <dd>A safety check that cannot do its job must fail, not shrug. Handed an
+      empty pin set, the natural implementation iterates zero times, finds no
+      mismatches, and reports success &mdash; on <em>any</em> endpoint at all,
+      which is precisely the false pass the module exists to prevent. So it
+      raises instead. The same instinct one line further down: a key missing
+      from the endpoint response counts as a mismatch, not as &ldquo;probably
+      still fine.&rdquo;</dd>
+      <dt>Hands off to</dt>
+      <dd>The driver, which submits nothing until this returns.</dd>
+    </dl>
+    <details>
+      <summary>Show the code</summary>
+      <pre><code>{{excerpt:preflight-refuses}}</code></pre>
+    </details>
+  </div>
+
+  <div class="card" id="card-2">
+    <h3>Card 2 &mdash; the one thing that differs between arms</h3>
+    <p class="where">coldstart/cache_config.py</p>
+    <dl>
+      <dt>What it is</dt>
+      <dd>The three arms as one frozen object with two fields, and a method that
+      turns them into exactly two environment variables. Same image, same
+      entrypoint, same engine flags; one swapped object.</dd>
+      <dt>Its one job</dt>
+      <dd>Express the experiment's single independent variable in a form the
+      container can consume, and nowhere else.</dd>
+      <dt>Why it exists</dt>
+      <dd>Warm paths deliberately point at a shared location on the network
+      volume &mdash; the whole meaning of warm is that a later run finds what an
+      earlier run left. Cold paths are the opposite, and so they are namespaced
+      by the run id. A serverless worker outlives any single run. Without the
+      namespace, the next run's &ldquo;cold&rdquo; arm starts up, finds the
+      previous run's downloaded weights already sitting on local disk, and
+      reports a cold start that never happened &mdash; as a perfectly plausible
+      number, in the arm whose whole purpose is to be slow.</dd>
+      <dt>Hands off to</dt>
+      <dd>The handler, which merges the dict into the subprocess environment
+      only and never into its own, for the same reason.</dd>
+    </dl>
+    <details>
+      <summary>Show the code</summary>
+      <pre><code>{{excerpt:cache-config-env}}</code></pre>
+    </details>
+  </div>
+
+  <div class="card">
+    <h3>Card 3 &mdash; instrumenting a black box</h3>
+    <p class="where">worker/probe.py</p>
+    <p>Shown in place, up in <a href="#card-3">the vLLM section</a>, where its
+    two log lines are the thing being discussed. It is not repeated here.</p>
+  </div>
+
+  <div class="card" id="card-4">
+    <h3>Card 4 &mdash; the line that must not move</h3>
+    <p class="where">worker/handler.py</p>
+    <dl>
+      <dt>What it is</dt>
+      <dd>One directory check, under a comment roughly fifteen times its
+      length.</dd>
+      <dt>Its one job</dt>
+      <dd>Answer &ldquo;was this arm's compile cache already there when the run
+      <em>started</em>?&rdquo; &mdash; which is a question about a moment, not
+      about a directory.</dd>
+      <dt>Why it exists</dt>
+      <dd>A directory check cannot tell &ldquo;found a pre-existing cache&rdquo;
+      apart from &ldquo;just created one by compiling.&rdquo; A cold compile
+      creates that directory as a side effect of <em>finishing</em>. So the
+      identical call, moved a few lines later to sit with the other
+      post-run bookkeeping, still returns a boolean &mdash; it just answers a
+      different question. It would report a warm cache for every genuinely cold
+      run, and the downstream arm-state gate would then discard roughly 200 of
+      the {{runs_total}} paid runs as inconsistent. In the other direction it
+      goes blind: an actual warm cache leaking onto a cold arm, the exact
+      contamination this check exists to catch, reads exactly the same as the
+      bug. This is what a correctness bug disguised as a simplification looks
+      like: nothing crashes, nothing looks wrong, and two thirds of a campaign
+      evaporates.</dd>
+      <dt>Hands off to</dt>
+      <dd>The record, and from there the offline gate that compares the observed
+      cache state against the arm the run was supposed to be.</dd>
+    </dl>
+    <details>
+      <summary>Show the code</summary>
+      <pre><code>{{excerpt:handler-snapshot-before}}</code></pre>
+    </details>
+  </div>
+
+  <div class="card" id="card-5">
+    <h3>Card 5 &mdash; when three clocks disagree</h3>
+    <p class="where">coldstart/checks.py</p>
+    <dl>
+      <dt>What it is</dt>
+      <dd>The rule that decides whether clock A and clock B can both be telling
+      the truth about the same run.</dd>
+      <dt>Its one job</dt>
+      <dd>Detect the impossible and name it, without repairing anything.</dd>
+      <dt>Why it exists</dt>
+      <dd>Clock A ran on a laptop; clock B ran in a datacentre in another
+      country. A contains B by construction, plus queueing, plus two network
+      crossings. Their difference is the only cross-clock subtraction this
+      codebase permits at all. If that difference comes out <em>negative</em>,
+      something is badly wrong and the run raises rather than being clamped to
+      zero. If it comes out positive but smaller than 50&nbsp;ms &mdash; less
+      than one honest round trip between those two machines &mdash; then the two
+      clocks are not disagreeing slightly, they are describing events that
+      cannot both have happened, and the run is discarded with a named reason
+      recorded beside it. A rule fixed in advance, applied by code, leaves an
+      audit trail; an eyeball applied to a scatter plot does not.</dd>
+      <dt>Hands off to</dt>
+      <dd>The caller, deliberately: this function decides nothing about storage,
+      so a discard is always something someone chose to record.</dd>
+    </dl>
+    <details>
+      <summary>Show the code</summary>
+      <pre><code>{{excerpt:checks-rtt-floor}}</code></pre>
+    </details>
+  </div>
+
+  <div class="card" id="card-6">
+    <h3>Card 6 &mdash; the endpoint that costs nothing</h3>
+    <p class="where">coldstart/stubs/stub_endpoint.py</p>
+    <dl>
+      <dt>What it is</dt>
+      <dd>A class with the same shape as the RunPod endpoint. No network, no
+      GPU, no account.</dd>
+      <dt>Its one job</dt>
+      <dd>Let the entire campaign &mdash; schedule, submit, handler, probe,
+      record, analysis &mdash; run end to end on a laptop, for free.</dd>
+      <dt>Why it exists</dt>
+      <dd>It replays a real captured engine log rather than inventing one, and
+      draws each run's weight-load time from a per-arm profile with a seeded
+      random number generator. That combination means the answer is known in
+      advance, so the analysis has a specific right answer to recover and the
+      tests can fail when it does not. Every stage downstream of it &mdash; the
+      log parsing, the gates, the derivation, the charts, this page &mdash; was
+      written and debugged against the stub before a single dollar was spent on
+      a GPU. That is not a testing nicety. It is the reason the paid campaign
+      was a measurement rather than a debugging session &mdash; arm A alone
+      burned {{gpu_hours_a_n99}} GPU-hours, and a rerun costs that again.</dd>
+      <dt>Hands off to</dt>
+      <dd>The test suite, which runs the whole pipeline against it on every
+      change.</dd>
+    </dl>
+    <details>
+      <summary>Show the code</summary>
+      <pre><code>{{excerpt:stub-endpoint}}</code></pre>
+    </details>
+  </div>
+</section>
 
 <script>
   // No scrollytelling library: this page is published as an Artifact, where a
