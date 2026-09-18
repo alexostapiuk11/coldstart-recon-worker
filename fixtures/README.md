@@ -5,7 +5,10 @@ region EU-RO-1, image digest
 `sha256:14b22033a8d65f230c3ca4df2b0e69500b57e3296dec3a7ca8b88548b628aa4f`,
 vLLM 0.27.1, model `Qwen/Qwen3-8B` revision
 `b968826d9c46dd6066d109eabc6255188de91218`, `--max-model-len 8192`,
-`gpu_memory_utilization` at the 0.9 default.
+`gpu_memory_utilization` at 0.92 -- the engine log reports `Desired GPU memory
+utilization is (0.92, 21.64 GiB)`, not the 0.9 this line claimed until
+2026-09-17. It is the parameter that sets the KV budget, so it should read
+correctly even though no published result depends on it.
 
 Published as fixtures, not as results. Sample size is 3, all three runs landed on
 one worker, and nothing here is a measurement of anything.
