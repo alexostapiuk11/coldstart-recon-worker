@@ -25,6 +25,7 @@ def _build_module():
 
 
 def _build(tmp_path):
+    tmp_path.mkdir(parents=True, exist_ok=True)
     out = tmp_path / "index.html"
     r = subprocess.run(
         [sys.executable, "scripts/build_explainer.py", "--out", str(out)],
@@ -212,3 +213,37 @@ def test_build_escapes_html_special_characters_in_a_code_excerpt(tmp_path):
     assert "&lt;" in html
     body = html[len("<pre><code>") : -len("</code></pre>")]
     assert "<" not in body, "an unescaped angle bracket would be parsed as a tag"
+
+
+def test_glossary_wraps_defined_terms_in_prose_only(tmp_path):
+    """Every defined term becomes clickable, revealing the page's own
+    definition -- so a reader who forgets one four thousand words later does not
+    have to go hunting, and what they are shown cannot disagree with the prose.
+    """
+    html = _build(tmp_path)
+    assert 'class="gloss"' in html
+    assert html.count('class="term"') >= 10
+
+
+def test_glossary_never_rewrites_code_charts_or_headings(tmp_path):
+    """Three regions the wrap must not touch, each for its own reason: code is
+    read verbatim, chart SVGs are markup rather than prose (and an early version
+    of the protection regex let <svg> close at the <style> matplotlib emits
+    inside it), and a heading would be split in half by the block the term
+    reveals.
+    """
+    import re
+
+    html = _build(tmp_path)
+    for pattern in (r"<pre\b.*?</pre\s*>", r"<svg\b.*?</svg\s*>", r"<h[1-4]\b.*?</h[1-4]\s*>"):
+        region = "".join(re.findall(pattern, html, re.DOTALL))
+        assert 'class="gloss"' not in region, f"glossary leaked into {pattern}"
+
+
+def test_the_build_is_byte_reproducible(tmp_path):
+    """The page argues that everything published re-derives from committed data.
+    A build that differs from itself run to run is a poor advertisement for
+    that, and matplotlib's random clip-path ids made it differ in thousands of
+    characters until they were renumbered by order of appearance.
+    """
+    assert _build(tmp_path / "a") == _build(tmp_path / "b")

@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from coldstart.analysis.metrics import derive, rows_for_arm
 from coldstart.explainer.excerpts import extract
-from coldstart.explainer.jargon import undefined_terms
+from coldstart.explainer.jargon import TERMS, undefined_terms
 from coldstart.explainer.numbers import resolve
 from coldstart.store import JsonlStore
 
@@ -69,6 +69,83 @@ def _namespace_ids(svg: str, prefix: str) -> str:
         return f"{opener}{mapping.get(raw, raw)}{closer}"
 
     return _ID_CONTEXT.sub(rewrite, svg)
+
+
+# Regions whose text is not prose and must never be rewritten: code the reader
+# is meant to read verbatim, the chart SVGs, the page's own script and style,
+# and every HTML tag. re.split keeps the separators, so the odd indices of the
+# result are exactly the protected spans.
+_PROTECTED = re.compile(
+    # A backreference, not an alternation of closing names. Written as
+    # `</(?:pre|code|svg|...)>` an <svg> could be closed by the first </style>
+    # inside it -- matplotlib emits one -- which ended the protected span early
+    # and let the rest of every chart be rewritten as if it were prose.
+    # Headings are protected alongside the verbatim regions, for a different
+    # reason: the revealed definition is block-level, so a term inside an <h1>
+    # splits the heading across the panel. A reader meets every term in prose
+    # anyway, which is where the affordance belongs.
+    r"<(pre|code|script|style|svg|h1|h2|h3|h4|title|summary)\b[^>]*>.*?</\1\s*>",
+    re.DOTALL | re.IGNORECASE,
+)
+_TAG = re.compile(r"<[^>]+>|<!--.*?-->", re.DOTALL)
+
+
+def _prose_spans(html: str):
+    """The (start, end) ranges of `html` that are prose a reader reads.
+
+    Everything else -- verbatim code, the chart SVGs, the page's own script and
+    style, every tag and comment -- is skipped. Yielded in order so a caller can
+    rebuild the document without reordering anything.
+    """
+    blocked = [m.span() for m in _PROTECTED.finditer(html)]
+    for m in _TAG.finditer(html):
+        if not any(s <= m.start() < e for s, e in blocked):
+            blocked.append(m.span())
+    blocked.sort()
+    cursor = 0
+    for start, end in blocked:
+        if start > cursor:
+            yield cursor, start
+        cursor = max(cursor, end)
+    if cursor < len(html):
+        yield cursor, len(html)
+
+
+def _glossary(html: str, terms: dict[str, str]) -> str:
+    """Make every defined term clickable, revealing its own definition inline.
+
+    The page defines each term once, in the paragraph that introduces it. Four
+    thousand words later a reader who has forgotten one has to go hunting. This
+    costs no tokens, asks no consent, and cannot contradict the page, because
+    the text it shows IS the page's own definition -- the same string the build
+    gate already requires to be present.
+
+    Verified before relying on it: no definition contains another term, and no
+    term is a substring of another, so wrapping cannot nest or corrupt a
+    definition's contiguous text.
+    """
+    if not terms:
+        return html
+    pattern = re.compile(
+        "|".join(re.escape(k) for k in sorted(terms, key=len, reverse=True))
+    )
+
+    def wrap(match: re.Match) -> str:
+        term = match.group(0)
+        return (
+            f'<span class="gloss"><button type="button" class="term" '
+            f'aria-expanded="false">{html_mod.escape(term)}</button>'
+            f'<span class="def" hidden>{html_mod.escape(terms[term])}</span></span>'
+        )
+
+    out = []
+    cursor = 0
+    for start, end in _prose_spans(html):
+        out.append(html[cursor:start])
+        out.append(pattern.sub(wrap, html[start:end]))
+        cursor = end
+    out.append(html[cursor:])
+    return "".join(out)
 
 
 def _fmt(value) -> str:
@@ -192,10 +269,15 @@ def main() -> int:
             raise SystemExit(1) from exc
 
     html = PLACEHOLDER.sub(substitute, page)
+    # Gate first, glossary second. The gate asserts each definition appears as
+    # contiguous text; wrapping inserts markup between a term and its
+    # definition, so running it the other way round would fail the check the
+    # glossary depends on being true.
     missing = undefined_terms(html)
     if missing:
         print(f"build_explainer: terms used without a definition: {missing}", file=sys.stderr)
         return 1
+    html = _glossary(html, TERMS)
     out.write_text(html)
     print(f"built {out} ({len(html):,} bytes)")
     return 0

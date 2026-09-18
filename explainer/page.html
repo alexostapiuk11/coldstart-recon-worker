@@ -71,6 +71,35 @@
     font-family: var(--font-ui);
   }
   h1, h2, h3 { text-wrap: balance; }
+  /* Glossary. The term reads as body text with a dotted underline -- an
+     invitation, not a link, since it goes nowhere. The revealed definition is
+     the page's own string, so it can never disagree with the prose around it. */
+  .gloss { position: relative; }
+  .term {
+    font: inherit; color: inherit; background: none; border: 0; padding: 0;
+    cursor: help; text-decoration: underline dotted; text-underline-offset: .18em;
+    text-decoration-thickness: 1px; text-decoration-color: var(--ink-soft);
+  }
+  .term:hover { text-decoration-color: var(--ink); }
+  .term:focus-visible { outline: 2px solid var(--clk-a); outline-offset: 2px; border-radius: 2px; }
+  /* Floated, not in flow. A block-level panel inside a paragraph splits the
+     sentence around it -- the reader loses their place in the very sentence
+     that prompted the question. Anchored to the term instead, so the prose
+     never moves. */
+  .def {
+    position: absolute; left: 0; top: calc(100% + .4rem); z-index: 20;
+    width: max-content; max-width: min(28rem, 76vw);
+    padding: .55rem .7rem;
+    border: 1px solid var(--rule); border-left: 3px solid var(--clk-a);
+    background: var(--page); box-shadow: 0 6px 20px rgb(0 0 0 / .18);
+    font-family: var(--font-ui); font-size: .86rem; line-height: 1.45;
+    color: var(--ink); border-radius: 0 6px 6px 0; white-space: normal;
+  }
+  .def[hidden] { display: none; }
+  @media (prefers-reduced-motion: no-preference) {
+    .def { animation: gloss-in .18s ease-out; }
+    @keyframes gloss-in { from { opacity: 0; transform: translateY(-2px); } }
+  }
   body {
     margin: 0 auto;
     padding: 2rem 1.25rem 6rem;
@@ -1024,5 +1053,31 @@ seconds, against {{median_t_total_A}} with nothing cached.</p>
       }
     }, { rootMargin: "-45% 0px -45% 0px" });
     document.querySelectorAll("[data-lights]").forEach(function (b) { io.observe(b); });
+  })();
+</script>
+<script>
+  // Glossary: one open at a time, Escape closes, click outside closes. The
+  // definition text is already in the DOM, so this only toggles visibility --
+  // nothing is fetched and nothing is generated.
+  (function () {
+    const terms = document.querySelectorAll(".term");
+    function closeAll(except) {
+      for (const b of terms) {
+        if (b === except) continue;
+        b.setAttribute("aria-expanded", "false");
+        b.nextElementSibling.hidden = true;
+      }
+    }
+    for (const b of terms) {
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const open = b.getAttribute("aria-expanded") === "true";
+        closeAll(b);
+        b.setAttribute("aria-expanded", String(!open));
+        b.nextElementSibling.hidden = open;
+      });
+    }
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAll(null); });
+    document.addEventListener("click", () => closeAll(null));
   })();
 </script>
