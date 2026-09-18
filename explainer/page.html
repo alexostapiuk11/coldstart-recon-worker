@@ -114,6 +114,46 @@
   .card details { margin-top: 1.1rem; }
   .card summary { cursor: pointer; color: var(--ink-soft); font-size: .9rem; }
   .card pre { margin: .75rem 0 0; font-size: .8rem; line-height: 1.45; }
+
+  /* --- part II -------------------------------------------------------- */
+  .zone h4 { font-size: .95rem; margin: 1.7rem 0 .4rem; }
+  .part-rule {
+    border: 0; border-top: 2px solid var(--ink);
+    margin: 5rem 0 0; max-width: 46rem;
+  }
+  .act-q {
+    border-left: 3px solid var(--clk-a);
+    padding: .15rem 0 .15rem .9rem;
+    margin: 1.6rem 0 1.9rem;
+  }
+  .act-q p { margin: 0; }
+  /* The one element on this page designed to be screenshotted and to travel
+     without the rest of it. Hence the self-contained heading, the explicit
+     background -- a transparent card picks up whatever is behind it, which
+     for a screenshot is nothing -- and a width that stays legible when it is
+     pasted into a chat window at half size. */
+  .ask {
+    border: 2px solid var(--ink);
+    border-radius: 14px;
+    background: var(--page);
+    padding: 1.7rem 1.8rem 1.5rem;
+    margin: 3rem 0 2.5rem;
+    max-width: 40rem;
+  }
+  .ask h3 { margin: 0 0 1.2rem; font-size: 1.15rem; }
+  .ask ol { margin: 0; padding-left: 1.4rem; }
+  .ask li { margin-bottom: 1.05rem; }
+  .ask li:last-child { margin-bottom: 0; }
+  .ask li strong { display: block; font-size: 1.02rem; line-height: 1.35; }
+  .ask li span {
+    display: block; color: var(--ink-soft);
+    font-size: .88rem; margin-top: .2rem;
+  }
+  .ask .ask-foot {
+    margin: 1.3rem 0 0; padding-top: .9rem;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-soft); font-size: .82rem;
+  }
 </style>
 
 <h1>Where a cold start goes</h1>
@@ -563,6 +603,345 @@ seconds, against {{median_t_total_A}} with nothing cached.</p>
       <pre><code>{{excerpt:stub-endpoint}}</code></pre>
     </details>
   </div>
+</section>
+
+<hr class="part-rule">
+
+<section class="zone" id="method">
+  <h2>Part II &mdash; how to read a number somebody hands you</h2>
+
+  <p>Part one of this page was one experiment, walked end to end, and it is the
+  less useful half. The useful half is a habit you can carry to the next
+  benchmark you are shown: the vendor chart, the framework's README, the
+  internal dashboard announcing that the regression is fixed.</p>
+
+  <p>Four questions. Each one has a story here, and each story is a place this
+  experiment either held up or got caught.</p>
+
+  <h3>Act 1 &mdash; &ldquo;81 seconds&rdquo; is not a finding</h3>
+
+  <p>Arm A's median cold start is {{median_t_total_A}} seconds. Written on a
+  slide by itself, that is not a measurement. It is a measurement with the
+  measurement removed. It does not say how many runs went into it, and it does
+  not say what they looked like.</p>
+
+  <p>So look at them. Below is an ECDF &mdash; a chart showing what share of
+  runs finished by each time. Pick a height on the left, slide right until you
+  hit a line, read the seconds off the bottom.</p>
+
+  <figure>
+    {{chart:ecdf}}
+    <figcaption>Every run, in order, one step per run. A flat stretch is a
+    range of times that nothing took.</figcaption>
+  </figure>
+
+  <p>Arm A's line does not climb. It steps, goes flat for four and a half
+  seconds with nothing whatsoever in it, and steps again. About half the runs
+  finish just past eighty seconds; most of the rest arrive in a second bunch
+  near eighty-six; a thin tail runs out to the 95th percentile &mdash; the
+  value below which a given share of measurements fall &mdash; at
+  {{p95_t_total_A}} seconds.</p>
+
+  <p>There is no such thing as arm A's cold start time. There are two of them,
+  and a tail. Any single number pulled out of that &mdash; median, mean,
+  best-of-five &mdash; names one behaviour and buries the other. The mean, in
+  particular, lands in the four-and-a-half-second gap: a time that not one of
+  the ninety-nine runs took.</p>
+
+  <div class="act-q">
+    <p><strong>Question one: how many runs, and what was the spread?</strong>
+    A claim with no n behind it is a claim somebody ran once. A claim with an n
+    but no shape behind it can still be two different behaviours wearing a
+    single number as a hat.</p>
+  </div>
+
+  <h3>The interlude &mdash; what an interval is, and what it is not</h3>
+
+  <p>Question one has a second half that almost everyone, including the author
+  of this page, gets wrong on the first three attempts. It is worth the
+  detour, because the wrong version is confident, sounds right, and survives
+  being told the correct definition.</p>
+
+  <h4>Pin the sample first</h4>
+
+  <p>Arm A alone, and ninety-nine of its hundred runs. The hundredth is the
+  first-touch run at {{first_touch_seconds}} seconds, held out by the rule from
+  beat 12. That is worth noticing on its own: the gate is not decoration, it is
+  the reason the other ninety-nine are a single population and not ninety-nine
+  runs plus a category error.</p>
+
+  <h4>Refute the wrong reading with its own data</h4>
+
+  <p>Over those ninety-nine runs, the interval on arm A's median is
+  {{arm_a_ci_n99}} seconds. Almost every reader takes that bracket to mean
+  <em>this is where most of the runs landed</em> &mdash; a bell-ish pile of
+  measurements, the bulk of them inside the brackets.</p>
+
+  <p>It cannot mean that. Look back at the chart. The bracket spans 82 to 85
+  seconds, and <strong>not one of the ninety-nine runs is in there.</strong> It
+  also stops short of the nine runs bunched at {{p95_t_total_A}} seconds, which
+  are as real as any others. A range that covers a stretch holding nothing, and
+  excludes a stretch holding nine measurements, is not a description of where
+  the measurements are. Whatever it describes, it is not that.</p>
+
+  <h4>Shrink it until the machinery is visible</h4>
+
+  <p>Ninety-nine numbers is too many to watch. Suppose the whole experiment had
+  been five runs: 80, 80, 81, 85, 86. The median is 81.</p>
+
+  <p>Write those five on slips of paper and drop them in a bag. Pull one out,
+  write it down, <em>put it back</em>, pull again &mdash; five pulls, because
+  the campaign had five runs. You might get 80, 85, 80, 80, 86, whose median is
+  80. Do it again: 86, 81, 85, 85, 80, median 85. Again: 80, 80, 80, 81, 85,
+  median 80.</p>
+
+  <p>None of those is invented data. Each one is an imaginary campaign built
+  only out of numbers this experiment actually produced &mdash; a plausible
+  alternative afternoon. And each one hands back a single median. Run ten
+  thousand imaginary campaigns, collect the ten thousand medians, sort them,
+  and cut off the extreme 2.5% at each end. What is left is the bracket.</p>
+
+  <figure>
+    {{chart:resample}}
+    <figcaption>The real runs are the tick marks along the top row. The dots
+    below are ten imaginary campaigns, each contributing one median. The
+    bracket at the bottom spans the middle 95% of ten thousand of those
+    medians. Note which row the bracket belongs to &mdash; it is built from the
+    dots, and it was never a statement about the ticks.</figcaption>
+  </figure>
+
+  <p>That is a bootstrap interval &mdash; a range showing how much a summary
+  number could move if the measurements had come out slightly differently. It
+  is an answer to &ldquo;how firmly is the median pinned,&rdquo; and it answers
+  nothing at all about where individual runs land. The chart above already
+  answered that.</p>
+
+  <h4>The word that does the damage</h4>
+
+  <p>People describe this as shuffling the data, and that word is a large part
+  of why the wrong reading is so hard to dislodge. Shuffling is reordering.
+  Reordering cannot move a median by a picosecond &mdash; put ninety-nine
+  numbers in any order you like, sort them, and the middle one is the same
+  number every time. If shuffling were what happened, every imaginary campaign
+  would return an identical median and the bracket would have zero width.</p>
+
+  <p>The operation is drawing with replacement &mdash; picking a value, writing
+  it down, putting it back, and picking again. The putting-back is the entire
+  mechanism. It is what allows one run to turn up three times in an imaginary
+  campaign while another turns up not at all, and that lopsidedness is the only
+  reason two imaginary campaigns ever disagree.</p>
+
+  <h4>Break the wrong model on purpose</h4>
+
+  <p>If you still half-suspect the interval is measuring the gap between arm
+  A's two clusters, that is a reasonable suspicion and arm A cannot talk you
+  out of it. Its interval runs from about 81 to about 86, which is
+  <em>precisely</em> where its two clusters sit. The two readings make the same
+  prediction on this data. So change one thing, and only one.</p>
+
+  <p>Take ninety-nine imaginary runs with only two distinct values in them: 81
+  seconds and 86 seconds, nothing between. Split them 51 to 48, and the
+  interval comes back [81.00, 86.00]. Five seconds wide. That certainly looks
+  like the gap.</p>
+
+  <p>Now split the same two values 70 to 29. Same two clusters, same five
+  seconds between them, same spread in the measurements. The interval is
+  [81.00, 81.00]. <strong>Zero seconds wide.</strong></p>
+
+  <p>The gap never moved, so the gap was never what was being measured. What
+  moved is how easily a re-draw can shove the middle value across to the other
+  cluster. At 51 to 48 the median is balanced on a knife edge and one unlucky
+  bag tips it; at 70 to 29 it is not close, and all ten thousand imaginary
+  campaigns come back 81. A zero-width interval does not mean the runs were
+  identical. It means the median was never in doubt.</p>
+
+  <h4>What the interval cost, and what it did not</h4>
+
+  <p>Two very different kinds of expense go into that bracket, and keeping them
+  apart is the last piece.</p>
+
+  <p>The ninety-nine runs cost {{gpu_hours_a_n99}} GPU-hours on a rented card,
+  paid for in real money, and they alone set the width. The ten thousand
+  resamples cost nothing: a fraction of a second on a laptop, no network, no
+  GPU, and past a few thousand of them the answer stops moving in any digit
+  anybody publishes.</p>
+
+  <p>So the resampling adds no information. It reads back what the ninety-nine
+  runs already implied, to more decimal places than the ninety-nine runs
+  deserve. If a bracket is too wide to support the claim you want to make,
+  there is exactly one lever, and it is the expensive one.</p>
+
+  <h3>Act 2 &mdash; decided before, or decided after?</h3>
+
+  <p>Return to the first-touch run: {{first_touch_seconds}} seconds, twenty-odd
+  times its own arm's median, one observation out of {{runs_total}}. Excluding
+  it is obviously the right call. It is also, from the outside, completely
+  indistinguishable from the most common way a benchmark lies &mdash; run it,
+  dislike a number, find a reason the number does not count.</p>
+
+  <p>The defence is pre-registration &mdash; writing down what counts as a
+  result before looking at the data. This experiment has one, committed four
+  days ahead of the first run: every hypothesis, both contrasts, the exclusion
+  rules, the stopping rule, and the rule for picking which finding leads.</p>
+
+  <p>The rule that excludes that run was not in it.</p>
+
+  <p>It was committed roughly half an hour after the first window's data
+  landed, because that window contained a run large enough to make the pooled
+  chart unreadable. The artifact says so in its own write-up, in as many words:
+  that is a post-hoc analysis decision, and calling it anything else would be
+  the exact failure the whole thing was built to avoid.</p>
+
+  <p>Two things keep it from being a fudge, and both are worth stealing. First,
+  the criterion is mechanical rather than a judgement about that particular
+  run: a run is first-touch when it is the first ever seen on its host id,
+  derived from the file and applied backwards across all {{runs_total}} rows.
+  It excludes nothing for being large. Had the slowest run of the campaign been
+  a repeat-host run, it would still be in the chart. Second, the amendment is
+  dated in git, so the ordering is checkable rather than asserted.</p>
+
+  <div class="act-q">
+    <p><strong>Question two: was that decided before you looked?</strong>
+    Hardly any benchmark you are shown can answer it. One that can &mdash; and
+    that names the place where it failed to &mdash; is telling you something
+    the spotless ones structurally cannot.</p>
+  </div>
+
+  <h3>Act 3 &mdash; compared to what?</h3>
+
+  <p>{{median_t_total_C}} seconds is not fast. It is not slow either. It is not
+  anything, because fast is a comparison, and a comparison is only worth
+  reading when the two sides differ in exactly one way. That is what card 2 is
+  for: same image, same entrypoint, same engine flags, same model revision, one
+  swapped configuration object. Everything else is held down so that the
+  difference has only one place to come from.</p>
+
+  <figure>
+    {{chart:waterfall}}
+    <figcaption>Where the time goes in each arm, drawn as medians of the same
+    measured stages.</figcaption>
+  </figure>
+
+  <p>Two comparisons come out of that, and each is a contrast &mdash; the
+  difference between two arms, measured on the same quantity. A to B, which
+  adds weights already staged on the volume, is {{contrast_ab_total}} seconds
+  on total time. B to C, which adds the compile cache on top, is
+  {{contrast_bc_total}}.</p>
+
+  <p>Now the question that separates the people who compute from the people who
+  eyeball: <em>is the compile cache worth more than the staged weights?</em>
+  That is a difference between two differences, and the temptation is obvious.
+  The brackets are printed right there. Subtract the ends and be done.</p>
+
+  <p>On this data, that works. The honest figure, resampled across both
+  contrasts on the same runs at once, is {{difference_of_contrasts}} seconds
+  &mdash; and naive end-to-end subtraction lands within 0.04&nbsp;s of both
+  ends of it. The shortcut is right here. An explainer that showed you this
+  data while claiming the shortcut had failed would be lying to make a
+  point.</p>
+
+  <figure>
+    {{chart:shortcut}}
+    <figcaption>Top: this campaign, where naive subtraction and the computed
+    difference are indistinguishable at the resolution anyone reads. Bottom:
+    two contrasts that share a source of error, where the same arithmetic comes
+    out several times too wide.</figcaption>
+  </figure>
+
+  <p>The lower panel is what happens when the two estimates share a source of
+  error &mdash; the same host, the same window, the same noisy neighbour
+  pushing both measurements the same direction. That shared push cancels when
+  the difference is computed run by run on paired data, and does not cancel
+  when you subtract two summaries. The naive bracket comes out several times
+  too wide, which is not a harmless conservatism: it straddles zero and hides
+  an effect that is really there.</p>
+
+  <p>So the lesson is not &ldquo;never subtract endpoints.&rdquo; It is
+  narrower and much more useful: <strong>nothing visible in the two intervals
+  tells you which of those two panels you are in.</strong> The brackets look
+  the same in both. The correlation is not recoverable from the summaries, only
+  from the paired runs underneath them &mdash; which is why the difference is
+  computed rather than derived, and why an experiment that only publishes
+  summary intervals has quietly made this uncheckable.</p>
+
+  <div class="act-q">
+    <p><strong>Question three: compared to what, and where is the
+    interval?</strong> A speedup with no baseline is a press release. A
+    difference of two differences quoted without its own interval is arithmetic
+    somebody did in their head.</p>
+  </div>
+
+  <h3>Act 4 &mdash; what could this <em>not</em> tell you?</h3>
+
+  <p>Five hypotheses were registered before the campaign began. One of them was
+  about host placement: whether the machine you happen to land on drives the
+  tail harder than any cache does. It is a good hypothesis, and probably the
+  most commercially interesting of the five. This experiment cannot answer
+  it.</p>
+
+  <p>All {{runs_total}} runs landed on the same machine. {{hosts_observed}}
+  host, three hundred runs. RunPod kept re-allocating the box that already had
+  the image, and no endpoint setting changes that for a driver submitting one
+  job at a time.</p>
+
+  <figure>
+    {{chart:per_host}}
+    <figcaption>The figure the campaign owed, drawn from the data it actually
+    got.</figcaption>
+  </figure>
+
+  <p>Read what that chart does rather than what it shows. It could have been a
+  single bar drawn to scale, captioned &ldquo;median by host&rdquo; &mdash;
+  technically true, and it would have started travelling as evidence about host
+  variation the moment somebody screenshotted it away from its caption.
+  Instead it writes NOT ANSWERABLE across its own title, because a figure has
+  to survive being separated from the page it was born on.</p>
+
+  <p>There is a consolation, and it is stated as one rather than as a save:
+  because every triple ran on one host, host effects are held constant instead
+  of confounded, so the paired comparison in act 3 is cleanly supplied. The
+  design lost a hypothesis and got back a control it had not asked for. That
+  trade is still a loss, and the write-up reports it under a heading that says
+  so.</p>
+
+  <div class="act-q">
+    <p><strong>Question four: what did this fail to show?</strong> Almost
+    nothing you are handed answers it. Work that names its own dead hypothesis
+    is telling you the author went looking for the places it breaks &mdash;
+    which is the only evidence you will ever get that the numbers that
+    <em>did</em> survive were treated the same way.</p>
+  </div>
+
+  <h3>The card</h3>
+
+  <p>Four questions. They cost about ten seconds to ask, they work on a vendor
+  chart and on your own pull request, and the ones that go unanswered tell you
+  more than the ones that do.</p>
+
+  <div class="ask">
+    <h3>Four questions for any performance claim</h3>
+    <ol>
+      <li><strong>How many runs, and what was the spread?</strong>
+      <span>One run is an anecdote. A single number over a two-humped
+      distribution is a time that nothing actually took.</span></li>
+      <li><strong>Was that decided before you looked?</strong>
+      <span>Exclusions, metric, and headline all have to predate the data
+      &mdash; otherwise the data picked them.</span></li>
+      <li><strong>Compared to what, and where is the interval?</strong>
+      <span>Fast is a comparison against something that differed in one way.
+      A difference of two differences is computed, never eyeballed.</span></li>
+      <li><strong>What did this fail to show?</strong>
+      <span>A dead hypothesis, named out loud, is the rarest signal there
+      is.</span></li>
+    </ol>
+    <p class="ask-foot">An interval says how firmly the summary is pinned, not
+    where the runs landed. Those are different charts.</p>
+  </div>
+
+  <p>The experiment above is worth about what any single campaign is worth: one
+  provider, one GPU, one model, one region, one host. The seconds do not
+  transfer anywhere. The four questions do, and they are cheaper than renting
+  anything.</p>
 </section>
 
 <script>

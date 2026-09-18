@@ -115,6 +115,28 @@ class _Charts:
                 if r["t_total"] < FIRST_TOUCH_THRESHOLD_S
             ]
             figures.resample_frames(vals, out)
+        elif name == "per_host":
+            # Every row, not the gated 99: the whole point of the figure is
+            # that all 300 paid runs landed on one host, and filtering first
+            # would make the count drawn on the chart disagree with the
+            # sentence standing next to it.
+            figures.per_host_medians(rows, out)
+        elif name == "shortcut":
+            # shortcut_panels takes three already-computed intervals rather
+            # than rows -- its lower panel is a constructed counter-example,
+            # not anything this campaign measured. The upper panel's endpoints
+            # come back through resolve() so the numbers drawn here are the
+            # same objects the prose cites, instead of a second derivation
+            # free to drift from it.
+            intervals = {}
+            for short, key in (
+                ("ab", "contrast_ab_total"),
+                ("bc", "contrast_bc_total"),
+                ("diff", "difference_of_contrasts"),
+            ):
+                ci = resolve(key, repo=self.repo)
+                intervals[short] = (ci["lo"], ci["hi"])
+            figures.shortcut_panels(intervals, out)
         else:
             raise LookupError(f"unknown chart {name!r}")
         svg = out.read_text()
