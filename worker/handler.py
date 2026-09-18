@@ -171,6 +171,7 @@ def handler(job):
     _purge_cold_roots()
     _prepare_cache_dirs(env_overrides)
 
+    # explainer:handler-snapshot-before
     # Snapshot the cache state BEFORE run_probe(), not after. The gate this
     # feeds (metrics.derive()'s arm-state check, Task 4b) asks "was this
     # arm's cache warm when the run STARTED" -- but a COLD compile creates
@@ -193,6 +194,7 @@ def handler(job):
     # still reports *a* boolean) while quietly discarding ~2/3 of a paid
     # campaign. Do not move it.
     compile_cache_observed = _compile_cache_present(env_overrides)
+    # explainer:end
 
     model = os.environ["MODEL_ID"]
     try:

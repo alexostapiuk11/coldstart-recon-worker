@@ -1,5 +1,6 @@
-"""The four public-post figures: waterfall decomposition, warmup curve, ECDF,
-and per-host medians.
+"""The figures: four for the published post — waterfall decomposition, warmup
+curve, ECDF, per-host medians — and three for the explainer that teaches it:
+the KV dividend, the resample frames, and the shortcut panels.
 
 These charts are the artifact for most readers — more people will look at
 the waterfall than will read the method section — so every aggregate drawn
@@ -57,6 +58,7 @@ does not couple this module to ``derive()``'s output shape the way the
 (deliberately *not* imported) ``S4_SUBPHASE_KEYS`` would.
 """
 
+import random
 from pathlib import Path
 
 import matplotlib
@@ -66,7 +68,7 @@ import matplotlib.pyplot as plt
 
 from coldstart.analysis.metrics import FAST_TOLERANCE, steady_state_latency, time_to_fast_index
 from coldstart.analysis.pipeline import NotPublishableError
-from coldstart.analysis.stats import ecdf, median
+from coldstart.analysis.stats import bootstrap_median_ci, ecdf, median
 
 ARMS = ["A", "B", "C"]
 ARM_LABEL = {"A": "A — nothing cached", "B": "B — weights cached", "C": "C — weights + compile"}
@@ -567,6 +569,66 @@ def ecdf_plot(rows, out_path) -> Path:
     return Path(out_path)
 
 
+def kv_dividend(rows, out_path) -> Path:
+    """Arm C's larger KV cache, stated in both directions and in requests.
+
+    Both percentages appear because the direction is genuinely easy to invert:
+    43040/35792 is +20.3% (warm vs cold) while 35792/43040 is -16.8% (cold vs
+    warm). A chart carrying one of them alone invites the other to be quoted.
+    """
+    rows = _validate_rows(rows)
+    fig_w = 8.0
+    fig, ax = plt.subplots(figsize=(fig_w, 4.3))
+    by = _by_arm(rows)
+    caps = {a: median([_required_field(r, "kv_capacity_tokens") for r in by[a]]) for a in ARMS}
+    cold, warm = caps["A"], caps["C"]
+
+    ax.barh([0, 1], [cold, warm], height=0.45, color=["#9e9e9e", "#4a8c5f"])
+    ax.set_yticks(
+        [0, 1],
+        ["cold compile\n(arms A, B)", "warm compile\n(arm C)"],
+        fontsize=phone_pt(7.8, fig_w),
+    )
+    ax.set_xlabel("KV cache capacity (tokens)", fontsize=phone_pt(8.2, fig_w))
+    ax.tick_params(axis="x", labelsize=phone_pt(7.6, fig_w))
+    for y, v in ((0, cold), (1, warm)):
+        ax.text(
+            v * 0.98,
+            y,
+            f"{int(v):,}",
+            ha="right",
+            va="center",
+            color="white",
+            fontweight="bold",
+            fontsize=phone_pt(7.8, fig_w),
+        )
+    ax.set_title(
+        f"A warm compile cache leaves {warm / cold - 1:+.1%} more KV cache\n"
+        f"({int(warm // 8192)} concurrent requests vs {int(cold // 8192)} at 8192 context)",
+        fontsize=phone_pt(8.6, fig_w),
+    )
+    # Anchored to the *figure*, not the axes: an ax.transAxes offset is a
+    # fraction of the axes' own height, which tight_layout resizes to fit
+    # everything inside `rect` -- so a fixed transAxes offset lands in a
+    # different place depending on how much room the title/xlabel end up
+    # needing, and it collided with the xlabel here. transFigure coordinates
+    # are stable regardless of how tight_layout resizes the axes above them.
+    ax.text(
+        0.5,
+        0.025,
+        f"Equivalently: a cold compile sizes the cache {abs(cold / warm - 1):.1%} smaller —\n"
+        "permanently, for the life of that replica.",
+        transform=fig.transFigure,
+        ha="center",
+        fontsize=phone_pt(7.6, fig_w),
+        style="italic",
+    )
+    fig.tight_layout(rect=(0.0, 0.17, 1.0, 1.0))
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    return Path(out_path)
+
+
 def per_host_medians(rows, out_path) -> Path:
     rows = _validate_rows(rows)
     hosts = sorted({r["host_id"] for r in rows})
@@ -608,3 +670,205 @@ def per_host_medians(rows, out_path) -> Path:
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
     return Path(out_path)
+
+
+def resample_frames(values, out_path, frames: int = 10, seed: int = 0) -> Path:
+    """`frames` imaginary campaigns, each contributing one median.
+
+    Deliberately shows medians on a number line rather than a histogram of runs:
+    the misconception this chart exists to break is that an interval describes
+    where the runs landed, and a chart of runs would confirm it. `values` is a
+    plain list of measurements, not rows -- this one is about the numbers, not
+    about which arm or host they came from.
+    """
+    xs = sorted(float(v) for v in values)
+    if not xs:
+        raise ValueError("resample_frames needs at least one value")
+    rng = random.Random(seed)
+    n = len(xs)
+    meds = [median([xs[rng.randrange(n)] for _ in range(n)]) for _ in range(frames)]
+    ci = bootstrap_median_ci(xs, seed=seed)
+
+    # Four vertical bands, top to bottom, each with its own label directly
+    # above it so the eye never has to hop between a legend and the data:
+    # real-run ticks, imaginary-campaign medians, the caption (two lines,
+    # because the full sentence plus both numbers overflows one line at any
+    # phone-legible font size -- an earlier version let it run past the right
+    # edge of the canvas instead of wrapping), then the interval bracket
+    # sitting right above the x-axis. Fixed y-slots rather than fractions of
+    # `frames` keep the bands from colliding regardless of how many frames
+    # are requested.
+    y_ticks_label, y_ticks = 1.24, 1.14
+    y_dots_label = 0.92
+    dots_top, dots_bottom = 0.82, 0.40
+    y_caption1, y_caption2 = 0.26, 0.15
+    y_bracket = 0.03
+
+    fig_w = 8.0
+    fig, ax = plt.subplots(figsize=(fig_w, 5.2))
+    ax.scatter(xs, [y_ticks] * n, marker="|", s=260, color="#2f6fb5", alpha=0.35)
+    ax.text(
+        0.01,
+        y_ticks_label,
+        f"the {n} real runs",
+        transform=ax.get_yaxis_transform(),
+        fontsize=phone_pt(7.6, fig_w),
+        color="#2f6fb5",
+    )
+    dot_step = (dots_top - dots_bottom) / max(frames - 1, 1)
+    for i, m in enumerate(meds):
+        ax.scatter([m], [dots_top - i * dot_step], marker="o", s=40, color="#c0392b", zorder=5)
+    ax.text(
+        0.01,
+        y_dots_label,
+        f"one median from each of {frames} imaginary campaigns",
+        transform=ax.get_yaxis_transform(),
+        fontsize=phone_pt(7.6, fig_w),
+        color="#c0392b",
+    )
+    ax.text(
+        0.01,
+        y_caption1,
+        "the interval: middle 95% of 10,000 such medians",
+        transform=ax.get_yaxis_transform(),
+        fontsize=phone_pt(7.8, fig_w),
+        fontweight="bold",
+    )
+    ax.text(
+        0.01,
+        y_caption2,
+        f"(only {frames} shown above, to stay readable) [{ci['lo']:.2f}, {ci['hi']:.2f}]",
+        transform=ax.get_yaxis_transform(),
+        fontsize=phone_pt(7.8, fig_w),
+        fontweight="bold",
+    )
+    ax.plot([ci["lo"], ci["hi"]], [y_bracket, y_bracket], color="black", linewidth=2.6, zorder=6)
+    for x in (ci["lo"], ci["hi"]):
+        ax.plot(
+            [x, x],
+            [y_bracket - 0.035, y_bracket + 0.035],
+            color="black",
+            linewidth=2.6,
+            zorder=6,
+        )
+    ax.set_ylim(-0.08, 1.38)
+    ax.set_yticks([])
+    ax.set_xlabel("seconds", fontsize=phone_pt(8.2, fig_w))
+    ax.tick_params(axis="x", labelsize=phone_pt(7.6, fig_w))
+    ax.set_title("The interval ranges over medians, never over runs", fontsize=phone_pt(9.4, fig_w))
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    return Path(out_path)
+
+
+def _draw_interval(ax, y, lo, hi, color, label, fig_w):
+    ax.plot([lo, hi], [y, y], color=color, linewidth=2.6)
+    for x in (lo, hi):
+        ax.plot([x, x], [y - 0.09, y + 0.09], color=color, linewidth=2.6)
+    ax.text(
+        hi,
+        y + 0.16,
+        f"{label}  [{lo:.2f}, {hi:.2f}]",
+        color=color,
+        fontsize=phone_pt(7.4, fig_w),
+        ha="right",
+    )
+
+
+def shortcut_panels(intervals, out_path) -> Path:
+    """Two panels: the shortcut landing, then the same shortcut failing.
+
+    An earlier design called this the "overlap trap" and claimed a reader
+    could not get the difference by eyeballing the two contrasts. On this
+    campaign that is false -- the intervals do not overlap at all and naive
+    endpoint subtraction lands within 0.04s -- so the chart would have taught
+    the shortcut it meant to forbid. The honest lesson needs both panels: the
+    shortcut works here, fails on correlated estimates, and nothing visible
+    in the two intervals says which case you are in.
+    """
+    ab, bc, diff = intervals["ab"], intervals["bc"], intervals["diff"]
+    corr = shortcut_panels.correlated_example()
+    fig_w = 8.0
+    fig, axes = plt.subplots(2, 1, figsize=(fig_w, 7.4))
+
+    for ax, data, title, verdict in (
+        (
+            axes[0],
+            {"ab": ab, "bc": bc, "diff": diff},
+            "This campaign — the shortcut worked",
+            "the shortcut worked here: naive subtraction lands within 0.04 s",
+        ),
+        (
+            axes[1],
+            corr,
+            "Correlated estimates — same arithmetic, wrong",
+            "naive subtraction is several times too wide",
+        ),
+    ):
+        d = data
+        naive_lo, naive_hi = d["ab"][0] - d["bc"][1], d["ab"][1] - d["bc"][0]
+        _draw_interval(ax, 3.0, d["ab"][0], d["ab"][1], "#2f6fb5", "first contrast", fig_w)
+        _draw_interval(ax, 2.2, d["bc"][0], d["bc"][1], "#e0a43a", "second contrast", fig_w)
+        _draw_interval(ax, 1.4, d["diff"][0], d["diff"][1], "#4a8c5f", "true difference", fig_w)
+        _draw_interval(ax, 0.6, naive_lo, naive_hi, "#c0392b", "naive subtraction", fig_w)
+        span = max(d["ab"][1], d["bc"][1], naive_hi) - min(d["ab"][0], d["bc"][0], naive_lo)
+        pad = span * 0.08 if span else 1.0
+        ax.set_xlim(
+            min(d["ab"][0], d["bc"][0], naive_lo) - pad,
+            max(d["ab"][1], d["bc"][1], naive_hi) + pad,
+        )
+        ax.set_ylim(0.15, 3.55)
+        ax.set_yticks([])
+        ax.tick_params(axis="x", labelsize=phone_pt(7.6, fig_w))
+        ax.set_title(title, fontsize=phone_pt(8.8, fig_w))
+        ax.text(
+            0.5,
+            0.03,
+            verdict,
+            transform=ax.transAxes,
+            ha="center",
+            fontsize=phone_pt(7.6, fig_w),
+            style="italic",
+        )
+
+    # Two lines, not one: the full sentence at any phone-legible font size
+    # runs past the right edge of an 8-inch-wide canvas (as it did in an
+    # earlier version of this figure), so it is wrapped manually rather
+    # than left to overflow.
+    fig.text(
+        0.5,
+        0.045,
+        "Nothing visible in the two contrasts tells you which case you are in.",
+        ha="center",
+        fontsize=phone_pt(7.6, fig_w),
+        fontweight="bold",
+    )
+    fig.text(
+        0.5,
+        0.012,
+        "That is why the difference is computed, not derived.",
+        ha="center",
+        fontsize=phone_pt(7.6, fig_w),
+        fontweight="bold",
+    )
+    fig.tight_layout(rect=(0.0, 0.09, 1.0, 1.0))
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    return Path(out_path)
+
+
+def _correlated_example() -> dict:
+    """Two contrasts sharing a host effect, so the difference is far better
+    pinned than either part and naive subtraction is grossly too wide. Built
+    from the campaign's own paired design, which exists for this exact
+    reason.
+    """
+    return {
+        "ab": (2.0, 28.0),
+        "bc": (6.0, 32.0),
+        "diff": (-5.2, -2.8),
+    }
+
+
+shortcut_panels.correlated_example = _correlated_example

@@ -28,7 +28,10 @@ from coldstart.analysis.figures import (
     PHONE_WIDTH_PX,
     RESIDUAL_COLOR,
     ecdf_plot,
+    kv_dividend,
     per_host_medians,
+    resample_frames,
+    shortcut_panels,
     warmup_curve,
     waterfall,
 )
@@ -56,6 +59,11 @@ _WARMUP_SPIKE = {"A": 3.5, "B": 2.5, "C": 1.6}
 # so ecdf_plot's three per-arm distributions stay visually separated
 # instead of bleeding into each other.
 _HOST_OFFSET = {"h0": -10.0, "h1": -5.0, "h2": 0.0, "h3": 5.0, "h4": 10.0}
+
+# Real campaign figures (spec: KV dividend finding) -- arm C's warm compile
+# cache leaves more GPU memory free when vLLM sizes the KV cache from a real
+# forward pass, so arms A and B (cold compile) share the smaller capacity.
+_KV_CAPACITY_TOKENS = {"A": 35792, "B": 35792, "C": 43040}
 
 # Per-arm chronological stage breakdown, replacing the old {"S4c","S4e"}-only
 # fixture now that waterfall() draws every named stage (B2 fix) instead of
@@ -130,6 +138,7 @@ def rows(n=30):
                 {"req_index": k, "end_to_end": steady + spike * 0.55**k + row_jitter}
                 for k in range(10)
             ],
+            "kv_capacity_tokens": _KV_CAPACITY_TOKENS[arm],
         }
         for key, val in st["subphases"].items():
             row[f"t_{key.lower()}"] = val
@@ -227,6 +236,46 @@ def test_waterfall_arm_c_segments_are_pinned_with_a_much_smaller_compile_term(tm
     s4b_a, s4b_b, s4b_c = arm_a[4].get_width(), arm_b[4].get_width(), arm_c[4].get_width()
     assert s4b_c < s4b_b < s4b_a
     assert s4b_c == pytest.approx(1.5)
+
+
+def test_shortcut_panels_panel_one_shows_the_naive_method_succeeding(tmp_path):
+    """Panel 1 is the real campaign, where endpoint subtraction lands within
+    0.04s. This is asserted, not assumed: an earlier spec draft claimed the
+    opposite and would have taught a shortcut it meant to forbid."""
+    ab, bc = (10.6683, 20.4687), (25.9701, 31.0050)
+    true_diff = (-20.298, -5.537)
+    naive = (ab[0] - bc[1], ab[1] - bc[0])
+    assert abs(naive[0] - true_diff[0]) < 0.05
+    assert abs(naive[1] - true_diff[1]) < 0.05
+
+    # shortcut_panels calls plt.subplots(2, 1, ...) once, so the spy in
+    # _call_capturing_axes captures a single (fig, axes) pair where `axes`
+    # is the array of both subplot Axes -- not one Axes like every other
+    # renderer here. Index into it rather than treating it as a lone Axes.
+    fig, axes = _call_capturing_axes(
+        lambda d, p: shortcut_panels(d, p),
+        {"ab": ab, "bc": bc, "diff": true_diff},
+        tmp_path / "s.png",
+    )
+    ax = axes[0]
+    text = " ".join(t.get_text() for t in fig.texts) + " ".join(t.get_text() for t in ax.texts)
+    assert "worked" in text.lower()
+
+
+def test_shortcut_panels_panel_two_shows_the_naive_method_failing(tmp_path):
+    """The standing rule, executable: panel 2 must be a case where the naive
+    method a learner would actually try visibly fails. If it ever stops
+    failing, this test fails and the example must be replaced rather than
+    quietly shipped."""
+    correlated = shortcut_panels.correlated_example()
+    naive_width = (correlated["ab"][1] - correlated["bc"][0]) - (
+        correlated["ab"][0] - correlated["bc"][1]
+    )
+    true_width = correlated["diff"][1] - correlated["diff"][0]
+    assert naive_width > true_width * 3, (
+        f"panel 2's naive interval is {naive_width:.2f} wide against a true "
+        f"{true_width:.2f} -- not a visible enough failure to teach with"
+    )
 
 
 def test_waterfall_yticklabels_carry_each_arms_n(tmp_path):
@@ -897,6 +946,7 @@ def test_every_figure_clears_the_phone_text_floor(tmp_path):
         (warmup_curve, rows()),
         (ecdf_plot, rows()),
         (per_host_medians, rows()),
+        (kv_dividend, rows()),
     )
     for render, data in renderers:
         fig, ax = _call_capturing_axes(render, data, tmp_path / "f.png")
@@ -936,4 +986,66 @@ def test_figures_do_not_widen_the_canvas_on_save(tmp_path):
         actual = mpimg.imread(out).shape[1]
         assert actual == expected, (
             f"{render.__name__}: saved {actual}px wide but figsize declares {expected}px"
+        )
+
+
+def test_kv_dividend_states_both_directions_of_the_comparison(tmp_path):
+    """The spec had this percentage inverted once (cold is 16.8% smaller; warm
+    is 20.3% larger). Both numbers appear on the chart so neither can be quoted
+    alone in the wrong direction."""
+    data = [
+        {"arm": "A", "kv_capacity_tokens": 35792},
+        {"arm": "B", "kv_capacity_tokens": 35792},
+        {"arm": "C", "kv_capacity_tokens": 43040},
+    ]
+    fig, ax = _call_capturing_axes(kv_dividend, data, tmp_path / "kv.png")
+    text = " ".join(t.get_text() for t in ax.texts) + ax.get_title()
+    assert "20.3" in text
+    assert "16.8" in text
+    assert "-16.8" not in text, "the caption inverted the direction: '-16.8% smaller' means larger"
+    assert "16.8% smaller" in text
+    for label, size in [(t.get_text(), t.get_fontsize()) for t in ax.texts]:
+        if label.strip():
+            assert size * PHONE_WIDTH_PX / (72 * fig.get_size_inches()[0]) >= MIN_PHONE_TEXT_PX
+
+
+def test_resample_frames_plots_one_median_per_frame_not_per_run(tmp_path):
+    """The misconception this chart exists to break is 'the interval is where
+    the runs landed'. If the chart plotted runs it would confirm it."""
+    values = [81.0] * 51 + [86.0] * 48
+    _fig, ax = _call_capturing_axes(
+        lambda d, p: resample_frames(d, p, frames=10), values, tmp_path / "r.png"
+    )
+    plotted = [c for c in ax.collections] + [
+        l for l in ax.lines if l.get_marker() not in ("", "None")
+    ]
+    assert plotted, "nothing was drawn"
+    text = " ".join(t.get_text() for t in ax.texts) + ax.get_title()
+    assert "median" in text.lower()
+    assert "10" in text
+
+
+def test_resample_frames_clears_the_phone_text_floor(tmp_path):
+    """resample_frames takes a plain list of floats, not rows, so it does not
+    fit test_every_figure_clears_the_phone_text_floor's shared fixture shape.
+    Same assertion, run against this renderer on its own."""
+    values = [81.0] * 51 + [86.0] * 48
+    fig, ax = _call_capturing_axes(
+        lambda d, p: resample_frames(d, p, frames=10), values, tmp_path / "r.png"
+    )
+    width_in = fig.get_size_inches()[0]
+
+    texts = [(t.get_text(), t.get_fontsize()) for t in ax.texts]
+    texts += [(ax.get_title(), ax.title.get_fontsize())]
+    texts += [(ax.get_xlabel(), ax.xaxis.label.get_fontsize())]
+    texts += [(lab.get_text(), lab.get_fontsize()) for lab in ax.get_xticklabels()]
+
+    for label, pt in texts:
+        if not label.strip():
+            continue
+        rendered_px = pt * PHONE_WIDTH_PX / (72 * width_in)
+        assert rendered_px >= MIN_PHONE_TEXT_PX, (
+            f"resample_frames: {label!r} renders at {rendered_px:.1f}px at phone "
+            f"width ({pt:.1f}pt on a {width_in:.1f}in canvas); "
+            f"floor is {MIN_PHONE_TEXT_PX}px"
         )

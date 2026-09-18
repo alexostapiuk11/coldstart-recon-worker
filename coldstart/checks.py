@@ -149,6 +149,7 @@ class ConsistencyResult(NamedTuple):
         return self.ok
 
 
+# explainer:checks-rtt-floor
 def check_consistency(
     t_total: float, t_process: float, rtt_floor: float = DEFAULT_RTT_FLOOR
 ) -> ConsistencyResult:
@@ -174,3 +175,4 @@ def check_consistency(
             DiscardReason.RESIDUAL_BELOW_RTT_FLOOR,
         )
     return ConsistencyResult(True, None, None)
+# explainer:end

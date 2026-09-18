@@ -1,0 +1,1028 @@
+<title>Where a Cold Start Goes</title>
+<!-- Without this a phone lays the page out at 980 CSS px, takes the wide
+     branch of the media queries, and renders the spine into a side rail it
+     is not readable in. The Artifact host supplies one too; this makes the
+     fragment correct on its own. -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+  /* IBM Plex was drawn for technical documentation, which is what this is; it
+     carries the instrument vernacular of the subject without costume. Source
+     Serif 4 does the long-form reading -- seven thousand words is too many to
+     set in a UI sans. Every face has a real fallback stack: the CSP admits
+     Google Fonts and nothing else, so a blocked load must still land somewhere
+     deliberate. */
+  :root {
+    /* Neutrals carry a slight cool bias toward the clock accents rather than
+       being pure greys, so the ground and the instruments belong together. */
+    --ink: #1b1b1d;
+    --ink-soft: #55565b;
+    --rule: #d9d9de;
+    --page: #ffffff;
+    --clk-a: #1f5fc4;
+    --clk-b: #a8460b;
+    --clk-c: #6d28a8;
+    /* Figure cards: transparent on a light ground, an explicit card on a dark
+       one. A token, not a rule inside a media block, so the component style is
+       written once and resolves in all three theme states. */
+    --fig-card: transparent;
+    --fig-ink: var(--ink-soft);
+    --fig-pad: 0;
+    --font-body: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  /* Three theme states, not two. The un-stamped default is the common case and
+     only prefers-color-scheme separates it; an explicit choice stamps the root
+     and must beat the OS in BOTH directions. Without the :not() guard, a viewer
+     who picks light on a dark OS gets a dark page. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #e8e8ea;
+      --ink-soft: #a6a7ad;
+      --rule: #34353a;
+      --page: #141416;
+      /* Lifted, not the same hues dimmed: the light-theme accents are dark
+         enough to vanish against a dark page. */
+      --clk-a: #79b0f5;
+      --clk-b: #f5a361;
+      --clk-c: #c79af0;
+      --fig-card: #fff;
+      --fig-ink: #3a3a3a;
+      --fig-pad: .6rem .4rem;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #e8e8ea;
+    --ink-soft: #a6a7ad;
+    --rule: #34353a;
+    --page: #141416;
+    --clk-a: #79b0f5;
+    --clk-b: #f5a361;
+    --clk-c: #c79af0;
+    --fig-card: #fff;
+    --fig-ink: #3a3a3a;
+    --fig-pad: .6rem .4rem;
+  }
+  /* Sans for the structural voice -- headings, eyebrows, the card labels --
+     against the serif that does the reading. The split is the hierarchy; it
+     does not need a second colour or a rule to say the same thing again. */
+  h1, h2, h3, h4, .kicker, summary, figcaption, .act-q, dt {
+    font-family: var(--font-ui);
+  }
+  h1, h2, h3 { text-wrap: balance; }
+  body {
+    margin: 0 auto;
+    padding: 2rem 1.25rem 6rem;
+    max-width: 1180px;
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--font-body);
+    line-height: 1.55;
+  }
+  h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 1rem; }
+  figure { margin: 2.5rem 0; }
+  figure svg { max-width: 100%; height: auto; display: block; }
+  /* The charts come from matplotlib, which bakes a white canvas and dark ink
+     into the SVG. On a light page that is seamless. On a dark one it reads as
+     an accidental bleed unless the figure claims it deliberately, so give it
+     a card: rounded, padded, clipped. Cheaper and more honest than pretending
+     a baked raster-era palette is theme-aware. */
+  figure:has(svg:not(#spine)) {
+    background: var(--fig-card);
+    border-radius: 10px;
+    padding: var(--fig-pad);
+    overflow: hidden;
+  }
+  /* The caption rides inside that card, so it takes the card's ink rather than
+     the page's -- otherwise on a dark theme it stays light grey on white and
+     becomes the least readable text on the page. */
+  figure:has(svg:not(#spine)) figcaption { color: var(--fig-ink); }
+  figcaption { color: var(--ink-soft); font-size: .95rem; }
+  pre, code, kbd, samp { font-family: var(--font-mono); }
+  pre { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; padding: 1rem; }
+  /* The UA default link blue is near-unreadable on the dark page background,
+     and there are few enough links here that an underline is signal enough. */
+  a { color: inherit; text-decoration-color: var(--clk-a); text-underline-offset: 2px; }
+
+  /* --- the spine, and the beats that light it ------------------------- */
+  .apparatus { margin: 3rem 0; }
+  .spine-col { min-width: 0; }
+  #spine { display: block; width: 100%; height: auto; color: var(--ink); }
+  /* Progressive enhancement: the diagram is fully legible by default, and the
+     dimming only switches on once the observer has actually fired once. If the
+     script never runs, or the viewer's environment suspends IntersectionObserver
+     (a hidden document does exactly that -- callbacks ride the same rendering
+     pipeline as requestAnimationFrame), the reader gets a complete diagram
+     rather than one stuck at 28% opacity forever. */
+  #spine .dim { transition: opacity .35s ease; }
+  #spine.choreo .dim { opacity: .28; }
+  #spine.choreo .dim.lit { opacity: 1; }
+  #spine .lit { opacity: 1; }
+  .beat { border-top: 1px solid var(--rule); padding: 1rem 0; }
+  .beat h2 {
+    font-size: .8rem; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-soft); margin: 0 0 .4rem; font-weight: 600;
+  }
+  /* Beats now run to several paragraphs; without this they butt together,
+     since the base rule zeroes the margin so a single-paragraph beat sits
+     flush under its label. */
+  .beat p { margin: 0; }
+  .beat p + p { margin-top: .9rem; }
+
+  @media (max-width: 767px) {
+    /* Static, not sticky. At this width the diagram cannot be shrunk into a
+       side rail and stay readable, so it is shown once at full width and the
+       beats follow it. The cap is deliberately loose: if it binds, the 26-unit
+       type in the SVG drops under the legibility floor. */
+    body { padding-left: .75rem; padding-right: .75rem; }
+    #spine { position: static; max-height: 62vh; }
+    .beat { min-height: 0; }
+  }
+  @media (min-width: 768px) {
+    .apparatus { display: grid; grid-template-columns: minmax(0, 46%) minmax(0, 1fr); gap: 2.5rem; }
+    #spine { position: sticky; top: 1.5rem; max-height: calc(100vh - 3rem); }
+    .beat { min-height: 62vh; display: flex; flex-direction: column; justify-content: center; }
+  }
+
+  /* --- prose sections and code cards ---------------------------------- */
+  /* The body is sized for the two-column apparatus; prose run at that full
+     width is ~150 characters a line, which is well past readable. */
+  .zone { margin: 4rem 0 0; max-width: 46rem; }
+  .zone > h2 { font-size: 1.45rem; line-height: 1.25; margin: 0 0 .9rem; }
+  .zone h3 { font-size: 1.05rem; margin: 2rem 0 .5rem; }
+  .zone p { margin: 0 0 1rem; }
+  ul.steps { padding-left: 1.1rem; }
+  ul.steps li { margin-bottom: .65rem; }
+  .card {
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 1.1rem 1.25rem 1.25rem;
+    margin: 1.75rem 0;
+  }
+  .card h3 { margin-top: 0; margin-bottom: .15rem; }
+  .card .where {
+    color: var(--ink-soft); font-size: .82rem;
+    font-family: var(--font-mono);
+  }
+  .card dl { margin: .9rem 0 0; }
+  .card dt {
+    font-weight: 600; font-size: .72rem; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--ink-soft); margin-top: .9rem;
+  }
+  .card dd { margin: .2rem 0 0; }
+  .card details { margin-top: 1.1rem; }
+  .card summary { cursor: pointer; color: var(--ink-soft); font-size: .9rem; }
+  .card pre { margin: .75rem 0 0; font-size: .8rem; line-height: 1.45; }
+
+  /* --- part II -------------------------------------------------------- */
+  .zone h4 { font-size: .95rem; margin: 1.7rem 0 .4rem; }
+  .part-rule {
+    border: 0; border-top: 2px solid var(--ink);
+    margin: 5rem 0 0; max-width: 46rem;
+  }
+  .act-q {
+    border-left: 3px solid var(--clk-a);
+    padding: .15rem 0 .15rem .9rem;
+    margin: 1.6rem 0 1.9rem;
+  }
+  .act-q p { margin: 0; }
+  /* The one element on this page designed to be screenshotted and to travel
+     without the rest of it. Hence the self-contained heading, the explicit
+     background -- a transparent card picks up whatever is behind it, which
+     for a screenshot is nothing -- and a width that stays legible when it is
+     pasted into a chat window at half size. */
+  .ask {
+    border: 2px solid var(--ink);
+    border-radius: 14px;
+    background: var(--page);
+    padding: 1.7rem 1.8rem 1.5rem;
+    margin: 3rem 0 2.5rem;
+    max-width: 40rem;
+  }
+  .ask h3 { margin: 0 0 1.2rem; font-size: 1.15rem; }
+  .ask ol { margin: 0; padding-left: 1.4rem; }
+  .ask li { margin-bottom: 1.05rem; }
+  .ask li:last-child { margin-bottom: 0; }
+  .ask li strong { display: block; font-size: 1.02rem; line-height: 1.35; }
+  .ask li span {
+    display: block; color: var(--ink-soft);
+    font-size: .88rem; margin-top: .2rem;
+  }
+  .ask .ask-foot {
+    margin: 1.3rem 0 0; padding-top: .9rem;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-soft); font-size: .82rem;
+  }
+</style>
+
+<h1>Where a cold start goes</h1>
+<p>A cold start is the wait while a machine boots and loads a model, before
+anyone gets an answer. Arm C's median cold start is {{median_t_total_C}}
+seconds, against {{median_t_total_A}} with nothing cached.</p>
+
+<div class="apparatus">
+  <div class="spine-col">
+    {{spine}}
+  </div>
+  <div class="beats">
+    <section class="beat" data-lights="zone-1">
+      <h2>Beat 1 &middot; the schedule</h2>
+      <p>Run 147 is arm B, and it was arm B before the campaign started. The
+      scheduler draws the whole order once, from a seed: {{runs_total}} runs as
+      randomised triples, one of each arm in every triple, shuffled within it.</p>
+      <p>Running all of arm A, then all of arm B, then all of arm C would have
+      been simpler and worthless. A rented GPU at 3am is not the same machine as
+      one at noon &mdash; different neighbours, different network, different luck
+      of the draw on which host you land. Blocking hands that drift to whichever
+      arm happened to run through it. Interleaving spreads it across all three.</p>
+    </section>
+    <section class="beat" data-lights="zone-1">
+      <h2>Beat 2 &middot; preflight</h2>
+      <p>Before any money moves, preflight fetches the live endpoint from
+      RunPod's API and compares it, field by field, against a dict of pinned
+      values: platform snapshotting off, this GPU type, this network volume,
+      this container template. One difference and the campaign does not start.</p>
+      <p>The guard exists because the failure it catches is invisible
+      afterwards. An endpoint with the platform's own boot-acceleration switched
+      back on returns a complete, plausible, entirely wrong dataset &mdash; it
+      measures RunPod's cache instead of the three arms, and nothing in the
+      numbers says so.</p>
+    </section>
+    <section class="beat" data-lights="zone-1,clock-A,edge-1">
+      <h2>Beat 3 &middot; submit</h2>
+      <p>The submitter stamps the job with its two facts &mdash;
+      <code>{arm, run_id}</code> &mdash; and posts it.</p>
+      <p><strong>Clock A starts here.</strong> It is the laptop's stopwatch:
+      submit to result, queueing and scheduling and network included. It is the
+      only one of the three clocks that sees the wait before a container exists,
+      and therefore the only one measuring what a user would actually feel.</p>
+    </section>
+    <section class="beat" data-lights="zone-2,clock-C,edge-2">
+      <h2>Beat 4 &middot; the platform</h2>
+      <p>RunPod accepts the job, queues it, finds a free 4090, and boots the
+      container image onto it. You are comfortable with this part already: it is
+      a cold start in the ordinary serverless sense, the one you avoid in
+      production by keeping a worker warm. Here it is the thing under the
+      microscope, so nothing is kept warm on purpose.</p>
+      <p><strong>Clock C</strong> is the platform's own account of that stretch,
+      and it is an odd instrument: it reports durations &mdash; how long the job
+      waited, how long it ran &mdash; and never timestamps. There is no instant
+      to line up against clock A. Only two lengths that ought to add up.</p>
+    </section>
+    <section class="beat" data-lights="zone-3">
+      <h2>Beat 5 &middot; the handler prepares</h2>
+      <p>Inside the container, the handler turns arm B's configuration into two
+      environment variables, creates the directories it is allowed to create,
+      and refuses outright if a path claims to be on the network volume and the
+      volume is not mounted &mdash; silently landing that cache on container
+      disk would make arms B and C run cold while reporting themselves warm.</p>
+      <p>Then, <em>before</em> starting anything, it records whether this arm's
+      compile cache directory already exists. The ordering is the entire point.
+      Why that ordering matters is card 4's lesson &mdash; for now, just note
+      that the snapshot happens first, and that moving it later would look like
+      a tidy-up.</p>
+    </section>
+    <section class="beat" data-lights="zone-3,clock-B,edge-3">
+      <h2>Beat 6 &middot; the probe starts the engine</h2>
+      <p>The probe launches <code>vllm serve</code> as a subprocess and hands
+      its stdout to a thread that reads line by line, forever.</p>
+      <p><strong>Clock B starts at that instant.</strong> A monotonic stopwatch
+      inside the box, in the same process as the thing it times, with no network
+      between the clock and the event. That is why clock B can name phase
+      boundaries to the millisecond while clock A can only bracket the whole
+      run &mdash; and why the two are never added together.</p>
+    </section>
+    <section class="beat" data-lights="zone-4,clock-B,edge-4">
+      <h2>Beat 7 &middot; vLLM does four things</h2>
+      <p>Load the weights. Compile the model. Size the cache that holds
+      conversations. Capture the GPU call sequences. None of that is this
+      repo's code, and the probe never patches the engine to find out where it
+      is &mdash; it reads the log lines vLLM already prints about itself and
+      promotes two of them to marks.</p>
+      <p>This is where the bulk of a cold start lives: with nothing cached, the
+      median run takes {{median_t_total_A}} seconds, and the tail reaches
+      {{p95_t_total_A}}. The section below this diagram opens the box.</p>
+    </section>
+    <section class="beat" data-lights="zone-3,clock-B">
+      <h2>Beat 8 &middot; ten requests</h2>
+      <p>The health endpoint answers, so the engine now calls itself ready. Ten
+      requests go in anyway, one after another, each one timed on clock B.</p>
+      <p>The engine is warm by any reasonable definition, and we time it warm on
+      purpose. The question is whether &ldquo;ready&rdquo; and &ldquo;fast&rdquo;
+      are the same moment &mdash; whether a replica that has just announced
+      itself is fit to take traffic, or whether the first few users quietly pay
+      for the rest.</p>
+    </section>
+    <section class="beat" data-lights="zone-3,edge-5">
+      <h2>Beat 9 &middot; the result channel</h2>
+      <p>The probe hands the entire bundle back as the job's <em>result</em>
+      &mdash; the JSON RunPod returns to the submitter &mdash; and not as log
+      output.</p>
+      <p>Logs are a lossy channel. They truncate, they interleave two workers'
+      lines, they arrive late or not at all, and a run whose only telemetry
+      lived in stdout is a run you paid for and cannot use. A result either
+      comes back whole or fails loudly enough to retry.</p>
+    </section>
+    <section class="beat" data-lights="zone-5,edge-6">
+      <h2>Beat 10 &middot; nothing is judged yet</h2>
+      <p>The row is written whether the run succeeded, failed its health check,
+      timed out, or came back internally contradictory. Raw fields, no verdict.</p>
+      <p>Validity is decided later, offline, by code that can be re-run against
+      the same file as many times as you like. Judging at write time inverts
+      that: a bug in the judge no longer produces a wrong answer you can find
+      and fix, it produces <em>no data</em> &mdash; the evidence that would have
+      exposed the bug was discarded by the bug.</p>
+      <p>One run in this campaign took {{first_touch_seconds}} seconds, because
+      it was the first time that model had ever been pulled to that region. It
+      is in the file. It is labelled, and excluded downstream by a rule written
+      in advance. It was never deleted.</p>
+    </section>
+    <section class="beat" data-lights="zone-5">
+      <h2>Beat 11 &middot; one row appended</h2>
+      <p>A single line of JSON, appended to the campaign file. Self-describing:
+      every field the analysis needs is named in the row itself, so the file
+      still means something without the code that wrote it.</p>
+      <p>Append-only carries more weight than it sounds like. A
+      {{runs_total}}-run campaign spans hours of paid GPU time; workers recycle,
+      laptops sleep, the first attempt died of a full disk. The only recovery
+      that actually works is &ldquo;stop, then start again after the last row
+      on disk.&rdquo;</p>
+    </section>
+    <section class="beat" data-lights="zone-6,clock-A,clock-B,clock-C,edge-7,edge-8">
+      <h2>Beat 12 &middot; offline, no GPU</h2>
+      <p>Everything from here runs on a laptop and touches nothing but that
+      file. The three clocks are reconciled against each other; runs that break
+      the rules fixed in advance are discarded with a named reason rather than
+      quietly repaired; per-phase durations are derived; ranges are computed by
+      resampling the measurements; the charts are drawn.</p>
+      <p>The medians land at {{median_t_total_A}} seconds with nothing cached,
+      {{median_t_total_B}} with the weights already on the volume, and
+      {{median_t_total_C}} with the compiled artifacts there too.</p>
+      <p>Every number published anywhere about this experiment comes out of this
+      stage &mdash; not out of a notebook someone ran once. That is the point of
+      pushing the whole judgement downstream: clone the repo, run the pipeline,
+      and you re-derive all of it, including the numbers in this sentence,
+      without renting anything.</p>
+    </section>
+  </div>
+</div>
+
+<section class="zone" id="vllm">
+  <h2>Zone 4 &mdash; what is actually in the box</h2>
+
+  <p>Everything above treats vLLM as a box that takes eighty-odd seconds to
+  open. It is worth knowing what it is, because two of its four startup steps
+  are the entire experiment.</p>
+
+  <h3>What it replaces</h3>
+  <p>The obvious way to serve a model is a loop: read a request, call
+  <code>model.generate()</code>, write the answer back, read the next request.
+  That works, and it is what every tutorial shows. It also holds one
+  conversation at a time, leaves the GPU idle between a user's tokens, and gives
+  you no way to serve two people at once short of loading the weights twice.</p>
+
+  <h3>What it is</h3>
+  <p>An HTTP server wrapped around the model. This repo starts it as a
+  subprocess &mdash; literally <code>vllm serve &lt;model&gt; --port 8000</code>
+  &mdash; polls <code>http://127.0.0.1:8000/health</code> until it answers, and
+  then sends its warmup traffic to <code>/v1/completions</code>. That is the
+  whole interface the probe needs: a process, a port, a health route, and an
+  OpenAI-shaped completions route.</p>
+  <p>What you get for it is one copy of the weights with many users' requests
+  multiplexed over it. That is continuous batching &mdash; serving many users'
+  requests through one copy of the model at once &mdash; and requests join and
+  leave the running batch between decode steps rather than waiting for a batch
+  to fill. It is also why a fresh replica is useful the moment it reports ready:
+  it does not need traffic to warm itself into efficiency. It needs memory.</p>
+
+  <h3>What it is not</h3>
+  <p>Not a model. The weights are a separate download, pinned to a revision, and
+  vLLM will happily serve a different one. Not a trainer &mdash; nothing in it
+  computes a gradient. It is a scheduler and a memory manager with an HTTP front
+  door.</p>
+
+  <h3>Why starting it costs real time</h3>
+  <ul class="steps">
+    <li><strong>Load the weights.</strong> Roughly 15&nbsp;GB moved off disk, or
+    off the network volume, into HBM &mdash; the GPU's own memory, separate from
+    the computer's RAM. This is the step arms B and C shorten by having the file
+    already staged on the volume.</li>
+    <li><strong>Compile the model.</strong> torch.compile &mdash; a step that
+    turns the model into faster GPU code before serving &mdash; traces the model
+    and generates kernels for it. Slow once; reusable afterwards if the output
+    is kept. Keeping it is the only thing arm C has that arm B does not.</li>
+    <li><strong>Size the cache that holds conversations.</strong> Measured, not
+    configured. See below &mdash; this is where the interesting failure is.</li>
+    <li><strong>Capture the GPU call sequences.</strong> CUDA graph capture
+    &mdash; recording a fixed sequence of GPU operations so they replay without
+    per-step overhead &mdash; costs a flat four seconds here, identical in all
+    three arms because it depends on the shapes captured rather than on anything
+    cached, and pays itself back on every token afterwards.</li>
+  </ul>
+
+  <h3>The consequence you already have the parts for</h3>
+  <p>You can already list what sits in GPU memory beside the weights:
+  activations, and the K/Q/V matrices. One correction is owed. Q is not kept
+  &mdash; it is computed fresh for the token being generated and thrown away.
+  Only K and V are retained, which is why it is called the KV cache and not the
+  QKV cache: per-conversation scratch space the model keeps on the GPU while
+  generating. It grows by a slice per token, and every slice stays until the
+  conversation ends.</p>
+  <p>Now finish the chain, because this is the part that bites. The card holds
+  24&nbsp;GB. The weights take ~15&nbsp;GB and never move. What remains, after
+  activations and working space, is the <em>entire</em> budget for every
+  conversation the replica will ever hold simultaneously. Context length
+  multiplied by concurrent conversations is a hard ceiling &mdash; and vLLM
+  computes that ceiling once, during startup, and never revisits it. The replica
+  you boot at second zero has a fixed conversational capacity for its whole
+  life.</p>
+
+  <h3>The dividend: a compile cache buys capacity, not just seconds</h3>
+  <p>How does vLLM decide how much memory the cache gets? It cannot ask. No API
+  reports &ldquo;free memory for a KV cache.&rdquo; The only way to find out is
+  to run the model once on the largest batch it must support &mdash; a forward
+  pass, running the model once, start to finish, on some input &mdash; record
+  peak usage, and hand the remainder to the cache.</p>
+  <p>On a cold-compile arm, the compiler's own working set is still resident
+  while that measurement runs. The profiler is not wrong; it accurately reports
+  less free memory than the replica will have a second later. vLLM sizes the
+  cache to what it saw: {{kv_cold}} tokens instead of {{kv_warm}}. At the
+  context length held fixed across all three arms, that is
+  {{concurrency_cold}} concurrent conversations instead of
+  {{concurrency_warm}} &mdash; one whole request of capacity, on the same card,
+  for the life of that replica. Nothing later reclaims it.</p>
+
+  <figure>
+    {{chart:kv_dividend}}
+    <figcaption>The same fact stated in both directions, because it is easy to
+    invert: the warm arm gets that much more, the cold arm is sized that much
+    smaller.</figcaption>
+  </figure>
+
+  <h3>The instrumentation point</h3>
+  <p>vLLM was never modified, forked, or monkey-patched to produce any of this.
+  The phase boundaries come from lines the engine already prints about itself,
+  matched by pattern against real captured logs held as fixtures.</p>
+  <p>That is the transferable trick, and the code below shows the half of it
+  that is easy to miss: most of those comments are about the lines that were
+  <em>rejected</em>. There is a plausible-looking line a few entries earlier
+  that reports the weight loader finishing, and another pair a few entries later
+  that report the HTTP server binding. Matching either would shift a boundary by
+  seconds and produce a clean, confident, wrong number. Choosing a marker in a
+  black box is mostly choosing which neighbour you refuse.</p>
+
+  <div class="card" id="card-3">
+    <h3>Card 3 &mdash; the two lines the probe watches for</h3>
+    <p class="where">worker/probe.py</p>
+    <dl>
+      <dt>What it is</dt>
+      <dd>Two compiled regular expressions, and the reasoning for each.</dd>
+      <dt>Its one job</dt>
+      <dd>Turn the engine's own chatter into two timestamped marks on clock B:
+      weights resident on the device, and engine fully initialised.</dd>
+      <dt>Why it exists</dt>
+      <dd>Without it the only measurable thing is &ldquo;the whole startup took
+      N seconds,&rdquo; and the experiment cannot say which arm bought which
+      part. With the wrong two lines it is worse than that: a boundary drawn at
+      the wrong log entry folds one phase into its neighbour, and the arm
+      difference lands on whichever phase absorbed it.</dd>
+      <dt>Hands off to</dt>
+      <dd>The stage recorder, which stores the marks relative to a single
+      origin, and then to the offline derivation that subtracts them.</dd>
+    </dl>
+    <details>
+      <summary>Show the code</summary>
+      <pre><code>{{excerpt:probe-markers}}</code></pre>
+    </details>
+  </div>
+</section>
+
+<section class="zone" id="cards">
+  <h2>Six pieces of code worth reading</h2>
+  <p>Each one is small, and each one exists because of a specific way this
+  experiment could have produced confident nonsense.</p>
+
+  <div class="card" id="card-1">
+    <h3>Card 1 &mdash; a guard that refuses to check nothing</h3>
+    <p class="where">coldstart/preflight.py</p>
+    <dl>
+      <dt>What it is</dt>
+      <dd>A dict of pinned endpoint settings, and a function comparing the live
+      endpoint against it.</dd>
+      <dt>Its one job</dt>
+      <dd>Refuse to open a paid run window if the endpoint has drifted from the
+      configuration the experiment was designed around.</dd>
+      <dt>Why it exists</dt>
+      <dd>A safety check that cannot do its job must fail, not shrug. Handed an
+      empty pin set, the natural implementation iterates zero times, finds no
+      mismatches, and reports success &mdash; on <em>any</em> endpoint at all,
+      which is precisely the false pass the module exists to prevent. So it
+      raises instead. The same instinct one line further down: a key missing
+      from the endpoint response counts as a mismatch, not as &ldquo;probably
+      still fine.&rdquo;</dd>
+      <dt>Hands off to</dt>
+      <dd>The driver, which submits nothing until this returns.</dd>
+    </dl>
+    <details>
+      <summary>Show the code</summary>
+      <pre><code>{{excerpt:preflight-refuses}}</code></pre>
+    </details>
+  </div>
+
+  <div class="card" id="card-2">
+    <h3>Card 2 &mdash; the one thing that differs between arms</h3>
+    <p class="where">coldstart/cache_config.py</p>
+    <dl>
+      <dt>What it is</dt>
+      <dd>The three arms as one frozen object with two fields, and a method that
+      turns them into exactly two environment variables. Same image, same
+      entrypoint, same engine flags; one swapped object.</dd>
+      <dt>Its one job</dt>
+      <dd>Express the experiment's single independent variable in a form the
+      container can consume, and nowhere else.</dd>
+      <dt>Why it exists</dt>
+      <dd>Warm paths deliberately point at a shared location on the network
+      volume &mdash; the whole meaning of warm is that a later run finds what an
+      earlier run left. Cold paths are the opposite, and so they are namespaced
+      by the run id. A serverless worker outlives any single run. Without the
+      namespace, the next run's &ldquo;cold&rdquo; arm starts up, finds the
+      previous run's downloaded weights already sitting on local disk, and
+      reports a cold start that never happened &mdash; as a perfectly plausible
+      number, in the arm whose whole purpose is to be slow.</dd>
+      <dt>Hands off to</dt>
+      <dd>The handler, which merges the dict into the subprocess environment
+      only and never into its own, for the same reason.</dd>
+    </dl>
+    <details>
+      <summary>Show the code</summary>
+      <pre><code>{{excerpt:cache-config-env}}</code></pre>
+    </details>
+  </div>
+
+  <div class="card">
+    <h3>Card 3 &mdash; instrumenting a black box</h3>
+    <p class="where">worker/probe.py</p>
+    <p>Shown in place, up in <a href="#card-3">the vLLM section</a>, where its
+    two log lines are the thing being discussed. It is not repeated here.</p>
+  </div>
+
+  <div class="card" id="card-4">
+    <h3>Card 4 &mdash; the line that must not move</h3>
+    <p class="where">worker/handler.py</p>
+    <dl>
+      <dt>What it is</dt>
+      <dd>One directory check, under a comment roughly fifteen times its
+      length.</dd>
+      <dt>Its one job</dt>
+      <dd>Answer &ldquo;was this arm's compile cache already there when the run
+      <em>started</em>?&rdquo; &mdash; which is a question about a moment, not
+      about a directory.</dd>
+      <dt>Why it exists</dt>
+      <dd>A directory check cannot tell &ldquo;found a pre-existing cache&rdquo;
+      apart from &ldquo;just created one by compiling.&rdquo; A cold compile
+      creates that directory as a side effect of <em>finishing</em>. So the
+      identical call, moved a few lines later to sit with the other
+      post-run bookkeeping, still returns a boolean &mdash; it just answers a
+      different question. It would report a warm cache for every genuinely cold
+      run, and the downstream arm-state gate would then discard roughly 200 of
+      the {{runs_total}} paid runs as inconsistent. In the other direction it
+      goes blind: an actual warm cache leaking onto a cold arm, the exact
+      contamination this check exists to catch, reads exactly the same as the
+      bug. This is what a correctness bug disguised as a simplification looks
+      like: nothing crashes, nothing looks wrong, and two thirds of a campaign
+      evaporates.</dd>
+      <dt>Hands off to</dt>
+      <dd>The record, and from there the offline gate that compares the observed
+      cache state against the arm the run was supposed to be.</dd>
+    </dl>
+    <details>
+      <summary>Show the code</summary>
+      <pre><code>{{excerpt:handler-snapshot-before}}</code></pre>
+    </details>
+  </div>
+
+  <div class="card" id="card-5">
+    <h3>Card 5 &mdash; when three clocks disagree</h3>
+    <p class="where">coldstart/checks.py</p>
+    <dl>
+      <dt>What it is</dt>
+      <dd>The rule that decides whether clock A and clock B can both be telling
+      the truth about the same run.</dd>
+      <dt>Its one job</dt>
+      <dd>Detect the impossible and name it, without repairing anything.</dd>
+      <dt>Why it exists</dt>
+      <dd>Clock A ran on a laptop; clock B ran in a datacentre in another
+      country. A contains B by construction, plus queueing, plus two network
+      crossings. Their difference is the only cross-clock subtraction this
+      codebase permits at all. If that difference comes out <em>negative</em>,
+      something is badly wrong and the run raises rather than being clamped to
+      zero. If it comes out positive but smaller than 50&nbsp;ms &mdash; less
+      than one honest round trip between those two machines &mdash; then the two
+      clocks are not disagreeing slightly, they are describing events that
+      cannot both have happened, and the run is discarded with a named reason
+      recorded beside it. A rule fixed in advance, applied by code, leaves an
+      audit trail; an eyeball applied to a scatter plot does not.</dd>
+      <dt>Hands off to</dt>
+      <dd>The caller, deliberately: this function decides nothing about storage,
+      so a discard is always something someone chose to record.</dd>
+    </dl>
+    <details>
+      <summary>Show the code</summary>
+      <pre><code>{{excerpt:checks-rtt-floor}}</code></pre>
+    </details>
+  </div>
+
+  <div class="card" id="card-6">
+    <h3>Card 6 &mdash; the endpoint that costs nothing</h3>
+    <p class="where">coldstart/stubs/stub_endpoint.py</p>
+    <dl>
+      <dt>What it is</dt>
+      <dd>A class with the same shape as the RunPod endpoint. No network, no
+      GPU, no account.</dd>
+      <dt>Its one job</dt>
+      <dd>Let the entire campaign &mdash; schedule, submit, handler, probe,
+      record, analysis &mdash; run end to end on a laptop, for free.</dd>
+      <dt>Why it exists</dt>
+      <dd>It replays a real captured engine log rather than inventing one, and
+      draws each run's weight-load time from a per-arm profile with a seeded
+      random number generator. That combination means the answer is known in
+      advance, so the analysis has a specific right answer to recover and the
+      tests can fail when it does not. Every stage downstream of it &mdash; the
+      log parsing, the gates, the derivation, the charts, this page &mdash; was
+      written and debugged against the stub before a single dollar was spent on
+      a GPU. That is not a testing nicety. It is the reason the paid campaign
+      was a measurement rather than a debugging session &mdash; arm A alone
+      burned {{gpu_hours_a_n99}} GPU-hours, and a rerun costs that again.</dd>
+      <dt>Hands off to</dt>
+      <dd>The test suite, which runs the whole pipeline against it on every
+      change.</dd>
+    </dl>
+    <details>
+      <summary>Show the code</summary>
+      <pre><code>{{excerpt:stub-endpoint}}</code></pre>
+    </details>
+  </div>
+</section>
+
+<hr class="part-rule">
+
+<section class="zone" id="method">
+  <h2>Part II &mdash; how to read a number somebody hands you</h2>
+
+  <p>Part one of this page was one experiment, walked end to end, and it is the
+  less useful half. The useful half is a habit you can carry to the next
+  benchmark you are shown: the vendor chart, the framework's README, the
+  internal dashboard announcing that the regression is fixed.</p>
+
+  <p>Four questions. Each one has a story here, and each story is a place this
+  experiment either held up or got caught.</p>
+
+  <h3>Act 1 &mdash; &ldquo;81 seconds&rdquo; is not a finding</h3>
+
+  <p>Arm A's median cold start is {{median_t_total_A}} seconds. Written on a
+  slide by itself, that is not a measurement. It is a measurement with the
+  measurement removed. It does not say how many runs went into it, and it does
+  not say what they looked like.</p>
+
+  <p>So look at them. Below is an ECDF &mdash; a chart showing what share of
+  runs finished by each time. Pick a height on the left, slide right until you
+  hit a line, read the seconds off the bottom.</p>
+
+  <figure>
+    {{chart:ecdf}}
+    <figcaption>Every run, in order, one step per run. A flat stretch is a
+    range of times that nothing took.</figcaption>
+  </figure>
+
+  <p>Arm A's line does not climb. It steps, goes flat for four and a half
+  seconds with nothing whatsoever in it, and steps again. About half the runs
+  finish just past eighty seconds; most of the rest arrive in a second bunch
+  near eighty-six; a thin tail runs out to the 95th percentile &mdash; the
+  value below which a given share of measurements fall &mdash; at
+  {{p95_t_total_A}} seconds.</p>
+
+  <p>There is no such thing as arm A's cold start time. There are two of them,
+  and a tail. Any single number pulled out of that &mdash; median, mean,
+  best-of-five &mdash; names one behaviour and buries the other. The mean, in
+  particular, lands in the four-and-a-half-second gap: a time that not one of
+  the ninety-nine runs took.</p>
+
+  <div class="act-q">
+    <p><strong>Question one: how many runs, and what was the spread?</strong>
+    A claim with no n behind it is a claim somebody ran once. A claim with an n
+    but no shape behind it can still be two different behaviours wearing a
+    single number as a hat.</p>
+  </div>
+
+  <h3>The interlude &mdash; what an interval is, and what it is not</h3>
+
+  <p>Question one has a second half that almost everyone, including the author
+  of this page, gets wrong on the first three attempts. It is worth the
+  detour, because the wrong version is confident, sounds right, and survives
+  being told the correct definition.</p>
+
+  <h4>Pin the sample first</h4>
+
+  <p>Arm A alone, and ninety-nine of its hundred runs. The hundredth is the
+  first-touch run at {{first_touch_seconds}} seconds, held out by the rule from
+  beat 12. That is worth noticing on its own: the gate is not decoration, it is
+  the reason the other ninety-nine are a single population and not ninety-nine
+  runs plus a category error.</p>
+
+  <h4>Refute the wrong reading with its own data</h4>
+
+  <p>Over those ninety-nine runs, the interval on arm A's median is
+  {{arm_a_ci_n99}} seconds. Almost every reader takes that bracket to mean
+  <em>this is where most of the runs landed</em> &mdash; a bell-ish pile of
+  measurements, the bulk of them inside the brackets.</p>
+
+  <p>It cannot mean that. Look back at the chart. The bracket spans 82 to 85
+  seconds, and <strong>not one of the ninety-nine runs is in there.</strong> It
+  also stops short of the nine runs bunched at {{p95_t_total_A}} seconds, which
+  are as real as any others. A range that covers a stretch holding nothing, and
+  excludes a stretch holding nine measurements, is not a description of where
+  the measurements are. Whatever it describes, it is not that.</p>
+
+  <h4>Shrink it until the machinery is visible</h4>
+
+  <p>Ninety-nine numbers is too many to watch. Suppose the whole experiment had
+  been five runs: 80, 80, 81, 85, 86. The median is 81.</p>
+
+  <p>Write those five on slips of paper and drop them in a bag. Pull one out,
+  write it down, <em>put it back</em>, pull again &mdash; five pulls, because
+  the campaign had five runs. You might get 80, 85, 80, 80, 86, whose median is
+  80. Do it again: 86, 81, 85, 85, 80, median 85. Again: 80, 80, 80, 81, 85,
+  median 80.</p>
+
+  <p>None of those is invented data. Each one is an imaginary campaign built
+  only out of numbers this experiment actually produced &mdash; a plausible
+  alternative afternoon. And each one hands back a single median. Run ten
+  thousand imaginary campaigns, collect the ten thousand medians, sort them,
+  and cut off the extreme 2.5% at each end. What is left is the bracket.</p>
+
+  <figure>
+    {{chart:resample}}
+    <figcaption>The real runs are the tick marks along the top row. The dots
+    below are ten imaginary campaigns, each contributing one median. The
+    bracket at the bottom spans the middle 95% of ten thousand of those
+    medians. Note which row the bracket belongs to &mdash; it is built from the
+    dots, and it was never a statement about the ticks.</figcaption>
+  </figure>
+
+  <p>That is a bootstrap interval &mdash; a range showing how much a summary
+  number could move if the measurements had come out slightly differently. It
+  is an answer to &ldquo;how firmly is the median pinned,&rdquo; and it answers
+  nothing at all about where individual runs land. The chart above already
+  answered that.</p>
+
+  <h4>The word that does the damage</h4>
+
+  <p>People describe this as shuffling the data, and that word is a large part
+  of why the wrong reading is so hard to dislodge. Shuffling is reordering.
+  Reordering cannot move a median by a picosecond &mdash; put ninety-nine
+  numbers in any order you like, sort them, and the middle one is the same
+  number every time. If shuffling were what happened, every imaginary campaign
+  would return an identical median and the bracket would have zero width.</p>
+
+  <p>The operation is drawing with replacement &mdash; picking a value, writing
+  it down, putting it back, and picking again. The putting-back is the entire
+  mechanism. It is what allows one run to turn up three times in an imaginary
+  campaign while another turns up not at all, and that lopsidedness is the only
+  reason two imaginary campaigns ever disagree.</p>
+
+  <h4>Break the wrong model on purpose</h4>
+
+  <p>If you still half-suspect the interval is measuring the gap between arm
+  A's two clusters, that is a reasonable suspicion and arm A cannot talk you
+  out of it. Its interval runs from about 81 to about 86, which is
+  <em>precisely</em> where its two clusters sit. The two readings make the same
+  prediction on this data. So change one thing, and only one.</p>
+
+  <p>Take ninety-nine imaginary runs with only two distinct values in them: 81
+  seconds and 86 seconds, nothing between. Split them 51 to 48, and the
+  interval comes back [81.00, 86.00]. Five seconds wide. That certainly looks
+  like the gap.</p>
+
+  <p>Now split the same two values 70 to 29. Same two clusters, same five
+  seconds between them, same spread in the measurements. The interval is
+  [81.00, 81.00]. <strong>Zero seconds wide.</strong></p>
+
+  <p>The gap never moved, so the gap was never what was being measured. What
+  moved is how easily a re-draw can shove the middle value across to the other
+  cluster. At 51 to 48 the median is balanced on a knife edge and one unlucky
+  bag tips it; at 70 to 29 it is not close, and all ten thousand imaginary
+  campaigns come back 81. A zero-width interval does not mean the runs were
+  identical. It means the median was never in doubt.</p>
+
+  <h4>What the interval cost, and what it did not</h4>
+
+  <p>Two very different kinds of expense go into that bracket, and keeping them
+  apart is the last piece.</p>
+
+  <p>The ninety-nine runs cost {{gpu_hours_a_n99}} GPU-hours on a rented card,
+  paid for in real money, and they alone set the width. The ten thousand
+  resamples cost nothing: a fraction of a second on a laptop, no network, no
+  GPU, and past a few thousand of them the answer stops moving in any digit
+  anybody publishes.</p>
+
+  <p>So the resampling adds no information. It reads back what the ninety-nine
+  runs already implied, to more decimal places than the ninety-nine runs
+  deserve. If a bracket is too wide to support the claim you want to make,
+  there is exactly one lever, and it is the expensive one.</p>
+
+  <h3>Act 2 &mdash; decided before, or decided after?</h3>
+
+  <p>Return to the first-touch run: {{first_touch_seconds}} seconds, twenty-odd
+  times its own arm's median, one observation out of {{runs_total}}. Excluding
+  it is obviously the right call. It is also, from the outside, completely
+  indistinguishable from the most common way a benchmark lies &mdash; run it,
+  dislike a number, find a reason the number does not count.</p>
+
+  <p>The defence is pre-registration &mdash; writing down what counts as a
+  result before looking at the data. This experiment has one, committed four
+  days ahead of the first run: every hypothesis, both contrasts, the exclusion
+  rules, the stopping rule, and the rule for picking which finding leads.</p>
+
+  <p>The rule that excludes that run was not in it.</p>
+
+  <p>It was committed roughly half an hour after the first window's data
+  landed, because that window contained a run large enough to make the pooled
+  chart unreadable. The artifact says so in its own write-up, in as many words:
+  that is a post-hoc analysis decision, and calling it anything else would be
+  the exact failure the whole thing was built to avoid.</p>
+
+  <p>Two things keep it from being a fudge, and both are worth stealing. First,
+  the criterion is mechanical rather than a judgement about that particular
+  run: a run is first-touch when it is the first ever seen on its host id,
+  derived from the file and applied backwards across all {{runs_total}} rows.
+  It excludes nothing for being large. Had the slowest run of the campaign been
+  a repeat-host run, it would still be in the chart. Second, the amendment is
+  dated in git, so the ordering is checkable rather than asserted.</p>
+
+  <div class="act-q">
+    <p><strong>Question two: was that decided before you looked?</strong>
+    Hardly any benchmark you are shown can answer it. One that can &mdash; and
+    that names the place where it failed to &mdash; is telling you something
+    the spotless ones structurally cannot.</p>
+  </div>
+
+  <h3>Act 3 &mdash; compared to what?</h3>
+
+  <p>{{median_t_total_C}} seconds is not fast. It is not slow either. It is not
+  anything, because fast is a comparison, and a comparison is only worth
+  reading when the two sides differ in exactly one way. That is what card 2 is
+  for: same image, same entrypoint, same engine flags, same model revision, one
+  swapped configuration object. Everything else is held down so that the
+  difference has only one place to come from.</p>
+
+  <figure>
+    {{chart:waterfall}}
+    <figcaption>Where the time goes in each arm, drawn as medians of the same
+    measured stages.</figcaption>
+  </figure>
+
+  <p>Two comparisons come out of that, and each is a contrast &mdash; the
+  difference between two arms, measured on the same quantity. A to B, which
+  adds weights already staged on the volume, is {{contrast_ab_total}} seconds
+  on total time. B to C, which adds the compile cache on top, is
+  {{contrast_bc_total}}.</p>
+
+  <p>Now the question that separates the people who compute from the people who
+  eyeball: <em>is the compile cache worth more than the staged weights?</em>
+  That is a difference between two differences, and the temptation is obvious.
+  The brackets are printed right there. Subtract the ends and be done.</p>
+
+  <p>On this data, that works. The honest figure, resampled across both
+  contrasts on the same runs at once, is {{difference_of_contrasts}} seconds
+  &mdash; and naive end-to-end subtraction lands within 0.04&nbsp;s of both
+  ends of it. The shortcut is right here. An explainer that showed you this
+  data while claiming the shortcut had failed would be lying to make a
+  point.</p>
+
+  <figure>
+    {{chart:shortcut}}
+    <figcaption>Top: this campaign, where naive subtraction and the computed
+    difference are indistinguishable at the resolution anyone reads. Bottom:
+    two contrasts that share a source of error, where the same arithmetic comes
+    out several times too wide.</figcaption>
+  </figure>
+
+  <p>The lower panel is what happens when the two estimates share a source of
+  error &mdash; the same host, the same window, the same noisy neighbour
+  pushing both measurements the same direction. That shared push cancels when
+  the difference is computed run by run on paired data, and does not cancel
+  when you subtract two summaries. The naive bracket comes out several times
+  too wide, which is not a harmless conservatism: it straddles zero and hides
+  an effect that is really there.</p>
+
+  <p>So the lesson is not &ldquo;never subtract endpoints.&rdquo; It is
+  narrower and much more useful: <strong>nothing visible in the two intervals
+  tells you which of those two panels you are in.</strong> The brackets look
+  the same in both. The correlation is not recoverable from the summaries, only
+  from the paired runs underneath them &mdash; which is why the difference is
+  computed rather than derived, and why an experiment that only publishes
+  summary intervals has quietly made this uncheckable.</p>
+
+  <div class="act-q">
+    <p><strong>Question three: compared to what, and where is the
+    interval?</strong> A speedup with no baseline is a press release. A
+    difference of two differences quoted without its own interval is arithmetic
+    somebody did in their head.</p>
+  </div>
+
+  <h3>Act 4 &mdash; what could this <em>not</em> tell you?</h3>
+
+  <p>Five hypotheses were registered before the campaign began. One of them was
+  about host placement: whether the machine you happen to land on drives the
+  tail harder than any cache does. It is a good hypothesis, and probably the
+  most commercially interesting of the five. This experiment cannot answer
+  it.</p>
+
+  <p>All {{runs_total}} runs landed on the same machine. {{hosts_observed}}
+  host, three hundred runs. RunPod kept re-allocating the box that already had
+  the image, and no endpoint setting changes that for a driver submitting one
+  job at a time.</p>
+
+  <figure>
+    {{chart:per_host}}
+    <figcaption>The figure the campaign owed, drawn from the data it actually
+    got.</figcaption>
+  </figure>
+
+  <p>Read what that chart does rather than what it shows. It could have been a
+  single bar drawn to scale, captioned &ldquo;median by host&rdquo; &mdash;
+  technically true, and it would have started travelling as evidence about host
+  variation the moment somebody screenshotted it away from its caption.
+  Instead it writes NOT ANSWERABLE across its own title, because a figure has
+  to survive being separated from the page it was born on.</p>
+
+  <p>There is a consolation, and it is stated as one rather than as a save:
+  because every triple ran on one host, host effects are held constant instead
+  of confounded, so the paired comparison in act 3 is cleanly supplied. The
+  design lost a hypothesis and got back a control it had not asked for. That
+  trade is still a loss, and the write-up reports it under a heading that says
+  so.</p>
+
+  <div class="act-q">
+    <p><strong>Question four: what did this fail to show?</strong> Almost
+    nothing you are handed answers it. Work that names its own dead hypothesis
+    is telling you the author went looking for the places it breaks &mdash;
+    which is the only evidence you will ever get that the numbers that
+    <em>did</em> survive were treated the same way.</p>
+  </div>
+
+  <h3>The card</h3>
+
+  <p>Four questions. They cost about ten seconds to ask, they work on a vendor
+  chart and on your own pull request, and the ones that go unanswered tell you
+  more than the ones that do.</p>
+
+  <div class="ask">
+    <h3>Four questions for any performance claim</h3>
+    <ol>
+      <li><strong>How many runs, and what was the spread?</strong>
+      <span>One run is an anecdote. A single number over a two-humped
+      distribution is a time that nothing actually took.</span></li>
+      <li><strong>Was that decided before you looked?</strong>
+      <span>Exclusions, metric, and headline all have to predate the data
+      &mdash; otherwise the data picked them.</span></li>
+      <li><strong>Compared to what, and where is the interval?</strong>
+      <span>Fast is a comparison against something that differed in one way.
+      A difference of two differences is computed, never eyeballed.</span></li>
+      <li><strong>What did this fail to show?</strong>
+      <span>A dead hypothesis, named out loud, is the rarest signal there
+      is.</span></li>
+    </ol>
+    <p class="ask-foot">An interval says how firmly the summary is pinned, not
+    where the runs landed. Those are different charts.</p>
+  </div>
+
+  <p>The experiment above is worth about what any single campaign is worth: one
+  provider, one GPU, one model, one region, one host. The seconds do not
+  transfer anywhere. The four questions do, and they are cheaper than renting
+  anything.</p>
+</section>
+
+<script>
+  // No scrollytelling library: this page is published as an Artifact, where a
+  // strict CSP blocks every external host. IntersectionObserver is enough.
+  // The band is the middle 10% of the viewport, so a beat lights when it is
+  // the thing being read, not when it first peeks in at the bottom.
+  (function () {
+    var spine = document.getElementById("spine");
+    var groups = document.querySelectorAll("#spine g");
+    var io = new IntersectionObserver(function (entries) {
+      for (var i = 0; i < entries.length; i++) {
+        if (!entries[i].isIntersecting) continue;
+        spine.classList.add("choreo");
+        groups.forEach(function (g) { g.classList.remove("lit"); });
+        entries[i].target.dataset.lights.split(",").forEach(function (id) {
+          var el = document.getElementById(id.trim());
+          if (el) el.classList.add("lit");
+        });
+      }
+    }, { rootMargin: "-45% 0px -45% 0px" });
+    document.querySelectorAll("[data-lights]").forEach(function (b) { io.observe(b); });
+  })();
+</script>
