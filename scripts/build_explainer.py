@@ -35,32 +35,40 @@ FIRST_TOUCH_THRESHOLD_S = 200.0
 
 _METADATA = re.compile(r"<metadata>.*?</metadata>", re.DOTALL)
 _SVG_ID = re.compile(r'\bid="([^"]+)"')
+# The three places an id is written or referenced. Rewriting only inside these
+# contexts keeps a stray match in ordinary text from being renamed.
+_ID_CONTEXT = re.compile(r'(\bid="|url\(#|xlink:href="#|\bhref="#)([^"()]+)("|\))')
 
 
 def _namespace_ids(svg: str, prefix: str) -> str:
-    """Prefix every element id in one chart's SVG, and every reference to it.
+    """Rename every element id in one chart's SVG, and every reference to it.
 
-    matplotlib names glyph definitions deterministically (`id="DejaVuSans-48"`),
-    so two charts inlined into the same document both declare them. A browser
-    resolves `xlink:href="#DejaVuSans-48"` to whichever came first, which
-    silently makes the second chart render the first chart's glyphs. The
-    outlines happen to be identical today, so it would look correct and be
-    wrong -- exactly the class of defect this page is about.
+    Two problems at once. matplotlib names glyph definitions deterministically
+    (`id="DejaVuSans-48"`), so two charts inlined into the same document both
+    declare them and a browser resolves every reference to whichever came
+    first -- the second chart would render the first chart's glyphs. And it
+    mints clip-path ids from a per-figure random hash, so the same data built
+    twice produced pages differing in thousands of characters.
 
-    Longest ids first: `#p123` must not be rewritten by a pass over `#p12`.
-
-    The prefix is an opaque counter, not the chart's name: naming it `ecdf-`
-    put the string "ecdf" into the markup, and the jargon gate -- correctly
-    case-insensitive -- then reported ECDF as an undefined term. A chart name
-    is allowed to be a word the page owes a definition for; an element id is
-    not the place to say it.
+    Numbering by order of first appearance fixes both. It cannot depend on the
+    random text (sorting on it just moves the randomness into the numbering,
+    which is the bug this replaced), and the document's structure is stable, so
+    the same data yields the same page byte for byte.
     """
-    ids = sorted(set(_SVG_ID.findall(svg)), key=len, reverse=True)
-    for raw in ids:
-        svg = svg.replace(f'id="{raw}"', f'id="{prefix}-{raw}"')
-        svg = svg.replace(f'#{raw}"', f'#{prefix}-{raw}"')
-        svg = svg.replace(f"url(#{raw})", f"url(#{prefix}-{raw})")
-    return svg
+    order: list[str] = []
+    seen: set[str] = set()
+    for match in _SVG_ID.finditer(svg):
+        raw = match.group(1)
+        if raw not in seen:
+            seen.add(raw)
+            order.append(raw)
+    mapping = {raw: f"{prefix}-{n}" for n, raw in enumerate(order)}
+
+    def rewrite(match: re.Match) -> str:
+        opener, raw, closer = match.group(1), match.group(2), match.group(3)
+        return f"{opener}{mapping.get(raw, raw)}{closer}"
+
+    return _ID_CONTEXT.sub(rewrite, svg)
 
 
 def _fmt(value) -> str:
