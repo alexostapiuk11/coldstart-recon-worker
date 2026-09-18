@@ -21,6 +21,12 @@ RUN pip install --no-cache-dir -r /opt/requirements.txt
 # lives outside worker/. Vendoring a copy into worker/ instead would put a
 # second, drifting copy of the pre-registered definitions in the tree.
 COPY coldstart /opt/coldstart
+# harness/ ships too: worker/handler.py imports harness.recorder once the stage
+# recorder moves there. A missing COPY is an ImportError on a paid GPU run and
+# nothing in the local loop reveals it, which is why the copy lands before the
+# move rather than with it. tests/test_harness_boundary.py asserts these COPY
+# lines cover everything the image actually imports.
+COPY harness /opt/harness
 COPY worker/recon_handler.py /opt/recon_handler.py
 COPY worker/probe.py /opt/probe.py
 COPY worker/handler.py /opt/handler.py

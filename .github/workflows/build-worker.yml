@@ -17,6 +17,9 @@ on:
       # stale image while the digest looked current -- including, once, the
       # pre-probe cache-observation fix the arm-state gate depends on.
       - "coldstart/**"
+      # Same reasoning as coldstart/** above: the image vendors this package
+      # too, so a change here changes the image.
+      - "harness/**"
       - ".github/workflows/build-worker.yml"
   workflow_dispatch:
 
