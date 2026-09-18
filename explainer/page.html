@@ -38,7 +38,24 @@
   }
   h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 1rem; }
   figure { margin: 2.5rem 0; }
-  figure svg { max-width: 100%; height: auto; }
+  figure svg { max-width: 100%; height: auto; display: block; }
+  /* The charts come from matplotlib, which bakes a white canvas and dark ink
+     into the SVG. On a light page that is seamless. On a dark one it reads as
+     an accidental bleed unless the figure claims it deliberately, so give it
+     a card: rounded, padded, clipped. Cheaper and more honest than pretending
+     a baked raster-era palette is theme-aware. */
+  @media (prefers-color-scheme: dark) {
+    figure:has(svg:not(#spine)) {
+      background: #fff;
+      border-radius: 10px;
+      padding: .6rem .4rem;
+      overflow: hidden;
+    }
+    /* The caption rides inside that card, so it needs the card's ink, not the
+       page's. Without this it stays dark-mode light-grey on white and is the
+       least readable text on the page. */
+    figure:has(svg:not(#spine)) figcaption { color: #3a3a3a; }
+  }
   figcaption { color: var(--ink-soft); font-size: .95rem; }
   pre { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; padding: 1rem; }
   /* The UA default link blue is near-unreadable on the dark page background,
