@@ -4,8 +4,17 @@
      is not readable in. The Artifact host supplies one too; this makes the
      fragment correct on its own. -->
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
 <style>
+  /* IBM Plex was drawn for technical documentation, which is what this is; it
+     carries the instrument vernacular of the subject without costume. Source
+     Serif 4 does the long-form reading -- seven thousand words is too many to
+     set in a UI sans. Every face has a real fallback stack: the CSP admits
+     Google Fonts and nothing else, so a blocked load must still land somewhere
+     deliberate. */
   :root {
+    /* Neutrals carry a slight cool bias toward the clock accents rather than
+       being pure greys, so the ground and the instruments belong together. */
     --ink: #1b1b1d;
     --ink-soft: #55565b;
     --rule: #d9d9de;
@@ -13,9 +22,22 @@
     --clk-a: #1f5fc4;
     --clk-b: #a8460b;
     --clk-c: #6d28a8;
+    /* Figure cards: transparent on a light ground, an explicit card on a dark
+       one. A token, not a rule inside a media block, so the component style is
+       written once and resolves in all three theme states. */
+    --fig-card: transparent;
+    --fig-ink: var(--ink-soft);
+    --fig-pad: 0;
+    --font-body: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
+  /* Three theme states, not two. The un-stamped default is the common case and
+     only prefers-color-scheme separates it; an explicit choice stamps the root
+     and must beat the OS in BOTH directions. Without the :not() guard, a viewer
+     who picks light on a dark OS gets a dark page. */
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
       --ink: #e8e8ea;
       --ink-soft: #a6a7ad;
       --rule: #34353a;
@@ -25,15 +47,37 @@
       --clk-a: #79b0f5;
       --clk-b: #f5a361;
       --clk-c: #c79af0;
+      --fig-card: #fff;
+      --fig-ink: #3a3a3a;
+      --fig-pad: .6rem .4rem;
     }
   }
+  :root[data-theme="dark"] {
+    --ink: #e8e8ea;
+    --ink-soft: #a6a7ad;
+    --rule: #34353a;
+    --page: #141416;
+    --clk-a: #79b0f5;
+    --clk-b: #f5a361;
+    --clk-c: #c79af0;
+    --fig-card: #fff;
+    --fig-ink: #3a3a3a;
+    --fig-pad: .6rem .4rem;
+  }
+  /* Sans for the structural voice -- headings, eyebrows, the card labels --
+     against the serif that does the reading. The split is the hierarchy; it
+     does not need a second colour or a rule to say the same thing again. */
+  h1, h2, h3, h4, .kicker, summary, figcaption, .act-q, dt {
+    font-family: var(--font-ui);
+  }
+  h1, h2, h3 { text-wrap: balance; }
   body {
     margin: 0 auto;
     padding: 2rem 1.25rem 6rem;
     max-width: 1180px;
     background: var(--page);
     color: var(--ink);
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: var(--font-body);
     line-height: 1.55;
   }
   h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 1rem; }
@@ -44,19 +88,18 @@
      an accidental bleed unless the figure claims it deliberately, so give it
      a card: rounded, padded, clipped. Cheaper and more honest than pretending
      a baked raster-era palette is theme-aware. */
-  @media (prefers-color-scheme: dark) {
-    figure:has(svg:not(#spine)) {
-      background: #fff;
-      border-radius: 10px;
-      padding: .6rem .4rem;
-      overflow: hidden;
-    }
-    /* The caption rides inside that card, so it needs the card's ink, not the
-       page's. Without this it stays dark-mode light-grey on white and is the
-       least readable text on the page. */
-    figure:has(svg:not(#spine)) figcaption { color: #3a3a3a; }
+  figure:has(svg:not(#spine)) {
+    background: var(--fig-card);
+    border-radius: 10px;
+    padding: var(--fig-pad);
+    overflow: hidden;
   }
+  /* The caption rides inside that card, so it takes the card's ink rather than
+     the page's -- otherwise on a dark theme it stays light grey on white and
+     becomes the least readable text on the page. */
+  figure:has(svg:not(#spine)) figcaption { color: var(--fig-ink); }
   figcaption { color: var(--ink-soft); font-size: .95rem; }
+  pre, code, kbd, samp { font-family: var(--font-mono); }
   pre { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; padding: 1rem; }
   /* The UA default link blue is near-unreadable on the dark page background,
      and there are few enough links here that an underline is signal enough. */
@@ -120,7 +163,7 @@
   .card h3 { margin-top: 0; margin-bottom: .15rem; }
   .card .where {
     color: var(--ink-soft); font-size: .82rem;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-family: var(--font-mono);
   }
   .card dl { margin: .9rem 0 0; }
   .card dt {
