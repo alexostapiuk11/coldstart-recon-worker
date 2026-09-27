@@ -51,10 +51,10 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts"))
 
-from a2_render_figures import UNTIL, _saturation_rps
+from a2_render_figures import UNTIL
 
 import autoscale.sweep as sweep_mod
-from autoscale.arrivals import SpikeShape, arrival_times
+from autoscale.arrivals import arrival_times
 from autoscale.coldstart_ecdf import load_measured_lags
 from autoscale.controller import Controller
 from autoscale.frontier import pareto_frontier
@@ -68,6 +68,7 @@ from autoscale.sweep import (
     SweepConfig,
     run_sweep,
 )
+from autoscale.traffic import SUSTAIN_SECONDS, saturation_rps, spike_shape
 
 TRACE_SEED = 12345  # one fixed trace per configuration, so policies are paired
 LAG_SEED = 999
@@ -89,12 +90,19 @@ def _probe(baseline_fraction, additional_replicas, max_replicas, lags, sustain):
     replication. Averaging over repetitions would only add the traffic noise
     that docs/findings-a2-degenerate-regime.md shows swamping the signal.
     """
-    saturation = _saturation_rps(CURVE)
-    baseline = baseline_fraction * saturation
-    peak = baseline + additional_replicas * saturation
-    shape = SpikeShape(
-        kind="step", baseline_rate=baseline, k=peak / baseline, ramp=0.0, sustain=sustain
+    shape = spike_shape(
+        CURVE,
+        "step",
+        sustain=sustain,
+        baseline_fraction=baseline_fraction,
+        additional_replicas=additional_replicas,
     )
+    saturation = saturation_rps(CURVE)
+    baseline = shape.baseline_rate
+    # Reported, not used to build anything: the probe prints and stores the
+    # peak it searched. Recomputing it as baseline x k can differ in the last
+    # bit, which would break byte parity for a label.
+    peak = baseline + additional_replicas * saturation
     arrivals = arrival_times(shape, until=UNTIL, rng=random.Random(TRACE_SEED))
     if not arrivals:
         return None
@@ -164,12 +172,19 @@ def _verify(baseline_fraction, additional_replicas, lags, sustain, reps, seeds):
     Comparing a three-point frontier against a nineteen-point one is not the
     comparison this artifact claims to make, however wide the resulting gap.
     """
-    saturation = _saturation_rps(CURVE)
-    baseline = baseline_fraction * saturation
-    peak = baseline + additional_replicas * saturation
-    shape = SpikeShape(
-        kind="step", baseline_rate=baseline, k=peak / baseline, ramp=0.0, sustain=sustain
+    shape = spike_shape(
+        CURVE,
+        "step",
+        sustain=sustain,
+        baseline_fraction=baseline_fraction,
+        additional_replicas=additional_replicas,
     )
+    saturation = saturation_rps(CURVE)
+    baseline = shape.baseline_rate
+    # Reported, not used to build anything: the probe prints and stores the
+    # peak it searched. Recomputing it as baseline x k can differ in the last
+    # bit, which would break byte parity for a label.
+    peak = baseline + additional_replicas * saturation
     sweep_mod.REPETITIONS = reps
 
     per_signal_counts = {s: [] for s in SIGNALS}
@@ -221,8 +236,8 @@ def main() -> None:
     args = ap.parse_args()
 
     lags = load_measured_lags(args.store)[args.arm]
-    sustain = 190.0  # pre-registered D, held fixed: it is measured (2 x p95 arm A)
-    saturation = _saturation_rps(CURVE)
+    sustain = SUSTAIN_SECONDS  # pre-registered D, held fixed: measured, 2 x p95 arm A
+    saturation = saturation_rps(CURVE)
     print(f"arm {args.arm}: saturation/replica={saturation:.1f} rps, sustain={sustain:g}s")
     print("PLACEHOLDER service curve. One fixed arrival trace per configuration.\n")
     print(

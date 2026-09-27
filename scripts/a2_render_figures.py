@@ -33,13 +33,17 @@ from autoscale.frontier import (
 )
 from autoscale.service import SERVICE_CURVE_PLACEHOLDER
 from autoscale.sweep import SweepConfig, run_sweep
+from autoscale.traffic import (
+    ADDITIONAL_REPLICAS_AT_PEAK,  # noqa: F401 -- tests read render.*; plan 2a Task 11
+    BASELINE_FRACTION_OF_SATURATION,  # noqa: F401 -- tests read render.*; plan 2a Task 11
+    RAMP_SECONDS,  # noqa: F401 -- tests read render.*; plan 2a Task 11
+    saturation_rps,
+    spike_shape,
+)
 
 SEED = 17
 UNTIL = 400.0
 SWEPT_LAGS = (20.0, 40.0, 60.0, 80.0, 120.0)
-BASELINE_FRACTION_OF_SATURATION = 0.70  # docs/experiment-a2.md, amended 2026-09-17
-ADDITIONAL_REPLICAS_AT_PEAK = 0.25  # docs/experiment-a2.md, amended 2026-09-17
-RAMP_SECONDS = 95.0  # docs/experiment-a2.md, "Traffic model": R = D / 2
 # 2000 draws is enough for 95% percentile endpoints (the 50th and 1950th
 # order statistics) without the bootstrap dominating a sweep that is
 # already minutes of CPU.
@@ -47,35 +51,24 @@ GAP_BOOTSTRAP_ITERATIONS = 2000
 
 
 def _saturation_rps(curve) -> float:
-    """Requests per second one replica sustains at its best operating point.
-
-    The pre-registration fixes the traffic model as a RULE, not as two numbers:
-    baseline is 40% of measured saturation and `k` is sized to require three
-    additional replicas at the measured service rate, with "the two absolute
-    rates computed from the service curve and committed before any policy sweep
-    runs". So they are derived here from whichever curve is in hand rather than
-    written as literals -- literals fixed against one curve silently stop
-    implementing the rule the moment the curve is replaced, which is precisely
-    what plan 2 is going to do. The plan's own draft of this script hardcoded
-    `baseline_rate=2.0, k=4.0`, roughly a sixth of what the rule gives against
-    the placeholder curve; at that load one replica absorbs the whole spike and
-    queue depth never crosses even its lowest threshold, so its entire frontier
-    was discarded as `no_scaling_action`.
-
-    Continuous batching makes throughput non-monotonic in concurrency once the
-    latency knee is passed, so this is a max over the measured points rather
-    than the value at the highest one.
-    """
-    return max(c / curve.latency_at(c) for c, _, _, _ in curve.points if c > 0)
+    """Shim for `autoscale.traffic.saturation_rps`. Deleted in plan 2a Task 11,
+    once parity with the old derivation has been proven through it."""
+    return saturation_rps(curve)
 
 
 def _preregistered_shape(curve, kind: str, ramp: float) -> SpikeShape:
-    saturation = _saturation_rps(curve)
-    baseline = BASELINE_FRACTION_OF_SATURATION * saturation
-    peak = baseline + ADDITIONAL_REPLICAS_AT_PEAK * saturation
-    return SpikeShape(
-        kind=kind, baseline_rate=baseline, k=peak / baseline, ramp=ramp, sustain=190.0
-    )
+    """Shim for `autoscale.traffic.spike_shape`. Deleted in plan 2a Task 11.
+
+    The `ramp` argument is no longer an input -- R = D/2 is derived -- but a
+    caller passing one that disagrees is told so rather than silently ignored.
+    """
+    shape = spike_shape(curve, kind)
+    if ramp != shape.ramp:
+        raise ValueError(
+            f"ramp={ramp!r} disagrees with the pre-registered R = D/2 = "
+            f"{shape.ramp!r} for kind={kind!r}; the ramp is derived, not chosen"
+        )
+    return shape
 
 
 def _report_discards(label: str, discards: list[str]) -> None:
@@ -112,7 +105,7 @@ def _sweep(label: str, shape: SpikeShape, lags: LagDistribution, arm: str):
 
 def _run_everything(store: str):
     """Every sweep the two figures need, as plain data ready to cache."""
-    shape = _preregistered_shape(SERVICE_CURVE_PLACEHOLDER, kind="step", ramp=0.0)
+    shape = spike_shape(SERVICE_CURVE_PLACEHOLDER, kind="step")
     print(
         f"step spike: baseline={shape.baseline_rate:.1f} rps, k={shape.k:.1f} "
         f"(peak {shape.baseline_rate * shape.k:.1f} rps), sustain={shape.sustain:g}s"
@@ -167,7 +160,7 @@ def _run_everything(store: str):
     # one. Until this existed the script swept only the step, and `h3_verdict`
     # was reachable from tests and from nowhere else: running the artifact
     # could not evaluate its own headline hypothesis.
-    ramp_shape = _preregistered_shape(SERVICE_CURVE_PLACEHOLDER, kind="ramp", ramp=RAMP_SECONDS)
+    ramp_shape = spike_shape(SERVICE_CURVE_PLACEHOLDER, kind="ramp")
     print(
         f"ramp spike: baseline={ramp_shape.baseline_rate:.1f} rps, k={ramp_shape.k:.1f}, "
         f"ramp={ramp_shape.ramp:g}s, sustain={ramp_shape.sustain:g}s"
