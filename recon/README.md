@@ -86,9 +86,16 @@ Needs an endpoint whose `workersMax` is at least 2. Artifact 1's
 `workersMax`: that is the cost ceiling, and it is the operator's to set. Rather
 than raise that endpoint's ceiling, which would leave it no longer matching
 artifact 1's records, provision a new one with `workersMin 0`, `workersMax` at
-least 2, `idleTimeout` 5 s, the same template, and a volume in a datacenter with
+least 2, `idleTimeout` 5 s, the same image, and a volume in a datacenter with
 verified 24GB stock. Then force `flashboot: false` with a follow-up
 `POST /endpoints/{id}/update` (create silently ignores `false`).
+
+**The template must override `dockerStartCmd` to
+`python3 -u /opt/recon_handler.py`.** The image's default `CMD` is the
+measurement handler (`worker/Dockerfile`), which requires `arm` and `run_id` in
+its input (`worker/handler.py`). The capture submits `{"recon": true}`, so on
+the default command every job fails with a `KeyError` — four paid cold starts
+that capture nothing about Q2.
 
 ```
 export RUNPOD_API_KEY=...

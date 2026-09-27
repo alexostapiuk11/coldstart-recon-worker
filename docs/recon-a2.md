@@ -191,7 +191,10 @@ as its records describe:
 1. Provision an endpoint with `max > 1`, `flashboot: false` (assert it after
    creation — it silently ignores `false` at create time), in a datacenter with
    verified 24GB stock. EU-RO-1 was the only one holding Medium stock in August;
-   re-check, since `recon/README.md` documents that availability flaps.
+   re-check, since `recon/README.md` documents that availability flaps. Its
+   template must start `/opt/recon_handler.py`, not the image's default
+   measurement handler, which rejects a recon job (`recon/README.md`, "Artifact
+   2 capture"). `recon/capture_a2.py` automates steps 2–4.
 2. Submit concurrently, enough to force a second worker.
 3. Record, per job: `workerId`, `delayTime`, `executionTime`, and the vLLM
    startup log. A second *distinct* `workerId` whose log shows a full S4
