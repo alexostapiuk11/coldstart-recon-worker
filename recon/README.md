@@ -81,8 +81,11 @@ any paid campaign run.
 
 ## Artifact 2 capture (spec §9 Q1/Q2)
 
-Needs a **new** endpoint — worker bounds and datacenter are fixed at creation,
-so artifact 1's `ka5mryakkxumew` cannot be repurposed. Provision one with
+Needs an endpoint whose `workersMax` is at least 2. Artifact 1's
+`ka5mryakkxumew` is provisioned max 1, and the capture never writes
+`workersMax`: that is the cost ceiling, and it is the operator's to set.
+Provision a new endpoint rather than raising that one's ceiling, so the endpoint
+artifact 1's records describe stays as recorded. Provision one with
 `workersMin 0`, `workersMax` at least 2, the same template and a volume in a
 datacenter with verified 24GB stock, then force `flashboot: false` with a
 follow-up `POST /endpoints/{id}/update` (it silently ignores `false` at create).
@@ -96,6 +99,8 @@ export RUNPOD_A2_ENDPOINT_ID=...    # NOT artifact 1's RUNPOD_ENDPOINT_ID
 .venv/bin/python recon/analyse_a2.py fixtures/a2_recon
 ```
 
-The full run pins `workersMax` workers for up to 10 minutes and runs four cold
-starts. Its cost is small against the spec §13 envelope, but it is real, and
-running it is the operator's decision. Record the answers in `docs/recon-a2.md`.
+The full run submits four jobs (two bursts of `WORKERS` = 2), pins `workersMin`
+at 2 for `SCALE_OBSERVE_SECONDS` (10 minutes), then watches for another 10
+minutes after setting it back to 0. Its cost is small against the spec §13
+envelope, but it is real, and running it is the operator's decision. Record the
+answers in `docs/recon-a2.md`.

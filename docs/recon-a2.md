@@ -184,9 +184,9 @@ overwritten.
 
 ## What it would take to close the gate
 
-One capture run, on a **new** endpoint — the datacenter and worker bounds are
-fixed at creation (`recon/README.md`), so this cannot be done by updating
-`ka5mryakkxumew`:
+One capture run, on an endpoint with `max > 1` — provisioned **new** rather
+than by raising `ka5mryakkxumew`'s ceiling, so that artifact 1's endpoint stays
+as its records describe:
 
 1. Provision an endpoint with `max > 1`, `flashboot: false` (assert it after
    creation — it silently ignores `false` at create time), in a datacenter with
