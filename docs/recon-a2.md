@@ -62,10 +62,29 @@ All three recon captures landed on **the same worker**:
 `fixtures/README.md` already states this ("all three runs landed on one worker").
 The spec's §1 table attributes artifact 1's single-host result to serial
 submission — *"artifact 1 submitted serially, so the platform never needed a
-second worker"* — which is true and is not the whole reason. **The endpoint caps
-at one worker.** Concurrency alone would not have produced a second; it would
-have produced a queue. Two independent causes, and only one of them is fixed by
-submitting concurrently.
+second worker"* — which is true and is not the whole reason. There are three
+causes, and the committed record documents all of them:
+
+1. **Serial submission.** One job in flight at a time.
+2. **The endpoint caps at one worker.** Concurrency alone would not have
+   produced a second; it would have produced a queue.
+3. **Host affinity.** `docs/experiment.md` (H4) records that with `idleTimeout`
+   at its 5 s minimum *"workers do terminate between runs, and RunPod still
+   re-allocates the same physical machine because it has the image cached. Across
+   27 runs of a discarded first window we observed 2 distinct hosts, one of them
+   serving 23 runs."* For the three recon captures specifically,
+   `fixtures/README.md` adds a fourth, narrower effect: they were submitted back
+   to back inside the idle window, so the *container* survived between jobs —
+   which is why runs 1 and 2 show a 0.3 s `torch.compile` against run 0's 39 s.
+
+The third is the one that matters for Q2. Raising the cap and submitting
+concurrently fixes causes 1 and 2, but host affinity means a driven scale-up may
+still land on a host that already holds the image — which is precisely the
+"warm-host restart" outcome §9 asks about. The capture protocol therefore has to
+separate three things a single `workerId` conflates: a surviving **container**
+(warm compile cache), a re-allocated **host** after termination (image cached,
+container cold), and a genuinely **new host** (image pull visible in
+`delayTime`).
 
 Answering Q2 needs both: an endpoint with `max > 1`, and concurrent submission.
 Neither exists in any committed capture.
@@ -125,9 +144,13 @@ assumption.
 ## A consequence for the replica model that is worth deciding before the sweep
 
 Arm C's KV cache is **20% larger** than arm A's, measured, in artifact 1's own
-data. The plausible mechanism is that arm C's warm `torch.compile` cache means
-compilation is not holding transient memory when vLLM profiles for KV
-allocation, leaving more behind.
+data. The mechanism is not merely plausible — `fixtures/README.md` shows it on
+a single worker. Between recon run 0 (cold `torch.compile`, 38.96 s) and runs 1–2
+(warm, 0.30 s and 0.29 s), peak activation during vLLM's memory profiling fell
+from 1.18 GiB to 0.19 GiB and the KV cache rose from 35,792 to 43,040 tokens —
+the same two values artifact 1's arms A/B and C report. A cold compile holds
+about a gigabyte of transient memory at the moment vLLM sizes the KV cache, and
+that gigabyte is what arm C gets back.
 
 Spec §6 models a replica as **absent or serving**, with the arms differing only
 in cold-start lag, justified by "per-arm steady-state medians differ by 0.6 ms".
