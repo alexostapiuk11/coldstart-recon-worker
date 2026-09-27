@@ -6,6 +6,8 @@
 
 **Architecture:** Modules move by `git mv` into `harness/`, one module (or one split) per task, with imports rewritten across `coldstart/`, `worker/`, `scripts/`, and `tests/` in the same commit. Four modules are *split* rather than moved, because they mix generic machinery with artifact-1 constants: `pipeline.py` (machinery vs. `REQUIRED_FOR_*` presets), `checks.py` (failure taxonomy vs. clock reconciliation), `preflight.py` (the check vs. the pinned endpoint), and `figures.py` (guard rails vs. the four charts). Three modules are *generalized* where an artifact-1 name is hardcoded in a way that would block reuse: `JsonlStore` takes a record class, `build_schedule` speaks conditions/blocks instead of arms/triples, and the grouping functions take an explicit key. Everything else moves verbatim — the YAGNI line is that a name is generalized only when it would otherwise make artifact 2 or 5 store the wrong thing or group by the wrong column.
 
+**Added 2026-09-26 by plan 2a:** `recon/analyse_a2.py` imports `coldstart.vllm_logs` and `coldstart.runpod_api`. Both move in this plan (Tasks 5 and 12), and the rewrite list above does not name `recon/`. Include it in those two tasks' import rewrites. `recon/capture.py` and `recon/capture_a2.py` import neither, by design.
+
 **The invariant that makes this safe:** `harness/` must never import `coldstart`. A test enforces the direction (Task 3), and every task ends with a parity gate that re-derives artifact 1's published numbers and re-renders its four figures.
 
 **Tech Stack:** Python 3.13 (stdlib only in the moved modules, plus `requests` for the RunPod client and `matplotlib` for figures), pytest, ruff.
