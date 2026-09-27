@@ -4,7 +4,7 @@
 
 **Goal:** Build, with no GPU and no spend, everything in spec §15's "plan 2" that does not depend on what reconnaissance finds: the Q1/Q2 capture tooling that *produces* those answers, the open-loop validation gate's arithmetic, figure 4, and a single home for the traffic model.
 
-**Architecture:** Three independent tracks in one plan. (1) **Recon** — `recon/capture_a2.py` drives a max>1 endpoint through a fixed protocol and saves every response verbatim; `recon/analyse_a2.py` tabulates the evidence and is proven against artifact 1's committed fixtures. (2) **Validation core** — `SimResult` starts keeping each request's arrival time, and `autoscale/validation.py` turns three real repeats of one arrival schedule into a tolerance band and a three-state verdict. (3) **Traffic consolidation** — four copies of the traffic-model derivation collapse into `autoscale/traffic.py`, gated on byte-identical shapes and diagnostic outputs, with the old code deleted last. Figure 4 is a new matplotlib chart in `autoscale/figures.py`: no encapsulation boundary is involved and no visible figure is removed — the existing two figures are re-rendered and compared byte-for-byte to prove they did not move.
+**Architecture:** Three independent tracks in one plan. (1) **Recon** — `recon/capture_a2.py` drives a max>1 endpoint through a fixed protocol and saves every response verbatim; `recon/analyse_a2.py` tabulates the evidence and is proven against artifact 1's committed fixtures. (2) **Validation core** — `SimResult` starts keeping each request's arrival time, `autoscale/validation_band.py` turns latency trajectories into a tolerance band and a three-state verdict with no import path to `coldstart` (artifact 4 imports it), and `autoscale/validation.py` is artifact 2's gate on top: its constants, its run record, and the replay into `run_fixed_capacity`. (3) **Traffic consolidation** — four copies of the traffic-model derivation collapse into `autoscale/traffic.py`, gated on byte-identical shapes and diagnostic outputs, with the old code deleted last. Figure 4 is a new matplotlib chart in `autoscale/figures.py`: no encapsulation boundary is involved and no visible figure is removed — the existing two figures are re-rendered and compared byte-for-byte to prove they did not move.
 
 **Tech Stack:** Python 3.13, pytest, matplotlib, `requests` (recon only), ruff. No new dependencies.
 
@@ -17,7 +17,8 @@ The artifact-2 simulator plan (`2026-09-04-artifact-2-simulator.md`) scoped itse
 **Non-goals — plan 2b, after reconnaissance has run:**
 
 - **Running the capture.** Task 3 builds it; running it rents GPUs. That spend is the operator's decision against the spec §13 budget, not a plan step.
-- **The service-curve sweep driver and the open-loop load driver.** How capacity is pinned is Q1; how the platform places concurrent work is Q2. Writing either now would encode a guess.
+- **The open-loop load driver and capacity pinning — plan 2b.** How capacity is pinned is Q1; how the platform routes concurrent work across pinned replicas is Q2. Writing either now would encode a guess.
+- **The in-container load-generation core, the `vllm serve` lifecycle and the single-engine service-curve sweep — a separate harness plan, not plan 2b.** Decided 2026-09-26 as decision 4 of `docs/superpowers/specs/2026-09-26-multi-model-serving-economics-scope.md` (§1d, §2): artifacts 4 and 5 need these without platform scaling, so they are built once, without waiting for artifact 2's reconnaissance. Plan 2b keeps only what is platform-specific. Artifact 2's service curve is measured with that shared sweep.
 - **The closed-loop gate.** Conditional on Q2 by spec §9's own go/no-go table.
 - **Figure 3 (validation overlay).** Its time axis and bin density come from the load driver's real schedule. Task 8 builds the arithmetic it will plot; the chart waits for a real run's shape.
 - **Intervals on figure 4.** Spec §11 requires intervals on every figure. `ServiceCurve` carries one value per concurrency level because the placeholder has no repeats; per-level dispersion is a sweep-format decision that plan 2b makes. Figure 4 here states N and labels itself NOT MEASURED, and plan 2b adds the band.
@@ -33,6 +34,7 @@ The artifact-2 simulator plan (`2026-09-04-artifact-2-simulator.md`) scoped itse
 
 - **Harness extraction** (`2026-09-03-harness-extraction.md`, Tasks 1–3 done). `recon/analyse_a2.py` (Task 4) imports `coldstart.vllm_logs` and `coldstart.runpod_api`, which that plan moves to `harness/`. Its import-rewrite list names `coldstart/`, `worker/`, `scripts/` and `tests/` — **not `recon/`**. Task 4 Step 6 adds a line to the harness plan so the rewrite covers this file.
 - `tests/test_a2_figures.py` already imports `MIN_PHONE_TEXT_PX` from `coldstart.analysis.figures`; Task 10 keeps that import, which the harness plan already tracks.
+- **Artifact 4 imports `autoscale/validation_band.py`** (Task 8) across a transitive import boundary against `coldstart` — requested by artifact 4's session and recorded as decision 12 of `docs/superpowers/specs/2026-09-26-multi-model-serving-economics-scope.md`. That module must never import `autoscale.sim`, `autoscale.coldstart_ecdf`, or anything that reaches them; a subprocess test checks `sys.modules` after importing it, because `tests/test_autoscale_boundary.py` sees direct imports only.
 
 ---
 
@@ -47,11 +49,12 @@ The artifact-2 simulator plan (`2026-09-04-artifact-2-simulator.md`) scoped itse
 | `autoscale/traffic.py` | **Create (Task 5).** The traffic model's one home: constants, `saturation_rps`, `spike_shape`. |
 | `scripts/a2_render_figures.py`, `scripts/a2_gap_noise_floor.py`, `scripts/a2_regime_probe.py` | **Modify (Task 6).** Call `autoscale.traffic` instead of deriving. Render keeps two delegating shims until Task 11. |
 | `autoscale/sim.py` | **Modify (Task 7).** `SimResult` keeps each request's arrival time, in both loops. |
-| `autoscale/validation.py` | **Create (Task 8).** Trajectory, tolerance band, three-state verdict. |
+| `autoscale/validation_band.py` | **Create (Task 8).** Trajectory, tolerance band, three-state verdict over plain sequences. No pre-registered values; no import path to `coldstart`. Shared with artifact 4. |
+| `autoscale/validation.py` | **Create (Task 8).** Artifact 2's gate: pre-registered constants, `RealRun`, the one-schedule checks, the replay into `run_fixed_capacity`. |
 | `docs/experiment-a2.md` | **Modify (Task 9).** Pre-register the validation gate's pass rule. **Sign-off required.** |
 | `autoscale/figures.py` | **Modify (Task 10).** `service_curve()` — figure 4 — and `censoring_onset()`. |
 | `tests/test_a2_end_to_end.py`, `scripts/a2_render_figures.py` | **Modify (Task 11).** Delete the last copies of the derivation, gated on parity. |
-| `tests/test_recon_capture_a2.py`, `tests/test_recon_analyse_a2.py`, `tests/test_traffic.py`, `tests/test_validation.py`, `tests/test_a2_figures.py`, `tests/test_sim.py` | Tests, per task. |
+| `tests/test_recon_capture_a2.py`, `tests/test_recon_analyse_a2.py`, `tests/test_traffic.py`, `tests/test_validation_band.py`, `tests/test_validation.py`, `tests/test_a2_figures.py`, `tests/test_sim.py` | Tests, per task. |
 
 ---
 
@@ -1622,47 +1625,76 @@ git commit -m "feat: SimResult keeps each request's arrival time, in both loops"
 
 ---
 
-## Task 8: The validation core
+## Task 8: The validation core — the shared arithmetic, then artifact 2's gate
+
+Two modules, split on the import boundary. `autoscale/validation_band.py` holds the band and verdict arithmetic over plain sequences and imports nothing that reaches `coldstart`. `autoscale/validation.py` is artifact 2's gate: its pre-registered constants, the `RealRun` record, and the replay into `run_fixed_capacity`.
+
+**Why the split.** `autoscale.sim` imports `autoscale.coldstart_ecdf`, which imports `coldstart` at load time — measured: `import autoscale.sim` puts `coldstart` in `sys.modules`, `import autoscale.stats` does not. Artifact 4's placement simulator needs the band and verdict and forbids `coldstart` transitively; it asked, and its scope record (`docs/superpowers/specs/2026-09-26-multi-model-serving-economics-scope.md` §1d, decision 12) depends on the answer. The arithmetic is artifact-agnostic anyway — nothing in it knows how a prediction was made or how a run was driven.
 
 **Files:**
+- Create: `autoscale/validation_band.py`
 - Create: `autoscale/validation.py`
-- Test: `tests/test_validation.py`
+- Test: `tests/test_validation_band.py`, `tests/test_validation.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing tests for the shared arithmetic**
 
-Create `tests/test_validation.py`:
+Create `tests/test_validation_band.py`:
 
 ```python
-import math
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
-from autoscale.service import SERVICE_CURVE_PLACEHOLDER
-from autoscale.validation import (
-    MIN_COMPARED_BINS,
-    BandBin,
-    Bin,
-    RealRun,
-    compare,
-    predicted_trajectory,
-    tolerance_band,
-    trajectory,
-    validate,
-)
+from autoscale.validation_band import BandBin, Bin, band, compare, trajectory
+
+REPO = Path(__file__).resolve().parents[1]
+# The comparison threshold these tests hold compare() to. Chosen here, not
+# imported from any artifact: each artifact pre-registers its own.
+MIN_COMPARED = 5
 
 
-# 20 requests per 10 s bin, spaced 0.5 s: the p50 sample floor exactly, and
-# sparse enough that one placeholder replica serves each alone at the
-# concurrency-1 latency of 0.30 s.
 def _schedule(bins):
+    """20 requests per 10 s bin, spaced 0.5 s: exactly the p50 sample floor."""
     return tuple(i * 0.5 for i in range(20 * bins))
 
 
-def _run(latency, bins=6, host="w1"):
+def _trajectory(latency, bins=6):
     schedule = _schedule(bins)
     lat = latency if isinstance(latency, list) else [latency] * len(schedule)
-    return RealRun(schedule=schedule, sent=schedule, latencies=tuple(lat),
-                   replicas=1, until=10.0 * bins, host_ids=(host,))
+    return trajectory(schedule, lat, until=10.0 * bins, bin_seconds=10.0)
+
+
+def _pred(p50s):
+    return [Bin(i * 10.0, (i + 1) * 10.0, 20, 20, 0, p, "ok") for i, p in enumerate(p50s)]
+
+
+def _band(n, lo=1.0, hi=1.2, status="ok"):
+    return [BandBin(i * 10.0, (i + 1) * 10.0, lo, hi, status) for i in range(n)]
+
+
+# ---- the boundary this module exists for -----------------------------------
+
+def test_importing_it_does_not_load_artifact_one():
+    """Artifact 4's placement simulator imports this module across a
+    TRANSITIVE boundary against `coldstart`. `autoscale.sim` reaches
+    `coldstart` through `autoscale.coldstart_ecdf`, so one convenience import
+    of it here would end the arrangement silently -- and
+    tests/test_autoscale_boundary.py checks direct imports only, so it would
+    not notice. A fresh interpreter, because this test process has already
+    loaded `coldstart` through other test modules."""
+    code = (
+        "import sys; import autoscale.validation_band; "
+        "print(sorted(m for m in sys.modules if m == 'coldstart' or m.startswith('coldstart.')))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], cwd=REPO, capture_output=True, text=True, check=True
+    )
+    assert out.stdout.strip() == "[]", (
+        f"importing autoscale.validation_band loads {out.stdout.strip()}; artifact 4 "
+        "imports this module precisely because it must not pull in artifact 1's package"
+    )
 
 
 # ---- trajectory -------------------------------------------------------------
@@ -1697,7 +1729,346 @@ def test_an_arrival_at_the_window_edge_lands_in_the_last_bin():
     assert bins[-1].requests == 1
 
 
-# ---- prediction -------------------------------------------------------------
+def test_the_bin_width_has_no_default():
+    """Each artifact pre-registers its own. A default here would let one
+    artifact silently run on another's."""
+    with pytest.raises(TypeError):
+        trajectory([1.0], [1.0], until=20.0)
+
+
+# ---- band -------------------------------------------------------------------
+
+def test_the_band_is_the_spread_of_the_repeats():
+    b = band([_trajectory(1.0), _trajectory(1.2), _trajectory(1.1)], min_repeats=3)
+    assert all(x.status == "ok" for x in b)
+    assert (b[0].lo, b[0].hi) == pytest.approx((1.0, 1.2))
+
+
+def test_fewer_repeats_than_required_is_refused():
+    with pytest.raises(ValueError, match="at least 3"):
+        band([_trajectory(1.0), _trajectory(1.1)], min_repeats=3)
+
+
+def test_a_band_of_one_run_is_refused_whatever_the_caller_asks_for():
+    """One run has zero spread, so the band would hold a model to that run's
+    noise exactly."""
+    with pytest.raises(ValueError, match="at least two"):
+        band([_trajectory(1.0)], min_repeats=1)
+
+
+def test_repeats_binned_differently_are_refused():
+    with pytest.raises(ValueError, match="edges"):
+        band([_trajectory(1.0), _trajectory(1.0, bins=5), _trajectory(1.0)], min_repeats=3)
+
+
+def test_a_bin_the_system_itself_disagrees_about_is_unstable():
+    lat = [1.0] * 120
+    lat[3] = None
+    b = band([_trajectory(1.0), _trajectory(1.1), _trajectory(lat)], min_repeats=3)
+    assert b[0].status == "unstable"
+
+
+# ---- compare ----------------------------------------------------------------
+
+def test_every_bin_inside_the_band_passes():
+    v = compare(_pred([1.1] * 6), _band(6), min_compared_bins=MIN_COMPARED)
+    assert v.outcome == "passed" and v.compared == 6 and v.max_miss_seconds == 0.0
+
+
+def test_a_miss_is_reported_with_its_magnitude():
+    v = compare(_pred([1.1] * 5 + [1.5]), _band(6), min_compared_bins=MIN_COMPARED)
+    assert v.outcome == "failed"
+    assert v.max_miss_seconds == pytest.approx(0.3)
+    assert v.bins[-1].verdict == "outside"
+
+
+def test_reality_backlogged_while_the_model_kept_up_is_a_miss():
+    """The flattering direction: the model says the fleet coped and reality
+    did not. Excluding the bin because reality is censored would pass exactly
+    the failure the gate exists to catch."""
+    b = _band(5) + [BandBin(50.0, 60.0, None, None, "censored")]
+    v = compare(_pred([1.1] * 6), b, min_compared_bins=MIN_COMPARED)
+    assert v.outcome == "failed"
+    assert v.bins[-1].verdict == "censoring_disagreement"
+    assert v.max_miss_seconds == float("inf")
+
+
+def test_both_backlogged_in_the_same_bin_agree():
+    pred = _pred([1.1] * 5) + [Bin(50.0, 60.0, 20, 15, 5, None, "censored")]
+    b = _band(5) + [BandBin(50.0, 60.0, None, None, "censored")]
+    assert compare(pred, b, min_compared_bins=MIN_COMPARED).outcome == "passed"
+
+
+def test_too_few_comparable_bins_is_not_evaluable_rather_than_a_pass():
+    """Zero misses over too few compared bins is not agreement."""
+    b = _band(MIN_COMPARED - 1) + [
+        BandBin((MIN_COMPARED - 1) * 10.0, MIN_COMPARED * 10.0, None, None, "unstable")
+    ]
+    v = compare(_pred([1.1] * MIN_COMPARED), b, min_compared_bins=MIN_COMPARED)
+    assert v.outcome == "not_evaluable"
+
+
+def test_a_gate_that_requires_no_evidence_is_refused():
+    with pytest.raises(ValueError, match="min_compared_bins"):
+        compare(_pred([1.1] * 6), _band(6), min_compared_bins=0)
+
+
+def test_mismatched_bin_edges_are_refused():
+    with pytest.raises(ValueError, match="edges"):
+        compare(_pred([1.1] * 6), _band(5), min_compared_bins=MIN_COMPARED)
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_validation_band.py -q`
+Expected: `ModuleNotFoundError: No module named 'autoscale.validation_band'`.
+
+- [ ] **Step 3: Write the shared arithmetic**
+
+Create `autoscale/validation_band.py`:
+
+```python
+"""Replay-validation arithmetic: latency trajectories, a tolerance band from
+real repeats, and a three-state verdict. Artifact-agnostic, and free of
+artifact 1.
+
+It knows nothing about how a prediction was produced or how a real run was
+driven -- callers hand it arrival times and latencies. And it imports nothing
+that reaches `coldstart`: artifact 4's placement simulator imports it across a
+transitive boundary against artifact 1's package, and gets the band and verdict
+without artifact 2's even-balancing replay. `autoscale.validation` is artifact
+2's gate built on top: its pre-registered constants, its run record, and the
+replay into `run_fixed_capacity`. tests/test_validation_band.py checks the
+boundary in a fresh interpreter.
+
+No pre-registered value lives here. Bin width, required repeats and the minimum
+number of comparable bins are required keywords, because each artifact
+pre-registers its own and a default would let one silently inherit another's.
+
+Three decisions, each with its rejected alternative:
+
+- **The per-bin statistic is the p50, not the p99.** A 10 s bin holds a few
+  hundred requests at the rates these artifacts drive, and the p99's sample
+  floor is 500 (`autoscale.stats.MIN_SAMPLES`). A p99 trajectory would be all
+  "thin".
+- **A bin with any unfinished request is censored**, never summarised. The
+  median of the requests that finished is biased low by exactly the slow ones
+  missing. A censored bin is compared by WHETHER both sides backlogged: reality
+  backlogged and the model did not is a miss -- the flattering one -- not a bin
+  excluded for lack of a number.
+- **The verdict has three states.** Zero misses over too few compared bins is
+  not agreement, so fewer than `min_compared_bins` comparable bins is
+  "not_evaluable", as `frontier.h3_verdict` treats a gap it cannot assess.
+"""
+
+import math
+from collections.abc import Sequence
+from dataclasses import dataclass
+
+from autoscale.stats import MIN_SAMPLES, percentiles
+
+__all__ = ["BandBin", "Bin", "BinVerdict", "Validation", "band", "compare", "trajectory"]
+
+
+@dataclass(frozen=True)
+class Bin:
+    start: float
+    end: float
+    requests: int
+    completed: int
+    unfinished: int
+    p50: float | None
+    status: str  # "ok" | "censored" | "thin" | "empty"
+
+
+@dataclass(frozen=True)
+class BandBin:
+    start: float
+    end: float
+    lo: float | None
+    hi: float | None
+    status: str  # "ok" | "censored" | "unstable" | "insufficient"
+
+
+@dataclass(frozen=True)
+class BinVerdict:
+    start: float
+    end: float
+    verdict: str
+    miss_seconds: float
+
+
+@dataclass(frozen=True)
+class Validation:
+    bins: tuple[BinVerdict, ...]
+    compared: int
+    agreeing: int
+    outcome: str  # "passed" | "failed" | "not_evaluable"
+    detail: str
+    max_miss_seconds: float
+
+
+def trajectory(arrivals, latencies, *, until: float, bin_seconds: float) -> list[Bin]:
+    """Per-bin p50 of latency, keyed by the arrival times the caller passes,
+    over [0, until). `latencies[i]` is None for a request that had not
+    completed when the window closed."""
+    arrivals, latencies = list(arrivals), list(latencies)
+    if len(arrivals) != len(latencies):
+        raise ValueError("arrivals and latencies must be the same length")
+    if not math.isfinite(bin_seconds) or bin_seconds <= 0:
+        raise ValueError(f"bin_seconds must be finite and positive, got {bin_seconds!r}")
+    if not math.isfinite(until) or until <= 0:
+        raise ValueError(f"until must be finite and positive, got {until!r}")
+    n_bins = math.ceil(until / bin_seconds)
+    done: list[list[float]] = [[] for _ in range(n_bins)]
+    open_: list[int] = [0] * n_bins
+    for t, lat in zip(arrivals, latencies, strict=True):
+        # An arrival exactly at `until` belongs to the last bin, not to a bin
+        # past the window that nothing else would ever report.
+        i = min(int(t // bin_seconds), n_bins - 1)
+        if lat is None:
+            open_[i] += 1
+        else:
+            done[i].append(lat)
+    out = []
+    for i in range(n_bins):
+        completed, unfinished = len(done[i]), open_[i]
+        start, end = i * bin_seconds, min((i + 1) * bin_seconds, until)
+        if completed + unfinished == 0:
+            status, p50 = "empty", None
+        elif unfinished:
+            status, p50 = "censored", None
+        elif completed < MIN_SAMPLES["p50"]:
+            status, p50 = "thin", None
+        else:
+            status, p50 = "ok", percentiles(done[i], want=("p50",))["p50"]
+        out.append(Bin(start, end, completed + unfinished, completed, unfinished, p50, status))
+    return out
+
+
+def band(trajectories: Sequence[Sequence[Bin]], *, min_repeats: int) -> list[BandBin]:
+    """Per bin, the min and max p50 across real repeats of ONE schedule.
+
+    Whether the repeats really replayed one schedule is the caller's to check
+    -- it is a property of how the runs were driven, which this module does
+    not see. What it does check: enough repeats, and identical binning.
+    """
+    if min_repeats < 2:
+        raise ValueError(
+            f"min_repeats={min_repeats}; a band needs at least two runs, because "
+            "one run has zero spread and would hold a model to that run's noise"
+        )
+    runs = [list(t) for t in trajectories]
+    if len(runs) < min_repeats:
+        raise ValueError(
+            f"{len(runs)} repeats; the band needs at least {min_repeats}. Fewer makes "
+            "it the spread of too few numbers to say anything about reproducibility"
+        )
+    edges = [(b.start, b.end) for b in runs[0]]
+    if any([(b.start, b.end) for b in run] != edges for run in runs[1:]):
+        raise ValueError("repeats were binned differently; their bin edges disagree")
+    out = []
+    for column in zip(*runs, strict=True):
+        statuses = {b.status for b in column}
+        start, end = column[0].start, column[0].end
+        if statuses == {"ok"}:
+            values = [b.p50 for b in column]
+            out.append(BandBin(start, end, min(values), max(values), "ok"))
+        elif statuses == {"censored"}:
+            out.append(BandBin(start, end, None, None, "censored"))
+        elif "censored" in statuses:
+            # The real system backlogged on some repeats and not others: it
+            # disagrees with itself about whether it kept up, so there is no
+            # band a model could be held to.
+            out.append(BandBin(start, end, None, None, "unstable"))
+        else:
+            out.append(BandBin(start, end, None, None, "insufficient"))
+    return out
+
+
+def compare(predicted: Sequence[Bin], band_bins: Sequence[BandBin], *,
+            min_compared_bins: int) -> Validation:
+    if min_compared_bins < 1:
+        raise ValueError(
+            f"min_compared_bins={min_compared_bins}; a gate that requires no "
+            "comparable bins passes on no evidence at all"
+        )
+    predicted, band_bins = list(predicted), list(band_bins)
+    if len(predicted) != len(band_bins) or any(
+        (p.start, p.end) != (b.start, b.end) for p, b in zip(predicted, band_bins, strict=False)
+    ):
+        raise ValueError("predicted and band bin edges differ; they were binned differently")
+    verdicts = []
+    for p, b in zip(predicted, band_bins, strict=True):
+        if b.status in ("unstable", "insufficient"):
+            verdicts.append(BinVerdict(b.start, b.end, f"excluded_{b.status}", 0.0))
+        elif b.status == "censored" or p.status == "censored":
+            if b.status == p.status == "censored":
+                verdicts.append(BinVerdict(b.start, b.end, "agree_censored", 0.0))
+            else:
+                # One side kept up and the other did not. A censored latency
+                # is only bounded below, so the miss has no finite magnitude
+                # and is reported as unbounded rather than as zero.
+                verdicts.append(BinVerdict(b.start, b.end, "censoring_disagreement", math.inf))
+        elif p.status != "ok":
+            verdicts.append(BinVerdict(b.start, b.end, "excluded_insufficient", 0.0))
+        elif b.lo <= p.p50 <= b.hi:
+            verdicts.append(BinVerdict(b.start, b.end, "inside", 0.0))
+        else:
+            miss = b.lo - p.p50 if p.p50 < b.lo else p.p50 - b.hi
+            verdicts.append(BinVerdict(b.start, b.end, "outside", miss))
+
+    judged = [v for v in verdicts if not v.verdict.startswith("excluded")]
+    agreeing = sum(1 for v in judged if v.verdict in ("inside", "agree_censored"))
+    max_miss = max((v.miss_seconds for v in judged), default=0.0)
+    if len(judged) < min_compared_bins:
+        outcome = "not_evaluable"
+        detail = (f"{len(judged)} comparable bins, below the {min_compared_bins} required; "
+                  "zero misses over too few bins is not agreement")
+    elif agreeing == len(judged):
+        outcome, detail = "passed", f"all {len(judged)} comparable bins agree"
+    else:
+        outcome = "failed"
+        detail = (f"{len(judged) - agreeing} of {len(judged)} bins disagree; "
+                  f"largest miss {max_miss:.3g} s")
+    return Validation(tuple(verdicts), len(judged), agreeing, outcome, detail, max_miss)
+```
+
+- [ ] **Step 4: Run the shared tests, and prove the boundary test bites**
+
+Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_validation_band.py -q && .venv/bin/ruff check autoscale/validation_band.py tests/test_validation_band.py`
+Expected: all pass, `All checks passed!`.
+
+Then add `import autoscale.sim  # noqa: F401` as the last import in `autoscale/validation_band.py` and rerun `-k does_not_load_artifact_one`. Expected: **FAIL**, naming the `coldstart` modules it loads. Remove the line and rerun: pass. A boundary guard never seen failing is not known to guard anything.
+
+- [ ] **Step 5: Write the failing tests for artifact 2's gate**
+
+Create `tests/test_validation.py`:
+
+```python
+"""Artifact 2's gate: its run record, the replay into the simulator, and its
+pre-registered constants. The band and verdict arithmetic is tested in
+tests/test_validation_band.py."""
+
+import pytest
+
+from autoscale.service import SERVICE_CURVE_PLACEHOLDER
+from autoscale.validation import RealRun, predicted_trajectory, tolerance_band, validate
+
+
+# 20 requests per 10 s bin, spaced 0.5 s: the p50 sample floor exactly, and
+# sparse enough that one placeholder replica serves each alone at the
+# concurrency-1 latency of 0.30 s.
+def _schedule(bins):
+    return tuple(i * 0.5 for i in range(20 * bins))
+
+
+def _run(latency, bins=6, host="w1"):
+    schedule = _schedule(bins)
+    lat = latency if isinstance(latency, list) else [latency] * len(schedule)
+    return RealRun(schedule=schedule, sent=schedule, latencies=tuple(lat),
+                   replicas=1, until=10.0 * bins, host_ids=(host,))
+
 
 def test_the_prediction_replays_the_schedule_through_the_simulator():
     bins = predicted_trajectory(_schedule(2), replicas=1, curve=SERVICE_CURVE_PLACEHOLDER,
@@ -1705,11 +2076,8 @@ def test_the_prediction_replays_the_schedule_through_the_simulator():
     assert [b.p50 for b in bins] == pytest.approx([0.30, 0.30])
 
 
-# ---- tolerance band ---------------------------------------------------------
-
-def test_the_band_is_the_spread_of_the_real_repeats():
+def test_the_band_comes_from_the_real_repeats():
     band = tolerance_band([_run(1.0), _run(1.2), _run(1.1)], bin_seconds=10.0)
-    assert all(b.status == "ok" for b in band)
     assert (band[0].lo, band[0].hi) == pytest.approx((1.0, 1.2))
 
 
@@ -1721,85 +2089,20 @@ def test_fewer_than_three_repeats_is_refused():
 def test_repeats_of_different_schedules_are_refused():
     """The band is the system's own reproducibility on ONE trace. Repeats of
     different traces fold traffic variance into it and widen it for free."""
-    other = RealRun(schedule=_schedule(6)[1:] + (59.9,), sent=_schedule(6)[1:] + (59.9,),
-                    latencies=(1.0,) * 120, replicas=1, until=60.0, host_ids=("w1",))
+    shifted = _schedule(6)[1:] + (59.9,)
+    other = RealRun(schedule=shifted, sent=shifted, latencies=(1.0,) * 120,
+                    replicas=1, until=60.0, host_ids=("w1",))
     with pytest.raises(ValueError, match="schedule"):
         tolerance_band([_run(1.0), _run(1.1), other], bin_seconds=10.0)
 
 
 def test_a_run_that_did_not_hold_the_schedule_is_refused():
     schedule = _schedule(6)
-    late = tuple(t + 2.0 for t in schedule)
-    drifted = RealRun(schedule=schedule, sent=late, latencies=(1.0,) * 120,
-                      replicas=1, until=60.0, host_ids=("w1",))
+    drifted = RealRun(schedule=schedule, sent=tuple(t + 2.0 for t in schedule),
+                      latencies=(1.0,) * 120, replicas=1, until=60.0, host_ids=("w1",))
     with pytest.raises(ValueError, match="jitter"):
         tolerance_band([_run(1.0), _run(1.1), drifted], bin_seconds=10.0)
 
-
-def test_a_bin_the_system_itself_disagrees_about_is_unstable():
-    lat = [1.0] * 120
-    lat[3] = None
-    band = tolerance_band([_run(1.0), _run(1.1), _run(lat)], bin_seconds=10.0)
-    assert band[0].status == "unstable"
-
-
-# ---- compare ----------------------------------------------------------------
-
-def _pred(p50s):
-    return [Bin(i * 10.0, (i + 1) * 10.0, 20, 20, 0, p, "ok") for i, p in enumerate(p50s)]
-
-
-def _band(n, lo=1.0, hi=1.2, status="ok"):
-    return [BandBin(i * 10.0, (i + 1) * 10.0, lo, hi, status) for i in range(n)]
-
-
-def test_every_bin_inside_the_band_passes():
-    v = compare(_pred([1.1] * 6), _band(6))
-    assert v.outcome == "passed" and v.compared == 6 and v.max_miss_seconds == 0.0
-
-
-def test_a_miss_is_reported_with_its_magnitude():
-    """Spec §10: misses are reported with magnitude."""
-    v = compare(_pred([1.1] * 5 + [1.5]), _band(6))
-    assert v.outcome == "failed"
-    assert v.max_miss_seconds == pytest.approx(0.3)
-    assert [b.verdict for b in v.bins][-1] == "outside"
-
-
-def test_reality_backlogged_while_the_model_kept_up_is_a_miss():
-    """The flattering direction: the simulator says the fleet coped and the
-    real system did not. Excluding the bin because reality is censored would
-    pass exactly the failure the gate exists to catch."""
-    band = _band(5) + [BandBin(50.0, 60.0, None, None, "censored")]
-    v = compare(_pred([1.1] * 6), band)
-    assert v.outcome == "failed"
-    assert v.bins[-1].verdict == "censoring_disagreement"
-    assert math.isinf(v.max_miss_seconds)
-
-
-def test_both_backlogged_in_the_same_bin_agree():
-    pred = _pred([1.1] * 5) + [Bin(50.0, 60.0, 20, 15, 5, None, "censored")]
-    band = _band(5) + [BandBin(50.0, 60.0, None, None, "censored")]
-    assert compare(pred, band).outcome == "passed"
-
-
-def test_too_few_comparable_bins_is_not_evaluable_rather_than_a_pass():
-    """Zero misses over zero compared bins is not agreement. A gate that passes
-    when it compared nothing certifies the model on no evidence."""
-    band = _band(MIN_COMPARED_BINS - 1) + [
-        BandBin((MIN_COMPARED_BINS - 1) * 10.0, MIN_COMPARED_BINS * 10.0, None, None, "unstable")
-    ]
-    pred = _pred([1.1] * MIN_COMPARED_BINS)
-    v = compare(pred, band)
-    assert v.outcome == "not_evaluable"
-
-
-def test_mismatched_bin_edges_are_refused():
-    with pytest.raises(ValueError, match="edges"):
-        compare(_pred([1.1] * 6), _band(5))
-
-
-# ---- end to end --------------------------------------------------------------
 
 def test_real_runs_that_bracket_the_model_pass():
     runs = [_run(0.29), _run(0.30), _run(0.31)]
@@ -1807,13 +2110,10 @@ def test_real_runs_that_bracket_the_model_pass():
 
 
 def test_real_runs_far_from_the_model_fail_with_the_distance():
-    runs = [_run(1.0), _run(1.1), _run(1.2)]
-    v = validate(runs, SERVICE_CURVE_PLACEHOLDER, bin_seconds=10.0)
+    v = validate([_run(1.0), _run(1.1), _run(1.2)], SERVICE_CURVE_PLACEHOLDER, bin_seconds=10.0)
     assert v.outcome == "failed"
     assert v.max_miss_seconds == pytest.approx(0.70)
 
-
-# ---- RealRun ----------------------------------------------------------------
 
 @pytest.mark.parametrize("override, match", [
     ({"sent": (0.0,)}, "length"),
@@ -1829,49 +2129,38 @@ def test_a_malformed_real_run_is_refused(override, match):
         RealRun(**{**base, **override})
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [ ] **Step 6: Run to verify failure**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_validation.py -q`
 Expected: `ModuleNotFoundError: No module named 'autoscale.validation'`.
 
-- [ ] **Step 3: Write the module**
+- [ ] **Step 7: Write artifact 2's gate**
 
 Create `autoscale/validation.py`:
 
 ```python
-"""The open-loop validation gate's arithmetic (spec §10), GPU-free.
+"""Artifact 2's open-loop validation gate (spec §10), GPU-free.
 
-The gate: pin capacity, drive a real transient load from a fixed arrival
-SCHEDULE, replay that same schedule into `run_fixed_capacity`, and compare the
-predicted latency trajectory against what happened. Three real repeats of the
-same schedule set the tolerance band -- "a model cannot be required to be more
-reproducible than the system it models". This module is everything in that
-sentence except the load driver, which plan 2b writes once reconnaissance says
-how the platform pins capacity.
+Pin capacity, drive a real transient load from a fixed arrival SCHEDULE,
+replay that same schedule into `run_fixed_capacity`, and compare the predicted
+latency trajectory against what happened. Three real repeats of the schedule
+set the tolerance band -- "a model cannot be required to be more reproducible
+than the system it models". The load driver is plan 2b's.
 
-Four decisions, each with its rejected alternative:
+This module holds what is artifact 2's: the pre-registered constants, the
+`RealRun` record, the checks that the repeats really replayed one schedule, and
+the replay into the simulator. The band and verdict arithmetic is
+`autoscale.validation_band`, kept separate because `autoscale.sim` -- imported
+here -- pulls in `coldstart`, and artifact 4 needs that arithmetic without it.
 
-- **Bins are keyed by SCHEDULED arrival time**, not observed send time. Every
-  repeat and the prediction then place exactly the same requests in exactly
-  the same bins; binning by send time would let driver jitter move requests
-  across a boundary and manufacture differences no system produced. Jitter is
-  bounded instead (`MAX_SEND_JITTER_SECONDS`), and a run that exceeds it is
-  refused -- it replayed a different trace, so it tests nothing.
-- **The per-bin statistic is the p50, not the p99.** A 10 s bin holds a few
-  hundred requests at the traffic model's rates, and the p99's sample floor is
-  500 (`autoscale.stats.MIN_SAMPLES`). A p99 trajectory would be all "thin".
-- **A bin with any unfinished request is censored**, never summarised. The
-  median of the requests that finished is biased low by exactly the slow ones
-  that are missing. A censored bin is compared by WHETHER both sides
-  backlogged: if reality backlogged and the model did not, that is a miss --
-  the flattering one -- rather than a bin excluded for lack of a number.
-- **The verdict has three states.** Zero misses over zero compared bins is not
-  agreement, so fewer than `MIN_COMPARED_BINS` comparable bins is
-  "not_evaluable", as `frontier.h3_verdict` treats a gap it cannot assess.
+Bins are keyed by SCHEDULED arrival time, not observed send time: every repeat
+and the prediction then place exactly the same requests in the same bins, and
+driver jitter cannot move a request across a boundary and manufacture a
+difference no system produced. Jitter is bounded instead, and a run exceeding
+the bound is refused -- it replayed a different trace, so it tests nothing.
 
-The constants below are proposals until docs/experiment-a2.md pre-registers
-them (plan 2a Task 9). Changing one after the first real validation run is an
-amendment, not an edit.
+The constants are fixed by docs/experiment-a2.md ("Validation gate — pass
+rule"). Changing one after the first real validation run is an amendment.
 """
 
 import math
@@ -1880,22 +2169,16 @@ from dataclasses import dataclass
 
 from autoscale.service import ServiceCurve
 from autoscale.sim import run_fixed_capacity
-from autoscale.stats import MIN_SAMPLES, percentiles
+from autoscale.validation_band import BandBin, Bin, Validation, band, compare, trajectory
 
 __all__ = [
     "BIN_SECONDS",
     "MAX_SEND_JITTER_SECONDS",
     "MIN_COMPARED_BINS",
     "MIN_REPEATS",
-    "BandBin",
-    "Bin",
-    "BinVerdict",
     "RealRun",
-    "Validation",
-    "compare",
     "predicted_trajectory",
     "tolerance_band",
-    "trajectory",
     "validate",
 ]
 
@@ -1965,96 +2248,20 @@ class RealRun:
         return max(abs(s - t) for s, t in zip(self.sent, self.schedule, strict=True))
 
 
-@dataclass(frozen=True)
-class Bin:
-    start: float
-    end: float
-    requests: int
-    completed: int
-    unfinished: int
-    p50: float | None
-    status: str  # "ok" | "censored" | "thin" | "empty"
-
-
-@dataclass(frozen=True)
-class BandBin:
-    start: float
-    end: float
-    lo: float | None
-    hi: float | None
-    status: str  # "ok" | "censored" | "unstable" | "insufficient"
-
-
-@dataclass(frozen=True)
-class BinVerdict:
-    start: float
-    end: float
-    verdict: str
-    miss_seconds: float
-
-
-@dataclass(frozen=True)
-class Validation:
-    bins: tuple[BinVerdict, ...]
-    compared: int
-    agreeing: int
-    outcome: str  # "passed" | "failed" | "not_evaluable"
-    detail: str
-    max_miss_seconds: float
-
-
-def trajectory(arrivals, latencies, until: float, bin_seconds: float = BIN_SECONDS) -> list[Bin]:
-    """Per-bin p50 of latency, keyed by arrival time over [0, until)."""
-    arrivals, latencies = list(arrivals), list(latencies)
-    if len(arrivals) != len(latencies):
-        raise ValueError("arrivals and latencies must be the same length")
-    if not math.isfinite(bin_seconds) or bin_seconds <= 0:
-        raise ValueError(f"bin_seconds must be finite and positive, got {bin_seconds!r}")
-    if not math.isfinite(until) or until <= 0:
-        raise ValueError(f"until must be finite and positive, got {until!r}")
-    n_bins = math.ceil(until / bin_seconds)
-    done: list[list[float]] = [[] for _ in range(n_bins)]
-    open_: list[int] = [0] * n_bins
-    for t, lat in zip(arrivals, latencies, strict=True):
-        # An arrival exactly at `until` belongs to the last bin, not to a bin
-        # past the window that nothing else would ever report.
-        i = min(int(t // bin_seconds), n_bins - 1)
-        if lat is None:
-            open_[i] += 1
-        else:
-            done[i].append(lat)
-    out = []
-    for i in range(n_bins):
-        completed, unfinished = len(done[i]), open_[i]
-        start, end = i * bin_seconds, min((i + 1) * bin_seconds, until)
-        if completed + unfinished == 0:
-            status, p50 = "empty", None
-        elif unfinished:
-            status, p50 = "censored", None
-        elif completed < MIN_SAMPLES["p50"]:
-            status, p50 = "thin", None
-        else:
-            status, p50 = "ok", percentiles(done[i], want=("p50",))["p50"]
-        out.append(Bin(start, end, completed + unfinished, completed, unfinished, p50, status))
-    return out
-
-
 def predicted_trajectory(schedule, replicas: int, curve: ServiceCurve, until: float,
                          bin_seconds: float = BIN_SECONDS) -> list[Bin]:
     result = run_fixed_capacity(list(schedule), replicas, curve, until)
     pairs = result.completed_requests()
     arrivals = [a for a, _ in pairs] + list(result.unfinished_arrivals)
     latencies = [lat for _, lat in pairs] + [None] * len(result.unfinished_arrivals)
-    return trajectory(arrivals, latencies, until, bin_seconds)
+    return trajectory(arrivals, latencies, until=until, bin_seconds=bin_seconds)
 
 
 def _check_repeats(runs: Sequence[RealRun]) -> None:
-    if len(runs) < MIN_REPEATS:
-        raise ValueError(
-            f"{len(runs)} real repeats; the tolerance band needs at least "
-            f"{MIN_REPEATS} (spec §10). Fewer makes the band the spread of two "
-            "numbers, which says almost nothing about reproducibility"
-        )
+    """What only a RealRun can tell: that the repeats replayed ONE schedule, at
+    one capacity, faithfully. How many repeats are enough is `band`'s check."""
+    if not runs:
+        raise ValueError("no real runs; there is nothing to build a band from")
     first = runs[0]
     for run in runs[1:]:
         if (run.schedule, run.replicas, run.until) != (first.schedule, first.replicas, first.until):
@@ -2075,84 +2282,32 @@ def _check_repeats(runs: Sequence[RealRun]) -> None:
 
 def tolerance_band(runs: Sequence[RealRun], bin_seconds: float = BIN_SECONDS) -> list[BandBin]:
     _check_repeats(runs)
-    trajectories = [trajectory(r.schedule, r.latencies, r.until, bin_seconds) for r in runs]
-    band = []
-    for column in zip(*trajectories, strict=True):
-        statuses = {b.status for b in column}
-        start, end = column[0].start, column[0].end
-        if statuses == {"ok"}:
-            values = [b.p50 for b in column]
-            band.append(BandBin(start, end, min(values), max(values), "ok"))
-        elif statuses == {"censored"}:
-            band.append(BandBin(start, end, None, None, "censored"))
-        elif "censored" in statuses:
-            # The real system backlogged on some repeats and not others: it
-            # disagrees with itself about whether it kept up, so there is no
-            # band a model could be held to.
-            band.append(BandBin(start, end, None, None, "unstable"))
-        else:
-            band.append(BandBin(start, end, None, None, "insufficient"))
-    return band
-
-
-def compare(predicted: list[Bin], band: list[BandBin]) -> Validation:
-    if len(predicted) != len(band) or any(
-        (p.start, p.end) != (b.start, b.end) for p, b in zip(predicted, band, strict=False)
-    ):
-        raise ValueError("predicted and band bin edges differ; they were binned differently")
-    verdicts = []
-    for p, b in zip(predicted, band, strict=True):
-        if b.status in ("unstable", "insufficient"):
-            verdicts.append(BinVerdict(b.start, b.end, f"excluded_{b.status}", 0.0))
-        elif b.status == "censored" or p.status == "censored":
-            if b.status == p.status == "censored":
-                verdicts.append(BinVerdict(b.start, b.end, "agree_censored", 0.0))
-            else:
-                # One side kept up and the other did not. The miss has no
-                # finite magnitude -- a censored latency is only bounded below
-                # -- so it is reported as unbounded rather than as zero.
-                verdicts.append(BinVerdict(b.start, b.end, "censoring_disagreement", math.inf))
-        elif p.status != "ok":
-            verdicts.append(BinVerdict(b.start, b.end, "excluded_insufficient", 0.0))
-        elif b.lo <= p.p50 <= b.hi:
-            verdicts.append(BinVerdict(b.start, b.end, "inside", 0.0))
-        else:
-            miss = b.lo - p.p50 if p.p50 < b.lo else p.p50 - b.hi
-            verdicts.append(BinVerdict(b.start, b.end, "outside", miss))
-
-    judged = [v for v in verdicts if not v.verdict.startswith("excluded")]
-    agreeing = sum(1 for v in judged if v.verdict in ("inside", "agree_censored"))
-    max_miss = max((v.miss_seconds for v in judged), default=0.0)
-    if len(judged) < MIN_COMPARED_BINS:
-        outcome = "not_evaluable"
-        detail = (f"{len(judged)} comparable bins, below the {MIN_COMPARED_BINS} required; "
-                  "zero misses over too few bins is not agreement")
-    elif agreeing == len(judged):
-        outcome, detail = "passed", f"all {len(judged)} comparable bins agree"
-    else:
-        outcome = "failed"
-        detail = f"{len(judged) - agreeing} of {len(judged)} bins disagree; largest miss {max_miss:.3g} s"
-    return Validation(tuple(verdicts), len(judged), agreeing, outcome, detail, max_miss)
+    return band(
+        [trajectory(r.schedule, r.latencies, until=r.until, bin_seconds=bin_seconds)
+         for r in runs],
+        min_repeats=MIN_REPEATS,
+    )
 
 
 def validate(runs: Sequence[RealRun], curve: ServiceCurve,
              bin_seconds: float = BIN_SECONDS) -> Validation:
-    band = tolerance_band(runs, bin_seconds)
+    tolerance = tolerance_band(runs, bin_seconds)
     first = runs[0]
-    predicted = predicted_trajectory(first.schedule, first.replicas, curve, first.until, bin_seconds)
-    return compare(predicted, band)
+    predicted = predicted_trajectory(first.schedule, first.replicas, curve, first.until,
+                                     bin_seconds)
+    return compare(predicted, tolerance, min_compared_bins=MIN_COMPARED_BINS)
 ```
 
-- [ ] **Step 4: Run the tests**
+- [ ] **Step 8: Run both test files and the boundary guards**
 
-Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_validation.py tests/test_autoscale_boundary.py -q && .venv/bin/ruff check autoscale/validation.py tests/test_validation.py`
+Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_validation_band.py tests/test_validation.py tests/test_autoscale_boundary.py -q && .venv/bin/ruff check autoscale/validation_band.py autoscale/validation.py tests/test_validation_band.py tests/test_validation.py`
 Expected: all pass, `All checks passed!`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add autoscale/validation.py tests/test_validation.py
-git commit -m "feat: the open-loop validation gate's arithmetic, with a verdict that cannot pass on nothing"
+git add autoscale/validation_band.py autoscale/validation.py tests/test_validation_band.py tests/test_validation.py
+git commit -m "feat: the validation gate's arithmetic, in a module artifact 4 can import without artifact 1"
 ```
 
 ---
@@ -2799,5 +2954,6 @@ State plainly, with the command output that shows each:
 - Validation core built; pass rule pre-registered (or the sign-off still pending, if Task 9 stopped).
 - Figure 4 rendered and inspected at both widths.
 - Traffic model consolidated from four copies to one, with shapes, diagnostics, the full sweep and figures 1–2 all byte-identical to the baseline.
-- Open, carried to plan 2b: the load driver, the service-curve sweep driver, the closed-loop gate, figure 3, and intervals on figure 4.
+- Open, carried to plan 2b: capacity pinning, the platform-routed load driver, the closed-loop gate, figure 3, and intervals on figure 4.
+- Open, in the shared harness plan (scope decision 4): the in-container load generator, the `vllm serve` lifecycle and the single-engine service-curve sweep that measures artifact 2's curve.
 - Open, flagged by this plan's inventory: the regime probe's inline iso-cost budget lacks the FP-dust tolerance and completeness guard.
