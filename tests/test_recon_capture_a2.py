@@ -23,11 +23,14 @@ import capture_a2
 
 EID = "ep-test"
 KEY = "sk-THIS-MUST-NEVER-REACH-DISK"
-HF_TOKEN = "hf_" + "A1b2C3d4E5f6G7h8"
-RPA_TOKEN = "rpa_" + "Z9y8X7w6V5u4T3s2"
+HF_TOKEN = "hf_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7"
+RPA_TOKEN = "rpa_" + "Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4"
 GOOD_ENDPOINT = {"id": EID, "flashboot": False, "workersMin": 0, "workersMax": 2,
                  "idleTimeout": 5}
 COMPILE_LINE = "torch.compile took 1.00 s in total"
+# Real vLLM lines of the kind Task 4 parses, with `hf_` in them but no secret.
+WEIGHTS_LINE = "Time spent downloading weights for Qwen/Qwen3-8B via hf_transfer: 41.2 seconds"
+OVERRIDES_LINE = "Initializing an LLM engine with config: model='Qwen/Qwen3-8B', hf_overrides={}"
 
 
 class FakeResponse:
@@ -39,13 +42,24 @@ class FakeResponse:
         return self._payload
 
 
+class HtmlResponse:
+    """A gateway's error page served with a 2xx: not JSON at all."""
+
+    status_code = 200
+    text = "<html><body>502 Bad Gateway</body></html>"
+
+    def json(self):
+        raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+
 class FakeSession:
     """Scripted RunPod. `endpoint` is mutated by /update, as the real one is.
 
     `scripts` maps "run", "update" or "endpoint" to an iterator of steps, one
     consumed per such call: None behaves normally, an int answers with that
-    status code and changes nothing, an exception is raised. An exhausted
-    script behaves normally.
+    status code and changes nothing, a response object is returned as-is and
+    changes nothing, an exception is raised. An exhausted script behaves
+    normally.
     """
 
     def __init__(self, endpoint=None, health_status=200, health_raises=False,
@@ -73,8 +87,10 @@ class FakeSession:
         self.calls.append(("GET", url, None))
         if url.endswith(f"/endpoints/{EID}"):
             code = self._step("endpoint")
-            if code is not None:
+            if isinstance(code, int):
                 return FakeResponse(code, {"error": "scripted"})
+            if code is not None:
+                return code
             return FakeResponse(200, json.loads(json.dumps(self.endpoint)))
         if url.endswith("/health"):
             if self.health_raises:
@@ -105,8 +121,10 @@ class FakeSession:
             return FakeResponse(200, {"id": f"job{next(self._jobs)}"})
         if url.endswith("/update"):
             code = self._step("update")
-            if code is not None:
+            if isinstance(code, int):
                 return FakeResponse(code, {"error": "scripted"})
+            if code is not None:
+                return code
             if not (self.ignore_release and json.get("workersMin") == 0):
                 self.endpoint.update(json)
             return FakeResponse(200, dict(self.endpoint))
@@ -369,10 +387,46 @@ def test_restore_outlasts_the_old_retry_budget(tmp_path):
     RunPod answers 409 for a while after ANY configuration change -- and the
     restore always follows one."""
     session = FakeSession(scripts=_pinned_then_release_fails(*[409] * 8))
+    clock = FakeClock(session)
     with pytest.raises(RuntimeError, match="returned 400"):
-        _capture(tmp_path, session).run()
+        _capture(tmp_path, session, clock).run()
     assert len(_posts(session, "/update")) == 2 + 8 + 1
     assert session.endpoint["workersMin"] == 0
+    # An uncapped doubling would spend the budget on a few long waits and
+    # re-check a billing endpoint less and less often.
+    first_restore_post = [i for i, url in enumerate(_urls(session)) if url.endswith("/update")][2]
+    restore_sleeps = [s for s, position in clock.sleeps if position > first_restore_post]
+    assert len(restore_sleeps) == 8
+    assert max(restore_sleeps) <= capture_a2.RESTORE_BACKOFF_CAP_SECONDS
+
+
+def test_a_rejected_restore_fails_at_once(tmp_path):
+    """A 400 will not turn into a 200 by waiting. Retrying it for five
+    minutes would only delay telling the operator the endpoint may bill."""
+    session = FakeSession(scripts={"update": [None, None, 400]})
+    with pytest.raises(RuntimeError, match="RESTORE FAILED"):
+        _capture(tmp_path, session).run()
+    assert len(_posts(session, "/update")) == 2 + 1
+
+
+def test_a_lagging_re_read_is_released_again(tmp_path):
+    """An accepted write can take a moment to show on a re-read. That is not
+    a failure: release again and re-read."""
+    lagging = FakeResponse(200, dict(GOOD_ENDPOINT, workersMin=2))
+    session = FakeSession(scripts={"endpoint": [None, lagging]})
+    _capture(tmp_path, session).run()
+    assert _posts(session, "/update") == [{"workersMin": n} for n in (2, 0, 0, 0)]
+    assert session.endpoint["workersMin"] == 0
+
+
+def test_a_re_read_that_is_not_json_is_a_restore_failure(tmp_path):
+    """A gateway can answer 2xx with an HTML page. That proves nothing about
+    workersMin; it must end in RESTORE FAILED, not an AttributeError that
+    does not tell the operator to look."""
+    session = FakeSession(scripts={"endpoint": itertools.chain(
+        [None], itertools.repeat(HtmlResponse()))})
+    with pytest.raises(RuntimeError, match="RESTORE FAILED"):
+        _capture(tmp_path, session).run()
 
 
 def test_a_restore_that_never_succeeds_names_the_recovery_command(tmp_path):
@@ -463,7 +517,8 @@ def test_no_secret_reaches_disk(tmp_path):
     token can surface in a log line."""
     endpoint = dict(GOOD_ENDPOINT, template={"id": "t", "env": [f"HF_TOKEN={HF_TOKEN}"]})
     session = FakeSession(endpoint, log_lines=[
-        f"login {HF_TOKEN}", f"auth {KEY}", f"api {RPA_TOKEN}", COMPILE_LINE])
+        f"login {HF_TOKEN}", f"auth {KEY}", f"api {RPA_TOKEN}.",
+        WEIGHTS_LINE, OVERRIDES_LINE, COMPILE_LINE])
     _capture(tmp_path, session).run()
     out = tmp_path / "a2_recon"
     for path in out.rglob("*"):
@@ -471,8 +526,11 @@ def test_no_secret_reaches_disk(tmp_path):
             text = path.read_text()
             for secret in (KEY, HF_TOKEN, RPA_TOKEN):
                 assert secret not in text, f"{path.name} contains {secret[:4]}..."
+    # The secret is replaced where it sits; the line around it, and every line
+    # merely mentioning `hf_`, is evidence Task 4 parses and survives intact.
     assert json.loads((out / "burst1_0.json").read_text())["output"]["log_lines"] == [
-        "<redacted>", "<redacted>", "<redacted>", COMPILE_LINE]
+        "login <redacted>", "auth <redacted>", "api <redacted>.",
+        WEIGHTS_LINE, OVERRIDES_LINE, COMPILE_LINE]
     assert _entries(tmp_path)[0]["response"]["template"]["env"] == "<redacted>"
 
 
@@ -507,7 +565,9 @@ def test_a_sigterm_while_pinned_still_restores(tmp_path, main_env):
     with pytest.raises(SystemExit):
         capture_a2.main([], session=session, out=tmp_path / "a2_recon",
                         clock=clock.clock, sleep=clock.sleep)
-    assert set(main_env) == {signal.SIGTERM, signal.SIGHUP}
+    # A closing terminal often sends more than one signal. After the first,
+    # both are ignored, so a second cannot interrupt the restore it started.
+    assert main_env == {signal.SIGTERM: signal.SIG_IGN, signal.SIGHUP: signal.SIG_IGN}
     assert session.endpoint["workersMin"] == 0
 
 

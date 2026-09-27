@@ -115,12 +115,15 @@ deadline is saved as `burstN_i.timeout.json` and stops the run there, so a
 timeout in burst1 ends it after about 5400 + 300 s.
 
 The run refuses to write into a non-empty `fixtures/a2_recon/`, so move an
-earlier run aside first. Secrets are redacted before anything is written (any
-`env` key, the API key, `hf_…` and `rpa_…` tokens). As a second check, run
-this before committing, and expect no output:
+earlier run aside first. Secrets are redacted before anything is written: any
+`env` key is dropped whole, and within a string only the secret itself is
+replaced (the API key, and `hf_`/`rpa_` followed by 20 or more letters or
+digits), so the log lines around it survive. As a second check, run this
+before committing, and expect no output. It uses the same token shapes as the
+script; tested with macOS's BSD grep.
 
 ```
-grep -rE 'hf_|rpa_' fixtures/a2_recon
+grep -rE '\bhf_[A-Za-z0-9]{20,}|\brpa_[A-Za-z0-9]{20,}' fixtures/a2_recon
 ```
 
 **If the run ends with `RESTORE FAILED`, the endpoint may still be pinned and

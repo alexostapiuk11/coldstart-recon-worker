@@ -75,7 +75,7 @@ RESTORE_BACKOFF_CAP_SECONDS = 30.0
 # else, a relative path would leave the evidence where nobody commits it.
 OUT = Path(__file__).resolve().parents[1] / "fixtures" / "a2_recon"
 REDACTED = "<redacted>"
-SECRET_PATTERN = re.compile(r"hf_[A-Za-z0-9]{8,}|rpa_[A-Za-z0-9]{8,}")
+SECRET_PATTERN = re.compile(r"\bhf_[A-Za-z0-9]{20,}\b|\brpa_[A-Za-z0-9]{20,}\b")
 
 
 class RefuseToSpend(RuntimeError):
@@ -102,22 +102,35 @@ def redact(value, secret):
     """Replace secrets in a JSON-shaped value with "<redacted>".
 
     This is the one deliberate exception to capturing verbatim: the output
-    directory is meant to be committed as fixtures. The endpoint read returns
-    its template, whose `env` holds HF_TOKEN, and a token can surface in an
-    engine log line. Any key named `env` is dropped whole, at any depth, rather
-    than scrubbing the variables known to be secret -- the next secret someone
-    adds to the template would not be on that list. Any string containing the
-    API key or shaped like a Hugging Face (`hf_`) or RunPod (`rpa_`) token is
-    replaced whole. Scrubbing by hand before commit was rejected: it is the
-    step that gets skipped, and a leaked token in git history outlives any fix.
-    The README's grep is a second check, not the first.
+    directory is meant to be committed as fixtures. The endpoint read may
+    return its template, whose `env` may hold HF_TOKEN, and a token can surface
+    in an engine log line. Any key named `env` is dropped whole, at any depth,
+    rather than scrubbing the variables known to be secret -- the next secret
+    someone adds to the template would not be on that list.
+
+    In strings, only the secret itself is replaced, never the string around
+    it: a vLLM log line is the evidence Task 4 parses (compile time, KV
+    tokens, version, weights download), and blanking a whole line for one
+    token in it would destroy that. The API key is replaced wherever it
+    appears. A Hugging Face (`hf_`) or RunPod (`rpa_`) token is recognised by
+    shape: the prefix, then at least 20 letters or digits, bounded as a whole
+    word. The token alphabet has no underscore, so a snake_case identifier
+    such as `hf_transfer` or `hf_overrides` cannot match, and the 20-character
+    floor keeps short identifiers out. Real token lengths were NOT verified
+    here; the floor was chosen well below any plausible length, so the pattern
+    errs toward redacting. Scrubbing by hand before commit was rejected: it is
+    the step that gets skipped, and a leaked token in git history outlives any
+    fix. The README's grep, with the same patterns, is a second check, not the
+    first.
     """
     if isinstance(value, dict):
         return {k: REDACTED if k == "env" else redact(v, secret) for k, v in value.items()}
     if isinstance(value, list):
         return [redact(v, secret) for v in value]
-    if isinstance(value, str) and ((secret and secret in value) or SECRET_PATTERN.search(value)):
-        return REDACTED
+    if isinstance(value, str):
+        if secret:
+            value = value.replace(secret, REDACTED)
+        return SECRET_PATTERN.sub(REDACTED, value)
     return value
 
 
@@ -331,6 +344,10 @@ class Capture:
             raise _Retryable(f"the verifying re-read returned {r.status_code}")
         if not 200 <= r.status_code < 300:
             raise _Rejected(f"the verifying re-read returned {r.status_code}")
+        if not isinstance(ep, dict):
+            # A 2xx that is not the endpoint's JSON (a gateway's HTML page)
+            # proves nothing about workersMin; read again.
+            raise _Retryable(f"the verifying re-read was not JSON: {str(ep)[:80]!r}")
         if ep.get("workersMin") != 0:
             # Possibly propagation lag after an accepted write; POST again.
             raise _Retryable(f"the re-read shows workersMin {ep.get('workersMin')!r}")
@@ -415,6 +432,16 @@ class Capture:
 
 
 def _exit_on_signal(signum, frame):
+    """Unwind on the first SIGTERM or SIGHUP, and ignore any that follow.
+
+    A closing terminal often sends more than one signal. Without the ignore,
+    a second would raise SystemExit again from inside the `finally` restore
+    that the first began, and cut it short with the worker still pinned.
+    Ignoring is safe because the restore is bounded (RESTORE_DEADLINE_SECONDS)
+    and `kill -9` still ends the process -- after which `--restore` releases.
+    """
+    for other in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(other, signal.SIG_IGN)
     raise SystemExit(128 + signum)
 
 
