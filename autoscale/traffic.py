@@ -6,7 +6,11 @@ number of additional replicas at the measured service rate -- with "the two
 absolute rates computed from the service curve and committed before any policy
 sweep runs". Literals fixed against one curve silently stop implementing the
 rule the moment the curve is replaced, which is exactly what plan 2's measured
-sweep will do.
+sweep will do. The simulator plan's first draft did exactly this, with
+`baseline_rate=2.0, k=4.0`: about a sixth of what the rule as first registered
+gave against the placeholder curve. At that load one replica absorbed the whole
+spike, queue depth never crossed its lowest threshold, and every policy was
+discarded as `no_scaling_action`.
 
 Until this module the rule lived in four places: the render script, the
 noise-floor diagnostic, the regime probe (twice, inline) and the end-to-end

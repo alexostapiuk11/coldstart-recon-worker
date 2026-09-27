@@ -26,6 +26,7 @@ ends with this plan.
 | 9 | Ramp is half the sustain | `test_the_ramp_is_half_the_sustain_as_the_pre_registration_states` (via `render._preregistered_shape`) | Same test, via `spike_shape` |
 | 10 | The render script evaluates H3 under both shapes: its source contains `kind="ramp"` and `h3_verdict(` | `test_the_render_script_evaluates_h3_under_both_shapes` | **Preserved.** Task 6 calls `spike_shape(..., kind="ramp")` by keyword so this source check keeps meaning what it says |
 | 11 | `render.RAMP_SECONDS == 95.0` is asserted by a test | same test | Preserved: render imports `RAMP_SECONDS` from `autoscale.traffic` |
+| 12 | Override inputs validated (finite, positive, not bool) — previously a zero `--additional-replicas` ran a flat no-spike sweep silently and a zero `--baseline-fraction` raised a bare `ZeroDivisionError` | noise floor, probe | `spike_shape`'s explanatory errors (found in Task 6 review; a behaviour improvement, not a drop) |
 
 ## Preserved in place — related, deliberately NOT consolidated
 
