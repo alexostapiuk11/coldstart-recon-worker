@@ -83,18 +83,18 @@ any paid campaign run.
 
 Needs an endpoint whose `workersMax` is at least 2. Artifact 1's
 `ka5mryakkxumew` is provisioned max 1, and the capture never writes
-`workersMax`: that is the cost ceiling, and it is the operator's to set.
-Provision a new endpoint rather than raising that one's ceiling, so the endpoint
-artifact 1's records describe stays as recorded. Provision one with
-`workersMin 0`, `workersMax` at least 2, the same template and a volume in a
-datacenter with verified 24GB stock, then force `flashboot: false` with a
-follow-up `POST /endpoints/{id}/update` (it silently ignores `false` at create).
+`workersMax`: that is the cost ceiling, and it is the operator's to set. Rather
+than raise that endpoint's ceiling, which would leave it no longer matching
+artifact 1's records, provision a new one with `workersMin 0`, `workersMax` at
+least 2, `idleTimeout` 5 s, the same template, and a volume in a datacenter with
+verified 24GB stock. Then force `flashboot: false` with a follow-up
+`POST /endpoints/{id}/update` (create silently ignores `false`).
 
 ```
 export RUNPOD_API_KEY=...
 export RUNPOD_A2_ENDPOINT_ID=...    # NOT artifact 1's RUNPOD_ENDPOINT_ID
 
-.venv/bin/python recon/capture_a2.py --preflight-only   # free: one GET
+.venv/bin/python recon/capture_a2.py --preflight-only   # free: one GET, writes nothing
 .venv/bin/python recon/capture_a2.py                     # spends: 4 jobs + a pinned window
 .venv/bin/python recon/analyse_a2.py fixtures/a2_recon
 ```
@@ -104,3 +104,31 @@ at 2 for `SCALE_OBSERVE_SECONDS` (10 minutes), then watches for another 10
 minutes after setting it back to 0. Its cost is small against the spec §13
 envelope, but it is real, and running it is the operator's decision. Record the
 answers in `docs/recon-a2.md`.
+
+**Worst-case wall time is about 3 h 26 min**: 12,360 s, from the constants in
+`capture_a2.py`. That is two bursts that each run to `JOB_TIMEOUT_SECONDS`
+(2 × 5400), the `IDLE_WAIT_SECONDS` gap (60), the two scale windows
+(2 × 600) and a restore that uses all of `RESTORE_DEADLINE_SECONDS` (300).
+HTTP time is on top: each request can take up to its 30 s timeout, and a
+409/5xx retry adds up to 15 s of backoff. A job that is not terminal by its
+deadline is saved as `burstN_i.timeout.json` and stops the run there, so a
+timeout in burst1 ends it after about 5400 + 300 s.
+
+The run refuses to write into a non-empty `fixtures/a2_recon/`, so move an
+earlier run aside first. Secrets are redacted before anything is written (any
+`env` key, the API key, `hf_…` and `rpa_…` tokens). As a second check, run
+this before committing, and expect no output:
+
+```
+grep -rE 'hf_|rpa_' fixtures/a2_recon
+```
+
+**If the run ends with `RESTORE FAILED`, the endpoint may still be pinned and
+billing.** Release it, then confirm the result it prints shows `workersMin` 0:
+
+```
+.venv/bin/python recon/capture_a2.py --restore   # sets workersMin 0 and re-reads; writes nothing
+```
+
+The run also restores on Ctrl-C, `kill` (SIGTERM) and a closed terminal
+(SIGHUP). A `kill -9` cannot be caught, so run `--restore` after one.
