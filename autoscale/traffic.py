@@ -36,7 +36,13 @@ __all__ = [
 # D = 2 x p95(arm A) = 192.7 s, rounded. Pinned to arm A and held constant
 # across both distributions so the composition comparison varies one thing.
 SUSTAIN_SECONDS = 190.0
-# R = D / 2.
+# R = D / 2, evaluated at the default sustain above -- kept as a module
+# constant for display and for the render script's own test (inventory row
+# 11: it imports RAMP_SECONDS and checks the source calls spike_shape with
+# kind="ramp"). `spike_shape` does not read this constant back: it derives R
+# from whichever `sustain` its caller passes, on purpose, so a caller with a
+# different D (the end-to-end test's halved window) still gets R = D/2 for
+# ITS D, not this one.
 RAMP_SECONDS = SUSTAIN_SECONDS / 2
 # Both amended 2026-09-17 from 40% and 3. As first registered they put the peak
 # at 3.4x one replica's saturation and every policy delivered an identical p99;
@@ -77,18 +83,61 @@ def spike_shape(
 
     The arithmetic order -- baseline, then peak as baseline plus the additional
     rate, then k as their ratio -- is the order every previous copy used, kept
-    so the consolidation changes no float in any shape.
+    so the consolidation changes no float in any shape. Two algebraically
+    equal rewrites were rejected for exactly that reason: `k = 1 +
+    additional_replicas / baseline_fraction`, and folding the two
+    multiplications together as `peak = (baseline_fraction +
+    additional_replicas) * saturation`. Both differ from this order in the
+    last bit for several `(baseline_fraction, additional_replicas)` pairs on
+    the placeholder curve -- `tests/test_traffic.py`'s bit-exact test pins
+    two of them -- and a one-ulp change in `k` can flip a single candidate's
+    accept/reject in `autoscale.arrivals.arrival_times`'s thinning test,
+    changing which timestamps land in the arrival trace.
     """
-    for name, value in (
-        ("sustain", sustain),
-        ("baseline_fraction", baseline_fraction),
-        ("additional_replicas", additional_replicas),
+    for name, value, consequence in (
+        (
+            "sustain",
+            sustain,
+            (
+                "a zero or negative sustain holds the peak for no time, so "
+                "the run measures no spike, while an infinite or NaN "
+                "sustain makes `ramp + sustain` in `rate_at` non-finite, so "
+                "the elevated period never ends"
+            ),
+        ),
+        (
+            "baseline_fraction",
+            baseline_fraction,
+            (
+                "a zero or negative baseline_fraction makes `baseline` "
+                "zero or negative, so `k = peak / baseline` divides by "
+                "zero or the spike inverts into a dip, while an infinite "
+                "or NaN value poisons `baseline` and every rate computed "
+                "from it"
+            ),
+        ),
+        (
+            "additional_replicas",
+            additional_replicas,
+            (
+                "a zero or negative additional_replicas is not a spike -- "
+                "peak would be at or below baseline, putting k at or below "
+                "1 -- while an infinite or NaN value poisons `peak` and "
+                "`k` with the same non-finite value"
+            ),
+        ),
     ):
+        if isinstance(value, bool):
+            raise TypeError(
+                f"{name} is {value!r}, a bool; bool is a subclass of int in "
+                "Python, so it passes both the finiteness and positivity "
+                "checks below and would silently be treated as 0.0 or 1.0 "
+                "seconds/fraction/replicas instead of being refused as the "
+                "wrong type"
+            )
         if not math.isfinite(value) or value <= 0:
             raise ValueError(
-                f"{name} is {value!r}; it must be finite and positive. Zero "
-                "additional replicas is not a spike, a zero baseline makes k "
-                "infinite, and a NaN passes every later comparison silently"
+                f"{name} is {value!r}, which must be finite and positive; {consequence}"
             )
     saturation = saturation_rps(curve)
     baseline = baseline_fraction * saturation
