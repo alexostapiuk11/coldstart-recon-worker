@@ -249,14 +249,21 @@ def compare(predicted: Sequence[Bin], band_bins: Sequence[BandBin], *,
             edge_tolerance_seconds: float) -> Validation:
     """Hold a predicted trajectory to the band, bin by bin, and give a verdict.
 
-    Per bin:
-    - band "unstable" or "insufficient", or a prediction with no median
-      (thin, empty): excluded, not judged, and reported;
+    Assumes both sides binned the same requests -- one schedule, replayed --
+    so a bin's request count matches on both sides, which is why "empty"
+    never meets "censored".
+
+    Per bin, in this order:
+    - band "unstable": excluded, not judged, and reported;
     - both censored: "agree_censored" -- agreement, but not judged (see the
       module docstring: it says nothing about latency, and counting it lets a
       backlogged tail pass for free);
     - exactly one censored: "censoring_disagreement", a judged miss of
-      unbounded magnitude;
+      unbounded magnitude -- including a censored model against an
+      "insufficient" band, since reality's censoring is known even where its
+      median is not;
+    - band "insufficient", or a prediction with no median (thin, empty):
+      excluded, not judged, and reported;
     - otherwise inside iff `lo - tol <= p50 <= hi + tol`. An outside miss's
       magnitude is its distance to the nearer UNWIDENED edge: the tolerance
       absorbs clock-resolution residue at an edge, and shrinking a real miss by
@@ -301,8 +308,12 @@ def compare(predicted: Sequence[Bin], band_bins: Sequence[BandBin], *,
     tol = edge_tolerance_seconds
     verdicts = []
     for p, b in zip(predicted, band_bins, strict=True):
-        if b.status in ("unstable", "insufficient"):
-            verdicts.append(BinVerdict(b.start, b.end, f"excluded_{b.status}", 0.0))
+        if b.status == "unstable":
+            verdicts.append(BinVerdict(b.start, b.end, "excluded_unstable", 0.0))
+        # Censoring before "insufficient": a band too thin for a median still
+        # knows that every repeat finished every request, so a censored model
+        # against it is a disagreement -- the mirror of a censored band against
+        # a thin prediction -- not a bin with nothing to compare.
         elif b.status == "censored" or p.status == "censored":
             if b.status == p.status == "censored":
                 verdicts.append(BinVerdict(b.start, b.end, "agree_censored", 0.0))
@@ -311,7 +322,7 @@ def compare(predicted: Sequence[Bin], band_bins: Sequence[BandBin], *,
                 # is only bounded below, so the miss has no finite magnitude
                 # and is reported as unbounded rather than as zero.
                 verdicts.append(BinVerdict(b.start, b.end, "censoring_disagreement", math.inf))
-        elif p.status != "ok":
+        elif b.status == "insufficient" or p.status != "ok":
             verdicts.append(BinVerdict(b.start, b.end, "excluded_insufficient", 0.0))
         elif b.lo - tol <= p.p50 <= b.hi + tol:
             verdicts.append(BinVerdict(b.start, b.end, "inside", 0.0))

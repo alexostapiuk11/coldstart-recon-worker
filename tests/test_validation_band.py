@@ -235,6 +235,20 @@ def test_the_model_backlogged_while_reality_kept_up_is_a_miss_too():
     assert v.max_miss_seconds == float("inf")
 
 
+def test_a_censored_model_against_a_thin_but_finished_band_is_a_miss():
+    """Every repeat finished every request in the bin, too few for a median,
+    but reality's censoring is known regardless: it kept up, and the model
+    says it did not. The mirror case -- censored band, thin prediction -- is
+    already a judged miss; excluding this one would let the model backlog
+    wherever reality was quiet."""
+    thin = trajectory([50.0] * 10, [1.0] * 10, until=60.0, bin_seconds=10.0)
+    [*_, thin_band] = band([thin, thin, thin], min_repeats=3)
+    assert thin_band.status == "insufficient"
+    v = _cmp(_pred([1.1] * 5) + [_censored_pred(50.0)], _band(5) + [thin_band], frac=0.0)
+    assert v.bins[-1].verdict == "censoring_disagreement"
+    assert (v.outcome, v.compared, v.max_miss_seconds) == ("failed", 6, float("inf"))
+
+
 def test_a_censoring_disagreement_counts_as_a_judged_miss():
     """2 inside, 2 outside, 2 disagreements: 4 misses of 6 judged. Excluded,
     it would leave 4 judged (not evaluable); counted as agreement, 2 of 6
@@ -307,6 +321,15 @@ def test_an_unstable_bin_is_excluded_from_judgement_and_reported():
     assert v.outcome == "passed" and v.compared == 6
     assert v.bins[-1].verdict == "excluded_unstable"
     assert "1 excluded (1 unstable)" in v.detail
+
+
+def test_an_unstable_bin_is_excluded_whatever_the_model_says():
+    """Reality backlogged on some repeats only, so it has no answer to whether
+    the fleet kept up. A censored model there is neither agreement nor a miss."""
+    b = _band(6) + [BandBin(60.0, 70.0, None, None, "unstable")]
+    v = _cmp(_pred([1.1] * 6) + [_censored_pred(60.0)], b, frac=0.0)
+    assert v.bins[-1].verdict == "excluded_unstable"
+    assert (v.outcome, v.compared) == ("passed", 6)
 
 
 def test_an_insufficient_bin_is_reported_as_excluded_but_not_unstable():

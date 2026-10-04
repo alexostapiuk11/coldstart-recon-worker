@@ -316,13 +316,15 @@ Fixed 2026-10-03, before any real validation run exists. Implemented in
 - **Driver fidelity:** a run whose send times drift more than **0.5 s** from the
   schedule is refused; it replayed a different trace.
 - **Band:** per bin, the min and max of the three repeats' p50, widened by **1 ms**
-  on each side — the latency clock's resolution — so float residue at an edge is not
+  on each side — taken as the latency clock's resolution — so float residue at an edge is not
   a miss. A miss's magnitude is measured from the unwidened edge.
 - **Censoring:** a bin with any unfinished request is censored. A bin censored on
   some repeats and not others is excluded as unstable and reported. Model and reality
   both censored is agreement, but the bin is not *judged*: it says nothing about the
   model's latency, and counting it would let a backlogged tail pass for free. One
   censored and the other not is a **miss of unbounded magnitude**.
+- **Sample floor:** a bin with fewer than 20 completed requests — on every repeat, or
+  in the prediction — has no p50; it is excluded and reported, never judged.
 - **Pass:** at least **10** judged bins are required — fewer is **not evaluable**,
   never a pass — and the run passes if **no more than half** of the judged bins are
   misses.
@@ -332,9 +334,12 @@ Fixed 2026-10-03, before any real validation run exists. Implemented in
   0.3% at 20. Under this rule, if bins were independent, a perfect model fails about
   2% of the time at 10 judged bins and under 0.1% at 30, while a model biased beyond
   the system's own spread — outside in about three bins of four — fails 92% and 99.7%
-  of the time. Neighbouring bins share queue state, so they are not independent and a
-  perfect model fails somewhat more often than stated; the result is published with
-  its number of judged bins so a reader can weigh it.
+  of the time. Neighbouring bins share queue state, so they are not independent: a
+  perfect model fails more often than stated and a biased one less often. In
+  simulation, queue-level correlation raised the perfect-model failure rate to about
+  3% at 10–12 judged bins, and a per-run host-speed effect held it near 5% however
+  many bins were judged, with power near 80%. The result is published with its number
+  of judged bins so a reader can weigh it.
 - **Disclosure:** every miss is published with its magnitude, as spec §10 already
   requires.
 

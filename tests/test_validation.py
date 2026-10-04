@@ -240,7 +240,7 @@ def test_a_malformed_real_run_is_refused(override, match):
 def test_the_constants_are_the_ones_the_preregistration_states():
     from pathlib import Path
 
-    from autoscale import validation
+    from autoscale import stats, validation
 
     prereg = (Path(__file__).resolve().parents[1] / "docs" / "experiment-a2.md").read_text()
     assert "## Validation gate — pass rule" in prereg
@@ -250,3 +250,4 @@ def test_the_constants_are_the_ones_the_preregistration_states():
     assert validation.MIN_COMPARED_BINS == 10 and "at least **10** judged bins" in prereg
     assert validation.MAX_MISS_FRACTION == 0.5 and "**no more than half**" in prereg
     assert validation.BAND_EDGE_TOLERANCE_SECONDS == 0.001 and "**1 ms**" in prereg
+    assert stats.MIN_SAMPLES["p50"] == 20 and "fewer than 20 completed requests" in prereg
