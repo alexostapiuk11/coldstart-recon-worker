@@ -87,3 +87,19 @@ def test_the_unhealthy_text_matches_the_real_submitters():
 
     real = RunPodSubmitter(Transport(), sleep=lambda s: None).submit_payload({})
     assert real.error == UNHEALTHY_ERROR
+
+
+def test_the_output_comes_back_as_json_would_deliver_it():
+    outcome = PayloadStubSubmitter(
+        lambda p: {"healthy": True, "levels": (1, 2)}, clock=_clock()
+    ).submit_payload({})
+    assert outcome.error is None
+    assert outcome.payload["levels"] == [1, 2]
+
+
+def test_an_output_the_real_transport_could_not_return_fails_here():
+    outcome = PayloadStubSubmitter(
+        lambda p: {"healthy": True, "path": Path("/tmp/x")}, clock=_clock()
+    ).submit_payload({})
+    assert outcome.payload is None
+    assert "not JSON serializable" in outcome.error
