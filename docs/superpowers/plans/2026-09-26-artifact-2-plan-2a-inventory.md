@@ -4,12 +4,16 @@ Built by reading the code at the commit plan 2a started from. Every capability
 carries a decision. A capability in neither column is a planning bug.
 
 The derivation — baseline a fraction of one replica's saturation, `k` sized to
-require a number of additional replicas at the measured service rate — lived in
-FOUR places, not the three the 2026-09-17 review counted. The fourth,
-`tests/test_a2_end_to_end.py`, was a deliberate independent copy: its docstring
-says "the derivation is duplicated rather than imported because `scripts/` is
-not an importable package". `autoscale/traffic.py` is importable, so that reason
-ends with this plan.
+require a number of additional replicas at the measured service rate — lived as
+SIX copies in FOUR files, not the three places the 2026-09-17 review counted:
+the render script (one copy), the noise floor (one), the regime probe (two,
+inline in `_probe` and `_verify`) and `tests/test_a2_end_to_end.py` (two). The
+fourth file's `_shape` was a deliberate independent copy: its docstring said
+"the derivation is duplicated rather than imported because `scripts/` is not an
+importable package". `autoscale/traffic.py` is importable, so that reason ends
+with this plan. That file's second copy, inside the string its cross-process
+check runs in a fresh interpreter, was missed by Task 1 and found in Task 11
+(row 13).
 
 ## Consolidated into `autoscale/traffic.py` — behavior unchanged
 
@@ -21,13 +25,13 @@ ends with this plan.
 | 4 | Ramp `R` = `D / 2` = 95 s | `a2_render_figures.RAMP_SECONDS`; end-to-end `RAMP = 47.5` | Derived inside `spike_shape` from `sustain`, so no caller can break R = D/2 |
 | 5 | `BASELINE_FRACTION_OF_SATURATION = 0.70`, `ADDITIONAL_REPLICAS_AT_PEAK = 0.25`, with provenance comments | render (module constants); end-to-end (duplicate constants) | `autoscale/traffic.py` constants |
 | 6 | Candidate override: a caller may pass a different baseline fraction / additional replicas, to measure a candidate regime **before** the pre-registration is amended to adopt it | noise floor (`--baseline-fraction`, `--additional-replicas`, each falling back to the pre-registered value); probe (both stages) | `baseline_fraction=` / `additional_replicas=` keywords |
-| 7 | "NOT the pre-registered traffic model" printed whenever the override is used | noise floor | **Preserved in the noise floor**, unchanged |
+| 7 | "NOT the pre-registered traffic model" printed whenever the override is used | noise floor | **Preserved in the noise floor**, unchanged. Pinned since Task 11's review by `tests/test_a2_gap_noise_floor.py`: printed exactly once under each override flag, absent on a default run |
 | 8 | The constants agree with the text of `docs/experiment-a2.md` (`baseline = **70%**`, `**0.25 additional replicas**`) — an amendment must touch the document | `test_the_traffic_constants_match_the_render_script_and_the_preregistration` | `tests/test_traffic.py`, extended to `D` and `R` |
-| 9 | Ramp is half the sustain | `test_the_ramp_is_half_the_sustain_as_the_pre_registration_states` (via `render._preregistered_shape`) | Same test, via `spike_shape` |
+| 9 | Ramp is half the sustain | `test_the_ramp_is_half_the_sustain_as_the_pre_registration_states` (via `render._preregistered_shape`) | `tests/test_traffic.py::test_the_ramp_is_half_the_sustain` (R = D/2 from `spike_shape`, exact) plus `test_the_render_draws_the_preregistered_spike_not_a_candidate` (the render passes no `sustain`, so it gets the pre-registered D and R). The end-to-end test was deleted in Task 11's review: it re-ran the first with `pytest.approx`, a weaker check |
 | 10 | The render script evaluates H3 under both shapes: its source contains `kind="ramp"` and `h3_verdict(` | `test_the_render_script_evaluates_h3_under_both_shapes` | **Preserved.** Task 6 calls `spike_shape(..., kind="ramp")` by keyword so this source check keeps meaning what it says |
 | 11 | `render.RAMP_SECONDS == 95.0` is asserted by a test | same test | Preserved: render imports `RAMP_SECONDS` from `autoscale.traffic` |
 | 12 | Override inputs validated (finite, positive, not bool) — previously a zero `--additional-replicas` ran a flat no-spike sweep silently and a zero `--baseline-fraction` raised a bare `ZeroDivisionError` | noise floor, probe | `spike_shape`'s explanatory errors (found in Task 6 review; a behaviour improvement, not a drop) |
-| 13 | A fifth copy of the derivation (saturation max, `baseline = 0.40 × saturation`, `peak = baseline + 3 × saturation`, `SpikeShape(kind="step", ramp=0.0, sustain=<argv>)`) inside `_CROSS_PROCESS_PROGRAM`, the program the seed-determinism test runs in two fresh interpreters. **Found in Task 11's review, not by Task 1** — Task 1's grep missed it because it lives in a string literal | `tests/test_a2_end_to_end.py` (`_CROSS_PROCESS_PROGRAM`) | `spike_shape(curve, "step", baseline_fraction=0.40, additional_replicas=3, sustain=sustain)`. Keeps the explicit 0.40 / 3 — the original registration, the load this test was tuned at — via the row-6 override, commented as deliberate. Old and new shapes compared `==` and bit-identical at sustain 95/190/30; the program's JSON output byte-identical before and after |
+| 13 | A sixth copy, in the fourth file: the derivation (saturation max, `baseline = 0.40 × saturation`, `peak = baseline + 3 × saturation`, `SpikeShape(kind="step", ramp=0.0, sustain=<argv>)`) inside `_CROSS_PROCESS_PROGRAM`, the program the seed-determinism test runs in two fresh interpreters. **Found in Task 11's review, not by Task 1** — Task 1's grep missed it because it lives in a string literal | `tests/test_a2_end_to_end.py` (`_CROSS_PROCESS_PROGRAM`) | `spike_shape(curve, "step", baseline_fraction=0.40, additional_replicas=3, sustain=sustain)`. Keeps the explicit 0.40 / 3 — the original registration, the load this test was tuned at — via the row-6 override, commented as deliberate. Old and new shapes compared `==` and bit-identical at sustain 95/190/30; the program's JSON output byte-identical before and after. `tests/test_traffic.py::test_nothing_derives_saturation_outside_its_one_home` parses string constants as code, so a copy hidden this way now fails it (verified against 4f3093d) |
 
 ## Preserved in place — related, deliberately NOT consolidated
 

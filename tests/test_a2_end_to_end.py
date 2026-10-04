@@ -14,7 +14,7 @@ window, for each of seven lag distributions -- about 25 minutes of CPU (see
 these tests reduce exactly three things and nothing else:
 
   * `REPETITIONS` 30 -> 1, monkeypatched;
-  * the window 400 s -> 120 s (and the sustain 190 s -> 60 s with it);
+  * the window 400 s -> 200 s (and the sustain 190 s -> 95 s with it);
   * in the cross-process test only, the threshold grid to one combination per
     signal, because that test is about seed derivation and not about coverage.
 
@@ -319,6 +319,8 @@ sweep.THRESHOLDS = {
 }
 curve = SERVICE_CURVE_PLACEHOLDER
 # 0.40 / 3 on purpose: the ORIGINAL registration, the load this test was tuned at.
+# The amendment rejected it as degenerate (every policy hits the same p99); that
+# does not matter here, where only process-vs-process equality is asserted.
 shape = spike_shape(curve, "step", baseline_fraction=0.40, additional_replicas=3, sustain=sustain)
 lags = load_measured_lags(store)
 points, discards = sweep.run_sweep(
@@ -378,6 +380,12 @@ def test_the_sweep_reproduces_across_processes_not_just_within_one():
     second = _sweep_in_a_fresh_interpreter("12345")
 
     assert first["points"], "a sweep with no points would compare equal trivially"
+    # p[2] is the signal: points are [cost, p99, signal, scale_up_at, scale_down_at].
+    assert {p[2] for p in first["points"]} == {
+        "queue_depth",
+        "in_flight_concurrency",
+        "utilization",
+    }, "a signal produced no points, so its seed derivation went unchecked"
     assert first["samples"] == second["samples"]
     assert first["points"] == second["points"]
     assert first["discards"] == second["discards"]
@@ -410,13 +418,3 @@ def test_the_render_script_evaluates_h3_under_both_shapes():
         "nothing and the published gap is the spread between each signal's "
         "unconstrained best"
     )
-
-
-def test_the_ramp_is_half_the_sustain_as_the_pre_registration_states():
-    import sys
-
-    sys.path.insert(0, str(REPO_ROOT / "scripts"))
-    import a2_render_figures as render
-
-    shape = spike_shape(render.SERVICE_CURVE_PLACEHOLDER, kind="ramp")
-    assert shape.ramp == pytest.approx(shape.sustain / 2)

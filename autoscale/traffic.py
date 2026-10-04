@@ -12,11 +12,12 @@ gave against the placeholder curve. At that load one replica absorbed the whole
 spike, queue depth never crossed its lowest threshold, and every policy was
 discarded as `no_scaling_action`.
 
-Until this module the rule lived in four places: the render script, the
-noise-floor diagnostic, the regime probe (twice, inline) and the end-to-end
-test. They agreed because a test compared two of them and because the
-2026-09-17 amendment was applied by hand in each. When the measured curve
-lands, one place changes.
+Until this module the rule lived as six copies in four files: the render
+script, the noise-floor diagnostic, the regime probe (twice, inline) and the
+end-to-end test (twice -- once inside the string its cross-process check runs
+in a fresh interpreter). They agreed because a test compared two of them and
+because the 2026-09-17 amendment was applied by hand in each. When the
+measured curve lands, one place changes.
 
 R = D/2 is encoded structurally: `spike_shape` derives the ramp from the
 sustain instead of accepting both, so no caller can pass a pair that breaks the

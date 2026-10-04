@@ -1,4 +1,6 @@
+import ast
 import math
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -162,12 +164,12 @@ def test_the_bits_are_pinned_not_just_the_algebra():
     change which timestamps land in the arrival trace -- silently, since nothing
     downstream raises on it.
 
-    The only committed record of what the OLD four copies actually produced is
+    The only record of what the OLD copies actually produced is
     `build/plan2a-baseline/shapes.json` (Task 1's baseline), which is
-    gitignored and survives only until Task 11 deletes the old copies. These
-    hex literals are taken from that file with `float.hex()`, so this test
-    keeps that bit-level evidence alive in the one place both this module and
-    that file agree on: version control.
+    gitignored; the copies that produced it survived until Task 11 deleted
+    them. These hex literals are taken from that file with `float.hex()`, so
+    this test keeps that bit-level evidence alive where the baseline file
+    cannot: version control.
     """
     sat = saturation_rps(SERVICE_CURVE_PLACEHOLDER)
     assert sat == float.fromhex("0x1.0d79435e50d79p+5")
@@ -196,24 +198,147 @@ def test_the_bits_are_pinned_not_just_the_algebra():
     assert candidate_b.k == float.fromhex("0x1.6000000000001p+3")
 
 
-def test_no_script_constructs_a_spike_shape_itself():
-    """The consolidation, made permanent. Four copies of this derivation agreed
-    only because a test compared two of them and an amendment was applied by
-    hand in each; the next copy would be the fifth. Parses rather than greps,
-    so a comment or docstring mentioning SpikeShape is not a violation."""
-    import ast
+# The derivation's one home. Everything else that computes saturation from the
+# service curve is a copy, whatever it is named.
+DERIVATION_HOME = Path("autoscale") / "traffic.py"
+SCANNED_DIRS = ("scripts", "tests", "autoscale")
+SHIM_NAMES = ("_saturation_rps", "_preregistered_shape")
+RENDER = REPO / "scripts" / "a2_render_figures.py"
+# The keywords that turn `spike_shape` into a candidate regime or a different
+# window. The production render must pass none of them.
+NON_PREREGISTERED_KEYWORDS = ("baseline_fraction", "additional_replicas", "sustain")
 
-    offenders = []
-    for path in sorted((REPO / "scripts").glob("*.py")):
+
+def _called_name(call: ast.Call) -> str | None:
+    """`f(...)` and `module.f(...)` both name `f`; a guard that only read
+    `ast.Name` would miss `arrivals.SpikeShape(...)`."""
+    return getattr(call.func, "id", None) or getattr(call.func, "attr", None)
+
+
+def _saturation_maxes(tree: ast.AST) -> list[int]:
+    """Lines of every `max(...)` call whose source reads the service curve's
+    latency lookup -- the derivation's signature, independent of what the
+    function holding it is called or what it builds afterwards."""
+    return [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and _called_name(node) == "max"
+        and "latency_at" in ast.unparse(node)
+    ]
+
+
+def _local_derivations(root: Path) -> list[str]:
+    """Every copy of the saturation derivation under `root` outside its home.
+
+    String constants that mention the lookup are parsed as Python too: the
+    cross-process program in `tests/test_a2_end_to_end.py` hid a copy inside a
+    string literal, which neither Task 1's grep nor a name-based guard saw. A
+    string that does not parse (prose, an error message) is not code and is
+    skipped rather than reported.
+    """
+    found = []
+    for directory in SCANNED_DIRS:
+        for path in sorted((root / directory).rglob("*.py")):
+            rel = path.relative_to(root)
+            if rel == DERIVATION_HOME:
+                continue
+            tree = ast.parse(path.read_text())
+            found += [f"{rel}:{line}" for line in _saturation_maxes(tree)]
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+                    continue
+                if "latency_at" not in node.value:
+                    continue
+                try:
+                    inner = ast.parse(textwrap.dedent(node.value))
+                except SyntaxError:
+                    continue
+                if _saturation_maxes(inner):
+                    found.append(f"{rel}:{node.lineno} (code inside a string)")
+    return found
+
+
+def _script_constructions(root: Path) -> list[str]:
+    """Every way a script can build a spike itself: calling `SpikeShape` by
+    name or through a module, importing it under another name (which a call
+    check by name would then miss), or reviving a deleted shim, sync or async."""
+    found = []
+    for path in sorted((root / "scripts").glob("*.py")):
         for node in ast.walk(ast.parse(path.read_text())):
-            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "SpikeShape":
-                offenders.append(path.name)
-            if isinstance(node, ast.FunctionDef) and node.name in (
-                "_saturation_rps", "_preregistered_shape"
+            if isinstance(node, ast.Call) and _called_name(node) == "SpikeShape":
+                found.append(f"{path.name}:{node.lineno}")
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+                node.name in SHIM_NAMES
             ):
-                offenders.append(f"{path.name}:{node.name}")
+                found.append(f"{path.name}:{node.name}")
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                found += [
+                    f"{path.name}:{node.lineno} (SpikeShape imported as {alias.asname})"
+                    for alias in node.names
+                    if alias.name.rpartition(".")[2] == "SpikeShape"
+                    and alias.asname not in (None, "SpikeShape")
+                ]
+    return found
+
+
+def test_nothing_derives_saturation_outside_its_one_home():
+    """The consolidation, made permanent. Before plan 2a this derivation lived
+    as six copies in four files -- the render script, the noise floor, the
+    regime probe (twice) and the end-to-end test (twice, once inside a string)
+    -- and they agreed only because a test compared two of them and an
+    amendment was applied by hand in each. The next copy would be the seventh.
+
+    Detects the derivation's signature, a saturation `max(...)` over the
+    service curve, rather than the `SpikeShape` name: the sixth copy built its
+    shape the same way under a different variable and was missed by a check
+    that looked only at scripts. Parses rather than greps, so prose that
+    mentions the lookup is not a violation."""
+    offenders = _local_derivations(REPO)
     assert offenders == [], (
-        f"{offenders} derive the traffic model locally. Use autoscale.traffic -- "
-        "a second copy stops implementing the pre-registered rule the moment "
-        "the service curve or an amendment changes one and not the other"
+        f"{offenders} compute saturation from the service curve locally. Use "
+        "autoscale.traffic -- a second copy stops implementing the "
+        "pre-registered rule the moment the service curve or an amendment "
+        "changes one and not the other"
+    )
+
+
+def test_no_script_constructs_a_spike_shape_itself():
+    """Scripts are where the published numbers come from, so for them the ban is
+    stricter than the signature check above: no script builds a `SpikeShape`
+    at all, by any spelling, and the two deleted shims stay deleted. Naming the
+    type in an annotation is allowed -- `_sweep` does -- constructing it is not."""
+    offenders = _script_constructions(REPO)
+    assert offenders == [], (
+        f"{offenders} construct the traffic model locally. Use "
+        "autoscale.traffic.spike_shape -- a script that builds its own shape "
+        "publishes numbers from a rule nothing else checks"
+    )
+
+
+def test_the_render_draws_the_preregistered_spike_not_a_candidate():
+    """`spike_shape`'s overrides exist so the diagnostics can measure a
+    candidate regime before it is adopted. The production render passing one
+    would publish figures from a traffic model the pre-registration does not
+    state, with every other check in this file still green, because they
+    test `spike_shape` and not what the render asks it for."""
+    tree = ast.parse(RENDER.read_text())
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and _called_name(node) == "spike_shape"
+    ]
+    assert calls, (
+        f"{RENDER.name} no longer calls spike_shape, so this test checks "
+        "nothing; find where the render's traffic model comes from now"
+    )
+    overrides = [
+        f"line {call.lineno}: {kw.arg or '**kwargs'}"
+        for call in calls
+        for kw in call.keywords
+        if kw.arg is None or kw.arg in NON_PREREGISTERED_KEYWORDS
+    ]
+    assert overrides == [], (
+        f"{RENDER.name} overrides the pre-registered traffic model at {overrides}; "
+        "its figures would then be a candidate regime presented as the result"
     )
