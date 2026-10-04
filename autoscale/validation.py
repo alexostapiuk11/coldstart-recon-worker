@@ -70,11 +70,11 @@ class RealRun:
     driver was given and the simulator replays -- not a measured wall-clock
     time: a measured value would differ between repeats and break the exact
     one-schedule equality, and one a few ms past a bin boundary would create a
-    sliver bin. `host_ids` is the platform identity of every replica that served
-    (spec §10's new requirement): artifact 1 saw one first-touch cold start at
-    2266.6 s against a 39-96 s norm, and a host-novelty event inside a
-    validation run is indistinguishable from a simulator bug unless the host is
-    on record.
+    sliver bin. `host_ids` is the platform identity of every replica that
+    served, exactly one per replica (spec §10's new requirement): artifact 1
+    saw one first-touch cold start at 2266.6 s against a 39-96 s norm, and a
+    host-novelty event inside a validation run is indistinguishable from a
+    simulator bug unless the host is on record.
     """
 
     schedule: tuple[float, ...]
@@ -111,6 +111,13 @@ class RealRun:
                 "host_ids is empty or holds a blank id; spec §10 requires the host "
                 "of every replica, because a host-novelty event is otherwise "
                 "indistinguishable from a simulator bug"
+            )
+        if len(self.host_ids) != self.replicas:
+            raise ValueError(
+                f"{len(self.host_ids)} host ids for {self.replicas} replicas; spec §10 "
+                "requires one per replica. An unrecorded replica's host cannot be "
+                "separated from a simulator bug if it turns out to be new, and extra "
+                "ids cannot say which hosts actually served"
             )
         previous = 0.0
         for t in self.schedule:
@@ -165,6 +172,11 @@ def predicted_trajectory(schedule, replicas: int, curve: ServiceCurve, until: fl
     The unfinished requests go in as None rather than being dropped: they are
     the backlog, and a trajectory without them would report the bins they
     arrived in as uncongested -- the flattering direction.
+
+    The gate (`validate`) always passes `BIN_SECONDS`. The parameter stays
+    because figure 3, the validation overlay (spec §11), may want finer bins
+    than the gate judges; dropping it would push that figure into a second
+    copy of the replay.
     """
     result = run_fixed_capacity(list(schedule), replicas, curve, until)
     pairs = result.completed_requests()

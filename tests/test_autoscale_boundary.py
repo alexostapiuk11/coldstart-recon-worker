@@ -21,7 +21,11 @@ check would report a violation that is not one. This parses the imports.
 """
 
 import ast
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 PACKAGE = REPO / "autoscale"
@@ -84,3 +88,29 @@ def test_the_import_parser_is_not_fooled_by_the_sibling_module_name():
     sim = PACKAGE / "sim.py"
     assert "autoscale.coldstart_ecdf" in sim.read_text()
     assert not _imports_coldstart(sim)
+
+
+@pytest.mark.parametrize("module, why", [
+    ("autoscale.traffic", "artifact 4 imports the traffic derivation"),
+    ("autoscale.thresholds", "figure 4 shades against the threshold grid without the sweep"),
+], ids=["traffic", "thresholds"])
+def test_modules_used_without_the_simulator_load_none_of_it(module, why):
+    """The checks above parse DIRECT imports, and the road to `coldstart` is
+    transitive: `autoscale.sim` and `autoscale.coldstart_ecdf` reach it, so one
+    convenience import of either would pull artifact 1's package into a module
+    that is used without it, and nothing above would notice. A fresh
+    interpreter, because this test process has already loaded `coldstart`
+    through other test modules. `autoscale.validation_band` and
+    `autoscale.figures` have the same check beside their own tests."""
+    code = (
+        f"import sys; import {module}; "
+        "print(sorted(m for m in sys.modules if m == 'coldstart' or m.startswith('coldstart')"
+        " or m in ('autoscale.sim', 'autoscale.coldstart_ecdf')))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], cwd=REPO, capture_output=True, text=True, check=True
+    )
+    assert out.stdout.strip() == "[]", (
+        f"importing {module} loads {out.stdout.strip()}; {why}, and the simulator and "
+        "artifact 1's package must not come with it"
+    )

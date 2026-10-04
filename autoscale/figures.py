@@ -29,7 +29,7 @@ the data, and margins are set explicitly instead of by `tight_layout`, which
 cannot see the out-of-axes artists and collapses the axes rather than the
 labels.
 
-Refusals rather than best-effort drawing, in four places:
+Refusals rather than best-effort drawing, in five places:
 
 - `frontiers` refuses a `by_signal` missing any of the three signals. A chart
   that appears to compare three signals while showing two is a misleading
@@ -48,6 +48,11 @@ Refusals rather than best-effort drawing, in four places:
 - `convergence` refuses an empty arm, and refuses an empty sweep. Both draw a
   blank panel that reads as "the model showed nothing" rather than "nothing was
   run".
+- `service_curve` (figure 4), through `censoring_onset`, refuses a utilization
+  curve that falls back below the censoring threshold after reaching it. The
+  figure shades ONE region from the onset to the edge and says every point in
+  it is past the threshold; on a curve that dips, part of that region is load
+  the utilization policy can still respond to.
 """
 
 from itertools import pairwise
@@ -669,9 +674,10 @@ def _figure_banner(fig, left: float, right: float, word: str, subtitle: str, col
     """The measured/modeled strip, in FIGURE coordinates, for a stacked figure.
 
     `_banner` sizes its strip as a fraction of one panel's height, which suits
-    figures 1 and 2's tall panels and fails on figure 4's three short ones: the
-    strip comes out shorter than the word inside it and the subtitle lands on
-    the top panel. It is not changed to fit, because that would move figure
+    figure 1's tall panels -- `convergence` is its only caller; figure 2 has no
+    banner -- and fails on figure 4's three short ones: the strip comes out
+    shorter than the word inside it and the subtitle lands on the top panel.
+    It is not changed to fit, because that would move figure
     1's pixels; a stacked figure has one header for all its panels, so it is
     drawn once, against the figure, spanning the panels' shared width.
     """

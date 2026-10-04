@@ -34,7 +34,8 @@ def _run(latency, bins=BINS, *, sent=None, replicas=1, until=None):
     lat = latency if isinstance(latency, list) else [latency] * len(schedule)
     return RealRun(schedule=schedule, sent=schedule if sent is None else sent,
                    latencies=tuple(lat), replicas=replicas,
-                   until=10.0 * bins if until is None else until, host_ids=("w1",))
+                   until=10.0 * bins if until is None else until,
+                   host_ids=tuple(f"w{i + 1}" for i in range(replicas)))
 
 
 def _send_one(at, index=20, bins=BINS):
@@ -237,6 +238,18 @@ def test_a_malformed_real_run_is_refused(override, match):
         RealRun(**{**base, **override})
 
 
+@pytest.mark.parametrize("host_ids", [("w1",), ("w1", "w2", "w3")])
+def test_a_run_must_record_one_host_per_replica(host_ids):
+    """Spec §10: the host of EVERY replica. A two-replica run naming one host
+    leaves the other unrecorded, and a host-novelty event on it would be
+    indistinguishable from a simulator bug; three ids for two replicas cannot
+    say which two served."""
+    schedule = tuple(i * 0.5 for i in range(120))
+    with pytest.raises(ValueError, match="replica"):
+        RealRun(schedule=schedule, sent=schedule, latencies=(1.0,) * 120, replicas=2,
+                until=60.0, host_ids=host_ids)
+
+
 def test_the_constants_are_the_ones_the_preregistration_states():
     from pathlib import Path
 
@@ -251,3 +264,40 @@ def test_the_constants_are_the_ones_the_preregistration_states():
     assert validation.MAX_MISS_FRACTION == 0.5 and "**no more than half**" in prereg
     assert validation.BAND_EDGE_TOLERANCE_SECONDS == 0.001 and "**1 ms**" in prereg
     assert stats.MIN_SAMPLES["p50"] == 20 and "fewer than 20 completed requests" in prereg
+
+
+def test_the_preregistrations_binomial_figures_follow_from_the_constants():
+    """The "why a miss rate" clause quotes figures computed from REPEATS,
+    MIN_COMPARED_BINS and MAX_MISS_FRACTION. Recomputed here, so moving a
+    constant without rewriting the clause fails instead of leaving it arguing
+    for a rule the gate no longer applies."""
+    from fractions import Fraction
+    from math import comb
+    from pathlib import Path
+
+    from autoscale.validation import MAX_MISS_FRACTION, REPEATS
+
+    repo = Path(__file__).resolve().parents[1]
+    text = " ".join((repo / "docs" / "experiment-a2.md").read_text().split())
+
+    # All REPEATS repeats on one side of a perfect model's true median.
+    outside = Fraction(2) * Fraction(1, 2) ** REPEATS
+    assert outside == Fraction(1, 4) and f"probability {outside} per bin" in text
+
+    def fails(k, p):
+        """P(more than MAX_MISS_FRACTION of k bins miss), misses ~ Binomial(k, p)."""
+        first = int(MAX_MISS_FRACTION * k) + 1
+        return sum(comb(k, i) * p**i * (1 - p) ** (k - i) for i in range(first, k + 1))
+
+    k1, k2, k3 = MIN_COMPARED_BINS, 2 * MIN_COMPARED_BINS, 3 * MIN_COMPARED_BINS
+    p = float(outside)
+    every = (1 - p) ** k1, (1 - p) ** k2
+    assert f"passes a perfect model {every[0]:.0%} of the time at {k1} bins" in text
+    assert f"and {every[1]:.1%} at {k2}" in text
+    assert f"fails about {fails(k1, p):.0%} of the time at {k1} judged bins" in text
+    assert fails(k3, p) < 0.001 and f"under 0.1% at {k3}" in text
+    biased = fails(k1, 1 - p), fails(k3, 1 - p)
+    assert f"fails {biased[0]:.0%} and {biased[1]:.1%} of the time" in text
+    # The correlated-bin figures beside them come from a committed script.
+    assert "scripts/a2_validation_gate_power.py" in text
+    assert (repo / "scripts" / "a2_validation_gate_power.py").is_file()

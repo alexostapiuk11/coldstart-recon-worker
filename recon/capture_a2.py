@@ -32,9 +32,12 @@ PROTOCOL
   burst1     Submit WORKERS jobs back to back, ALL before any is polled, so the
              platform must start more than one worker if it ever will (Q2a).
              Poll them round-robin until each is terminal or past its deadline.
-  idle       Wait IDLE_WAIT_SECONDS -- far past the 5 s idleTimeout -- so every
-             container from burst1 terminates. Without this, burst2 would reuse
-             live containers and measure container survival, not host affinity.
+  idle       Wait IDLE_WAIT_SECONDS, which must exceed the endpoint's
+             idleTimeout (preflight enforces idleTimeout < IDLE_WAIT_SECONDS;
+             5 s, the platform minimum, is recommended for the widest margin),
+             so every container from burst1 terminates. Without this, burst2
+             would reuse live containers and measure container survival, not
+             host affinity.
   burst2     The same again. A workerId repeated from burst1 is a host the
              platform re-allocated after termination: a warm-host candidate
              (docs/experiment.md saw 23 of 27 runs on one host). Its engine log
@@ -322,8 +325,9 @@ class Capture:
                 self._call("GET", f"{API}/{self._id}/health", require_ok=False)
             except requests.RequestException:
                 # Already recorded as an error row by _send. One dropped
-                # connection must not end a 20-minute window whose other polls
-                # are the evidence; a run of them is itself a finding.
+                # connection must not end a 10-minute observation window (scale
+                # runs two) whose other polls are the evidence; a run of them is
+                # itself a finding.
                 pass
             self._sleep(POLL_SECONDS)
 

@@ -331,7 +331,7 @@ def test_a_timed_out_job_is_saved_as_a_timeout_and_stops_the_run(tmp_path):
 
 
 def test_a_health_error_is_recorded_and_the_window_continues(tmp_path):
-    """One dropped connection on `/health` must not abort a 20-minute
+    """One dropped connection on `/health` must not abort a 10-minute
     observation window whose other polls are the evidence."""
     session = FakeSession(health_raises=True)
     _capture(tmp_path, session).run()
@@ -594,3 +594,72 @@ def test_the_restore_flag_only_releases(tmp_path, main_env, capsys):
         ("POST", {"workersMin": 0}), ("GET", None)]
     assert not out.exists()
     assert '"workersMin": 0' in capsys.readouterr().out
+
+
+# --- round trip: what the capture writes, the analysis reads ---------------
+#
+# Each half is tested against its own fixtures above and in
+# tests/test_recon_analyse_a2.py. These run the real `Capture` and hand its
+# directory straight to `analyse_a2`, so a change in what one writes -- a file
+# name, a payload shape, a redaction that eats a line -- cannot pass both
+# halves' tests and still leave the first real capture unreadable.
+
+STARTUP_LOG = REPO / "fixtures" / "vllm_logs" / "startup_0.log"
+
+
+def _analyse():
+    """Imported here, not at the top: it imports artifact 1's parser, which
+    the capture's own tests deliberately do without."""
+    import analyse_a2
+
+    return analyse_a2
+
+
+def _round_trip(tmp_path, session):
+    capture = _capture(tmp_path, session)
+    try:
+        capture.run()
+    except capture_a2.JobTimedOut:
+        pass
+    out = tmp_path / "a2_recon"
+    analyse_a2 = _analyse()
+    rows = analyse_a2.load(out, "burst*.json")
+    return out, rows, analyse_a2.render_table(rows)
+
+
+def test_a_clean_capture_reads_back_as_four_rows(tmp_path):
+    lines = STARTUP_LOG.read_text().splitlines()
+    _, rows, table = _round_trip(tmp_path, FakeSession(log_lines=lines))
+    assert [r["label"] for r in rows] == ["burst1_0", "burst1_1", "burst2_0", "burst2_1"]
+    assert {r["status"] for r in rows} == {"COMPLETED"}
+    # fixtures/README.md's run 0: a cold compile and arm A's cache.
+    assert [r["compile_s"] for r in rows] == pytest.approx([38.96] * 4)
+    assert {r["kv_tokens"] for r in rows} == {35792}
+    assert "distinct workers: 4" in table and "timed out" not in table
+
+
+def test_a_timed_out_capture_keeps_and_flags_the_unfinished_job(tmp_path):
+    """The `.timeout` row is kept, not dropped: dropped, an aborted burst
+    would read as a smaller clean one."""
+    _, rows, table = _round_trip(tmp_path, FakeSession(never_finish={"job2"}))
+    assert [(r["label"], r["status"]) for r in rows] == [
+        ("burst1_0", "COMPLETED"), ("burst1_1.timeout", "IN_PROGRESS")]
+    assert "timed out (capture aborted after this burst): 1" in table
+
+
+def test_a_redacted_log_line_still_parses(tmp_path):
+    """A token on the very lines the analysis reads: redaction replaces the
+    token and leaves the rest of the line, so the compile time and the KV
+    capacity survive and nothing secret reaches disk."""
+    lines = [
+        f"{line} HF_TOKEN={HF_TOKEN} key={KEY}"
+        if "torch.compile took" in line or "GPU KV cache size" in line else line
+        for line in STARTUP_LOG.read_text().splitlines()
+    ]
+    assert sum(HF_TOKEN in line for line in lines) == 2
+    out, rows, _ = _round_trip(tmp_path, FakeSession(log_lines=lines))
+    on_disk = "".join(p.read_text() for p in out.iterdir())
+    assert HF_TOKEN not in on_disk and KEY not in on_disk
+    assert capture_a2.REDACTED in on_disk
+    assert [r["compile_s"] for r in rows] == pytest.approx([38.96] * 4)
+    assert {r["kv_tokens"] for r in rows} == {35792}
