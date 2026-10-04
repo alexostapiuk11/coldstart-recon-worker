@@ -194,3 +194,26 @@ def test_the_bits_are_pinned_not_just_the_algebra():
     )
     assert candidate_b.baseline_rate == float.fromhex("0x1.af286bca1af28p+2")
     assert candidate_b.k == float.fromhex("0x1.6000000000001p+3")
+
+
+def test_no_script_constructs_a_spike_shape_itself():
+    """The consolidation, made permanent. Four copies of this derivation agreed
+    only because a test compared two of them and an amendment was applied by
+    hand in each; the next copy would be the fifth. Parses rather than greps,
+    so a comment or docstring mentioning SpikeShape is not a violation."""
+    import ast
+
+    offenders = []
+    for path in sorted((REPO / "scripts").glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "SpikeShape":
+                offenders.append(path.name)
+            if isinstance(node, ast.FunctionDef) and node.name in (
+                "_saturation_rps", "_preregistered_shape"
+            ):
+                offenders.append(f"{path.name}:{node.name}")
+    assert offenders == [], (
+        f"{offenders} derive the traffic model locally. Use autoscale.traffic -- "
+        "a second copy stops implementing the pre-registered rule the moment "
+        "the service curve or an amendment changes one and not the other"
+    )

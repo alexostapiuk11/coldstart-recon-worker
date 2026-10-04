@@ -34,10 +34,7 @@ from autoscale.frontier import (
 from autoscale.service import SERVICE_CURVE_PLACEHOLDER
 from autoscale.sweep import SweepConfig, run_sweep
 from autoscale.traffic import (
-    ADDITIONAL_REPLICAS_AT_PEAK,  # noqa: F401 -- tests read render.*; plan 2a Task 11
-    BASELINE_FRACTION_OF_SATURATION,  # noqa: F401 -- tests read render.*; plan 2a Task 11
-    RAMP_SECONDS,  # noqa: F401 -- tests read render.*; plan 2a Task 11
-    saturation_rps,
+    RAMP_SECONDS,  # noqa: F401 -- tests/test_a2_end_to_end.py reads render.RAMP_SECONDS
     spike_shape,
 )
 
@@ -48,27 +45,6 @@ SWEPT_LAGS = (20.0, 40.0, 60.0, 80.0, 120.0)
 # order statistics) without the bootstrap dominating a sweep that is
 # already minutes of CPU.
 GAP_BOOTSTRAP_ITERATIONS = 2000
-
-
-def _saturation_rps(curve) -> float:
-    """Shim for `autoscale.traffic.saturation_rps`. Deleted in plan 2a Task 11,
-    once parity with the old derivation has been proven through it."""
-    return saturation_rps(curve)
-
-
-def _preregistered_shape(curve, kind: str, ramp: float) -> SpikeShape:
-    """Shim for `autoscale.traffic.spike_shape`. Deleted in plan 2a Task 11.
-
-    The `ramp` argument is no longer an input -- R = D/2 is derived -- but a
-    caller passing one that disagrees is told so rather than silently ignored.
-    """
-    shape = spike_shape(curve, kind)
-    if ramp != shape.ramp:
-        raise ValueError(
-            f"ramp={ramp!r} disagrees with the pre-registered R = D/2 = "
-            f"{shape.ramp!r} for kind={kind!r}; the ramp is derived, not chosen"
-        )
-    return shape
 
 
 def _report_discards(label: str, discards: list[str]) -> None:

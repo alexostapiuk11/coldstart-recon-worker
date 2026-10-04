@@ -49,6 +49,7 @@ from autoscale.frontier import gap_at_iso_cost, h3_verdict, pareto_frontier
 from autoscale.service import SERVICE_CURVE_PLACEHOLDER
 from autoscale.signals import SIGNALS
 from autoscale.sweep import THRESHOLDS, SweepConfig, run_sweep
+from autoscale.traffic import spike_shape
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 # Artifact 1's committed campaign, not a fixture. If this test ever stops
@@ -69,9 +70,6 @@ SUSTAIN = 95.0
 RAMP = 47.5
 REPETITIONS_UNDER_TEST = 1
 
-BASELINE_FRACTION_OF_SATURATION = 0.70  # docs/experiment-a2.md, amended 2026-09-17
-ADDITIONAL_REPLICAS_AT_PEAK = 0.25  # docs/experiment-a2.md, amended 2026-09-17
-
 # Threshold combinations one sweep actually runs: the pre-registered grids,
 # less the pairs `Controller` refuses outright (`scale_down_at >= scale_up_at`
 # oscillates). Derived from `THRESHOLDS` rather than written as 55, so a grid
@@ -82,29 +80,15 @@ _VALID_COMBINATIONS = sum(
 
 
 def _shape(kind: str, ramp: float) -> SpikeShape:
-    """The traffic model as the pre-registration states it: a RULE over the
-    service curve, not two literals.
+    """The pre-registered spike over the reduced SUSTAIN window.
 
-    The plan's draft of this test hardcoded `baseline_rate=2.0, k=4.0`, which
-    is roughly a sixth of what the rule gives against the placeholder curve.
-    At that load one replica absorbs the whole spike, queue depth never crosses
-    even its lowest threshold, and every queue_depth run is discarded as
-    `no_scaling_action` -- so the "end to end" test would have exercised two of
-    the three signals and passed, which is the exact failure this file is
-    supposed to catch. `scripts/a2_render_figures.py` derives the shape the
-    same way and for the same reason; the derivation is duplicated rather than
-    imported because `scripts/` is not an importable package.
+    This used to be an independent copy of the derivation, because `scripts/`
+    is not importable. `autoscale.traffic` is, and one copy is the only kind
+    that cannot drift. `ramp` is checked rather than passed: R = D/2 is derived.
     """
-    saturation = max(
-        c / SERVICE_CURVE_PLACEHOLDER.latency_at(c)
-        for c, _, _, _ in SERVICE_CURVE_PLACEHOLDER.points
-        if c > 0
-    )
-    baseline = BASELINE_FRACTION_OF_SATURATION * saturation
-    peak = baseline + ADDITIONAL_REPLICAS_AT_PEAK * saturation
-    return SpikeShape(
-        kind=kind, baseline_rate=baseline, k=peak / baseline, ramp=ramp, sustain=SUSTAIN
-    )
+    shape = spike_shape(SERVICE_CURVE_PLACEHOLDER, kind, sustain=SUSTAIN)
+    assert shape.ramp == ramp, f"ramp {ramp} is not D/2 = {shape.ramp} for this window"
+    return shape
 
 
 def _sweep(arm: str, lags, shape: SpikeShape):
@@ -397,39 +381,6 @@ def test_the_sweep_reproduces_across_processes_not_just_within_one():
     assert first["discards"] == second["discards"]
 
 
-def test_the_traffic_constants_match_the_render_script_and_the_preregistration():
-    """The traffic derivation lives in three places -- this file, the render
-    script, and docs/experiment-a2.md -- and the first two are duplicated rather
-    than shared. A duplicated constant that nothing compares is two constants.
-
-    This bit for real: the pre-registered `k` (3 additional replicas at peak)
-    put the peak at 3.4x one replica's saturation, which made every signal
-    saturate for the whole spike and every policy deliver an identical p99, and
-    the amendment that fixed it had to be applied by hand in both copies. A
-    third place that quietly kept the old value would have produced a sweep
-    disagreeing with the gate that is supposed to certify it.
-    """
-    import sys
-
-    sys.path.insert(0, str(REPO_ROOT / "scripts"))
-    import a2_render_figures as render
-
-    assert BASELINE_FRACTION_OF_SATURATION == render.BASELINE_FRACTION_OF_SATURATION
-    assert ADDITIONAL_REPLICAS_AT_PEAK == render.ADDITIONAL_REPLICAS_AT_PEAK
-
-    prereg = (REPO_ROOT / "docs" / "experiment-a2.md").read_text()
-    assert "baseline = **70%** of measured saturation" in prereg, (
-        "the pre-registration no longer states the baseline fraction these "
-        "constants implement; one of the two moved without the other"
-    )
-    assert "**0.25 additional replicas**" in prereg, (
-        f"the pre-registration does not state the amended k that "
-        f"ADDITIONAL_REPLICAS_AT_PEAK={ADDITIONAL_REPLICAS_AT_PEAK} implements. "
-        "Changing the traffic model is an amendment to a pre-registered "
-        "quantity, not a code edit"
-    )
-
-
 def test_the_render_script_evaluates_h3_under_both_shapes():
     """H3 is the headline and `h3_verdict` was reachable only from tests: no
     ramp sweep existed, and nothing on the production path called it. Running
@@ -465,7 +416,5 @@ def test_the_ramp_is_half_the_sustain_as_the_pre_registration_states():
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
     import a2_render_figures as render
 
-    shape = render._preregistered_shape(
-        render.SERVICE_CURVE_PLACEHOLDER, kind="ramp", ramp=render.RAMP_SECONDS
-    )
+    shape = spike_shape(render.SERVICE_CURVE_PLACEHOLDER, kind="ramp")
     assert shape.ramp == pytest.approx(shape.sustain / 2)
