@@ -11,11 +11,12 @@ without artifact 2's even-balancing replay. `autoscale.validation` is artifact
 replay into `run_fixed_capacity`. tests/test_validation_band.py checks the
 boundary in a fresh interpreter.
 
-No pre-registered value lives here. Bin width, required repeats and the minimum
-number of comparable bins are required keywords, because each artifact
-pre-registers its own and a default would let one silently inherit another's.
+No pre-registered value lives here. Bin width, required repeats, the minimum
+number of judged bins, the tolerated miss fraction and the band-edge tolerance
+are required keywords, because each artifact pre-registers its own and a
+default would let one silently inherit another's.
 
-Three decisions, each with its rejected alternative:
+Five decisions, each with its rejected alternative:
 
 - **The per-bin statistic is the p50, not the p99.** A 10 s bin holds a few
   hundred requests at the rates these artifacts drive, and the p99's sample
@@ -26,8 +27,19 @@ Three decisions, each with its rejected alternative:
   missing. A censored bin is compared by WHETHER both sides backlogged: reality
   backlogged and the model did not is a miss -- the flattering one -- not a bin
   excluded for lack of a number.
-- **The verdict has three states.** Zero misses over too few compared bins is
-  not agreement, so fewer than `min_compared_bins` comparable bins is
+- **Both sides censored is agreement, but the bin is not judged.** It says
+  only that both backlogged, nothing about the model's latency. Counting it
+  toward the minimum, or as an agreement in the miss rate, would let a run that
+  matched a few bins and then backlogged pass on its tail for free.
+- **The pass rule is a miss rate, not "every bin agrees".** A model that
+  predicts each bin's true median exactly still falls outside the min-max of
+  three repeats with probability 1/4 per bin (all three repeats land on one
+  side of the median: 2 x (1/2)^3). "Every bin" therefore passes a PERFECT
+  model with probability 0.75^k -- 6% at 10 bins -- and its verdict says more
+  about k than about the model. A miss fraction is a rate a perfect model
+  meets and a biased one does not.
+- **The verdict has three states.** Zero misses over too few judged bins is
+  not agreement, so fewer than `min_compared_bins` judged bins is
   "not_evaluable", as `frontier.h3_verdict` treats a gap it cannot assess.
 """
 
@@ -42,6 +54,13 @@ __all__ = ["BandBin", "Bin", "BinVerdict", "Validation", "band", "compare", "tra
 
 @dataclass(frozen=True)
 class Bin:
+    """One bin of a latency trajectory, real or predicted.
+
+    `p50` is None unless `status` is "ok": a censored, thin or empty bin has
+    no median worth reporting, and a number there -- even a flagged one --
+    would be plotted and quoted like any other.
+    """
+
     start: float
     end: float
     requests: int
@@ -53,6 +72,13 @@ class Bin:
 
 @dataclass(frozen=True)
 class BandBin:
+    """One bin of the tolerance band: the range of the real repeats' p50s.
+
+    `lo`/`hi` are None unless `status` is "ok". The status says WHY there is
+    no range -- all repeats backlogged, the repeats disagreed about it, or too
+    few requests -- because each is excluded or judged differently.
+    """
+
     start: float
     end: float
     lo: float | None
@@ -62,6 +88,10 @@ class BandBin:
 
 @dataclass(frozen=True)
 class BinVerdict:
+    """The verdict on one bin. `miss_seconds` is 0.0 unless the bin is a miss;
+    `math.inf` for a censoring disagreement, whose true distance is unknown
+    and only bounded below -- reporting it as 0 would hide the worst miss."""
+
     start: float
     end: float
     verdict: str
@@ -70,12 +100,26 @@ class BinVerdict:
 
 @dataclass(frozen=True)
 class Validation:
+    """The outcome of one comparison.
+
+    `compared` counts the JUDGED bins (inside, outside, censoring
+    disagreement); `agreeing` counts the judged bins that agree, so
+    `compared - agreeing` is the misses (see `misses`). Both-censored bins are
+    in neither -- they agree but are not judged -- and are counted in
+    `detail`. No separate miss field: it would be a third number that could
+    disagree with the other two.
+    """
+
     bins: tuple[BinVerdict, ...]
     compared: int
     agreeing: int
     outcome: str  # "passed" | "failed" | "not_evaluable"
     detail: str
     max_miss_seconds: float
+
+    @property
+    def misses(self) -> int:
+        return self.compared - self.agreeing
 
 
 def trajectory(arrivals, latencies, *, until: float, bin_seconds: float) -> list[Bin]:
@@ -99,9 +143,17 @@ def trajectory(arrivals, latencies, *, until: float, bin_seconds: float) -> list
             "anyway would attribute latencies to the wrong requests"
         )
     if not math.isfinite(bin_seconds) or bin_seconds <= 0:
-        raise ValueError(f"bin_seconds must be finite and positive, got {bin_seconds!r}")
+        raise ValueError(
+            f"bin_seconds must be finite and positive, got {bin_seconds!r}; a zero or "
+            "negative width has no bins to put requests in, and NaN or inf makes "
+            "every bin boundary meaningless"
+        )
     if not math.isfinite(until) or until <= 0:
-        raise ValueError(f"until must be finite and positive, got {until!r}")
+        raise ValueError(
+            f"until must be finite and positive, got {until!r}; the window bounds "
+            "both the bins and which requests count as finished, so a bad one makes "
+            "every bin's censoring meaningless"
+        )
     for t in arrivals:
         if not (0.0 <= t <= until):  # also False for NaN
             raise ValueError(
@@ -150,6 +202,11 @@ def band(trajectories: Sequence[Sequence[Bin]], *, min_repeats: int) -> list[Ban
     Whether the repeats really replayed one schedule is the caller's to check
     -- it is a property of how the runs were driven, which this module does
     not see. What it does check: enough repeats, and identical binning.
+
+    Min and max, not mean +/- k standard deviations: a k-sigma band assumes a
+    distribution, and three samples cannot check one -- nor say which k means
+    anything. The range assumes nothing; its cost is that it only widens as
+    runs are added, which is why each artifact fixes its repeat count.
     """
     if min_repeats < 2:
         raise ValueError(
@@ -188,23 +245,50 @@ def band(trajectories: Sequence[Sequence[Bin]], *, min_repeats: int) -> list[Ban
 
 
 def compare(predicted: Sequence[Bin], band_bins: Sequence[BandBin], *,
-            min_compared_bins: int) -> Validation:
+            min_compared_bins: int, max_miss_fraction: float,
+            edge_tolerance_seconds: float) -> Validation:
     """Hold a predicted trajectory to the band, bin by bin, and give a verdict.
 
-    Per bin: a band the real system could not form ("unstable", "insufficient")
-    is excluded and reported as such, not judged; both sides censored agree;
-    one side censored is a miss of unbounded magnitude; otherwise the p50 is
-    inside or outside [lo, hi], and an outside miss is its distance to the
-    nearer edge. Distance rather than a ratio, because a band a few hundredths
-    of a second wide around a sub-second p50 makes any ratio explode.
+    Per bin:
+    - band "unstable" or "insufficient", or a prediction with no median
+      (thin, empty): excluded, not judged, and reported;
+    - both censored: "agree_censored" -- agreement, but not judged (see the
+      module docstring: it says nothing about latency, and counting it lets a
+      backlogged tail pass for free);
+    - exactly one censored: "censoring_disagreement", a judged miss of
+      unbounded magnitude;
+    - otherwise inside iff `lo - tol <= p50 <= hi + tol`. An outside miss's
+      magnitude is its distance to the nearer UNWIDENED edge: the tolerance
+      absorbs clock-resolution residue at an edge, and shrinking a real miss by
+      it would under-report the distance. Distance rather than a ratio,
+      because a band a few hundredths of a second wide around a sub-second p50
+      makes any ratio explode.
 
-    `min_compared_bins` is required, not defaulted: it decides when silence
-    counts as agreement, and that is a pre-registered choice per artifact.
+    Outcome: fewer than `min_compared_bins` judged bins is "not_evaluable";
+    more than `max_miss_fraction` of the judged bins missing is "failed";
+    otherwise "passed". A miss rate rather than "every bin agrees" for the
+    0.75^k reason in the module docstring.
+
+    All three thresholds are required, not defaulted: they decide when the
+    evidence counts, and that is a pre-registered choice per artifact.
     """
     if min_compared_bins < 1:
         raise ValueError(
             f"min_compared_bins={min_compared_bins}; a gate that requires no "
             "comparable bins passes on no evidence at all"
+        )
+    if not (math.isfinite(max_miss_fraction) and 0 <= max_miss_fraction < 1):
+        raise ValueError(
+            f"max_miss_fraction={max_miss_fraction!r} must be finite and in [0, 1); "
+            "at 1 or above every bin may miss and the gate passes any model, and a "
+            "NaN compares False against the miss count, which passes any model too"
+        )
+    if not (math.isfinite(edge_tolerance_seconds) and edge_tolerance_seconds >= 0):
+        raise ValueError(
+            f"edge_tolerance_seconds={edge_tolerance_seconds!r} must be finite and "
+            "non-negative; a negative one narrows the band below what the repeats "
+            "showed, an infinite one widens it to everything, and a NaN makes "
+            "every comparison False so every bin misses"
         )
     predicted, band_bins = list(predicted), list(band_bins)
     if len(predicted) != len(band_bins) or any(
@@ -214,6 +298,7 @@ def compare(predicted: Sequence[Bin], band_bins: Sequence[BandBin], *,
             "predicted and band bin edges differ; they were binned differently, so "
             "each prediction would be held to the band of a different stretch of time"
         )
+    tol = edge_tolerance_seconds
     verdicts = []
     for p, b in zip(predicted, band_bins, strict=True):
         if b.status in ("unstable", "insufficient"):
@@ -228,30 +313,35 @@ def compare(predicted: Sequence[Bin], band_bins: Sequence[BandBin], *,
                 verdicts.append(BinVerdict(b.start, b.end, "censoring_disagreement", math.inf))
         elif p.status != "ok":
             verdicts.append(BinVerdict(b.start, b.end, "excluded_insufficient", 0.0))
-        elif b.lo <= p.p50 <= b.hi:
+        elif b.lo - tol <= p.p50 <= b.hi + tol:
             verdicts.append(BinVerdict(b.start, b.end, "inside", 0.0))
         else:
             miss = b.lo - p.p50 if p.p50 < b.lo else p.p50 - b.hi
             verdicts.append(BinVerdict(b.start, b.end, "outside", miss))
 
-    judged = [v for v in verdicts if not v.verdict.startswith("excluded")]
-    agreeing = sum(1 for v in judged if v.verdict in ("inside", "agree_censored"))
+    judged = [v for v in verdicts if v.verdict in ("inside", "outside", "censoring_disagreement")]
+    agreeing = sum(1 for v in judged if v.verdict == "inside")
+    misses = len(judged) - agreeing
     max_miss = max((v.miss_seconds for v in judged), default=0.0)
     if len(judged) < min_compared_bins:
         outcome = "not_evaluable"
-        detail = (f"{len(judged)} comparable bins, below the {min_compared_bins} required; "
-                  "zero misses over too few bins is not agreement")
-    elif agreeing == len(judged):
-        outcome, detail = "passed", f"all {len(judged)} comparable bins agree"
-    else:
+        detail = (f"{len(judged)} judged bins, below the {min_compared_bins} required; "
+                  "too few bins to judge is not agreement")
+    elif misses > max_miss_fraction * len(judged):
         outcome = "failed"
-        detail = (f"{len(judged) - agreeing} of {len(judged)} bins disagree; "
-                  f"largest miss {max_miss:.3g} s")
-    # Excluded bins are named in the summary line too, not only per bin: a pass
-    # over 5 of 30 bins because 25 were unstable reads very differently from a
-    # pass over 30 of 30, and the one-line detail is what gets quoted.
-    excluded = len(verdicts) - len(judged)
-    if excluded:
-        unstable = sum(1 for v in verdicts if v.verdict == "excluded_unstable")
-        detail += f" ({excluded} bins excluded, {unstable} of them unstable)"
+        detail = (f"{misses} of {len(judged)} judged bins miss, more than the "
+                  f"{max_miss_fraction:g} allowed; largest miss {max_miss:.3g} s")
+    else:
+        outcome = "passed"
+        detail = (f"{misses} of {len(judged)} judged bins miss, within the "
+                  f"{max_miss_fraction:g} allowed")
+    # Excluded and both-censored bins are named in the summary line too, not
+    # only per bin: a pass over 10 of 30 bins because 20 were unstable or
+    # backlogged reads very differently from a pass over 30 of 30, and the
+    # one-line detail is what gets quoted.
+    excluded = sum(1 for v in verdicts if v.verdict.startswith("excluded"))
+    unstable = sum(1 for v in verdicts if v.verdict == "excluded_unstable")
+    both = sum(1 for v in verdicts if v.verdict == "agree_censored")
+    detail += (f"; {excluded} excluded ({unstable} unstable); "
+               f"{both} both censored (agreement, not judged)")
     return Validation(tuple(verdicts), len(judged), agreeing, outcome, detail, max_miss)

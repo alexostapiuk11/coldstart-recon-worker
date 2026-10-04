@@ -43,14 +43,16 @@ def test_importing_it_does_not_load_artifact_one():
     loaded `coldstart` through other test modules."""
     code = (
         "import sys; import autoscale.validation_band; "
-        "print(sorted(m for m in sys.modules if m == 'coldstart' or m.startswith('coldstart.')))"
+        "print(sorted(m for m in sys.modules if m == 'coldstart' or m.startswith('coldstart.')"
+        " or m in ('autoscale.sim', 'autoscale.coldstart_ecdf')))"
     )
     out = subprocess.run(
         [sys.executable, "-c", code], cwd=REPO, capture_output=True, text=True, check=True
     )
     assert out.stdout.strip() == "[]", (
         f"importing autoscale.validation_band loads {out.stdout.strip()}; artifact 4 "
-        "imports this module precisely because it must not pull in artifact 1's package"
+        "imports this module precisely because it must not pull in artifact 1's package, "
+        "and `autoscale.sim` / `autoscale.coldstart_ecdf` are the road to it"
     )
 
 
@@ -101,6 +103,22 @@ def test_a_latency_that_is_not_a_duration_is_refused(lat):
         trajectory([1.0] * 20, [1.0] * 19 + [lat], until=20.0, bin_seconds=10.0)
 
 
+@pytest.mark.parametrize("values, p50", [
+    ([1.0] * 19 + [100.0], 1.0),   # mean 5.95, max 100.0: only a median gives 1.0
+    ([1.0] * 10 + [3.0] * 10, 2.0),  # even count: interpolated, not min or nearest rank
+])
+def test_the_per_bin_statistic_is_the_interpolated_median(values, p50):
+    [only] = trajectory([float(i) * 0.5 for i in range(20)], values, until=10.0, bin_seconds=10.0)
+    assert only.p50 == p50
+
+
+def test_a_window_that_is_not_a_whole_number_of_bins_ends_in_a_partial_bin():
+    """Merging the last 5 s into its neighbour would make that bin 15 s wide;
+    leaving its end at 70 would claim 5 s the run never covered."""
+    bins = trajectory([62.0], [1.0], until=65.0, bin_seconds=10.0)
+    assert len(bins) == 7 and bins[-1].end == 65.0 and bins[6].requests == 1
+
+
 def test_the_bin_width_has_no_default():
     """Each artifact pre-registers its own. A default here would let one
     artifact silently run on another's."""
@@ -140,52 +158,133 @@ def test_a_bin_the_system_itself_disagrees_about_is_unstable():
     assert b[0].status == "unstable"
 
 
+def test_a_column_no_repeat_could_summarise_is_insufficient_not_unstable():
+    """Thin on every repeat is too few requests, not a system disagreeing
+    with itself; calling it unstable would misreport why it was excluded."""
+    thin = trajectory([0.0] * 10, [1.0] * 10, until=10.0, bin_seconds=10.0)
+    [only] = band([thin, thin, thin], min_repeats=3)
+    assert only.status == "insufficient"
+
+
 # ---- compare ----------------------------------------------------------------
 
+def _cmp(pred, band_bins, *, frac=0.5, tol=0.0, min_bins=MIN_COMPARED):
+    """compare() with this file's choices spelled out. No artifact's values:
+    each artifact pre-registers its own."""
+    return compare(pred, band_bins, min_compared_bins=min_bins, max_miss_fraction=frac,
+                   edge_tolerance_seconds=tol)
+
+
+def _censored_pred(start):
+    return Bin(start, start + 10.0, 20, 15, 5, None, "censored")
+
+
+def _censored_band(start):
+    return BandBin(start, start + 10.0, None, None, "censored")
+
+
 def test_every_bin_inside_the_band_passes():
-    v = compare(_pred([1.1] * 6), _band(6), min_compared_bins=MIN_COMPARED)
+    v = _cmp(_pred([1.1] * 6), _band(6))
     assert v.outcome == "passed" and v.compared == 6 and v.max_miss_seconds == 0.0
 
 
 def test_a_miss_is_reported_with_its_magnitude():
-    v = compare(_pred([1.1] * 5 + [1.5]), _band(6), min_compared_bins=MIN_COMPARED)
+    v = _cmp(_pred([1.1] * 5 + [1.5]), _band(6), frac=0.0)
     assert v.outcome == "failed"
     assert v.max_miss_seconds == pytest.approx(0.3)
     assert v.bins[-1].verdict == "outside"
+
+
+@pytest.mark.parametrize("p50", [1.0, 1.2])
+def test_a_prediction_on_a_band_edge_is_inside(p50):
+    """The band is closed: the repeats themselves reached that value."""
+    v = _cmp(_pred([1.1] * 5 + [p50]), _band(6), frac=0.0)
+    assert v.outcome == "passed" and v.bins[-1].verdict == "inside"
+
+
+def test_exactly_half_missing_passes():
+    """'No more than half': the boundary is on the passing side."""
+    v = _cmp(_pred([1.1] * 5 + [1.5] * 5), _band(10))
+    assert (v.outcome, v.compared, v.agreeing) == ("passed", 10, 5)
+
+
+def test_one_more_than_half_missing_fails():
+    v = _cmp(_pred([1.1] * 4 + [1.5] * 6), _band(10))
+    assert v.outcome == "failed"
 
 
 def test_reality_backlogged_while_the_model_kept_up_is_a_miss():
     """The flattering direction: the model says the fleet coped and reality
     did not. Excluding the bin because reality is censored would pass exactly
     the failure the gate exists to catch."""
-    b = _band(5) + [BandBin(50.0, 60.0, None, None, "censored")]
-    v = compare(_pred([1.1] * 6), b, min_compared_bins=MIN_COMPARED)
+    b = _band(5) + [_censored_band(50.0)]
+    v = _cmp(_pred([1.1] * 6), b, frac=0.0)
     assert v.outcome == "failed"
     assert v.bins[-1].verdict == "censoring_disagreement"
     assert v.max_miss_seconds == float("inf")
-
-
-def test_both_backlogged_in_the_same_bin_agree():
-    pred = _pred([1.1] * 5) + [Bin(50.0, 60.0, 20, 15, 5, None, "censored")]
-    b = _band(5) + [BandBin(50.0, 60.0, None, None, "censored")]
-    assert compare(pred, b, min_compared_bins=MIN_COMPARED).outcome == "passed"
 
 
 def test_the_model_backlogged_while_reality_kept_up_is_a_miss_too():
     """The other direction of a censoring disagreement. Less flattering, but
     still a model that says the fleet fell behind when it did not -- an
     autoscaling verdict built on it would buy capacity nobody needed."""
-    pred = _pred([1.1] * 5) + [Bin(50.0, 60.0, 20, 15, 5, None, "censored")]
-    v = compare(pred, _band(6), min_compared_bins=MIN_COMPARED)
+    pred = _pred([1.1] * 5) + [_censored_pred(50.0)]
+    v = _cmp(pred, _band(6), frac=0.0)
     assert v.outcome == "failed"
     assert v.bins[-1].verdict == "censoring_disagreement"
     assert v.max_miss_seconds == float("inf")
 
 
+def test_a_censoring_disagreement_counts_as_a_judged_miss():
+    """2 inside, 2 outside, 2 disagreements: 4 misses of 6 judged. Excluded,
+    it would leave 4 judged (not evaluable); counted as agreement, 2 of 6
+    (a pass). Only counting it as a miss fails."""
+    pred = _pred([1.1, 1.1, 1.5, 1.5]) + [_censored_pred(40.0), Bin(50.0, 60.0, 20, 20, 0, 1.1, "ok")]
+    b = _band(4) + [BandBin(40.0, 50.0, 1.0, 1.2, "ok"), _censored_band(50.0)]
+    v = _cmp(pred, b)
+    assert (v.outcome, v.compared, v.agreeing) == ("failed", 6, 2)
+
+
+def test_both_backlogged_in_the_same_bin_agree_without_being_judged():
+    pred = _pred([1.1] * 5) + [_censored_pred(50.0)]
+    b = _band(5) + [_censored_band(50.0)]
+    v = _cmp(pred, b, frac=0.0)
+    assert (v.outcome, v.compared) == ("passed", 5)
+    assert v.bins[-1].verdict == "agree_censored"
+    assert "1 both censored" in v.detail
+
+
+def test_a_backlogged_tail_does_not_count_toward_the_minimum():
+    """Both sides censored says nothing about the model's latency. Counted,
+    a run that agreed on 4 bins and then backlogged would pass on its tail."""
+    pred = _pred([1.1] * 4) + [_censored_pred(40.0 + 10.0 * i) for i in range(6)]
+    b = _band(4) + [_censored_band(40.0 + 10.0 * i) for i in range(6)]
+    v = _cmp(pred, b)
+    assert (v.outcome, v.compared) == ("not_evaluable", 4)
+
+
+def test_a_prediction_within_the_edge_tolerance_is_inside():
+    v = _cmp(_pred([1.1] * 4 + [1.2005, 0.9995]), _band(6), frac=0.0, tol=0.001)
+    assert v.outcome == "passed"
+    assert [x.verdict for x in v.bins[-2:]] == ["inside", "inside"]
+
+
+def test_a_miss_beyond_the_tolerance_is_measured_from_the_unwidened_edge():
+    """The tolerance decides inside or out; it does not shrink the miss."""
+    v = _cmp(_pred([1.1] * 5 + [1.202]), _band(6), frac=0.0, tol=0.001)
+    assert v.bins[-1].verdict == "outside"
+    assert v.bins[-1].miss_seconds == pytest.approx(0.002, abs=1e-9)
+
+
+def test_a_thin_prediction_is_excluded_not_judged():
+    pred = _pred([1.1] * 5) + [Bin(50.0, 60.0, 10, 10, 0, None, "thin")]
+    v = _cmp(pred, _band(6), frac=0.0)
+    assert v.bins[-1].verdict == "excluded_insufficient" and v.compared == 5
+
+
 def test_exactly_the_required_comparable_bins_is_evaluable():
     """The threshold is a minimum, so meeting it exactly is enough."""
-    v = compare(_pred([1.1] * MIN_COMPARED), _band(MIN_COMPARED),
-                min_compared_bins=MIN_COMPARED)
+    v = _cmp(_pred([1.1] * MIN_COMPARED), _band(MIN_COMPARED))
     assert v.outcome == "passed" and v.compared == MIN_COMPARED
 
 
@@ -194,7 +293,7 @@ def test_too_few_comparable_bins_is_not_evaluable_rather_than_a_pass():
     b = _band(MIN_COMPARED - 1) + [
         BandBin((MIN_COMPARED - 1) * 10.0, MIN_COMPARED * 10.0, None, None, "unstable")
     ]
-    v = compare(_pred([1.1] * MIN_COMPARED), b, min_compared_bins=MIN_COMPARED)
+    v = _cmp(_pred([1.1] * MIN_COMPARED), b)
     assert v.outcome == "not_evaluable"
 
 
@@ -204,17 +303,41 @@ def test_an_unstable_bin_is_excluded_from_judgement_and_reported():
     it is named, per bin and in the one-line summary, because a pass that
     quietly skipped bins reads like a pass over all of them."""
     b = _band(6) + [BandBin(60.0, 70.0, None, None, "unstable")]
-    v = compare(_pred([1.1] * 6 + [5.0]), b, min_compared_bins=MIN_COMPARED)
+    v = _cmp(_pred([1.1] * 6 + [5.0]), b, frac=0.0)
     assert v.outcome == "passed" and v.compared == 6
     assert v.bins[-1].verdict == "excluded_unstable"
-    assert "1 bins excluded, 1 of them unstable" in v.detail
+    assert "1 excluded (1 unstable)" in v.detail
+
+
+def test_an_insufficient_bin_is_reported_as_excluded_but_not_unstable():
+    b = _band(6) + [BandBin(60.0, 70.0, None, None, "insufficient")]
+    v = _cmp(_pred([1.1] * 7), b, frac=0.0)
+    assert v.bins[-1].verdict == "excluded_insufficient"
+    assert "1 excluded (0 unstable)" in v.detail
 
 
 def test_a_gate_that_requires_no_evidence_is_refused():
     with pytest.raises(ValueError, match="min_compared_bins"):
-        compare(_pred([1.1] * 6), _band(6), min_compared_bins=0)
+        _cmp(_pred([1.1] * 6), _band(6), min_bins=0)
+
+
+@pytest.mark.parametrize("frac", [-0.1, 1.0, float("nan"), float("inf")])
+def test_a_miss_fraction_outside_zero_to_one_is_refused(frac):
+    with pytest.raises(ValueError, match="max_miss_fraction"):
+        _cmp(_pred([1.1] * 6), _band(6), frac=frac)
+
+
+@pytest.mark.parametrize("tol", [-0.001, float("nan"), float("inf")])
+def test_an_edge_tolerance_that_is_not_a_small_duration_is_refused(tol):
+    with pytest.raises(ValueError, match="edge_tolerance_seconds"):
+        _cmp(_pred([1.1] * 6), _band(6), tol=tol)
+
+
+def test_the_new_thresholds_have_no_defaults():
+    with pytest.raises(TypeError):
+        compare(_pred([1.1] * 6), _band(6), min_compared_bins=MIN_COMPARED)
 
 
 def test_mismatched_bin_edges_are_refused():
     with pytest.raises(ValueError, match="edges"):
-        compare(_pred([1.1] * 6), _band(5), min_compared_bins=MIN_COMPARED)
+        _cmp(_pred([1.1] * 6), _band(5))

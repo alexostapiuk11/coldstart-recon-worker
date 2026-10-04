@@ -2,9 +2,11 @@
 
 Pin capacity, drive a real transient load from a fixed arrival SCHEDULE,
 replay that same schedule into `run_fixed_capacity`, and compare the predicted
-latency trajectory against what happened. Three real repeats of the schedule
-set the tolerance band -- "a model cannot be required to be more reproducible
-than the system it models". The load driver is plan 2b's.
+latency trajectory against what happened. Exactly three real repeats of the
+schedule set the tolerance band -- "a model cannot be required to be more
+reproducible than the system it models" -- and the model passes if no more
+than half of the judged bins miss it (`autoscale.validation_band` says why a
+miss rate and not "every bin"). The load driver is plan 2b's.
 
 This module holds what is artifact 2's: the pre-registered constants, the
 `RealRun` record, the checks that the repeats really replayed one schedule, and
@@ -17,6 +19,12 @@ and the prediction then place exactly the same requests in the same bins, and
 driver jitter cannot move a request across a boundary and manufacture a
 difference no system produced. Jitter is bounded instead, and a run exceeding
 the bound is refused -- it replayed a different trace, so it tests nothing.
+
+A real run is cut at the window exactly as the simulator is: a request that
+finished after `until` counts as unfinished (`RealRun.windowed_latencies`).
+Without the cut, a driver that kept collecting after the window would report
+reality uncensored where the model is censored, and the gate would score a
+miss no system produced.
 
 The constants are fixed by docs/experiment-a2.md ("Validation gate — pass
 rule"). Changing one after the first real validation run is an amendment.
@@ -31,28 +39,38 @@ from autoscale.sim import run_fixed_capacity
 from autoscale.validation_band import BandBin, Bin, Validation, band, compare, trajectory
 
 __all__ = [
+    "BAND_EDGE_TOLERANCE_SECONDS",
     "BIN_SECONDS",
+    "MAX_MISS_FRACTION",
     "MAX_SEND_JITTER_SECONDS",
     "MIN_COMPARED_BINS",
-    "MIN_REPEATS",
+    "REPEATS",
     "RealRun",
     "predicted_trajectory",
     "tolerance_band",
     "validate",
 ]
 
-MIN_REPEATS = 3  # spec §10: "Three real repeats; their spread sets the tolerance band"
+REPEATS = 3  # exactly; spec §10: "Three real repeats; their spread sets the tolerance band"
 BIN_SECONDS = 10.0
 MAX_SEND_JITTER_SECONDS = 0.5
-MIN_COMPARED_BINS = 5
+MIN_COMPARED_BINS = 10
+MAX_MISS_FRACTION = 0.5
+# The latency clock's resolution: float residue at a band edge is not a miss.
+BAND_EDGE_TOLERANCE_SECONDS = 0.001
 
 
 @dataclass(frozen=True)
 class RealRun:
     """One real open-loop run at pinned capacity, as the load driver records it.
 
-    `latencies[i]` is None when request i had not completed when the window
-    closed. `host_ids` is the platform identity of every replica that served
+    `latencies[i]` is None when request i never completed; a latency is kept
+    as recorded even if it ended after the window, and `windowed_latencies`
+    applies the cut. `until` is the CONFIGURED window end, the same number the
+    driver was given and the simulator replays -- not a measured wall-clock
+    time: a measured value would differ between repeats and break the exact
+    one-schedule equality, and one a few ms past a bin boundary would create a
+    sliver bin. `host_ids` is the platform identity of every replica that served
     (spec §10's new requirement): artifact 1 saw one first-touch cold start at
     2266.6 s against a 39-96 s norm, and a host-novelty event inside a
     validation run is indistinguishable from a simulator bug unless the host is
@@ -111,8 +129,27 @@ class RealRun:
             if lat is not None and (not math.isfinite(lat) or lat < 0):
                 raise ValueError(
                     f"latency {lat!r} is not a finite non-negative duration; use "
-                    "None for a request that had not completed"
+                    "None for a request that had not completed, because a number "
+                    "here goes straight into its bin's median"
                 )
+
+    def windowed_latencies(self) -> tuple[float | None, ...]:
+        """The latencies with None wherever `sent[i] + latencies[i] > until`.
+
+        `sent + latency`, not `schedule + latency`: latency is measured from
+        the send, and the window closes on the driver's clock, so the send is
+        when that request's clock started. Strict `>`, matching the
+        simulator's `event.time > until`: a request finishing exactly at the
+        window end is completed in both.
+
+        Cut here rather than refusing such runs: a refusal would throw away
+        recorded evidence and push the same rule into every driver, where one
+        would get it subtly wrong. The raw latencies stay on the record.
+        """
+        return tuple(
+            None if lat is None or s + lat > self.until else lat
+            for s, lat in zip(self.sent, self.latencies, strict=True)
+        )
 
     def send_jitter(self) -> float:
         """The largest gap between when a request was scheduled and when it was
@@ -137,10 +174,14 @@ def predicted_trajectory(schedule, replicas: int, curve: ServiceCurve, until: fl
 
 
 def _check_repeats(runs: Sequence[RealRun]) -> None:
-    """What only a RealRun can tell: that the repeats replayed ONE schedule, at
-    one capacity, faithfully. How many repeats are enough is `band`'s check."""
-    if not runs:
-        raise ValueError("no real runs; there is nothing to build a band from")
+    """What only a RealRun can tell: that there are exactly `REPEATS` of them,
+    and that they replayed ONE schedule, at one capacity, faithfully."""
+    if len(runs) != REPEATS:
+        raise ValueError(
+            f"{len(runs)} real runs; the gate needs exactly {REPEATS}. Fewer is too "
+            "little spread to mean anything, and a fourth widens a min-max band -- "
+            "an open count lets the band grow until the model fits"
+        )
     first = runs[0]
     for run in runs[1:]:
         if (run.schedule, run.replicas, run.until) != (first.schedule, first.replicas, first.until):
@@ -159,26 +200,29 @@ def _check_repeats(runs: Sequence[RealRun]) -> None:
             )
 
 
-def tolerance_band(runs: Sequence[RealRun], bin_seconds: float = BIN_SECONDS) -> list[BandBin]:
+def tolerance_band(runs: Sequence[RealRun]) -> list[BandBin]:
     """The band from real repeats, binned by SCHEDULED arrival (see the module
-    docstring for why not send time), at artifact 2's pre-registered repeat
-    count rather than one the caller picks."""
+    docstring for why not send time) over the window-cut latencies, at artifact
+    2's pre-registered repeat count and bin width. No `bin_seconds` parameter:
+    a bin width chosen at the call site is a post-hoc choice."""
     _check_repeats(runs)
     return band(
-        [trajectory(r.schedule, r.latencies, until=r.until, bin_seconds=bin_seconds)
+        [trajectory(r.schedule, r.windowed_latencies(), until=r.until,
+                    bin_seconds=BIN_SECONDS)
          for r in runs],
-        min_repeats=MIN_REPEATS,
+        min_repeats=REPEATS,
     )
 
 
-def validate(runs: Sequence[RealRun], curve: ServiceCurve,
-             bin_seconds: float = BIN_SECONDS) -> Validation:
+def validate(runs: Sequence[RealRun], curve: ServiceCurve) -> Validation:
     """The gate end to end: band from the real repeats, prediction from
-    replaying their shared schedule, verdict at the pre-registered
-    `MIN_COMPARED_BINS`. The prediction replays the schedule, not any run's
-    send times, so it sees exactly the trace every repeat was meant to."""
-    tolerance = tolerance_band(runs, bin_seconds)
+    replaying their shared schedule, verdict at the pre-registered thresholds.
+    The prediction replays the schedule, not any run's send times, so it sees
+    exactly the trace every repeat was meant to."""
+    tolerance = tolerance_band(runs)
     first = runs[0]
     predicted = predicted_trajectory(first.schedule, first.replicas, curve, first.until,
-                                     bin_seconds)
-    return compare(predicted, tolerance, min_compared_bins=MIN_COMPARED_BINS)
+                                     BIN_SECONDS)
+    return compare(predicted, tolerance, min_compared_bins=MIN_COMPARED_BINS,
+                   max_miss_fraction=MAX_MISS_FRACTION,
+                   edge_tolerance_seconds=BAND_EDGE_TOLERANCE_SECONDS)
