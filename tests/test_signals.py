@@ -179,6 +179,9 @@ def test_throughput_fraction_rises_with_load_where_nvidia_smi_is_flat():
 
 def test_throughput_fraction_is_zero_when_idle_and_saturated_with_unserved_work():
     curve = _tp_curve()
+    # Reads 0 because this curve carries an idle point (0 load, 0 throughput),
+    # as `autoscale.measured_curve` adds to the measured one (Task 2). A curve
+    # without one would read its first point's throughput here instead.
     assert utilization_throughput(FleetState(0, 0, 1), curve) == 0.0
     assert utilization_throughput(FleetState(3, 0, 0), curve) == 1.0
     assert utilization_throughput(FleetState(0, 0, 0), curve) == 0.0
@@ -193,3 +196,26 @@ def test_the_headline_registry_is_unchanged_and_the_sensitivity_one_is_separate(
 def test_the_sensitivity_signal_uses_utilizations_grid_outside_the_pre_registered_dict():
     assert SENSITIVITY_THRESHOLDS["utilization_throughput"] == THRESHOLDS["utilization"]
     assert "utilization_throughput" not in THRESHOLDS
+
+
+def test_a_curve_whose_peak_throughput_is_zero_is_refused():
+    flat = ServiceCurve(points=[(0, 0.3, 0.0, 0.0), (4, 0.4, 0.0, 0.0)], measured=True)
+    with pytest.raises(ValueError, match="no denominator"):
+        utilization_throughput(FleetState(0, 1, 1), flat)
+
+
+def test_the_denominator_is_the_curves_maximum_not_its_last_point():
+    """Peak at concurrency 2 (300 tps), falling to 150 at 4. At load 4 the
+    fraction is 0.5 of the peak. Dividing by the last point would read 1.0."""
+    curve = ServiceCurve(points=[(0, 0.3, 0.0, 0.0), (2, 0.3, 300.0, 1.0), (4, 0.5, 150.0, 1.0)],
+                         measured=True)
+    assert utilization_throughput(FleetState(0, 2, 1), curve) == pytest.approx(1.0)
+    assert utilization_throughput(FleetState(0, 4, 1), curve) == pytest.approx(0.5)
+
+
+def test_a_load_beyond_the_last_point_holds_at_the_last_points_fraction():
+    curve = _tp_curve()
+    assert utilization_throughput(FleetState(0, 40, 1), curve) == pytest.approx(1.0)
+    falling = ServiceCurve(points=[(0, 0.3, 0.0, 0.0), (2, 0.3, 300.0, 1.0), (4, 0.5, 150.0, 1.0)],
+                           measured=True)
+    assert utilization_throughput(FleetState(0, 40, 1), falling) == pytest.approx(0.5)

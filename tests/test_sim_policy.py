@@ -798,17 +798,31 @@ def test_max_replicas_caps_the_fleet_not_just_the_serving_replicas():
     assert result.scale_up_events == 2
 
 
-def test_run_with_policy_accepts_the_sensitivity_signal():
+def test_the_sensitivity_signal_drives_the_loop_differently_from_utilization():
+    """One request in flight per replica reads 1.0 on nvidia-smi's utilisation and
+    0.25 as a throughput fraction (50 of 200 tps). A steady load of about one
+    request in flight, with scale_up_at 0.5, therefore scales the first fleet up
+    and leaves the second alone. If `run_with_policy` quietly resolved the
+    sensitivity name to `utilization`, both runs would match and this would fail."""
     curve = ServiceCurve(points=[(0, 0.3, 0.0, 0.0), (1, 0.3, 50.0, 1.0), (4, 0.4, 200.0, 1.0)],
                          measured=True)
-    result = run_with_policy(
-        arrivals=[i * 0.05 for i in range(1, 400)],
-        signal="utilization_throughput",
-        controller=Controller(scale_up_at=0.5, scale_down_at=0.05, cooldown=5.0, max_replicas=3),
-        lags=LagDistribution(samples=[1.0]),
-        curve=curve,
-        until=30.0,
-        evaluate_every=1.0,
-        rng=random.Random(0),
-    )
-    assert result.completed > 0
+
+    def run(signal):
+        return run_with_policy(
+            arrivals=[i * 0.5 for i in range(1, 60)],
+            signal=signal,
+            controller=Controller(scale_up_at=0.5, scale_down_at=0.05, cooldown=5.0, max_replicas=3),
+            lags=LagDistribution(samples=[1.0]),
+            curve=curve,
+            until=30.0,
+            evaluate_every=1.0,
+            rng=random.Random(0),
+        )
+
+    nvidia_smi = run("utilization")
+    throughput = run("utilization_throughput")
+
+    assert nvidia_smi.scale_up_events == 2
+    assert nvidia_smi.peak_replicas == 3
+    assert throughput.scale_up_events == 0
+    assert throughput.peak_replicas == 1

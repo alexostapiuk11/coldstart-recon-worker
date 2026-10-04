@@ -177,6 +177,14 @@ def utilization_throughput(state: FleetState, curve: ServiceCurve) -> float:
     fraction scale, so utilisation's threshold grid applies unchanged.
     Rejected: a fourth headline signal, which would change every figure and
     the pre-registered three-arm comparison.
+
+    ASSUMPTION: throughput is non-decreasing in load up to the curve's cap, as
+    it is on the measured curve. Past a peak the fraction would fall with load,
+    and a collapsing replica would read as LESS utilised -- the censoring this
+    arm exists to avoid, reintroduced from the other side. Rejected: a running
+    maximum over load, which would flatten a non-monotone measurement into a
+    plateau; a throughput that falls with load is a finding to investigate, not
+    to smooth. The denominator is the maximum over all points for that reason.
     """
     if state.serving_replicas == 0:
         return _zero_replica_reading(state, 1.0)
@@ -187,6 +195,8 @@ def utilization_throughput(state: FleetState, curve: ServiceCurve) -> float:
             "and returning 0 would read every load as idle"
         )
     per_replica = state.in_flight / state.serving_replicas
+    # Only absorbs float-epsilon overshoot from the interpolation, as in
+    # `ServiceCurve.utilization_at`; the ratio cannot otherwise exceed 1.
     return min(1.0, curve.throughput_at(per_replica) / peak)
 
 

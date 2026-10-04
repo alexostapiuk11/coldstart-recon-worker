@@ -175,21 +175,53 @@ def run_sweep(
     `signals` names the signals to sweep; the default is the three arms in
     `SIGNALS`. Naming one outside them (the utilisation sensitivity arm) runs
     only what is named, so a sensitivity sweep never changes the arms' output.
-    An unknown name is refused before any run, not discovered 25 minutes in.
+    An unknown name, an empty list and a duplicated name are all refused before
+    any run, not discovered a long way into a sweep (or never: an empty list
+    would return nothing and look like a sweep that found no policies, and a
+    duplicate would emit each point twice and double-count it in a frontier).
     """
     _require_measured_curve(config.curve, allow_unmeasured)
     points: list[PolicyPoint] = []
     discards: list[str] = []
 
+    if isinstance(signals, str):
+        # ValueError, not the TypeError ruff prefers: this codebase's house
+        # style for refused input is ValueError carrying the consequence.
+        raise ValueError(  # noqa: TRY004
+            f"signals is the bare string {signals!r}; it would be iterated as single "
+            "characters and refused as unknown ones, naming letters instead of the "
+            f"mistake. Pass a tuple, such as ({signals!r},)"
+        )
     names = tuple(sorted(SIGNALS)) if signals is None else tuple(signals)
+    if not names:
+        raise ValueError(
+            "signals is empty; a sweep over no signals runs nothing and returns no "
+            "points and no discards, which reads as a sweep that found no policies "
+            "rather than as a call that asked for none. Pass signals=None for the "
+            "default three"
+        )
+    duplicated = sorted({s for s in names if names.count(s) > 1})
+    if duplicated:
+        raise ValueError(
+            f"signals names {duplicated} more than once; each repeat would emit every "
+            "point of that signal again, and a frontier built from the result would "
+            "count those policies twice"
+        )
     # Built here, not at import: a test that reassigns `sweep.THRESHOLDS` must
     # still change what this sweep iterates.
     grids = {**THRESHOLDS, **SENSITIVITY_THRESHOLDS}
-    unknown = [s for s in names if s not in ALL_SIGNALS or s not in grids]
-    if unknown:
+    not_signals = [s for s in names if s not in ALL_SIGNALS]
+    if not_signals:
         raise KeyError(
-            f"unknown signals {unknown}; known: {sorted(ALL_SIGNALS)}. A typo here would "
+            f"{not_signals} are not signals; known: {sorted(ALL_SIGNALS)}. A typo here would "
             "otherwise surface only when the first policy of that signal runs"
+        )
+    no_grid = [s for s in names if s not in grids]
+    if no_grid:
+        raise KeyError(
+            f"signals {no_grid} have no threshold grid in THRESHOLDS or SENSITIVITY_THRESHOLDS; "
+            "the sweep would have nothing to iterate for them and return no points, "
+            "indistinguishable from a signal that never produced a policy"
         )
     for signal in names:
         up_grid, down_grid = grids[signal]
