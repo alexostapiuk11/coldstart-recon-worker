@@ -3,6 +3,7 @@
 import uuid
 
 from coldstart.schema import RunRecord
+from harness.campaign import run_campaign as harness_run_campaign
 from harness.failures import classify_failure
 from harness.scheduler import build_schedule
 from harness.vllm_logs import parse_engine_log
@@ -190,39 +191,23 @@ def run_campaign(submitter, store, arms, triples, seed, on_run=None, resume=Fals
     own store file.
     """
     schedule = build_schedule(conditions=arms, blocks=triples, seed=seed)
-    done: set[int] = set()
-    if resume:
-        arm_by_index = {s.run_index: s.condition for s in schedule}
-        for r in store.read_all():
-            expected_arm = arm_by_index.get(r.run_index)
-            if expected_arm is None:
-                raise ValueError(
-                    f"resume: stored run_index {r.run_index} falls beyond the "
-                    f"rebuilt schedule, which only covers 0..{len(schedule) - 1} "
-                    f"for the given arms/triples/seed. This means resume was "
-                    f"called with different schedule parameters (e.g. fewer "
-                    f"triples) than produced the stored data -- resume must use "
-                    f"the exact arms/triples/seed of the original window."
-                )
-            if r.arm != expected_arm:
-                raise ValueError(
-                    f"resume: stored run_index {r.run_index} has arm "
-                    f"{r.arm!r} on disk, but the rebuilt schedule assigns it "
-                    f"arm {expected_arm!r}. This means resume was called with "
-                    f"different arms/triples/seed than produced the stored "
-                    f"data, which would splice two different interleavings "
-                    f"together -- resume must use the exact arms/triples/seed "
-                    f"of the original window."
-                )
-            done.add(r.run_index)
-    for scheduled in schedule:
-        if scheduled.run_index in done:
-            continue
-        run_id = _new_run_id()
-        outcome = submitter.submit(arm=scheduled.condition, run_id=run_id)
+
+    def submit(scheduled, run_id):
+        return submitter.submit(arm=scheduled.condition, run_id=run_id)
+
+    def build_record(scheduled, run_id, outcome):
         record = _record_from(scheduled, run_id, outcome)
         record.host["triple_index"] = scheduled.block_index
-        store.append(record)
-        if on_run:
-            on_run(record)
-    return store
+        return record
+
+    return harness_run_campaign(
+        schedule,
+        submit,
+        build_record,
+        store,
+        index_of=lambda r: r.run_index,
+        condition_of=lambda r: r.arm,
+        make_run_id=_new_run_id,
+        on_run=on_run,
+        resume=resume,
+    )
