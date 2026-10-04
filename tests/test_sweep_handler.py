@@ -1,7 +1,9 @@
 """The sweep's RunPod handler, driven against a fake engine and bench."""
 
 import json
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -60,6 +62,8 @@ def test_a_healthy_run_returns_a_compact_summary_and_the_engine_facts():
     assert out["run"]["gpu_util"] == pytest.approx(model_util(8))
     assert out["run"]["prompt_path"] == "exact"
     assert out["run"]["input_lens_unique"] == [PROMPT_TOKENS]
+    assert out["run"]["gpu_util_windowed"] is True
+    assert out["run"]["gpu_util_whole_call"] == pytest.approx(model_util(8))
     assert out["engine"]["max_num_seqs"] == 256
     assert out["engine"]["max_num_seqs_source"] == "non-default-args"
     assert out["engine"]["kv_capacity_tokens"] == 35792
@@ -93,6 +97,10 @@ def test_the_bench_sequence_is_probe_warmup_then_one_measured_run():
     measured = engine.bench_calls[-1]
     assert (measured["max_concurrency"], measured["num_prompts"]) == (8, 160)
     assert measured["timeout"] is not None, "the measured run must be bounded by the job budget"
+    probe = engine.bench_calls[0]
+    # a hung probe would hold the job until the platform killed it and returned
+    # nothing, so it is bounded by the same budget: 1800 s less the reserve
+    assert 0 < probe["timeout"] <= 1800 - sweep_handler.TEARDOWN_RESERVE_S
 
 
 def test_an_unhealthy_engine_returns_its_log_and_runs_no_load():
@@ -123,6 +131,15 @@ def test_a_budget_spent_on_startup_is_a_run_error_not_a_platform_kill():
     out = _run(FakeEngine(), _payload(job_budget_s=60))
     assert out["run"] is None
     assert "budget is spent" in out["run_error"]
+
+
+def test_a_run_with_failed_requests_is_a_run_error_the_handler_reports_like_any_other():
+    out = _run(FakeEngine(failed_requests=3), _payload(level=8))
+    assert out["healthy"] is True
+    assert out["run"] is None
+    assert "3 of 160 requests failed" in out["run_error"]
+    assert "understate" in out["run_error"]
+    assert out["log_lines"]
 
 
 def test_the_output_becomes_an_ok_record_through_the_stub_submitter():
@@ -160,8 +177,35 @@ def test_a_diagnostic_job_answers_the_first_paid_runs_questions():
     assert "--save-detailed" in diag["bench_help"]["stdout"]
     assert diag["nvidia_smi"]["stdout"] == "42"
     assert isinstance(diag["pandas_importable"], bool)
+    clocks = diag["clocks"]
+    assert set(clocks["monotonic"]) >= {"implementation", "resolution", "monotonic", "adjustable"}
+    assert set(clocks["perf_counter"]) >= {"implementation", "resolution"}
+    assert clocks["child_cmd"][-1].endswith("print(time.perf_counter())")
     assert diag["prompt_in_log"] is False
     assert out["run"]["raw_bench"]["ttfts"], "the diagnostic job keeps the saved JSON"
+
+
+def test_the_clock_diagnostic_says_whether_another_process_shares_the_monotonic_epoch():
+    def child_on_the_same_clock(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, f"{time.monotonic()!r}\n", "")
+
+    def child_on_another_clock(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, "12.5\n", "")
+
+    def child_that_fails(cmd, **kwargs):
+        raise OSError("no python")
+
+    same = sweep_handler.collect_diagnostics(child_on_the_same_clock, [])["clocks"]
+    assert same["child_perf_counter_between"] is True
+    assert same["monotonic_before_child"] <= same["child_perf_counter"] <= same[
+        "monotonic_after_child"
+    ]
+    other = sweep_handler.collect_diagnostics(child_on_another_clock, [])["clocks"]
+    assert other["child_perf_counter"] == 12.5
+    assert other["child_perf_counter_between"] is False
+    broken = sweep_handler.collect_diagnostics(child_that_fails, [])["clocks"]
+    assert broken["child_perf_counter"] is None
+    assert broken["child_perf_counter_between"] is None
 
 
 def test_an_unhealthy_diagnostic_job_still_reports_the_tools_help():

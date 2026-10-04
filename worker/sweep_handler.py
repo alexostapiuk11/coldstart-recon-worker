@@ -33,6 +33,7 @@ import importlib.util
 import os
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Callable
@@ -160,10 +161,14 @@ def collect_diagnostics(run_command: Callable, log_lines) -> dict:
     Each answers an item this repository could not verify without the image:
     whether the tool accepts every flag `harness.bench` passes (its help
     text), whether `pandas` -- which the custom dataset needs -- is installed,
-    what nvidia-smi prints for the sampler's query, and whether the engine
+    what nvidia-smi prints for the sampler's query, whether the engine
     logged artifact 1's prompt text (only if the job's serve args turned
-    request logging on). Never part of an ordinary job: the help text alone
-    is tens of kilobytes.
+    request logging on), and whether another process on this machine reads
+    the same monotonic clock (`clocks`: the GPU-utilisation window compares
+    the sampler's `time.monotonic` with the bench tool's `time.perf_counter`
+    request times; on Linux both are CLOCK_MONOTONIC, which is not checked
+    until a diagnostic job runs on the image). Never part of an ordinary job:
+    the help text alone is tens of kilobytes.
     """
 
     def capture(cmd):
@@ -178,7 +183,31 @@ def collect_diagnostics(run_command: Callable, log_lines) -> dict:
             "stderr": (proc.stderr or "")[-2000:],
         }
 
+    # A child process stamps its own perf_counter between two reads of this
+    # process's monotonic: if the child's value lies between them, the two
+    # processes (and the two clocks) share an epoch. The run's own check still
+    # applies per run; this says why it would fail.
+    child_cmd = [sys.executable, "-c", "import time; print(time.perf_counter())"]
+    before = time.monotonic()
+    child = capture(child_cmd)
+    after = time.monotonic()
+    try:
+        child_value = float(child.get("stdout", "").strip())
+    except ValueError:
+        child_value = None
+    clocks = {
+        "monotonic": vars(time.get_clock_info("monotonic")),
+        "perf_counter": vars(time.get_clock_info("perf_counter")),
+        "child_cmd": child_cmd,
+        "monotonic_before_child": before,
+        "child_perf_counter": child_value,
+        "monotonic_after_child": after,
+        "child_perf_counter_between": (
+            None if child_value is None else before <= child_value <= after
+        ),
+    }
     return {
+        "clocks": clocks,
         "bench_help": capture(["vllm", "bench", "serve", "--help"]),
         "nvidia_smi": capture(
             ["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits",
@@ -257,6 +286,8 @@ def handler(job, deps: Deps | None = None) -> dict:
                 workdir=tmp,
                 run_bench=d.run_bench,
                 count_tokens=lambda prompt: d.count_tokens(server.base_url, model, prompt),
+                deadline=deadline,
+                clock=d.clock,
             )
             run = run_one(
                 server.base_url,

@@ -5,6 +5,7 @@ The fake writes the result file where the command says the tool would."""
 import inspect
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -94,6 +95,17 @@ def test_warmups_ready_check_and_saving_are_pinned_on_every_run(tmp_path):
     assert _has(run.cmd, "--result-filename", RESULT_FILENAME)
 
 
+def test_the_backend_and_endpoint_are_pinned_to_the_request_function_the_latency_rebuild_reads(
+    tmp_path,
+):
+    # the end-to-end latency is rebuilt from ttft + itls, which is exact only for
+    # the completions request function (backend openai, /v1/completions)
+    run = FakeRun()
+    _call(tmp_path, run)
+    assert _has(run.cmd, "--backend", "openai")
+    assert _has(run.cmd, "--endpoint", "/v1/completions")
+
+
 def test_the_result_dir_is_created_and_the_saved_json_comes_back_unaltered(tmp_path):
     out = _call(tmp_path, FakeRun())
     assert out == SAVED
@@ -135,11 +147,35 @@ def test_dataset_and_extra_args_pass_through_in_order(tmp_path):
 
 @pytest.mark.parametrize(
     ("where", "bad"),
-    [("dataset_args", ["--save-result"]), ("extra_args", ["--max-concurrency=8"])],
+    [
+        ("dataset_args", ["--save-result"]),
+        ("extra_args", ["--max-concurrency=8"]),
+        # vllm's FlexibleArgumentParser rewrites `_` to `-` before argparse sees it
+        ("extra_args", ["--max_concurrency", "8"]),
+        ("extra_args", ["--ignore_eos"]),
+        ("dataset_args", ["--result_dir=/elsewhere"]),
+        # argparse accepts any unambiguous prefix of a long option
+        ("extra_args", ["--max-conc", "8"]),
+        ("extra_args", ["--num-prom=5"]),
+        ("dataset_args", ["--save"]),
+        ("extra_args", ["--max_conc=8"]),
+        # the pinned request function
+        ("extra_args", ["--backend", "openai-chat"]),
+        ("extra_args", ["--endpoint=/v1/chat/completions"]),
+        ("extra_args", ["--end", "/v1/chat/completions"]),
+    ],
 )
 def test_a_flag_run_bench_owns_is_refused_wherever_it_appears(tmp_path, where, bad):
     with pytest.raises(ValueError, match="sets itself"):
         _call(tmp_path, FakeRun(), **{where: bad})
+
+
+def test_a_flag_that_only_resembles_a_managed_one_is_not_refused(tmp_path):
+    # `--random-input-len` is not a prefix of anything run_bench owns, and values
+    # that merely contain a managed name are values, not flags
+    run = FakeRun()
+    _call(tmp_path, run, extra_args=["--percentile-metrics", "ttft,e2el", "--header", "x=--seed"])
+    assert _has(run.cmd, "--percentile-metrics", "ttft,e2el")
 
 
 def test_a_failed_tool_raises_with_its_exit_code_and_last_output(tmp_path):
@@ -162,13 +198,71 @@ def test_a_stale_result_file_is_refused(tmp_path):
         _call(tmp_path, FakeRun(), result_dir=out)
 
 
-def test_a_timeout_raises_bench_error(tmp_path):
-    def run(cmd, **kwargs):
-        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"], output="partial progress")
+def test_a_real_timeout_reports_what_the_tool_printed_on_both_streams(tmp_path):
+    # TimeoutExpired carries bytes, not str, even with text=True; a fake that
+    # raised it with a str hid that the tail was always empty
+    child = (
+        "import sys, time; print('p'); print('e', file=sys.stderr); "
+        "sys.stdout.flush(); sys.stderr.flush(); time.sleep(5)"
+    )
 
-    with pytest.raises(BenchError, match="within 3 s") as e:
-        _call(tmp_path, run, timeout=3)
-    assert "partial progress" in str(e.value)
+    def run(cmd, **kwargs):
+        real = {k: v for k, v in kwargs.items() if k != "check"}
+        return subprocess.run([sys.executable, "-c", child], check=False, **real)
+
+    with pytest.raises(BenchError, match="within 0.5 s") as e:
+        _call(tmp_path, run, timeout=0.5)
+    assert "stderr:\ne\nstdout:\np" in str(e.value)
+
+
+def test_undecodable_output_is_replaced_not_raised(tmp_path):
+    def run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, 1, output=b"ok \xff\xfe tail", stderr=None)
+
+    with pytest.raises(BenchError) as e:
+        _call(tmp_path, run, timeout=1)
+    assert "ok" in str(e.value)
+    assert "tail" in str(e.value)
+
+
+def test_the_output_tail_is_capped_in_bytes_not_only_in_lines(tmp_path):
+    run = FakeRun(returncode=1, stderr="x" * 200_000, stdout="y" * 200_000, write=False)
+    with pytest.raises(BenchError) as e:
+        _call(tmp_path, run)
+    assert len(str(e.value)) < 12_000
+
+
+def test_a_nonzero_exit_that_left_a_result_file_says_so(tmp_path):
+    # without this a retry into the same directory fails with "stale" and the
+    # reader has no way to know a file was written
+    run = FakeRun(returncode=1, stderr="Traceback: killed late", write=True)
+    with pytest.raises(BenchError, match="exited 1") as e:
+        _call(tmp_path, run)
+    assert RESULT_FILENAME in str(e.value)
+    assert "exists" in str(e.value)
+
+
+def test_a_timeout_that_left_a_result_file_says_so(tmp_path):
+    def run(cmd, **kwargs):
+        out = Path(cmd[cmd.index("--result-dir") + 1])
+        (out / RESULT_FILENAME).write_text("{}")
+        raise subprocess.TimeoutExpired(cmd, 1)
+
+    with pytest.raises(BenchError, match="exists"):
+        _call(tmp_path, run, timeout=1)
+
+
+@pytest.mark.parametrize("text", ['{"duration": 1.0, "compl', "", "not json", "[1, 2]", "null"])
+def test_a_result_file_that_is_not_a_json_object_is_a_bench_error(tmp_path, text):
+    class Writes(FakeRun):
+        def __call__(self, cmd, **kwargs):
+            super().__call__(cmd, **kwargs)
+            out = Path(cmd[cmd.index("--result-dir") + 1])
+            (out / RESULT_FILENAME).write_text(text)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    with pytest.raises(BenchError, match="not a complete JSON object"):
+        _call(tmp_path, Writes())
 
 
 def test_the_subprocess_is_run_without_check_and_with_output_captured(tmp_path):

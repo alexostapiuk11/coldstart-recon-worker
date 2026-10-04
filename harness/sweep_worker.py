@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from harness.bench import BenchError
+from harness.gpu_util import median_in_window
 from harness.stats import median
 
 PROMPT_EXACT = "exact"
@@ -68,7 +69,17 @@ def exact_dataset_args(dataset_path, *, output_len: int) -> list[str]:
 
 
 def random_dataset_args(*, input_len: int, output_len: int) -> list[str]:
-    """Random prompts of exactly `input_len` tokens: range ratio 0, no prefix."""
+    """Random prompts of exactly `input_len` tokens: range ratio 0, no prefix.
+
+    The fallback when the exact prompt cannot be sent. Range ratio 0 so every
+    request has the length the curve is labelled with, not a draw from a range
+    below it; prefix length 0 so no shared random prefix lets the engine's
+    prefix cache serve part of every prompt. Both are the tool's defaults in
+    0.27.1 (`add_dataset_parser`) and are passed anyway: a default that moved
+    in a later version would change what the fallback measures with no error,
+    and `--random-prefix-len` in particular would make its latencies
+    incomparable with runs from the version this was verified against.
+    """
     return [
         "--dataset-name", "random",
         "--random-input-len", str(input_len),
@@ -108,6 +119,8 @@ def choose_prompt_path(
     workdir,
     run_bench: Callable,
     count_tokens: Callable[[str], int],
+    deadline: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> PromptPlan:
     """Try the exact prompt once; fall back to random prompts of its length.
 
@@ -120,6 +133,14 @@ def choose_prompt_path(
     the expected cause), or a length mismatch -- falls back to the random
     dataset at the `/tokenize` length, with the reason kept.
 
+    `deadline` and `clock` are `run_one`'s: the probe is a subprocess that
+    talks to an engine, and with no timeout a hung one would hold the job
+    until the platform killed it and returned nothing, not even the engine's
+    log. A probe that times out raises `BenchError` like any other failure and
+    takes the fallback, with the timeout as its reason. A budget already spent
+    is NOT a probe failure and raises before the probe is started: falling
+    back would hide the real problem behind a plan the next step cannot run.
+
     Decided per job, because each job is a fresh engine and nothing carries
     between jobs. Deciding once on the local machine was rejected: it cannot
     run the pinned image's tool. `service_sweep.reduce_curve` refuses a store
@@ -130,6 +151,7 @@ def choose_prompt_path(
     exact_args = exact_dataset_args(
         write_exact_prompt_dataset(prompt, workdir), output_len=output_len
     )
+    timeout = _remaining(deadline, clock)
     try:
         raw = run_bench(
             base_url,
@@ -140,6 +162,7 @@ def choose_prompt_path(
             ignore_eos=True,
             seed=0,
             result_dir=workdir / "prompt-probe",
+            timeout=timeout,
         )
     except BenchError as e:
         error = str(e)[-2000:]
@@ -170,9 +193,20 @@ def successful_requests(raw: dict) -> dict:
     End-to-end latency per request is reconstructed as `ttft + sum(itls)`.
     `--save-detailed` saves no per-request end-to-end latency, and for the
     completions endpoint the tool's own `latency` is the last chunk's time
-    minus the start time, which is exactly the first chunk's time plus every
-    gap after it (`async_request_openai_completions` in
-    vllm/benchmarks/lib/endpoint_request_func.py, v0.27.1).
+    minus the start time, which equals the first chunk's time plus every gap
+    after it to within one clock read: `ttft` is stamped by a second
+    `perf_counter()` call just after the chunk's own timestamp, so the sum is
+    microseconds long, not different in kind (`async_request_openai_completions`
+    in vllm/benchmarks/lib/endpoint_request_func.py, v0.27.1).
+
+    Also returned, aligned to the successful requests: `start_s`, the tool's
+    `start_times` (`time.perf_counter()` readings), and `input_lens`. Both are
+    None when the saved array is absent, of another length, or not all
+    numbers: they are not required (a result without them still has its
+    latencies), and the caller decides what to do without them rather than
+    this function inventing a value. `input_lens` is the engine's own prompt
+    token count only when the usage chunk arrived; otherwise the tool puts its
+    local tokenizer's count there.
     """
     missing = [k for k in ("duration", "completed", "failed", *_PER_REQUEST) if k not in raw]
     if missing:
@@ -186,10 +220,13 @@ def successful_requests(raw: dict) -> dict:
             f"per-request arrays differ in length {lengths}; pairing them by index "
             "would attribute one request's timing to another"
         )
-    e2e, ttft, out = [], [], []
+    count = lengths["errors"]
+    starts = _aligned_numbers(raw.get("start_times"), count)
+    in_lens = _aligned_numbers(raw.get("input_lens"), count)
+    e2e, ttft, out, start_s, input_lens = [], [], [], [], []
     failed = 0
-    for err, t, itl, n in zip(
-        raw["errors"], raw["ttfts"], raw["itls"], raw["output_lens"], strict=True
+    for i, (err, t, itl, n) in enumerate(
+        zip(raw["errors"], raw["ttfts"], raw["itls"], raw["output_lens"], strict=True)
     ):
         if err or t == 0.0 or n == 0:
             failed += 1
@@ -197,6 +234,10 @@ def successful_requests(raw: dict) -> dict:
         e2e.append(t + sum(itl))
         ttft.append(t)
         out.append(n)
+        if starts is not None:
+            start_s.append(starts[i])
+        if in_lens is not None:
+            input_lens.append(in_lens[i])
     if len(e2e) != raw["completed"] or failed != raw["failed"]:
         raise ValueError(
             f"the failure rule finds {len(e2e)} successful and {failed} failed requests, "
@@ -204,10 +245,75 @@ def successful_requests(raw: dict) -> dict:
             "one of them is miscounting, and a latency from the wrong population "
             "would be stored as this level's"
         )
-    return {"e2e_s": e2e, "ttft_s": ttft, "output_lens": out, "n_failed": failed}
+    return {
+        "e2e_s": e2e,
+        "ttft_s": ttft,
+        "output_lens": out,
+        "n_failed": failed,
+        "start_s": None if starts is None else start_s,
+        "input_lens": None if in_lens is None else input_lens,
+    }
 
 
-def run_summary(raw: dict, *, gpu: dict, plan: PromptPlan, warmup: dict | None) -> dict:
+def _aligned_numbers(values, count: int) -> list | None:
+    """`values` if it is a list of `count` real numbers, else None."""
+    if not isinstance(values, list) or len(values) != count:
+        return None
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values):
+        return None
+    return values
+
+
+def _gpu_fields(gpu: dict, ok: dict) -> dict:
+    """The run's GPU utilisation figure, and how it was got.
+
+    The sampler wraps the whole bench subprocess, which idles the GPU before
+    its first request and after its last, so the whole-call median
+    (`gpu["gpu_util"]`) is kept as `gpu_util_whole_call` but is not what a run
+    reports. `gpu_util` is the median of the samples taken between the earliest
+    successful request's start and the latest successful request's end
+    (`start + e2e`), both from the tool's per-request arrays and compared with
+    the samples on the clock the two processes share (see
+    `harness.gpu_util.median_in_window` for the check it makes).
+
+    When the span cannot be bounded -- no usable `start_times`, no absolute
+    sampler start, or clocks that disagree -- `gpu_util` is the whole-call
+    median with `gpu_util_windowed` False and the reason in
+    `gpu_util_window_note`. That is a weaker number reported as such; a window
+    is never guessed. Rejected: dropping a fixed number of seconds from each
+    end, which would remove busy samples from a short run and keep idle ones
+    from a slow tool start.
+    """
+    whole = gpu["gpu_util"]
+    starts = ok["start_s"]
+    if starts is None:
+        note = "the tool's saved result has no usable start_times, so no span can be bounded"
+    else:
+        span = (min(starts), max(s + e for s, e in zip(starts, ok["e2e_s"], strict=True)))
+        try:
+            inside = median_in_window(gpu, *span)
+        except ValueError as e:
+            note = str(e)
+        else:
+            return {
+                "gpu_util": inside["gpu_util"],
+                "gpu_util_whole_call": whole,
+                "gpu_util_windowed": True,
+                "gpu_util_n_in_span": inside["n_in_span"],
+                "gpu_util_n_outside_span": inside["n_outside_span"],
+                "gpu_util_span_s": span[1] - span[0],
+            }
+    return {
+        "gpu_util": whole,
+        "gpu_util_whole_call": whole,
+        "gpu_util_windowed": False,
+        "gpu_util_window_note": note,
+    }
+
+
+def run_summary(
+    raw: dict, *, gpu: dict, plan: PromptPlan, warmup: dict | None, max_failed: int = 0
+) -> dict:
     """The compact per-run summary the worker returns: no per-request arrays.
 
     `latency_s` is the median end-to-end latency of the successful requests,
@@ -217,14 +323,30 @@ def run_summary(raw: dict, *, gpu: dict, plan: PromptPlan, warmup: dict | None) 
     failure rule, and the sweep keeps the same rule so the two artifacts'
     latencies mean the same thing.
 
+    More than `max_failed` failed requests (default none) raises instead of
+    summarising. A median of the survivors would understate the level's
+    latency, and the understatement is largest where it matters most: at the
+    top level, which becomes the admission cap, the requests that fail
+    (timeouts, rejected connections) are the slow ones. Rejected: reporting
+    the survivors' median with the failure count beside it, because a
+    downstream reader takes the number, not the caveat.
+
     `throughput_tps` is output tokens per second: successful output lengths
-    summed over the tool's measured duration.
+    summed over the tool's measured duration. The GPU fields are described in
+    `_gpu_fields`.
     """
     ok = successful_requests(raw)
     if not ok["e2e_s"]:
         raise ValueError(
             f"no request succeeded ({raw['failed']} failed); this run has no latency, "
             "and storing it as ok would put a point on the curve that was never measured"
+        )
+    if ok["n_failed"] > max_failed:
+        total = ok["n_failed"] + len(ok["e2e_s"])
+        raise ValueError(
+            f"{ok['n_failed']} of {total} requests failed (at most {max_failed} allowed); a "
+            "median of the survivors would understate this level's latency, because the "
+            "requests that fail under load are the slow ones"
         )
     if not raw["duration"] > 0:
         raise ValueError(
@@ -236,13 +358,13 @@ def run_summary(raw: dict, *, gpu: dict, plan: PromptPlan, warmup: dict | None) 
         "latency_s": median(ok["e2e_s"]),
         "ttft_median_s": median(ok["ttft_s"]),
         "throughput_tps": sum(ok["output_lens"]) / raw["duration"],
-        "gpu_util": gpu["gpu_util"],
+        **_gpu_fields(gpu, ok),
         "prompt_path": plan.path,
         "bench_median_e2el_s": None if bench_e2el is None else bench_e2el / 1000.0,
         "completed": raw["completed"],
         "failed": raw["failed"],
         "duration_s": raw["duration"],
-        "input_lens_unique": sorted(set(raw.get("input_lens") or [])),
+        "input_lens_unique": sorted(set(ok["input_lens"] or [])),
         "error_samples": list(dict.fromkeys(e[:_ERROR_CHARS] for e in errors))[:_ERROR_SAMPLES],
         "bench_scalars": {k: v for k, v in raw.items() if not isinstance(v, (list, dict))},
         "gpu": gpu,
@@ -285,7 +407,8 @@ def run_one(
     discarded but their counts kept. vLLM captures CUDA graphs at startup, so
     the first wave's extra cost is small, but it is not zero, and a sweep
     point's median should not carry it. The GPU sampler runs around the
-    measured run only, so the warm-up never reaches the utilisation median.
+    measured run only, so the warm-up never reaches the utilisation median;
+    inside that, `run_summary` narrows the median to the requests' own span.
 
     `keep_raw` adds the tool's saved JSON, unaltered, as `raw_bench`. Only the
     first paid run's diagnostic jobs ask for it, to check the saved keys

@@ -31,24 +31,29 @@ def model_util(level: int) -> float:
     return min(1.0, 0.15 * level**0.5)
 
 
-def bench_json(n: int, *, level: int, repeat: int = 0, input_len: int = PROMPT_TOKENS) -> dict:
+def bench_json(
+    n: int, *, level: int, repeat: int = 0, input_len: int = PROMPT_TOKENS, n_failed: int = 0
+) -> dict:
+    """The tool's saved JSON for `n` requests, the first `n_failed` of which
+    failed the way a timed-out request does: an error text, TTFT 0, no output."""
     latency, ttft = model_latency(level, repeat), model_ttft(level)
     itl = (latency - ttft) / (OUTPUT_LEN - 1)
+    bad = [i < n_failed for i in range(n)]
     return {
         "duration": n / level * latency,
-        "completed": n,
-        "failed": 0,
+        "completed": n - n_failed,
+        "failed": n_failed,
         "num_prompts": n,
         "max_concurrency": level,
         "output_throughput": OUTPUT_LEN * level / latency,
         "median_e2el_ms": latency * 1000,
         "input_lens": [input_len] * n,
-        "output_lens": [OUTPUT_LEN] * n,
-        "ttfts": [ttft] * n,
-        "itls": [[itl] * (OUTPUT_LEN - 1)] * n,
+        "output_lens": [0 if b else OUTPUT_LEN for b in bad],
+        "ttfts": [0.0 if b else ttft for b in bad],
+        "itls": [[] if b else [itl] * (OUTPUT_LEN - 1) for b in bad],
         "start_times": [0.0] * n,
         "generated_texts": ["x"] * n,
-        "errors": [""] * n,
+        "errors": ["Connection timeout" if b else "" for b in bad],
     }
 
 
@@ -82,7 +87,10 @@ class FakeSampler:
     def summary(self):
         util = model_util(self.engine.last_level)
         sample = {"t_s": 0.0, "raw": str(round(util * 100)), "util_pct": util * 100}
-        return {"gpu_util": util, "interval_s": 0.5, "n_samples": 1, "n_valid": 1,
+        # t0 and the request times (bench_json's start_times are 0.0) share a zero,
+        # so the one sample falls inside the measured span
+        return {"gpu_util": util, "t0_monotonic": 0.0, "t_exit_s": 10.0,
+                "thread_stopped": True, "interval_s": 0.5, "n_samples": 1, "n_valid": 1,
                 "samples": [sample]}
 
 
@@ -91,9 +99,14 @@ class FakeEngine:
 
     `measured[level]` counts measured runs per level, so each repeat of a
     level gets its own latency from `model_latency(level, repeat)`.
+    `failed_requests` makes that many of each measured run's requests fail.
     """
 
-    def __init__(self, *, healthy=True, probe_ok=True, fail_measured_at=None, log_lines=None):
+    def __init__(
+        self, *, healthy=True, probe_ok=True, fail_measured_at=None, log_lines=None,
+        failed_requests=0,
+    ):
+        self.failed_requests = failed_requests
         self.healthy = healthy
         self.log_lines = log_lines
         self.probe_ok = probe_ok
@@ -130,7 +143,9 @@ class FakeEngine:
         self.measured[level] += 1
         if self.fail_measured_at == (level, repeat):
             raise BenchError("vllm bench serve exited 1; this run has no result")
-        return bench_json(kw["num_prompts"], level=level, repeat=repeat)
+        return bench_json(
+            kw["num_prompts"], level=level, repeat=repeat, n_failed=self.failed_requests
+        )
 
     def sampler(self):
         return FakeSampler(self)

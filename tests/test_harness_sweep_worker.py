@@ -106,15 +106,27 @@ def test_the_fallback_flags_are_pinned():
 
 def test_a_probe_the_engine_received_at_the_right_length_keeps_the_exact_path(tmp_path):
     bench = FakeBench({"prompt-probe": raw_result(1)})
+    counted = []
+
+    def count_tokens(prompt):
+        counted.append(prompt)
+        return 13
+
     plan = choose_prompt_path(
         URL, model="m", prompt=PROMPT, output_len=16, workdir=tmp_path,
-        run_bench=bench, count_tokens=lambda p: 13,
+        run_bench=bench, count_tokens=count_tokens,
     )
     assert plan.path == PROMPT_EXACT
     assert plan.prompt_tokens == 13
     assert list(plan.dataset_args) == exact_dataset_args(tmp_path / "prompt.jsonl", output_len=16)
+    assert counted == [PROMPT]
     probe = bench.calls[0]
     assert (probe["num_prompts"], probe["max_concurrency"]) == (1, 1)
+    # the probe sends exactly what the measured runs will send, or "exact" would
+    # describe a different request from the one measured
+    assert probe["dataset_args"] == list(plan.dataset_args)
+    assert probe["ignore_eos"] is True
+    assert probe["model"] == "m"
 
 
 def test_a_failing_probe_falls_back_to_random_at_the_same_length(tmp_path):
@@ -193,7 +205,7 @@ def test_error_samples_are_deduplicated_and_capped_at_three():
     raw["errors"] = ["", "e1", "e1", "e2", "e3", "e4"]
     raw["ttfts"][1:] = [0.0] * 5
     raw.update(completed=1, failed=5)
-    s = run_summary(raw, gpu={"gpu_util": 0.1}, plan=PLAN, warmup=None)
+    s = run_summary(raw, gpu={"gpu_util": 0.1}, plan=PLAN, warmup=None, max_failed=5)
     assert s["error_samples"] == ["e1", "e2", "e3"]
 
 
@@ -268,7 +280,7 @@ def test_throughput_counts_only_successful_output_tokens():
     raw = raw_result(4, out=16, duration=2.0)
     raw["errors"][1] = "boom"
     raw.update(completed=3, failed=1)
-    s = run_summary(raw, gpu={"gpu_util": 0.1}, plan=PLAN, warmup=None)
+    s = run_summary(raw, gpu={"gpu_util": 0.1}, plan=PLAN, warmup=None, max_failed=1)
     assert s["throughput_tps"] == pytest.approx(3 * 16 / 2.0)
 
 
@@ -319,3 +331,211 @@ DEFAULTED = "DEBUG 10-04 [arg_utils.py:2797] Defaulting max_num_seqs to 256 for 
 )
 def test_max_num_seqs_is_read_from_the_log_and_never_assumed(lines, expected):
     assert max_num_seqs_from_log(lines) == expected
+
+
+# ---------------------------------------------------------------- probe budget (I1)
+
+
+def test_the_probe_is_bounded_by_what_is_left_of_the_jobs_budget(tmp_path):
+    bench = FakeBench({"prompt-probe": raw_result(1)})
+    choose_prompt_path(
+        URL, model="m", prompt=PROMPT, output_len=16, workdir=tmp_path,
+        run_bench=bench, count_tokens=lambda p: 13, deadline=100.0, clock=lambda: 40.0,
+    )
+    assert bench.calls[0]["timeout"] == 60.0
+
+
+def test_without_a_deadline_the_probe_has_no_timeout(tmp_path):
+    bench = FakeBench({"prompt-probe": raw_result(1)})
+    choose_prompt_path(
+        URL, model="m", prompt=PROMPT, output_len=16, workdir=tmp_path,
+        run_bench=bench, count_tokens=lambda p: 13,
+    )
+    assert bench.calls[0]["timeout"] is None
+
+
+def test_a_probe_that_timed_out_falls_back_and_keeps_the_reason(tmp_path):
+    bench = FakeBench(fail={"prompt-probe": "vllm bench serve did not finish within 60 s"})
+    plan = choose_prompt_path(
+        URL, model="m", prompt=PROMPT, output_len=16, workdir=tmp_path,
+        run_bench=bench, count_tokens=lambda p: 13, deadline=100.0, clock=lambda: 40.0,
+    )
+    assert plan.path == PROMPT_RANDOM_FALLBACK
+    assert "did not finish within 60 s" in plan.probe_error
+
+
+def test_a_spent_budget_stops_before_the_probe_instead_of_becoming_a_fallback(tmp_path):
+    bench = FakeBench()
+    with pytest.raises(BenchError, match="budget is spent"):
+        choose_prompt_path(
+            URL, model="m", prompt=PROMPT, output_len=16, workdir=tmp_path,
+            run_bench=bench, count_tokens=lambda p: 13, deadline=10.0, clock=lambda: 11.0,
+        )
+    assert bench.calls == []
+
+
+# ------------------------------------------------- the measured run's timeout (I4b)
+
+
+def test_each_bench_runs_gets_what_is_left_of_the_budget_when_it_starts(tmp_path):
+    bench = FakeBench()
+    clock = iter([10.0, 40.0])
+    run_one(
+        URL, model="m", level=2, num_prompts=100, warmup_prompts=2, plan=PLAN, seed=1,
+        workdir=tmp_path, run_bench=bench, sampler_factory=lambda: FakeSampler([]),
+        deadline=100.0, clock=lambda: next(clock),
+    )
+    warm, measured = bench.calls
+    assert warm["timeout"] == 90.0
+    assert measured["timeout"] == 60.0
+
+
+# ------------------------------------------------------ failed requests (I2, M5)
+
+
+def _with_one_failure(n=5):
+    raw = raw_result(n)
+    raw["errors"][1] = "boom"
+    raw["ttfts"][1] = 0.0
+    raw.update(completed=n - 1, failed=1)
+    return raw
+
+
+def test_a_run_with_any_failed_request_is_an_error_not_a_summary_of_the_survivors():
+    with pytest.raises(ValueError, match="1 of 5 requests failed") as e:
+        run_summary(_with_one_failure(), gpu={"gpu_util": 0.1}, plan=PLAN, warmup=None)
+    assert "median of the survivors would understate" in str(e.value)
+
+
+def test_a_failure_budget_lets_a_run_through_and_still_records_its_count():
+    s = run_summary(
+        _with_one_failure(), gpu={"gpu_util": 0.1}, plan=PLAN, warmup=None, max_failed=1
+    )
+    assert (s["completed"], s["failed"]) == (4, 1)
+
+
+def test_more_failures_than_the_budget_is_still_an_error():
+    raw = _with_one_failure()
+    raw["errors"][2], raw["ttfts"][2] = "boom", 0.0
+    raw.update(completed=3, failed=2)
+    with pytest.raises(ValueError, match="2 of 5 requests failed"):
+        run_summary(raw, gpu={"gpu_util": 0.1}, plan=PLAN, warmup=None, max_failed=1)
+
+
+def test_the_prompt_lengths_reported_are_those_of_requests_that_succeeded():
+    raw = _with_one_failure()
+    raw["input_lens"][1] = 999  # a failed request: no usage chunk, the tool's own count
+    s = run_summary(raw, gpu={"gpu_util": 0.1}, plan=PLAN, warmup=None, max_failed=1)
+    assert s["input_lens_unique"] == [13]
+
+
+# ------------------------------------------- GPU utilisation over the measured span (C1)
+
+SAMPLER_T0 = 90.0
+
+
+def _gpu_summary(samples, *, t0=SAMPLER_T0, t_exit_s=20.0):
+    readable = sorted(sample["util_pct"] for sample in samples)
+    return {
+        "gpu_util": readable[len(readable) // 2] / 100.0,
+        "t0_monotonic": t0,
+        "t_exit_s": t_exit_s,
+        "interval_s": 0.5,
+        "samples": samples,
+    }
+
+
+def _idle_busy_idle():
+    """Ten idle samples while the tool starts up, four busy ones while its four
+    requests run, three idle ones while it writes its JSON: the whole-call median
+    is idle, which is the reading this change exists to avoid."""
+    def at(t, pct):
+        return {"t_s": t, "query_s": 0.05, "raw": str(pct), "util_pct": float(pct)}
+
+    return (
+        [at(t, 0) for t in range(10)]
+        + [at(t, 90) for t in (10.1, 10.6, 11.1, 11.6)]
+        + [at(t, 0) for t in (12.5, 13.0, 13.5)]
+    )
+
+
+def _timed_raw(**over):
+    # four requests of 0.1 + 15 * 0.02 = 0.4 s, started at 100.0 .. 101.5 on the
+    # tool's clock: the span is [100.0, 101.9], i.e. 10.0 .. 11.9 s after the sampler
+    return raw_result(4, start_times=[100.0, 100.5, 101.0, 101.5], **over)
+
+
+def test_the_reported_utilisation_is_the_median_over_the_measured_span_not_the_whole_call():
+    s = run_summary(_timed_raw(), gpu=_gpu_summary(_idle_busy_idle()), plan=PLAN, warmup=None)
+    assert s["gpu_util"] == pytest.approx(0.90)
+    assert s["gpu_util_windowed"] is True
+    assert s["gpu_util_whole_call"] == 0.0
+    assert (s["gpu_util_n_in_span"], s["gpu_util_n_outside_span"]) == (4, 13)
+
+
+def test_a_failed_request_does_not_stretch_the_span():
+    raw = _timed_raw()
+    raw["errors"][0], raw["ttfts"][0] = "boom", 0.0
+    raw["start_times"][0] = 91.0  # a failed request started long before the others
+    raw.update(completed=3, failed=1)
+    s = run_summary(raw, gpu=_gpu_summary(_idle_busy_idle()), plan=PLAN, warmup=None, max_failed=1)
+    assert s["gpu_util"] == pytest.approx(0.90)
+    assert s["gpu_util_n_in_span"] == 3
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda raw: raw.pop("start_times"),
+        lambda raw: raw.update(start_times=[100.0, 100.5]),
+        lambda raw: raw.update(start_times=[None] * 4),
+    ],
+    ids=["absent", "wrong length", "not numbers"],
+)
+def test_without_the_tools_start_times_the_whole_call_median_is_reported_as_such(mutate):
+    raw = _timed_raw()
+    mutate(raw)
+    s = run_summary(raw, gpu=_gpu_summary(_idle_busy_idle()), plan=PLAN, warmup=None)
+    assert s["gpu_util"] == 0.0
+    assert s["gpu_util_whole_call"] == 0.0
+    assert s["gpu_util_windowed"] is False
+    assert "start_times" in s["gpu_util_window_note"]
+    assert "gpu_util_n_in_span" not in s
+
+
+def test_a_summary_without_an_absolute_start_is_reported_unwindowed():
+    s = run_summary(_timed_raw(), gpu={"gpu_util": 0.6}, plan=PLAN, warmup=None)
+    assert s["gpu_util"] == 0.6
+    assert s["gpu_util_windowed"] is False
+    assert "t0_monotonic" in s["gpu_util_window_note"]
+
+
+def test_clocks_that_do_not_agree_are_reported_not_papered_over():
+    gpu = _gpu_summary(_idle_busy_idle(), t0=5_000_000.0)
+    s = run_summary(_timed_raw(), gpu=gpu, plan=PLAN, warmup=None)
+    assert s["gpu_util_windowed"] is False
+    assert s["gpu_util"] == s["gpu_util_whole_call"]
+    assert "clock" in s["gpu_util_window_note"]
+
+
+def test_a_span_holding_no_readable_sample_reports_none_not_the_idle_median():
+    sparse = [{"t_s": 1.0, "query_s": 0.05, "raw": "0", "util_pct": 0.0}]
+    s = run_summary(_timed_raw(), gpu=_gpu_summary(sparse), plan=PLAN, warmup=None)
+    assert s["gpu_util"] is None
+    assert s["gpu_util_windowed"] is True
+    assert s["gpu_util_whole_call"] == 0.0
+
+
+def test_one_run_hands_the_samplers_summary_to_the_windowing(tmp_path):
+    bench = FakeBench({"measured": _timed_raw()})
+
+    class TimedSampler(FakeSampler):
+        def summary(self):
+            return _gpu_summary(_idle_busy_idle())
+
+    s = run_one(
+        URL, model="m", level=2, num_prompts=4, warmup_prompts=0, plan=PLAN, seed=1,
+        workdir=tmp_path, run_bench=bench, sampler_factory=lambda: TimedSampler([]),
+    )
+    assert s["gpu_util"] == pytest.approx(0.90)
+    assert s["gpu"]["t0_monotonic"] == SAMPLER_T0
