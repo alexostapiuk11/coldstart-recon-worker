@@ -26,7 +26,7 @@ speaks conditions and blocks, `failure_rate_by_group` requires a key, and
 | `vllm_logs.py` | Engine log → startup sub-phases, KV blocks, engine info, and which phases the version merges. |
 | `submit.py` | The submitter interface (`SubmitOutcome`), an in-process stub for artifact 1's `submit(arm, run_id)`, and `PayloadStubSubmitter` for workers that take a whole payload. |
 | `runpod/` | Endpoint preflight, job lifecycle extraction, a retrying HTTP client, and `submit_payload` for any JSON job input. |
-| `campaign.py` | The campaign loop (`run_campaign`): schedule → submit → record → store, never retried, with the resume drift guard. The artifact passes its own `submit` and `build_record`. Artifact 1's `coldstart/driver.py` still carries its own copy of the loop; it has not moved onto this one yet. |
+| `campaign.py` | The campaign loop (`run_campaign`): schedule → submit → record → store, never retried, with the resume drift guard. The artifact passes its own `submit` and `build_record`. Artifact 1's `coldstart/driver.py` calls it too; its own copy of the loop is gone. |
 | `serve.py` | `served(model, *, args, env, port=8000, health_timeout=900.0)`: `vllm serve` in its own process group, health-waited, yielded healthy or not, with an idempotent `stop() -> float`. |
 | `bench.py` | `run_bench(...)`: one `vllm bench serve` run, warm-ups and ready check pinned off, its saved JSON returned unaltered. |
 | `gpu_util.py` | `nvidia-smi` `utilization.gpu` sampled every 0.5 s on a thread while a run is in flight; median as a fraction, raw samples kept. |
@@ -47,6 +47,10 @@ decision log.
 template's `dockerStartCmd`; `scripts/run_service_sweep.py` drives a sweep
 from a laptop and keeps its pin set (pins never live here); artifact 2 turns
 the curve into its `ServiceCurve` in `scripts/a2_service_curve.py`.
+
+The paid run's checklist is `docs/runbook-service-sweep.md` (image, template,
+endpoint, free preflight, cost estimate, the two-job diagnostic pilot and the
+campaign); `scripts/read_sweep_pilot.py` prints the pilot's answers.
 
 ## Still not here
 
