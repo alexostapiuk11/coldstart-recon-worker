@@ -323,8 +323,10 @@ Fixed 2026-10-03, before any real validation run exists. Implemented in
   both censored is agreement, but the bin is not *judged*: it says nothing about the
   model's latency, and counting it would let a backlogged tail pass for free. One
   censored and the other not is a **miss of unbounded magnitude**.
-- **Sample floor:** a bin with fewer than 20 completed requests — on every repeat, or
+- **Sample floor:** a bin with fewer than 20 completed requests — on the repeats, or
   in the prediction — has no p50; it is excluded and reported, never judged.
+  Censoring is decided first: a bin censored on one side and thin-but-finished on
+  the other is a censoring miss, not excluded.
 - **Pass:** at least **10** judged bins are required — fewer is **not evaluable**,
   never a pass — and the run passes if **no more than half** of the judged bins are
   misses.
@@ -336,8 +338,9 @@ Fixed 2026-10-03, before any real validation run exists. Implemented in
   the system's own spread — outside in about three bins of four — fails 92% and 99.7%
   of the time. Neighbouring bins share queue state, so they are not independent: a
   perfect model fails more often than stated and a biased one less often. In
-  simulation, queue-level correlation raised the perfect-model failure rate to about
-  3% at 10–12 judged bins, and a per-run host-speed effect held it near 5% however
+  simulation (`scripts/a2_validation_gate_power.py`, seeded, over the real
+  `compare()` with no band-edge tolerance), queue-level correlation raised the perfect-model failure rate to about
+  2.5% at 10–12 judged bins, and a per-run host-speed effect held it near 5% however
   many bins were judged, with power near 80%. The result is published with its number
   of judged bins so a reader can weigh it.
 - **Disclosure:** every miss is published with its magnitude, as spec §10 already
