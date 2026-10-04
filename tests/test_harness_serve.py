@@ -18,6 +18,7 @@ import time
 import pytest
 import requests
 
+from harness import serve
 from harness.serve import served
 
 KV_LINE = "INFO GPU KV cache size: 43,040 tokens"
@@ -51,6 +52,27 @@ if mode == "child":
 if mode == "never_healthy":
     time.sleep(600)
     sys.exit(0)
+if mode == "binary":
+    # Invalid UTF-8, then enough output to fill a 64 KB pipe several times
+    # over: an engine whose log reader died would block here and never serve.
+    sys.stdout.buffer.write(b"INFO before \xff\xfe bad bytes\n")
+    for i in range(500):
+        sys.stdout.buffer.write(b"INFO filler %d " % i + b"x" * 200 + b"\n")
+    sys.stdout.buffer.flush()
+if mode == "sticky_child":
+    code = (
+        "import os, signal, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "open(os.environ['FAKE_VLLM_CHILD_PID'], 'w').write(str(os.getpid()))\n"
+        "time.sleep(600)\n"
+    )
+    subprocess.Popen([sys.executable, "-c", code])
+if mode == "tail":
+    def goodbye(*_):
+        for i in range(20):
+            print(f"TAIL {i}", flush=True)
+        os._exit(0)
+    signal.signal(signal.SIGTERM, goodbye)
 
 
 class Health(http.server.BaseHTTPRequestHandler):
@@ -200,3 +222,127 @@ def test_a_port_that_already_answers_is_refused_before_spawning(port):
             "m", args=[], env={}, port=port
         ):
             pass
+
+
+def _read_pid(pid_file) -> int:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            return int(pid_file.read_text())
+        except (FileNotFoundError, ValueError):
+            time.sleep(0.02)
+    raise AssertionError("the fake engine's child never reported its pid")
+
+
+def _slow_log(monkeypatch, *, delay=0.05, fail_on=None):
+    """Make the log list slow (or failing) so the drain thread lags the process."""
+
+    class SlowList(list):
+        def append(self, item):
+            if fail_on is not None and fail_on in item:
+                raise ValueError("log sink refused a line")
+            time.sleep(delay)
+            super().append(item)
+
+    original = serve.Server.__init__
+
+    def init(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        self.log_lines = SlowList(self.log_lines)
+
+    monkeypatch.setattr(serve.Server, "__init__", init)
+
+
+def test_undecodable_engine_output_does_not_stop_the_log_reader(port):
+    env = {"FAKE_VLLM_MODE": "binary"}
+    with served("m", args=[], env=env, port=port, health_timeout=10) as server:
+        assert server.healthy is True, "the engine blocked on a full pipe nobody was reading"
+    assert KV_LINE in server.log_lines, "lines before the bad bytes were lost"
+    assert any(line.startswith("INFO before") for line in server.log_lines)
+    assert any(line.startswith("INFO filler 499 ") for line in server.log_lines)
+    assert server.drain_completed is True
+    assert server.drain_error is None
+
+
+def test_a_failing_log_reader_is_recorded_not_reported_as_complete(port, monkeypatch):
+    _slow_log(monkeypatch, delay=0.0, fail_on="KV cache")
+    env = {"FAKE_VLLM_MODE": "binary"}  # >64 KB follows the line the sink refuses
+    with served("m", args=[], env=env, port=port, health_timeout=10) as server:
+        assert server.healthy is True, "a failed log reader must keep emptying the pipe"
+    assert isinstance(server.drain_error, ValueError)
+    assert server.drain_completed is False, "a log with a hole was reported complete"
+    assert KV_LINE not in server.log_lines
+
+
+def test_a_child_that_ignores_sigterm_is_swept_after_the_parent_exits(port, tmp_path):
+    pid_file = tmp_path / "child.pid"
+    env = {"FAKE_VLLM_MODE": "sticky_child", "FAKE_VLLM_CHILD_PID": str(pid_file)}
+    with served("m", args=[], env=env, port=port, health_timeout=30) as server:
+        assert server.healthy
+        child = _read_pid(pid_file)
+        try:
+            server.stop()
+            deadline = time.monotonic() + 5
+            while _alive(child) and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert not _alive(child), "SIGTERM-proof child survived: the post-exit sweep is gone"
+        finally:
+            if _alive(child):
+                os.kill(child, signal.SIGKILL)
+    assert server.drain_completed
+
+
+def test_stop_returns_only_after_the_engines_last_words_are_in_the_log(port, monkeypatch):
+    _slow_log(monkeypatch)
+    env = {"FAKE_VLLM_MODE": "tail"}
+    with served("m", args=[], env=env, port=port, health_timeout=30) as server:
+        assert server.healthy
+        server.stop()
+        assert "TAIL 19" in server.log_lines, "stop() returned before the log reader caught up"
+        assert server.drain_completed
+
+
+class _FakeTime:
+    """A clock that only moves when sleep is called, and records every sleep."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = []
+
+    def clock(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def test_the_health_budget_is_spent_in_poll_steps_on_the_injected_clock(port):
+    fake = _FakeTime()
+    urls = []
+
+    def never(url):
+        urls.append(url)
+        return False
+
+    env = {"FAKE_VLLM_MODE": "never_healthy"}
+    with served(
+        "m", args=[], env=env, port=port, health_timeout=10.0,
+        health_ok=never, clock=fake.clock, sleep=fake.sleep,
+    ) as server:  # fmt: skip
+        assert server.healthy is False
+    assert fake.sleeps == [serve.HEALTH_POLL_SECONDS] * 40
+    assert set(urls) == {f"http://127.0.0.1:{port}/health"}
+    assert len(urls) == 40
+
+
+def test_the_wait_returns_on_the_first_answering_poll(port):
+    fake = _FakeTime()
+    answers = iter([False, False, True])
+    env = {"FAKE_VLLM_MODE": "never_healthy"}
+    with served(
+        "m", args=[], env=env, port=port, health_timeout=10.0,
+        health_ok=lambda url: next(answers), clock=fake.clock, sleep=fake.sleep,
+    ) as server:  # fmt: skip
+        assert server.healthy is True
+    assert len(fake.sleeps) == 2

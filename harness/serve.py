@@ -28,11 +28,23 @@ Changed from the probe, on purpose:
   log lines; it does not raise. Those lines are the only evidence of why the
   engine never came up. Raising would make every caller rebuild the capture,
   and artifact 5's instance runner already reads them off the yielded object.
+- The engine's output is decoded with `errors="replace"`, and the log reader
+  records any failure instead of dying silently. The probe's strict decoding
+  lets one invalid byte kill its reader thread; the pipe then fills, the engine
+  blocks writing to it, never answers `/health`, and the log that would explain
+  why is empty. A replacement character in a log line costs nothing; a dead
+  reader costs the whole run.
+- Running in its own session means the engine no longer receives signals aimed
+  at the caller's process group: a SIGTERM to the caller leaves the engine
+  running. Accepted. On a serverless worker the container tears everything
+  down, and locally the `finally` in `served` is what stops it, so only a
+  caller killed outright (SIGKILL) can leave one behind.
 - A port that something already answers on is refused before spawning. The
   health check would otherwise talk to whatever owns the port and report
   someone else's engine as this one.
 """
 
+import contextlib
 import os
 import signal
 import socket
@@ -83,12 +95,27 @@ def _refuse_busy_port(port: int) -> None:
 class Server:
     """A started engine, healthy or not, as `served` yields it.
 
-    `log_lines` grows while the engine runs; read it after `stop()` (or after
-    the `with` block) for the complete log. `cmd` is the exact argument list
-    that was executed, including the `--port` that `served` added.
+    One object carries the address, the verdict and the evidence, because the
+    caller needs all three at once: `base_url` to send load to, `healthy` to
+    know whether to, and `log_lines` for artifact 5 to read the KV-cache line
+    from. Returning a bare URL and a separate log handle was rejected: the two
+    would have to be kept in step across an exception.
+
+    `log_lines` grows while the engine runs. It is the complete log only when
+    `drain_completed` is True; read that flag before trusting the log's tail.
+    `cmd` is the exact argument list that was executed, including the `--port`
+    that `served` added.
     """
 
-    def __init__(self, proc, *, cmd, base_url, term_grace, clock):
+    def __init__(
+        self,
+        proc: subprocess.Popen[str],
+        *,
+        cmd: list[str],
+        base_url: str,
+        term_grace: float,
+        clock: Callable[[], float],
+    ) -> None:
         self.cmd = cmd
         self.base_url = base_url
         self.healthy = False
@@ -97,23 +124,59 @@ class Server:
         self._term_grace = term_grace
         self._clock = clock
         self._teardown_s: float | None = None
+        self._drain_eof = False
+        self._drain_error: Exception | None = None
         self._drain = threading.Thread(target=self._drain_stdout, daemon=True)
         self._drain.start()
 
     def _drain_stdout(self) -> None:
-        for line in self._proc.stdout:
-            self.log_lines.append(line.rstrip("\n"))
+        try:
+            for line in self._proc.stdout:
+                self.log_lines.append(line.rstrip("\n"))
+            self._drain_eof = True
+        except Exception as exc:  # noqa: BLE001 -- a reader thread has no caller to raise to
+            # Record it where `drain_error` and `drain_completed` can report
+            # it, then keep emptying the pipe: a reader that stops reading
+            # blocks the engine on a full pipe and turns a logging fault into
+            # a failed run.
+            self._drain_error = exc
+            self._discard_rest()
+
+    def _discard_rest(self) -> None:
+        # Best effort: the first error is already recorded.
+        with contextlib.suppress(Exception):
+            for _ in self._proc.stdout:
+                pass
 
     @property
     def returncode(self) -> int | None:
-        """None while the engine runs; its exit status once it has exited."""
+        """None while the engine runs; its exit status once it has exited.
+
+        A property over `Popen.poll()` rather than a stored value, so a caller
+        asking "is it still up?" gets the live answer, and the tests for the
+        process-exit paths do not need to know about `Popen`.
+        """
         return self._proc.poll()
 
     @property
+    def drain_error(self) -> Exception | None:
+        """The exception that stopped the log reader appending, if any."""
+        return self._drain_error
+
+    @property
     def drain_completed(self) -> bool:
-        """False if the log reader was still running when `stop()` gave up
-        waiting for it, in which case `log_lines` may be missing its tail."""
-        return not self._drain.is_alive()
+        """True only if the log reader reached EOF without error.
+
+        EOF arrives once every process holding the engine's stdout has exited,
+        so True means `log_lines` is complete. It is False while the engine
+        runs, if `stop()` gave up waiting for the reader (a grandchild that
+        called `setsid` escapes the group kill by design and keeps the pipe
+        open), or if the reader failed (`drain_error`). "The thread is no
+        longer alive" was rejected as the definition: a reader that died on an
+        exception is not alive either, and reporting its truncated log as
+        complete is the failure this flag exists to expose.
+        """
+        return self._drain_eof and self._drain_error is None
 
     def _signal_group(self, sig: int) -> None:
         try:
@@ -132,6 +195,13 @@ class Server:
         `term_grace` seconds of waiting, then SIGKILL to the group if the
         parent is still alive. After the parent exits, the group is swept with
         SIGKILL so no straggling child keeps the GPU.
+
+        Teardown signals the whole process group at once rather than going
+        through vLLM's own parent-led shutdown, where the API server stops
+        its workers in turn. What that does to the last lines of the log and
+        to the time taken is inferred from how signals work, not verified
+        against vLLM. Artifact 4 should treat the float as "time until the
+        parent exited" and nothing finer.
 
         It does NOT measure GPU memory release. The driver frees a process's
         memory shortly after the process dies, and how shortly is exactly what
@@ -157,12 +227,20 @@ class Server:
         self._teardown_s = self._clock() - t0
         self._signal_group(signal.SIGKILL)
         # stdout reaches EOF only once every writer is gone; join so the
-        # drain thread finishes appending before anyone reads log_lines.
+        # drain thread finishes appending before anyone reads log_lines. A
+        # grandchild that called setsid survived the sweep above and holds the
+        # pipe open: the join then times out and `drain_completed` is False.
         self._drain.join(timeout=DRAIN_JOIN_SECONDS)
         return self._teardown_s
 
 
-def _wait_healthy(server: Server, timeout: float, health_ok, clock, sleep) -> bool:
+def _wait_healthy(
+    server: Server,
+    timeout: float,
+    health_ok: Callable[[str], bool],
+    clock: Callable[[], float],
+    sleep: Callable[[float], None],
+) -> bool:
     url = f"{server.base_url}/health"
     deadline = clock() + timeout
     while clock() < deadline:
@@ -199,7 +277,14 @@ def served(
 
     Yields a `Server`. Check `.healthy` before sending load: an engine that
     never answered `/health` within `health_timeout`, or exited first, is
-    already stopped when it is yielded, so `.log_lines` is complete.
+    already stopped when it is yielded, so `.log_lines` is complete unless
+    `.drain_completed` says otherwise.
+
+    That stop happens inside `__enter__`, before the yield. A caller timing
+    the `with` statement's entry on the unhealthy path therefore measures the
+    health wait PLUS teardown: up to `term_grace` seconds and the log reader's
+    join (15 s) on top. Stopping after the yield was rejected because the
+    caller would then be handed a running engine it has no reason to touch.
 
     The engine is always stopped on exit, including when the block raises.
     `executable`, `term_grace`, `health_ok`, `clock` and `sleep` exist for
@@ -215,7 +300,9 @@ def served(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
         text=True,
+        errors="replace",
         bufsize=1,
         env=merged,
         start_new_session=True,
