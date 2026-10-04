@@ -203,6 +203,14 @@ accept two repeats at the short level with `--reduce-only --levels ... --min-rep
 its repeat count, wherever the curve is reported. `--resume` is not a re-run: it skips every run already stored, failed
 ones included.
 
+A level that fails in every run because the engine cannot serve it (for example CUDA out of memory at the first
+step, at the same level in all repeats) is not a flaky failure, and no repeat count would fix it. Reduce the levels
+the engine did serve with `--reduce-only --levels <all levels, the unserved one included> --exclude-level
+"N=<reason>"` (repeatable). The level is left out of the curve's rows and recorded in its `excluded_levels`, with the
+reason, its run counts and the first failure details; `scripts/a2_service_curve.py` carries that into its output and
+prints one `[a2] excluded level N: ...` line per level. A level with any successful run cannot be excluded, since that
+would be choosing which measured points the curve shows; use `--min-repeats` and disclose the repeat count instead.
+
 `--reduce-only` labels the curve with the `source` its stored runs carry (`runpod` for a paid run). A store whose runs
 carry none needs `--source {runpod,stub}`; a `--source` that contradicts the runs, or a store mixing sources, is
 refused.

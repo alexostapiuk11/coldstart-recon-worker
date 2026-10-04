@@ -39,6 +39,10 @@ scripts/a2_service_curve.py would refuse it after the sweep was paid for.
 consequence; it is for a caller who knowingly wants a curve artifact 2 cannot
 use. `--preflight-only` and `--reduce-only` spend nothing and are not checked.
 
+`--reduce-only --exclude-level "N=<reason>"` (repeatable) leaves a level the engine could
+not serve in any run out of the curve and records it, with the reason, in the curve file's
+`excluded_levels`; see `harness.service_sweep.reduce_curve` for what it refuses.
+
 `--preflight-only` makes one GET (the endpoint's configuration) and nothing
 else: no job is submitted and no store is opened.
 
@@ -249,10 +253,15 @@ def run_sweep(
     return reduce_store(store_path, out_path, min_repeats=min_repeats, meta=meta)
 
 
-def reduce_store(store_path, out_path, *, min_repeats: int, meta: dict) -> dict:
+def reduce_store(
+    store_path, out_path, *, min_repeats: int, meta: dict, excluded_levels=None
+) -> dict:
     records = JsonlStore(store_path, SweepRun).read_all()
     reduction = reduce_curve(
-        records, min_repeats=min_repeats, expected_levels=meta.get("levels_requested")
+        records,
+        min_repeats=min_repeats,
+        expected_levels=meta.get("levels_requested"),
+        excluded_levels=excluded_levels,
     )
     doc = {**reduction.to_dict(), **meta, "min_repeats": min_repeats, "store": str(store_path)}
     out = Path(out_path)
@@ -304,6 +313,34 @@ def _levels(text: str) -> list[int]:
     return [int(part) for part in text.split(",") if part.strip()]
 
 
+def _exclusion(text: str) -> tuple[int, str]:
+    """`LEVEL=REASON` -> (level, reason); the reason is everything after the first `=`."""
+    level_text, sep, reason = text.partition("=")
+    level_text = level_text.strip()
+    if not sep or not level_text.isascii() or not level_text.isdigit() or int(level_text) < 1:
+        raise ValueError
+    if not reason.strip():
+        raise ValueError
+    return int(level_text), reason.strip()
+
+
+def parse_exclusions(values) -> dict[int, str]:
+    """The `--exclude-level` values as `{level: reason}`; ValueError names the bad one."""
+    out: dict[int, str] = {}
+    for text in values:
+        try:
+            level, reason = _exclusion(text)
+        except ValueError:
+            raise ValueError(
+                f"--exclude-level {text!r}: expected LEVEL=REASON with a positive integer "
+                "level and a non-empty reason"
+            ) from None
+        if level in out:
+            raise ValueError(f"--exclude-level: level {level} given more than once")
+        out[level] = reason
+    return out
+
+
 def _require(name: str) -> str:
     # The value is never echoed: only the name goes in the message.
     value = os.environ.get(name)
@@ -338,7 +375,22 @@ def main(argv=None) -> None:
         "--source", choices=SOURCES,
         help="--reduce-only on a store whose runs do not record their source",
     )
+    ap.add_argument(
+        "--exclude-level", action="append", default=[], metavar="LEVEL=REASON",
+        help="--reduce-only: leave a level the engine could not serve in any run out of the "
+        "curve and record it there with this reason; repeatable. A level with any successful "
+        "run cannot be excluded",
+    )
     args = ap.parse_args(argv)
+    if args.exclude_level and not args.reduce_only:
+        ap.error(
+            "--exclude-level only applies to --reduce-only; on a paid run the levels are "
+            "not yet measured, so none can be said to be unservable"
+        )
+    try:
+        excluded = parse_exclusions(args.exclude_level)
+    except ValueError as err:
+        ap.error(str(err))
 
     if args.reduce_only:
         if not (args.store and args.out):
@@ -347,7 +399,10 @@ def main(argv=None) -> None:
         meta = {"source": source_for_reduction(records, args.source)}
         if args.levels:
             meta["levels_requested"] = args.levels
-        reduce_store(args.store, args.out, min_repeats=args.min_repeats, meta=meta)
+        reduce_store(
+            args.store, args.out, min_repeats=args.min_repeats, meta=meta,
+            excluded_levels=excluded,
+        )
         print(f"[reduce] wrote {args.out}", flush=True)
         return
 

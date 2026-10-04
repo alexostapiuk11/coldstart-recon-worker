@@ -317,3 +317,50 @@ def test_end_to_end_from_the_stub_sweep(tmp_path, monkeypatch):
     runs = [json.loads(line) for line in (tmp_path / "s.jsonl").read_text().splitlines()]
     _, meta = a2.build_service_curve(doc, runs=runs)
     assert all(row["ratio"] is None for row in meta["littles_law"])
+
+
+def _excluded_entry(level=256, n_failed=3, n_runs=3):
+    return {
+        "concurrency": level,
+        "reason": "engine CUDA OOM at first step; EngineDeadError in 3 of 3 runs",
+        "n_runs": n_runs,
+        "n_failed": n_failed,
+        "run_ids": [f"r{level}-{i}" for i in range(n_runs)],
+        "failure_details": ["ValueError: no request succeeded (5120 failed)"],
+    }
+
+
+def test_the_curves_excluded_levels_are_carried_into_the_output_unchanged():
+    doc = _doc()
+    doc["excluded_levels"] = [_excluded_entry()]
+    curve, meta = a2.build_service_curve(doc)
+    assert meta["excluded_levels"] == [_excluded_entry()]
+    assert curve.points == ((1, 0.31, 51.6, 0.15), (64, 0.95, 1077.9, 0.99))
+
+
+def test_a_curve_file_from_before_exclusions_carries_an_empty_list():
+    _, meta = a2.build_service_curve(_doc())
+    assert meta["excluded_levels"] == []
+
+
+def test_main_prints_one_line_per_excluded_level_after_the_first_and_writes_them(
+    tmp_path, capsys
+):
+    doc = _doc()
+    doc["excluded_levels"] = [_excluded_entry(128, 2, 3), _excluded_entry(256)]
+    (tmp_path / "sweep.json").write_text(json.dumps(doc))
+    a2.main(["--curve", str(tmp_path / "sweep.json"), "--out", str(tmp_path / "a2.json")])
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "[a2] 2 points, max_num_seqs=256, MEASURED, gpu_util=windowed"
+    reason = _excluded_entry()["reason"]
+    assert lines[1] == f"[a2] excluded level 128: {reason} (2 of 3 runs failed)"
+    assert lines[2] == f"[a2] excluded level 256: {reason} (3 of 3 runs failed)"
+    written = json.loads((tmp_path / "a2.json").read_text())
+    assert written["excluded_levels"] == [_excluded_entry(128, 2, 3), _excluded_entry(256)]
+
+
+def test_main_on_a_curve_with_no_excluded_levels_prints_no_such_line(tmp_path, capsys):
+    (tmp_path / "sweep.json").write_text(json.dumps(_doc()))
+    a2.main(["--curve", str(tmp_path / "sweep.json"), "--out", str(tmp_path / "a2.json")])
+    assert "excluded level" not in capsys.readouterr().out
+    assert json.loads((tmp_path / "a2.json").read_text())["excluded_levels"] == []

@@ -420,6 +420,114 @@ def test_engine_facts_report_every_distinct_value_including_absence():
     assert reduce_curve(records).engine["max_num_seqs"] == [256, None]
 
 
+def _failed_at(level, details, *, start=0):
+    """Failed runs at one level, one per detail string, the way the worker's failure is stored."""
+    out = []
+    for i, detail in enumerate(details, start=start):
+        rec = _rec(level, i, outcome="failed")
+        rec.status = {"failure_class": "unknown", "failure_detail": detail}
+        out.append(rec)
+    return out
+
+
+_OOM = "ValueError: no request succeeded (5120 failed); EngineDeadError: CUDA out of memory"
+_REASON = "engine CUDA OOM at first step; EngineDeadError in 3 of 3 runs"
+
+
+def _with_unserved_top():
+    return (_three(1, [0.3] * 3) + _three(2, [0.4] * 3)
+            + _failed_at(256, [_OOM, _OOM, "ValueError: other"]))
+
+
+def test_a_level_the_engine_could_not_serve_is_left_out_of_the_rows_and_recorded():
+    records = _with_unserved_top()
+    red = reduce_curve(records, expected_levels=[1, 2, 256], excluded_levels={256: _REASON})
+    assert [row["concurrency"] for row in red.levels] == [1, 2]
+    assert [p[0] for p in red.points] == [1, 2]
+    assert red.excluded_levels == (
+        {
+            "concurrency": 256,
+            "reason": _REASON,
+            "n_runs": 3,
+            "n_failed": 3,
+            "run_ids": ["r256-0", "r256-1", "r256-2"],
+            "failure_details": [_OOM, "ValueError: other"],
+        },
+    )
+    doc = red.to_dict()
+    assert doc["excluded_levels"] == [dict(red.excluded_levels[0])]
+    assert [p[0] for p in doc["points"]] == [1, 2]
+    json.dumps(doc)
+
+
+def test_excluded_levels_are_recorded_ascending_with_details_capped_in_number_and_length():
+    long = "x" * 400
+    records = (
+        _three(1, [0.3] * 3) + _three(2, [0.4] * 3)
+        + _failed_at(512, ["a"])
+        + _failed_at(256, [long, "b", "c", "d"])
+    )
+    red = reduce_curve(records, excluded_levels={512: "r512", 256: "r256"})
+    assert [e["concurrency"] for e in red.excluded_levels] == [256, 512]
+    details = red.excluded_levels[0]["failure_details"]
+    assert details == ["x" * 300, "b", "c"], "first three distinct, each cut to 300 characters"
+    assert red.excluded_levels[0]["n_runs"] == 4
+
+
+def test_a_failed_run_without_a_detail_adds_none_to_the_recorded_details():
+    records = _three(1, [0.3] * 3) + _three(2, [0.4] * 3) + _failed_at(256, ["boom"])
+    records.append(_rec(256, 1, outcome="failed"))  # status left empty
+    red = reduce_curve(records, excluded_levels={256: _REASON})
+    assert red.excluded_levels[0]["failure_details"] == ["boom"]
+    assert red.excluded_levels[0]["n_failed"] == 2
+
+
+def test_with_no_exclusion_the_curve_is_what_it_was_and_records_an_empty_list():
+    records = _three(1, [0.3] * 3) + _three(2, [0.4] * 3)
+    plain = reduce_curve(records)
+    assert plain.excluded_levels == ()
+    assert plain.to_dict()["excluded_levels"] == []
+    assert reduce_curve(records, excluded_levels={}) == plain
+
+
+def test_an_excluded_level_is_still_present_for_the_requested_levels_check():
+    records = _with_unserved_top()
+    reduce_curve(records, expected_levels=[1, 2, 256], excluded_levels={256: _REASON})
+    with pytest.raises(ValueError, match=r"levels \[512\]"):
+        reduce_curve(records, expected_levels=[1, 2, 256, 512], excluded_levels={256: _REASON})
+
+
+def test_a_level_with_any_successful_run_cannot_be_excluded():
+    records = _three(1, [0.3] * 3) + _three(2, [0.4] * 3) + _three(4, [0.5] * 2)
+    records += _failed_at(4, [_OOM], start=2)
+    with pytest.raises(ValueError, match=r"level 4 has 2 successful runs.*cannot be excluded"):
+        reduce_curve(records, excluded_levels={4: _REASON})
+
+
+def test_an_excluded_level_with_no_stored_run_is_refused():
+    records = _three(1, [0.3] * 3) + _three(2, [0.4] * 3)
+    with pytest.raises(ValueError, match=r"level 256 .*no stored run"):
+        reduce_curve(records, excluded_levels={256: _REASON})
+
+
+@pytest.mark.parametrize("reason", ["", "   ", "\n\t"])
+def test_an_exclusion_without_a_reason_is_refused(reason):
+    with pytest.raises(ValueError, match=r"level 256 .*reason"):
+        reduce_curve(_with_unserved_top(), excluded_levels={256: reason})
+
+
+def test_a_curve_left_with_fewer_than_two_rows_by_the_exclusion_is_refused():
+    records = _three(1, [0.3] * 3) + _failed_at(2, [_OOM] * 3) + _failed_at(4, [_OOM] * 3)
+    with pytest.raises(ValueError, match="at least two"):
+        reduce_curve(records, excluded_levels={2: _REASON, 4: _REASON})
+
+
+def test_leaving_one_failed_level_out_does_not_excuse_another_short_one():
+    records = _with_unserved_top() + _three(4, [0.5] * 2)
+    with pytest.raises(ValueError, match="level 4 has 2 successful runs"):
+        reduce_curve(records, excluded_levels={256: _REASON})
+
+
 _HASHSEED_SCRIPT = """
 import json
 from harness.service_sweep import SweepRun, condition_for, reduce_curve, sweep_schedule

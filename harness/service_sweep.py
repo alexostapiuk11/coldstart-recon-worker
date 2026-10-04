@@ -18,7 +18,7 @@ artifact 2 adapts the tuples on its own side (`scripts/a2_service_curve.py`).
 """
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 
 from harness.failures import classify_failure
@@ -311,6 +311,9 @@ class CurveReduction:
     # disagrees is refused). Carried so a reader of the curve file, and
     # artifact 2's adapter, can say which statistic the column is.
     gpu_util_method: str
+    # One dict per level the caller left out because the engine could not serve
+    # it, ascending (see `reduce_curve`); empty when none was.
+    excluded_levels: tuple = ()
 
     @property
     def points(self) -> list[tuple[int, float, float, float]]:
@@ -330,6 +333,7 @@ class CurveReduction:
             "served_cmd": list(self.served_cmd),
             "engine": dict(self.engine),
             "gpu_util_method": self.gpu_util_method,
+            "excluded_levels": [dict(e) for e in self.excluded_levels],
         }
 
 
@@ -347,11 +351,58 @@ def _median_request_throughput(runs) -> float | None:
     return None if None in values else median(values)
 
 
+_EXCLUDED_DETAILS = 3
+_EXCLUDED_DETAIL_CHARS = 300
+
+
+def _excluded_entries(records, excluded_levels: Mapping[int, str]) -> list[dict]:
+    """The recorded entry per excluded level, ascending; refuses what `reduce_curve` documents."""
+    out = []
+    for level in sorted(excluded_levels):
+        reason = excluded_levels[level]
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(
+                f"level {level} is excluded with no reason; a level left out of the curve "
+                "has to say why, or a reader sees a curve that simply stops earlier"
+            )
+        runs = sorted((r for r in records if r.level == level), key=lambda r: (r.repeat, r.run_id))
+        if not runs:
+            raise ValueError(
+                f"level {level} is excluded but has no stored run; there is nothing to "
+                "say the engine could not serve it. Check the level against the store"
+            )
+        n_ok = sum(1 for r in runs if r.outcome == "ok")
+        if n_ok:
+            raise ValueError(
+                f"level {level} has {n_ok} successful runs and cannot be excluded: an "
+                "exclusion is for a level the engine could not serve, and leaving out a "
+                "measured level would be choosing which points the curve shows. Reduce it "
+                "with a lower --min-repeats and disclose the repeat count instead"
+            )
+        details = []
+        for r in runs:
+            detail = (r.status or {}).get("failure_detail")
+            if detail is not None:
+                detail = str(detail)[:_EXCLUDED_DETAIL_CHARS]
+                if detail not in details:
+                    details.append(detail)
+        out.append({
+            "concurrency": level,
+            "reason": reason,
+            "n_runs": len(runs),
+            "n_failed": len(runs),
+            "run_ids": [r.run_id for r in runs],
+            "failure_details": details[:_EXCLUDED_DETAILS],
+        })
+    return out
+
+
 def reduce_curve(
     records,
     *,
     min_repeats: int = DEFAULT_REPEATS,
     expected_levels: Sequence[int] | None = None,
+    excluded_levels: Mapping[int, str] | None = None,
 ) -> CurveReduction:
     """Stored runs -> one row per level: median of the run medians, min..max.
 
@@ -364,6 +415,20 @@ def reduce_curve(
     that never said which); a run with no GPU utilisation (the curve has no
     honest value to put there); a level with fewer than `min_repeats` successful runs; a
     requested level absent from the store; fewer than two levels.
+
+    `excluded_levels` maps a level to the reason it is left out. It is for a
+    level the engine could not serve at all (every run failed, for example an
+    out-of-memory death at the first step), where no repeat count could ever
+    satisfy `min_repeats`. The level is left out of the rows and recorded on
+    the reduction instead, with its run counts and the first distinct failure
+    details, so the curve says it was not served rather than just ending
+    earlier. Refused: a blank reason; a level with no stored run (there is
+    nothing to say it could not be served); and a level with ANY successful
+    run, because leaving out a level that was measured would be choosing which
+    points the curve shows. A level with some successful runs and some failed
+    ones is a short level, which `min_repeats` handles. An excluded level still
+    counts as present for `expected_levels`, and the two-row minimum applies to
+    the rows that remain.
     """
     records = list(records)
     ok = [r for r in records if r.outcome == "ok"]
@@ -430,9 +495,13 @@ def reduce_curve(
                 f"levels {absent} were requested but have no stored run; the campaign "
                 "did not finish. Resume it before reducing"
             )
+    excluded = _excluded_entries(records, excluded_levels or {})
+    left_out = {e["concurrency"] for e in excluded}
     failed = Counter(r.level for r in records if r.outcome != "ok")
     rows = []
     for level in present:
+        if level in left_out:
+            continue
         runs = sorted((r for r in ok if r.level == level), key=lambda r: r.repeat)
         if len(runs) < min_repeats:
             raise ValueError(
@@ -458,7 +527,8 @@ def reduce_curve(
         row["request_throughput"] = _median_request_throughput(runs)
         rows.append(row)
     if len(rows) < 2:
-        raise ValueError(f"only level {present} is present; a curve needs at least two")
+        kept = [row["concurrency"] for row in rows]
+        raise ValueError(f"only level {kept} is present; a curve needs at least two")
     engine = {
         key: _distinct(r.engine.get(key) for r in ok)
         for key in ("max_num_seqs", "max_num_seqs_source", "kv_capacity_tokens", "vllm_version")
@@ -469,4 +539,5 @@ def reduce_curve(
         served_cmd=next(iter(commands)),
         engine=engine,
         gpu_util_method=gpu_util_method,
+        excluded_levels=tuple(excluded),
     )

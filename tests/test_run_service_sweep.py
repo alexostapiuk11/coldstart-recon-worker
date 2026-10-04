@@ -652,3 +652,112 @@ def test_preflight_only_and_reduce_only_need_no_max_num_seqs(monkeypatch, tmp_pa
     rss.main(["--preflight-only", "--template-id", "tmpl", "--serve-args=--enable-log-requests"])
     _sweep(tmp_path, FakeEngine())
     assert _reduce(tmp_path, "--serve-args=--enable-log-requests")["source"] == "stub"
+
+
+# --- a level the engine could not serve is left out by name ------------------------
+
+OOM = "ValueError: no request succeeded (5120 failed); EngineDeadError: CUDA out of memory"
+REASON = "engine CUDA OOM at first step; EngineDeadError in 3 of 3 runs"
+
+
+def _fail_level(tmp_path, level, *, detail=OOM):
+    """Rewrite the store so every run at `level` failed the way an engine that died would."""
+    rows = _rows(tmp_path)
+    for r in rows:
+        if r["level"] == level:
+            r.update(outcome="failed", latency_s=None, ttft_median_s=None, throughput_tps=None,
+                     gpu_util=None, prompt_path=None, summary={},
+                     status={"failure_class": "unknown", "failure_detail": detail})
+    (tmp_path / "sweep.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+
+def test_an_excluded_level_is_left_out_of_the_curve_file_and_recorded_in_it(tmp_path):
+    _sweep(tmp_path, FakeEngine())
+    _fail_level(tmp_path, 8)
+    doc = _reduce(tmp_path, "--exclude-level", f"8={REASON}")
+    assert [p[0] for p in doc["points"]] == [1, 2, 4]
+    assert doc["levels_requested"] == LEVELS, "the request is still the whole list"
+    (entry,) = doc["excluded_levels"]
+    assert entry["concurrency"] == 8 and entry["reason"] == REASON
+    assert (entry["n_runs"], entry["n_failed"]) == (3, 3)
+    assert entry["failure_details"] == [OOM]
+    assert len(entry["run_ids"]) == 3
+    assert json.loads((tmp_path / "again.json").read_text()) == doc
+
+
+def test_a_reason_may_itself_contain_an_equals_sign_and_semicolons(tmp_path):
+    _sweep(tmp_path, FakeEngine())
+    _fail_level(tmp_path, 8)
+    doc = _reduce(tmp_path, "--exclude-level", "8=max_num_seqs=256; CUDA OOM")
+    assert doc["excluded_levels"][0]["reason"] == "max_num_seqs=256; CUDA OOM"
+
+
+def test_the_flag_repeats_one_per_level(tmp_path):
+    _sweep(tmp_path, FakeEngine())
+    _fail_level(tmp_path, 4)
+    _fail_level(tmp_path, 8)
+    doc = _reduce(tmp_path, "--exclude-level", "8=a", "--exclude-level", "4=b")
+    assert [(e["concurrency"], e["reason"]) for e in doc["excluded_levels"]] == [(4, "b"), (8, "a")]
+    assert [p[0] for p in doc["points"]] == [1, 2]
+
+
+def test_without_the_flag_the_curve_file_records_no_excluded_levels(tmp_path):
+    doc = _sweep(tmp_path, FakeEngine())
+    assert doc["excluded_levels"] == []
+    assert _reduce(tmp_path)["excluded_levels"] == []
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["256", "=reason", "abc=reason", "8=", "8=   ", "0=reason", "-4=reason", "8.5=reason"],
+    ids=["no-equals", "no-level", "level-not-int", "empty-reason", "blank-reason",
+         "zero", "negative", "float"],
+)
+def test_a_malformed_exclude_level_is_refused_before_the_store_is_read(
+    tmp_path, capsys, value
+):
+    with pytest.raises(SystemExit) as e:
+        rss.main(["--reduce-only", "--levels", "1,2,4,8", "--store", str(tmp_path / "nope.jsonl"),
+                  "--out", str(tmp_path / "again.json"), f"--exclude-level={value}"])
+    assert e.value.code == 2
+    assert "expected LEVEL=REASON" in capsys.readouterr().err
+    assert not (tmp_path / "again.json").exists()
+
+
+def test_the_same_level_excluded_twice_is_refused(tmp_path, capsys):
+    _sweep(tmp_path, FakeEngine())
+    _fail_level(tmp_path, 8)
+    with pytest.raises(SystemExit) as e:
+        _reduce(tmp_path, "--exclude-level", "8=a", "--exclude-level", "8=b")
+    assert e.value.code == 2
+    assert "level 8 given more than once" in capsys.readouterr().err
+    assert not (tmp_path / "again.json").exists()
+
+
+def test_exclude_level_is_only_for_reduce_only_and_is_refused_before_anything_is_spent(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
+    monkeypatch.delenv("RUNPOD_SWEEP_ENDPOINT_ID", raising=False)
+    with pytest.raises(SystemExit) as e:
+        rss.main(["--template-id", "tmpl", "--levels", "1,2", "--seed", "5",
+                  "--serve-args=--max-num-seqs 256", "--exclude-level", "2=reason",
+                  "--store", str(tmp_path / "s.jsonl"), "--out", str(tmp_path / "c.json")])
+    assert e.value.code == 2
+    err = capsys.readouterr().err
+    assert "--exclude-level only applies to --reduce-only" in err
+    assert not (tmp_path / "s.jsonl").exists()
+
+
+def test_excluding_a_level_that_has_a_successful_run_is_refused_and_writes_no_curve(tmp_path):
+    _sweep(tmp_path, FakeEngine())
+    with pytest.raises(ValueError, match="cannot be excluded"):
+        _reduce(tmp_path, "--exclude-level", f"8={REASON}")
+    assert not (tmp_path / "again.json").exists()
+
+
+def test_excluding_a_level_that_was_never_run_is_refused(tmp_path):
+    _sweep(tmp_path, FakeEngine())
+    with pytest.raises(ValueError, match="no stored run"):
+        _reduce(tmp_path, "--exclude-level", f"256={REASON}")
+    assert not (tmp_path / "again.json").exists()

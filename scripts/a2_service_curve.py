@@ -24,6 +24,11 @@ reduction refuses a store that mixes the two and records which one it got
 adapter carries it into its output and prints it in its summary line, because
 figures that plot the column should say which statistic it is.
 
+A level the reduction left out because the engine could not serve it
+(`excluded_levels` in the curve file) is not a point. The output carries the
+entries unchanged and the summary prints one line per level, so the curve's top
+level is not read as the engine's limit without the reader being told.
+
 `ServiceCurve` holds only points, but figure 4 draws an interval per level
 (spec section 11), so the output JSON carries the reduction's per-level
 min..max ranges beside the points (`intervals`). Dropping them here would
@@ -239,6 +244,9 @@ def build_service_curve(curve_doc: dict, runs=None) -> tuple[ServiceCurve, dict]
         "gpu_util_method": gpu_util_method_of(curve_doc),
         "top_level_above_max_num_seqs": curve.max_measured_concurrency > max_num_seqs,
         "sweep_source": curve_doc.get("source"),
+        # Levels the engine could not serve, left out of the points and recorded
+        # by the reduction; carried as written ([] for a file from before them).
+        "excluded_levels": curve_doc.get("excluded_levels", []),
     }
     return curve, meta
 
@@ -270,6 +278,9 @@ def main(argv=None) -> None:
     label = "MEASURED" if curve.measured else "NOT MEASURED (stub)"
     print(f"[a2] {len(curve.points)} points, max_num_seqs={meta['max_num_seqs']}, {label}, "
           f"gpu_util={meta['gpu_util_method']}")
+    for entry in meta["excluded_levels"]:
+        print(f"[a2] excluded level {entry['concurrency']}: {entry['reason']} "
+              f"({entry['n_failed']} of {entry['n_runs']} runs failed)")
     if meta["top_level_above_max_num_seqs"]:
         print(f"[a2] WARNING: top level {curve.max_measured_concurrency} is above max_num_seqs")
     print("[a2] Little's law, c / median latency vs the bench tool's request_throughput "
