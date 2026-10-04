@@ -56,8 +56,16 @@ class SimResult:
     """The outcome of one run.
 
     `completed + unfinished` always equals the number of arrivals replayed:
-    `run_fixed_capacity` refuses a trace that extends past its window, so
-    every request in the trace is accounted for as either finished or not.
+    both `run_fixed_capacity` and `run_with_policy` refuse a trace that
+    extends past `until`, so every request in the trace is accounted for as
+    either finished or not. The arrival bookkeeping makes the same promise by
+    value, not just by count:
+
+        sorted(completed_arrivals + unfinished_arrivals) == sorted(arrivals)
+
+    The count alone cannot catch a loop that records the wrong number --
+    a completion time, or a request id -- because those come in exactly the
+    right quantity. The identity can, and it is what the tests check.
     """
 
     latencies: list[float] = field(default_factory=list)

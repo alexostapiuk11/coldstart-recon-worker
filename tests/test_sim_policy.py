@@ -672,6 +672,11 @@ def test_every_arrival_is_accounted_for_as_completed_or_unfinished():
     )
 
     assert result.completed + result.unfinished == len(arrivals)
+    # Which arrivals, not just how many: completion times or request ids are
+    # floats/ints of the right count and pass the line above. Both sides are
+    # non-empty here (29 done, 121 not), so neither can hide in an empty list.
+    assert result.completed_arrivals and result.unfinished_arrivals
+    assert sorted(result.completed_arrivals + result.unfinished_arrivals) == sorted(arrivals)
 
 
 def test_a_replica_ready_exactly_when_the_window_ends_counts_as_having_served():

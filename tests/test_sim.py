@@ -18,7 +18,15 @@ NARROW = ServiceCurve(points=[(1, 0.5, 2.0, 0.5), (2, 0.5, 4.0, 0.6)], measured=
 
 
 @pytest.fixture
-def policy_run_result():
+def spike_policy_run():
+    """(arrivals, result) for the policy loop on a seed-3 step spike.
+
+    The trace is returned alongside the result because the arrival bookkeeping
+    can only be checked against the arrivals themselves: comparing
+    `unfinished_arrivals` with `unfinished` compares the result to itself, and
+    both come from the same tally line. This run leaves a backlog (7 requests
+    at the horizon), so `unfinished_arrivals` is not trivially empty.
+    """
     import random
 
     from autoscale.arrivals import arrival_times
@@ -30,8 +38,9 @@ def policy_run_result():
 
     rng = random.Random(3)
     shape = spike_shape(SERVICE_CURVE_PLACEHOLDER, "step", sustain=40.0)
-    return run_with_policy(
-        arrivals=arrival_times(shape, until=100.0, rng=rng),
+    arrivals = arrival_times(shape, until=100.0, rng=rng)
+    result = run_with_policy(
+        arrivals=arrivals,
         signal="queue_depth",
         controller=Controller(scale_up_at=2.0, scale_down_at=0.5, cooldown=30.0, max_replicas=4),
         lags=LagDistribution(samples=[20.0]),
@@ -40,6 +49,7 @@ def policy_run_result():
         evaluate_every=5.0,
         rng=rng,
     )
+    return arrivals, result
 
 
 def test_one_arrival_on_an_idle_replica_waits_only_for_service():
@@ -355,11 +365,20 @@ def test_every_arrival_is_accounted_for_however_the_window_falls():
     stops an overloaded run from looking uncongested: no request can leave the
     accounting by being cut off at the window boundary."""
     arrivals = [float(i) * 0.05 for i in range(40)]
+    split_at_least_once = False
     for until in (0.0, 0.3, 1.0, 2.5, 7.0, 60.0):
-        result = run_fixed_capacity(
-            arrivals=[t for t in arrivals if t <= until], replicas=2, curve=FLAT, until=until
-        )
-        assert result.completed + result.unfinished == len([t for t in arrivals if t <= until])
+        replayed = [t for t in arrivals if t <= until]
+        result = run_fixed_capacity(arrivals=replayed, replicas=2, curve=FLAT, until=until)
+        assert result.completed + result.unfinished == len(replayed)
+        # The counts say how many; this says which. Every float the bookkeeping
+        # recorded must be one of the trace's arrival times -- not a completion
+        # time and not a request id, both of which are numbers of the right
+        # count and would pass every length check.
+        assert sorted(result.completed_arrivals + result.unfinished_arrivals) == sorted(replayed)
+        split_at_least_once |= bool(result.completed_arrivals and result.unfinished_arrivals)
+    # Without a window that splits the trace, one side is always empty and the
+    # identity above cannot tell a mislabelled side from a correct one.
+    assert split_at_least_once
 
 
 def test_an_arrival_after_the_window_ends_is_refused_not_silently_dropped():
@@ -518,7 +537,42 @@ def test_unfinished_requests_keep_their_arrival_times():
     result = run_fixed_capacity([0.0, 0.1, 9.99], replicas=1,
                                 curve=SERVICE_CURVE_PLACEHOLDER, until=10.0)
     assert result.unfinished_arrivals == [9.99]
-    assert len(result.unfinished_arrivals) == result.unfinished
+    assert result.completed + result.unfinished == 3
+
+
+def test_unfinished_arrivals_come_out_in_arrival_order_in_the_fixed_loop():
+    """The backlog is assembled from two places -- `waiting`, then the values
+    of `in_flight` -- so concatenation alone puts a later queued request ahead
+    of earlier in-flight ones. Here 0.0 and 0.1 fill NARROW's capacity of two
+    and 0.2 queues; at 0.25 none has finished. Unsorted, the list would read
+    [0.2, 0.0, 0.1], and a consumer binning by arrival must not depend on it
+    being sorted for it."""
+    result = run_fixed_capacity([0.0, 0.1, 0.2], 1, NARROW, 0.25)
+    assert result.completed == 0
+    assert result.unfinished_arrivals == [0.0, 0.1, 0.2]
+
+
+def test_unfinished_arrivals_come_out_in_arrival_order_in_the_policy_loop():
+    """The same two-source backlog in the closed loop: one replica, a
+    controller that never acts, 0.2 queued behind two in-flight requests."""
+    import random
+
+    from autoscale.coldstart_ecdf import LagDistribution
+    from autoscale.controller import Controller
+    from autoscale.sim import run_with_policy
+
+    result = run_with_policy(
+        arrivals=[0.0, 0.1, 0.2],
+        signal="queue_depth",
+        controller=Controller(scale_up_at=50.0, scale_down_at=0.5, cooldown=100.0, max_replicas=1),
+        lags=LagDistribution(samples=[0.0]),
+        curve=NARROW,
+        until=0.25,
+        evaluate_every=1.0,
+        rng=random.Random(0),
+    )
+    assert result.completed == 0
+    assert result.unfinished_arrivals == [0.0, 0.1, 0.2]
 
 
 def test_a_half_populated_result_is_refused():
@@ -528,11 +582,12 @@ def test_a_half_populated_result_is_refused():
         SimResult(latencies=[1.0, 2.0], completed=2).completed_requests()
 
 
-def test_the_policy_loop_records_arrival_times_too(policy_run_result):
-    """Both loops, or the field lies about any closed-loop result."""
-    assert len(policy_run_result.completed_arrivals) == len(policy_run_result.latencies)
-    # This run leaves a backlog at the horizon. Without that, the length check
-    # below compares two empties: dropping the policy loop's tally line zeroes
-    # `unfinished_arrivals` AND `unfinished` together, and it still passes.
-    assert policy_run_result.unfinished_arrivals
-    assert len(policy_run_result.unfinished_arrivals) == policy_run_result.unfinished
+def test_the_policy_loop_records_arrival_times_too(spike_policy_run):
+    """Both loops, or the field lies about any closed-loop result. Checked
+    against the trace: a loop that recorded completion times or request ids
+    would have every length right and every value wrong."""
+    arrivals, result = spike_policy_run
+    assert len(result.completed_arrivals) == len(result.latencies)
+    assert result.completed_arrivals and result.unfinished_arrivals
+    assert sorted(result.completed_arrivals + result.unfinished_arrivals) == sorted(arrivals)
+    assert result.completed + result.unfinished == len(arrivals)
