@@ -2314,6 +2314,8 @@ git commit -m "feat: the validation gate's arithmetic, in a module artifact 4 ca
 
 ## Task 9: Pre-register the validation gate's pass rule — **STOP for sign-off**
 
+**Amended 2026-10-03 at sign-off:** code review of Task 8 showed the rule below fails a perfect model (0.75^k for k bins). The human approved a miss-rate rule instead; the text committed to `docs/experiment-a2.md` supersedes Step 2's block, and the constants are `REPEATS=3`, `MIN_COMPARED_BINS=10`, `MAX_MISS_FRACTION=0.5`, `BAND_EDGE_TOLERANCE_SECONDS=0.001`.
+
 Spec §10 fixes three repeats and "their spread sets the tolerance band", and requires misses to be reported with magnitude. It does not fix what counts as passing, the bin width, the jitter bound or the minimum evidence. Those are four pre-registered quantities, and they must be committed **before any real validation run exists** — the same discipline as the traffic model.
 
 **Files:**

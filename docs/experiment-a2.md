@@ -298,6 +298,46 @@ measured, so there was no result to tune it against. The only sweeps executed
 to this point used the explicitly-unmeasured placeholder curve, under
 `allow_unmeasured=True`, to check figure layout.
 
+## Validation gate — pass rule
+
+Fixed 2026-10-03, before any real validation run exists. Implemented in
+`autoscale/validation.py` (artifact 2's values) over `autoscale/validation_band.py`
+(the arithmetic); changing any value below after the first real run is an amendment.
+
+- **Repeats:** exactly **3** real runs of **one** fixed arrival schedule at pinned
+  capacity. Repeats of different schedules are refused, and so is a fourth: the band
+  is a min–max range, a range only widens as runs are added, and an open count would
+  let the band be grown until the model fits.
+- **Trajectory:** latency p50 per **10 s** bin, keyed by *scheduled* arrival time.
+  p50 rather than p99 because a 10 s bin holds a few hundred requests and the p99
+  floor is 500.
+- **Window:** a request whose send time plus latency is strictly later than the end
+  of the run window is unfinished — in the real runs exactly as in the simulator.
+- **Driver fidelity:** a run whose send times drift more than **0.5 s** from the
+  schedule is refused; it replayed a different trace.
+- **Band:** per bin, the min and max of the three repeats' p50, widened by **1 ms**
+  on each side — the latency clock's resolution — so float residue at an edge is not
+  a miss. A miss's magnitude is measured from the unwidened edge.
+- **Censoring:** a bin with any unfinished request is censored. A bin censored on
+  some repeats and not others is excluded as unstable and reported. Model and reality
+  both censored is agreement, but the bin is not *judged*: it says nothing about the
+  model's latency, and counting it would let a backlogged tail pass for free. One
+  censored and the other not is a **miss of unbounded magnitude**.
+- **Pass:** at least **10** judged bins are required — fewer is **not evaluable**,
+  never a pass — and the run passes if **no more than half** of the judged bins are
+  misses.
+- **Why a miss rate, not "every bin":** a model that predicts each bin's true median
+  exactly still falls outside the min–max of three repeats with probability 1/4 per
+  bin, so requiring every bin passes a perfect model 6% of the time at 10 bins and
+  0.3% at 20. Under this rule, if bins were independent, a perfect model fails about
+  2% of the time at 10 judged bins and under 0.1% at 30, while a model biased beyond
+  the system's own spread — outside in about three bins of four — fails 92% and 99.7%
+  of the time. Neighbouring bins share queue state, so they are not independent and a
+  perfect model fails somewhat more often than stated; the result is published with
+  its number of judged bins so a reader can weigh it.
+- **Disclosure:** every miss is published with its magnitude, as spec §10 already
+  requires.
+
 ## Stopping rule
 
 The sweep is exhaustive over the pre-declared threshold grid; there is no

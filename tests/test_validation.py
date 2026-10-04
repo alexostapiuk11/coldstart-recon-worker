@@ -235,3 +235,18 @@ def test_a_malformed_real_run_is_refused(override, match):
             "replicas": 1, "until": 60.0, "host_ids": ("w1",)}
     with pytest.raises(ValueError, match=match):
         RealRun(**{**base, **override})
+
+
+def test_the_constants_are_the_ones_the_preregistration_states():
+    from pathlib import Path
+
+    from autoscale import validation
+
+    prereg = (Path(__file__).resolve().parents[1] / "docs" / "experiment-a2.md").read_text()
+    assert "## Validation gate — pass rule" in prereg
+    assert validation.REPEATS == 3 and "exactly **3** real runs" in prereg
+    assert validation.BIN_SECONDS == 10.0 and "**10 s** bin" in prereg
+    assert validation.MAX_SEND_JITTER_SECONDS == 0.5 and "**0.5 s**" in prereg
+    assert validation.MIN_COMPARED_BINS == 10 and "at least **10** judged bins" in prereg
+    assert validation.MAX_MISS_FRACTION == 0.5 and "**no more than half**" in prereg
+    assert validation.BAND_EDGE_TOLERANCE_SECONDS == 0.001 and "**1 ms**" in prereg
