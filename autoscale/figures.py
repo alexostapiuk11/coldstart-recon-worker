@@ -50,6 +50,7 @@ Refusals rather than best-effort drawing, in four places:
   run".
 """
 
+from itertools import pairwise
 from pathlib import Path
 
 import matplotlib
@@ -62,8 +63,16 @@ from matplotlib.ticker import MaxNLocator
 
 from autoscale.frontier import pareto_frontier
 from autoscale.stats import MIN_BOOTSTRAP_SAMPLES
+from autoscale.sweep import THRESHOLDS
 
-__all__ = ["SIGNAL_ORDER", "convergence", "frontiers"]
+__all__ = [
+    "SIGNAL_ORDER",
+    "UTILIZATION_CENSOR_AT",
+    "censoring_onset",
+    "convergence",
+    "frontiers",
+    "service_curve",
+]
 
 SIGNAL_ORDER = ("queue_depth", "in_flight_concurrency", "utilization")
 # Short enough to survive the text budget above. The long forms live in the
@@ -96,6 +105,14 @@ MODELED_BG = "#e8f1ff"
 MEASURED_BANNER = "#2f6b34"
 MODELED_BANNER = "#1f4f9e"
 NOTE_COLOR = "#3f3f3f"
+
+# The top of utilization's pre-registered scale-up grid. Above the load where
+# utilization reaches it, utilization exceeds EVERY threshold the utilization
+# policy can be set to, so more load is invisible to that policy -- H2's
+# censoring mechanism, read off the grid rather than chosen for the chart.
+UTILIZATION_CENSOR_AT = max(THRESHOLDS["utilization"][0])
+CENSOR_COLOR = "#c0392b"
+CURVE_COLOR = "#333333"
 
 # Figure-x of the measured panel's centre, given the `subplots_adjust` below.
 # matplotlib sizes each column as (right - left) / (ncols + wspace).
@@ -604,4 +621,98 @@ def frontiers(
         "shaded: 95% bootstrap interval",
         y=-0.245,
     )
+    return _finish(fig, path, return_figure)
+
+
+def censoring_onset(curve, threshold: float = UTILIZATION_CENSOR_AT) -> float | None:
+    """The lowest concurrency at which utilization reaches `threshold`.
+
+    Linear interpolation between measured points, the same interpolation
+    `ServiceCurve` itself uses, so the shaded region begins where the model
+    the simulator runs on says it does. None if utilization never reaches the
+    threshold in the measured range.
+    """
+    points = [(c, u) for c, _, _, u in curve.points]
+    if points[0][1] >= threshold:
+        return float(points[0][0])
+    for (c0, u0), (c1, u1) in pairwise(points):
+        if u0 < threshold <= u1:
+            return c0 + (threshold - u0) / (u1 - u0) * (c1 - c0)
+    return None
+
+
+def _figure_banner(fig, left: float, right: float, word: str, subtitle: str, color: str) -> None:
+    """The measured/modeled strip, in FIGURE coordinates, for a stacked figure.
+
+    `_banner` sizes its strip as a fraction of one panel's height, which suits
+    figures 1 and 2's tall panels and fails on figure 4's three short ones: the
+    strip comes out shorter than the word inside it and the subtitle lands on
+    the top panel. It is not changed to fit, because that would move figure
+    1's pixels; a stacked figure has one header for all its panels, so it is
+    drawn once, against the figure, spanning the panels' shared width.
+    """
+    fig.patches.append(
+        Rectangle((left, 0.935), right - left, 0.05, transform=fig.transFigure,
+                  facecolor=color, edgecolor="none", zorder=5)
+    )
+    fig.text((left + right) / 2, 0.96, word, ha="center", va="center",
+             fontsize=_pt(PX_BANNER), fontweight="bold", color="white", zorder=6)
+    fig.text((left + right) / 2, 0.928, subtitle, ha="center", va="top",
+             fontsize=_pt(PX_SUBTITLE), color=color)
+
+
+def service_curve(curve, path, return_figure=False):
+    """Figure 4. Latency, throughput and GPU utilization against concurrency,
+    with the region where utilization is censored shaded on all three.
+
+    Three stacked panels sharing the concurrency axis rather than one panel
+    with three y-axes: the quantities have unrelated units, and a twin-axis
+    chart invites reading one curve against another's scale. The shading is on
+    every panel because the point of the figure is the COINCIDENCE -- latency
+    still climbing while utilization has flattened -- and a reader has to see
+    both sides of the boundary in one glance.
+
+    No interval band yet: `ServiceCurve` carries one value per level. Plan 2b
+    adds per-level dispersion when the sweep format is fixed.
+    """
+    left, right = 0.13, 0.985
+    fig, axes = plt.subplots(3, 1, sharex=True, figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN))
+    fig.subplots_adjust(left=left, right=right, top=0.86, bottom=0.20, hspace=0.22)
+    concurrency = [c for c, _, _, _ in curve.points]
+    # A little past the last point, and the shading runs to the same edge: a
+    # band that stopped at the last measured point would read as censoring
+    # that ENDS there, and an axis ending exactly on it would clip the marker.
+    x_right = max(concurrency) * 1.04
+    onset = censoring_onset(curve)
+    background = MEASURED_BG if curve.measured else MODELED_BG
+    for axis, index, label in (
+        (axes[0], 1, "latency\n(s)"),
+        (axes[1], 2, "throughput\n(tok/s)"),
+        (axes[2], 3, "GPU\nutilization"),
+    ):
+        axis.plot(concurrency, [p[index] for p in curve.points], "o-",
+                  markersize=5, linewidth=2, color=CURVE_COLOR)
+        _tidy(axis, "", label, background)
+        axis.set_xlim(0, x_right)
+        if onset is not None:
+            axis.axvspan(onset, x_right, color=CENSOR_COLOR, alpha=BAND_ALPHA,
+                         linewidth=0, gid="censored")
+    axes[2].set_ylim(0, 1.05)
+    axes[2].axhline(UTILIZATION_CENSOR_AT, color=CENSOR_COLOR, linewidth=1, linestyle=":")
+    axes[2].set_xlabel("concurrency per replica", fontsize=_pt(PX_AXIS_LABEL))
+    if curve.measured:
+        _figure_banner(fig, left, right, "MEASURED", "one replica, concurrency swept",
+                       MEASURED_BANNER)
+    else:
+        _figure_banner(fig, left, right, "NOT MEASURED", "placeholder curve: invented points",
+                       MODELED_BANNER)
+    # Two lines, each short: at the phone floor a note line wider than ~75
+    # characters runs past 375 px, and the off-canvas test fails on it.
+    shading = (
+        f"shaded: utilization ≥ {UTILIZATION_CENSOR_AT:g} (from {onset:.3g}), "
+        "above every utilization threshold"
+        if onset is not None
+        else f"utilization ≥ {UTILIZATION_CENSOR_AT:g} never reached in the measured range"
+    )
+    _note(axes[2], f"n={len(curve.points)} concurrency levels\n{shading}", y=-0.42)
     return _finish(fig, path, return_figure)

@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from autoscale.arrivals import SpikeShape
 from autoscale.coldstart_ecdf import LagDistribution, load_measured_lags
-from autoscale.figures import SIGNAL_ORDER, convergence, frontiers
+from autoscale.figures import SIGNAL_ORDER, convergence, frontiers, service_curve
 from autoscale.frontier import (
     PolicyPoint,
     gap_at_iso_cost,
@@ -273,6 +273,9 @@ def main() -> None:
             "WARNING: rendering against the PLACEHOLDER service curve. "
             "These figures are a layout draft, not a result."
         )
+    # Figure 4 needs no sweep -- only the curve -- so it renders first and
+    # renders even when a figure guard later refuses to draw the others.
+    print(service_curve(SERVICE_CURVE_PLACEHOLDER, out / "service_curve.png"))
 
     cache = out / "sweep-cache.json"
     if cache.exists() and not args.refresh:

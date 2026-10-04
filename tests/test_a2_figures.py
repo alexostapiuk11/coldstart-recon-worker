@@ -6,8 +6,16 @@ import matplotlib.pyplot as plt
 import pytest
 from matplotlib.collections import PolyCollection
 
-from autoscale.figures import SIGNAL_ORDER, convergence, frontiers
+from autoscale.figures import (
+    SIGNAL_ORDER,
+    UTILIZATION_CENSOR_AT,
+    censoring_onset,
+    convergence,
+    frontiers,
+    service_curve,
+)
 from autoscale.frontier import PolicyPoint
+from autoscale.service import SERVICE_CURVE_PLACEHOLDER, ServiceCurve
 
 # `harness.figure_guards` does not exist yet -- the harness extraction that owns
 # it has not run. `coldstart.analysis.figures` is where the constant currently
@@ -80,6 +88,14 @@ WIDE_A = {s: _frontier_shaped(s, 2.0 + i) for i, s in enumerate(SIGNAL_ORDER)}
 WIDE_C = {s: _frontier_shaped(s, 0.6 + i * 0.3, 0.5) for i, s in enumerate(SIGNAL_ORDER)}
 WIDE_SWEPT = {20.0: 1.1, 40.0: 2.4, 60.0: 3.9, 80.0: 5.2, 120.0: 8.6}
 
+# Ten levels, wide tick labels, the knee mid-range: what a measured sweep looks
+# like, rather than the placeholder's seven tidy powers of two.
+WIDE_CURVE = ServiceCurve(
+    points=[(c, 0.28 + 0.0009 * c * c, min(560.0, 55.0 * c), min(1.0, 0.16 * c ** 0.55))
+            for c in (1, 2, 4, 6, 8, 12, 16, 24, 32, 48)],
+    measured=True,
+)
+
 # Both a minimal chart and a full-width one, because the layout defects this
 # module keeps producing are data-dependent: wide tick labels, six overlapping
 # series and a five-point sweep are what push text off the canvas, and a fixture
@@ -92,6 +108,9 @@ def _draw(figure, case, tmp_path):
         minimal = case == "minimal"
         args = (FRONTIERS_A, FRONTIERS_C, SWEPT) if minimal else (WIDE_A, WIDE_C, WIDE_SWEPT)
         return convergence(*args, path=tmp_path / "c.png", curve_measured=True, return_figure=True)
+    if figure == "service_curve":
+        curve = SERVICE_CURVE_PLACEHOLDER if case == "minimal" else WIDE_CURVE
+        return service_curve(curve, path=tmp_path / "s.png", return_figure=True)
     data = ALL_THREE if case == "minimal" else WIDE_A
     return frontiers(data, path=tmp_path / "f.png", return_figure=True, context="arm A, step spike")
 
@@ -123,7 +142,7 @@ def test_the_modeled_panel_is_labelled_on_the_chart_itself(tmp_path):
 
 
 @pytest.mark.parametrize("case", LAYOUT_CASES)
-@pytest.mark.parametrize("figure", ["convergence", "frontiers"])
+@pytest.mark.parametrize("figure", ["convergence", "frontiers", "service_curve"])
 def test_every_text_artist_clears_the_phone_legibility_floor(tmp_path, figure, case):
     fig = _draw(figure, case, tmp_path)
     width_in = fig.get_size_inches()[0]
@@ -290,14 +309,15 @@ def _rendered(fig):
         artists += [axis.title, axis.xaxis.label, axis.yaxis.label]
         for matplotlib_axis, lim in ((axis.xaxis, axis.get_xlim()), (axis.yaxis, axis.get_ylim())):
             lo, hi = sorted(lim)
+            # Each tick paired with ITS OWN label. Zipping get_majorticklocs()
+            # against get_majorticklabels() only lines up while every label is
+            # visible: shared axes hide the upper panels' labels, the label list
+            # comes back shorter, and the pairing is off by however many were
+            # hidden. Hidden labels are dropped by the get_visible() filter below.
             artists += [
-                label
-                for loc, label in zip(
-                    matplotlib_axis.get_majorticklocs(),
-                    matplotlib_axis.get_majorticklabels(),
-                    strict=True,
-                )
-                if lo <= loc <= hi
+                tick.label1
+                for tick in matplotlib_axis.get_major_ticks()
+                if lo <= tick.get_loc() <= hi
             ]
         if axis.get_legend() is not None:
             artists += list(axis.get_legend().get_texts())
@@ -311,7 +331,7 @@ def _rendered(fig):
 
 
 @pytest.mark.parametrize("case", LAYOUT_CASES)
-@pytest.mark.parametrize("figure", ["convergence", "frontiers"])
+@pytest.mark.parametrize("figure", ["convergence", "frontiers", "service_curve"])
 def test_no_text_runs_off_the_canvas(tmp_path, figure, case):
     """The defect this repo keeps shipping: a label that renders, passes every
     assertion about its data, and is cut in half by the canvas edge. Artifact 1
@@ -376,7 +396,7 @@ def test_no_series_is_hidden_under_another(tmp_path):
 
 
 @pytest.mark.parametrize("case", LAYOUT_CASES)
-@pytest.mark.parametrize("figure", ["convergence", "frontiers"])
+@pytest.mark.parametrize("figure", ["convergence", "frontiers", "service_curve"])
 def test_no_two_labels_are_printed_on_top_of_each_other(tmp_path, figure, case):
     """Artifact 1 shipped a figure that stamped three labels on one point. The
     first draft of the frontier figure here printed its N statement across the
@@ -645,3 +665,126 @@ def test_a_single_point_frontier_still_shows_its_interval(tmp_path):
         "beside two banded curves reads as the certain one"
     )
     plt.close(fig)
+
+
+# --- figure 4: the service curve ----------------------------------------------
+
+
+def test_censoring_starts_where_utilization_crosses_the_top_of_its_grid():
+    """Placeholder: utilization 0.85 at 8, 0.96 at 16. Linear interpolation --
+    the same ServiceCurve uses -- puts 0.95 at 8 + 0.10/0.11 x 8."""
+    assert UTILIZATION_CENSOR_AT == 0.95
+    assert censoring_onset(SERVICE_CURVE_PLACEHOLDER) == pytest.approx(8 + 0.10 / 0.11 * 8)
+
+
+def test_censoring_starts_at_the_first_level_when_utilization_is_already_over():
+    """No pair of points brackets the threshold when the FIRST one is already
+    above it, so the interpolation loop alone returns None -- and the figure
+    would say "never reached" about a curve that is censored everywhere."""
+    hot = ServiceCurve(points=[(2, 0.5, 400.0, 0.97), (8, 1.2, 500.0, 1.0)], measured=False)
+    assert censoring_onset(hot) == 2.0
+
+
+def test_no_censoring_when_utilization_never_reaches_the_threshold(tmp_path):
+    low = ServiceCurve(points=[(1, 0.3, 50.0, 0.2), (8, 0.4, 300.0, 0.6)], measured=False)
+    assert censoring_onset(low) is None
+    fig = service_curve(low, path=tmp_path / "s.png", return_figure=True)
+    assert not [p for ax in fig.axes for p in ax.patches if p.get_gid() == "censored"]
+    assert "never reached" in " ".join(_texts(fig))
+
+
+def test_the_censored_region_is_painted_on_every_panel(tmp_path):
+    """Not "a patch exists" -- a zero-width span exists and paints nothing,
+    which is the defect a presence check would pass. Real pixel width."""
+    fig = service_curve(SERVICE_CURVE_PLACEHOLDER, path=tmp_path / "s.png", return_figure=True)
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    spans = [p for ax in fig.axes for p in ax.patches if p.get_gid() == "censored"]
+    assert len(spans) == 3
+    assert all(p.get_window_extent(renderer).width > 20 for p in spans)
+
+
+def test_an_unmeasured_curve_says_so_on_the_chart(tmp_path):
+    fig = service_curve(SERVICE_CURVE_PLACEHOLDER, path=tmp_path / "s.png", return_figure=True)
+    assert "NOT MEASURED" in _texts(fig)
+
+
+def test_a_measured_curve_is_labelled_measured(tmp_path):
+    fig = service_curve(WIDE_CURVE, path=tmp_path / "s.png", return_figure=True)
+    words = _texts(fig)
+    assert "MEASURED" in words and "NOT MEASURED" not in words
+
+
+def test_n_is_stated_on_the_service_curve(tmp_path):
+    fig = service_curve(WIDE_CURVE, path=tmp_path / "s.png", return_figure=True)
+    assert "n=10" in " ".join(_texts(fig))
+
+
+def test_every_service_curve_axis_starts_at_zero(tmp_path):
+    fig = service_curve(WIDE_CURVE, path=tmp_path / "s.png", return_figure=True)
+    for axis in fig.axes:
+        assert axis.get_ylim()[0] == 0 and axis.get_xlim()[0] == 0
+
+
+@pytest.mark.parametrize("curve", [SERVICE_CURVE_PLACEHOLDER, WIDE_CURVE], ids=["placeholder", "measured"])
+def test_the_figure_4_banner_holds_its_word_and_clears_the_panels(curve, tmp_path):
+    """The first draft reused `_banner`, which sizes its strip as a fraction of
+    ONE panel's height. On three short stacked panels the strip came out
+    shorter than the word inside it and the subtitle landed on the top panel --
+    while every legibility and off-canvas test in this file passed."""
+    fig = service_curve(curve, path=tmp_path / "s.png", return_figure=True)
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    [strip] = fig.patches
+    strip_box = strip.get_window_extent(renderer)
+    word = next(t for t in fig.texts if t.get_text() in ("MEASURED", "NOT MEASURED"))
+    word_box = word.get_window_extent(renderer)
+    assert strip_box.y0 <= word_box.y0 and word_box.y1 <= strip_box.y1, (
+        f"banner word spans y {word_box.y0:.0f}..{word_box.y1:.0f}, outside its "
+        f"strip at {strip_box.y0:.0f}..{strip_box.y1:.0f}"
+    )
+    top_panel = fig.axes[0].get_window_extent(renderer)
+    for text in fig.texts:
+        assert text.get_window_extent(renderer).y0 >= top_panel.y1, (
+            f"{text.get_text()!r} overlaps the top panel"
+        )
+
+
+def test_each_y_label_fits_the_height_of_its_own_panel(tmp_path):
+    """Three short panels leave little height for a rotated label. The first
+    draft's single-line labels ran past their panels and into each other.
+    Checked against each label's OWN panel rather than against its neighbours:
+    a neighbour-overlap check misses one long label beside two short ones."""
+    fig = service_curve(SERVICE_CURVE_PLACEHOLDER, path=tmp_path / "s.png", return_figure=True)
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    for axis in fig.axes:
+        panel = axis.get_window_extent(renderer)
+        label = axis.yaxis.label.get_window_extent(renderer)
+        assert panel.y0 - 1 <= label.y0 and label.y1 <= panel.y1 + 1, (
+            f"{axis.yaxis.label.get_text()!r} spans y {label.y0:.0f}..{label.y1:.0f}, "
+            f"past its panel at {panel.y0:.0f}..{panel.y1:.0f}"
+        )
+
+
+def test_the_censored_band_reaches_the_right_edge(tmp_path):
+    """A band that stops at the last measured point reads as censoring that
+    ENDS there."""
+    fig = service_curve(SERVICE_CURVE_PLACEHOLDER, path=tmp_path / "s.png", return_figure=True)
+    for axis in fig.axes:
+        [span] = [p for p in axis.patches if p.get_gid() == "censored"]
+        x1 = span.get_x() + span.get_width()
+        assert x1 == pytest.approx(axis.get_xlim()[1])
+
+
+def test_the_censoring_threshold_is_drawn_across_the_utilization_panel(tmp_path):
+    """The dotted line is what ties the shading to a utilization VALUE: without
+    it the band's left edge is a concurrency with no visible reason. Mutation
+    check found nothing held it in place."""
+    fig = service_curve(SERVICE_CURVE_PLACEHOLDER, path=tmp_path / "s.png", return_figure=True)
+    lines = [
+        line for line in fig.axes[2].get_lines()
+        if list(line.get_ydata()) == [UTILIZATION_CENSOR_AT] * 2
+        and list(line.get_xdata()) == [0, 1]
+    ]
+    assert len(lines) == 1, "no full-width line at the censoring threshold on the utilization panel"
