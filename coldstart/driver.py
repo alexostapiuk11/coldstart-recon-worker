@@ -2,9 +2,9 @@
 
 import uuid
 
-from coldstart.checks import classify_failure
 from coldstart.scheduler import build_schedule
 from coldstart.schema import RunRecord
+from harness.failures import classify_failure
 from harness.vllm_logs import parse_engine_log
 
 

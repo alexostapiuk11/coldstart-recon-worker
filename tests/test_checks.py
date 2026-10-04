@@ -3,13 +3,11 @@ import json
 import pytest
 
 from coldstart.checks import (
-    _SIGNATURES,
     DiscardReason,
-    FailureClass,
     check_consistency,
-    classify_failure,
     compute_residual,
 )
+from harness.failures import _SIGNATURES, FailureClass, classify_failure
 
 
 def test_residual_is_total_minus_process():

@@ -139,7 +139,7 @@ class RunPodSubmitter:
         output = dict(status.get("output") or {})
         if not output.get("healthy"):
             # The job completed but the engine never answered its health check.
-            # Phrased to match checks.classify_failure's HEALTH_TIMEOUT needle.
+            # Phrased to match harness.failures.classify_failure's HEALTH_TIMEOUT needle.
             raise _UnhealthyRun(
                 "health check timed out: probe reported unhealthy", output
             )
