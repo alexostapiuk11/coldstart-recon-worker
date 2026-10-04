@@ -82,6 +82,10 @@ _VALID_COMBINATIONS = sum(
 def _shape(kind: str, ramp: float) -> SpikeShape:
     """The pre-registered spike over the reduced SUSTAIN window.
 
+    Derived from the rule, not written as literals: an earlier draft hardcoded
+    `baseline_rate=2.0, k=4.0`, and at that load queue_depth never crossed a
+    threshold, so the test exercised two of the three signals and passed.
+
     This used to be an independent copy of the derivation, because `scripts/`
     is not importable. `autoscale.traffic` is, and one copy is the only kind
     that cannot drift. `ramp` is checked rather than passed: R = D/2 is derived.
@@ -302,9 +306,9 @@ def test_the_sweep_refuses_the_placeholder_curve_without_the_opt_in(
 _CROSS_PROCESS_PROGRAM = """
 import json, sys
 import autoscale.sweep as sweep
-from autoscale.arrivals import SpikeShape
 from autoscale.coldstart_ecdf import load_measured_lags
 from autoscale.service import SERVICE_CURVE_PLACEHOLDER
+from autoscale.traffic import spike_shape
 
 store, until, sustain, seed = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4])
 sweep.REPETITIONS = 1
@@ -314,14 +318,12 @@ sweep.THRESHOLDS = {
     "utilization": ((0.80,), (0.30,)),
 }
 curve = SERVICE_CURVE_PLACEHOLDER
-saturation = max(c / curve.latency_at(c) for c, _, _, _ in curve.points if c > 0)
-baseline = 0.40 * saturation
-peak = baseline + 3 * saturation
+# 0.40 / 3 on purpose: the ORIGINAL registration, the load this test was tuned at.
+shape = spike_shape(curve, "step", baseline_fraction=0.40, additional_replicas=3, sustain=sustain)
 lags = load_measured_lags(store)
 points, discards = sweep.run_sweep(
     sweep.SweepConfig(
-        shape=SpikeShape(kind="step", baseline_rate=baseline, k=peak / baseline,
-                         ramp=0.0, sustain=sustain),
+        shape=shape,
         lags=lags["A"],
         curve=curve,
         arm="A",
