@@ -2,9 +2,9 @@
 
 import uuid
 
-from coldstart.scheduler import build_schedule
 from coldstart.schema import RunRecord
 from harness.failures import classify_failure
+from harness.scheduler import build_schedule
 from harness.vllm_logs import parse_engine_log
 
 
@@ -46,7 +46,7 @@ def _record_from(scheduled, run_id: str, outcome) -> RunRecord:
         return RunRecord(
             run_id=run_id,
             run_index=scheduled.run_index,
-            arm=scheduled.arm,
+            arm=scheduled.condition,
             clock_A=outcome.clock_A,
             clock_C={},
             clock_B=diag.get("clock_B", {}),
@@ -101,7 +101,7 @@ def _record_from(scheduled, run_id: str, outcome) -> RunRecord:
     return RunRecord(
         run_id=run_id,
         run_index=scheduled.run_index,
-        arm=scheduled.arm,
+        arm=scheduled.condition,
         clock_A=outcome.clock_A,
         clock_C=p.get("clock_C", {}),
         clock_B=p.get("clock_B", {}),
@@ -189,10 +189,10 @@ def run_campaign(submitter, store, arms, triples, seed, on_run=None, resume=Fals
     schedule, so a legitimate resume could be refused. Give each campaign its
     own store file.
     """
-    schedule = build_schedule(arms=arms, triples=triples, seed=seed)
+    schedule = build_schedule(conditions=arms, blocks=triples, seed=seed)
     done: set[int] = set()
     if resume:
-        arm_by_index = {s.run_index: s.arm for s in schedule}
+        arm_by_index = {s.run_index: s.condition for s in schedule}
         for r in store.read_all():
             expected_arm = arm_by_index.get(r.run_index)
             if expected_arm is None:
@@ -219,9 +219,9 @@ def run_campaign(submitter, store, arms, triples, seed, on_run=None, resume=Fals
         if scheduled.run_index in done:
             continue
         run_id = _new_run_id()
-        outcome = submitter.submit(arm=scheduled.arm, run_id=run_id)
+        outcome = submitter.submit(arm=scheduled.condition, run_id=run_id)
         record = _record_from(scheduled, run_id, outcome)
-        record.host["triple_index"] = scheduled.triple_index
+        record.host["triple_index"] = scheduled.block_index
         store.append(record)
         if on_run:
             on_run(record)

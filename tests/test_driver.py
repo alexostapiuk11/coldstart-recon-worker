@@ -2,10 +2,10 @@ from coldstart.analysis.metrics import derive
 from coldstart.cache_config import resolve
 from coldstart.checks import DiscardReason
 from coldstart.driver import run_campaign
-from coldstart.scheduler import build_schedule
 from coldstart.schema import RunRecord
 from coldstart.stubs.stub_endpoint import StubEndpoint, VirtualClock
 from coldstart.submitter import StubSubmitter
+from harness.scheduler import build_schedule
 from harness.store import JsonlStore
 
 
@@ -248,7 +248,9 @@ def test_resume_skips_completed_runs_and_keeps_the_schedule(tmp_path):
     assert ep.calls == 7, "resume must not re-run completed runs"
     assert [r.run_index for r in all_records] == list(range(12))
     # The arm at each index is the one the original schedule assigned.
-    expected = [s.arm for s in build_schedule(arms=["A", "B", "C"], triples=4, seed=31)]
+    expected = [
+        s.condition for s in build_schedule(conditions=["A", "B", "C"], blocks=4, seed=31)
+    ]
     assert [r.arm for r in all_records] == expected
 
 
@@ -466,8 +468,8 @@ def test_a_failed_run_keeps_the_evidence_of_why_it_failed():
     lines makes the failure permanently unexplainable -- and failures are the
     rows most in need of explaining."""
     from coldstart.driver import _record_from
-    from coldstart.scheduler import ScheduledRun
     from coldstart.submitter import SubmitOutcome
+    from harness.scheduler import ScheduledRun
 
     lines = ["Model loading took 15.27 GiB and 36.4 seconds", "torch.compile took 12.5 s in total"]
     outcome = SubmitOutcome(
@@ -476,7 +478,7 @@ def test_a_failed_run_keeps_the_evidence_of_why_it_failed():
         error="health check timed out: probe reported unhealthy",
         diagnostics={"log_lines": lines, "healthy": False},
     )
-    record = _record_from(ScheduledRun(run_index=0, triple_index=0, arm="A"), "run-1", outcome)
+    record = _record_from(ScheduledRun(run_index=0, block_index=0, condition="A"), "run-1", outcome)
 
     assert record.status["outcome"] == "failed"
     assert record.status["failure_class"] == "health_timeout"
@@ -487,8 +489,8 @@ def test_a_failed_run_keeps_the_evidence_of_why_it_failed():
 
 def test_a_failure_with_no_diagnostics_still_records_cleanly():
     from coldstart.driver import _record_from
-    from coldstart.scheduler import ScheduledRun
     from coldstart.submitter import SubmitOutcome
+    from harness.scheduler import ScheduledRun
 
     outcome = SubmitOutcome(
         clock_A={"t_submit": 0.0, "t_result": 5.0},
@@ -496,6 +498,6 @@ def test_a_failure_with_no_diagnostics_still_records_cleanly():
         error="submit failed: connection reset",
         diagnostics=None,
     )
-    record = _record_from(ScheduledRun(run_index=0, triple_index=0, arm="B"), "run-2", outcome)
+    record = _record_from(ScheduledRun(run_index=0, block_index=0, condition="B"), "run-2", outcome)
     assert record.status["outcome"] == "failed"
     assert record.engine == {}
