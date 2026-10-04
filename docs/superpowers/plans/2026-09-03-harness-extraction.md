@@ -1,6 +1,6 @@
 # Harness Extraction Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Extract the artifact-agnostic half of `coldstart/` into a `harness/` package so artifacts 2–5 inherit the measurement plumbing, statistics, publishability gate, and figure guard rails without inheriting artifact 1's cold-start vocabulary.
 
@@ -37,7 +37,7 @@ The portfolio contract (artifact 1 spec §3) states that artifact 2 runs against
 - [x] Artifact 1's post is published at its permanent slug. *(Artifact 2's final design records artifact 1 as complete.)*
 - [x] A tag exists at the commit that produced the published numbers. *(Verified 2026-10-03: `artifact-1-published` is commit `5666765`, and `data/` and `docs/figures/` are unchanged since it.)*
 
-- [ ] You are in the dedicated worktree described in "How to run this plan" below, and `git status --porcelain --untracked-files=no` prints nothing.
+- [x] You are in the dedicated worktree described in "How to run this plan" below, and `git status --porcelain --untracked-files=no` prints nothing.
 
 The tag is the reader's reproduction path. This plan changes import paths throughout the repo, so anyone re-running artifact 1 exactly as published uses the tag; `main` carries the refactored harness. Do not re-pin `docs/experiment.md`'s image digest — it names the image the campaign actually ran on and is historical.
 
@@ -510,7 +510,7 @@ git commit -m "feat: add the harness package, its import-direction guard, and im
 
 Moves verbatim. Nothing in it names a cold-start concept: `within_host_triples` takes condition labels as arguments rather than hardcoding arms.
 
-- [ ] **Step 1: Point the tests at the new path first**
+- [x] **Step 1: Point the tests at the new path first**
 
 In `tests/test_stats.py`, rewrite the two import statements:
 
@@ -521,12 +521,12 @@ from harness.stats import (
 
 (keep the imported name list exactly as it is)
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_stats.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'harness.stats'`
 
-- [ ] **Step 3: Move the module and rewrite every import**
+- [x] **Step 3: Move the module and rewrite every import**
 
 ```bash
 git mv coldstart/analysis/stats.py harness/stats.py
@@ -554,12 +554,12 @@ In `harness/stats.py`, if the module docstring names `coldstart`, reword it to n
 sed -i '' 's/``coldstart\.analysis\.stats\.median``/``harness.stats.median``/' coldstart/analysis/figures.py
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -o addopts="" -q`
 Expected: exit 0, and the last line starts with `<N0> passed`.
 
-- [ ] **Step 5: Run the parity gate**
+- [x] **Step 5: Run the parity gate**
 
 First re-sort the imports in the files this task changed. A renamed module sorts differently, and the gate's `ruff check .` fails on it otherwise:
 
@@ -570,7 +570,7 @@ git diff --name-only --diff-filter=d HEAD -- '*.py' | xargs .venv/bin/ruff check
 Then run: `./scripts/parity_check.sh`
 Expected: `PARITY OK`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -u
@@ -591,7 +591,7 @@ Expected: `git diff --name-only` prints nothing, and the staged list holds only 
 
 The engine-log parser is the single highest-value file for artifacts 4 and 5: artifact 4's fourth figure decomposes swap cost onto artifact 1's stage taxonomy, and artifact 5 reads KV blocks off the same lines.
 
-- [ ] **Step 1: Point the test at the new path first**
+- [x] **Step 1: Point the test at the new path first**
 
 In `tests/test_vllm_logs.py`:
 
@@ -599,12 +599,12 @@ In `tests/test_vllm_logs.py`:
 from harness.vllm_logs import parse_engine_log
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_vllm_logs.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'harness.vllm_logs'`
 
-- [ ] **Step 3: Move the module and rewrite every import**
+- [x] **Step 3: Move the module and rewrite every import**
 
 ```bash
 git mv coldstart/vllm_logs.py harness/vllm_logs.py
@@ -614,12 +614,12 @@ grep -rln "coldstart\.vllm_logs\|coldstart/vllm_logs" --include="*.py" . | grep 
 
 The second pattern catches prose references — `coldstart/analysis/pipeline.py`'s `REQUIRED_FOR_T_COMPILE` docstring points at `coldstart/vllm_logs.py`'s `PATTERNS`.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -o addopts="" -q`
 Expected: exit 0, and the last line starts with `<N0> passed`.
 
-- [ ] **Step 5: Run the parity gate**
+- [x] **Step 5: Run the parity gate**
 
 First re-sort the imports in the files this task changed. A renamed module sorts differently, and the gate's `ruff check .` fails on it otherwise:
 
@@ -630,7 +630,7 @@ git diff --name-only --diff-filter=d HEAD -- '*.py' | xargs .venv/bin/ruff check
 Then run: `./scripts/parity_check.sh`
 Expected: `PARITY OK`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -u
@@ -651,7 +651,7 @@ Expected: `git diff --name-only` prints nothing, and the staged list holds only 
 
 This is the module that makes Task 3's Dockerfile change load-bearing.
 
-- [ ] **Step 1: Point the test at the new path first**
+- [x] **Step 1: Point the test at the new path first**
 
 In `tests/test_recorder.py`:
 
@@ -659,12 +659,12 @@ In `tests/test_recorder.py`:
 from harness.recorder import StageRecorder
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_recorder.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'harness.recorder'`
 
-- [ ] **Step 3: Move the module and rewrite every import**
+- [x] **Step 3: Move the module and rewrite every import**
 
 ```bash
 git mv coldstart/recorder.py harness/recorder.py
@@ -672,12 +672,12 @@ EXCLUDE='^(\./)?(\.venv/|autoscale/stats\.py$|autoscale/sim\.py$|tests/test_auto
 grep -rln "coldstart\.recorder" --include="*.py" . | grep -Ev "$EXCLUDE" | xargs sed -i '' 's/coldstart\.recorder/harness.recorder/g'
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -o addopts="" -q`
 Expected: exit 0, and the last line starts with `<N0> passed`, including `test_harness_boundary.py::test_dockerfile_copies_every_first_party_package_the_image_imports` — which now has something real to check, because `worker/handler.py` imports `harness.recorder`.
 
-- [ ] **Step 5: Prove the guard actually catches the failure it exists for**
+- [x] **Step 5: Prove the guard actually catches the failure it exists for**
 
 Temporarily remove the `COPY harness /opt/harness` line from `worker/Dockerfile`, then:
 
@@ -687,7 +687,7 @@ Expected: FAIL with `worker/Dockerfile does not COPY ['harness']`
 Restore the line and re-run:
 Expected: 4 passed. Confirm with `git diff worker/Dockerfile` that the restored file is identical to before.
 
-- [ ] **Step 6: Run the parity gate**
+- [x] **Step 6: Run the parity gate**
 
 First re-sort the imports in the files this task changed. A renamed module sorts differently, and the gate's `ruff check .` fails on it otherwise:
 
@@ -698,7 +698,7 @@ git diff --name-only --diff-filter=d HEAD -- '*.py' | xargs .venv/bin/ruff check
 Then run: `./scripts/parity_check.sh`
 Expected: `PARITY OK`
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -u
@@ -719,7 +719,7 @@ Expected: `git diff --name-only` prints nothing, and the staged list holds only 
 
 `checks.py` holds two unrelated things: a string-to-`FailureClass` classifier (generic — these are platform and engine failure strings) and artifact 1's clock reconciliation (`compute_residual`, `check_consistency`). Only the first moves. `DiscardReason` stays: all five of its members are outputs of artifact 1's own checks, and `harness/publish.py` reads `.value` off whatever enum a row carries rather than importing one.
 
-- [ ] **Step 1: Point the test at the new paths first**
+- [x] **Step 1: Point the test at the new paths first**
 
 In `tests/test_checks.py`, split the single import block into two — `FailureClass` and `classify_failure` come from the harness, everything else stays:
 
@@ -736,12 +736,12 @@ from harness.failures import FailureClass, classify_failure
 
 Adjust the names to whatever the file actually imports today — keep the same set, just routed to the two modules.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_checks.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'harness.failures'`
 
-- [ ] **Step 3: Create harness/failures.py**
+- [x] **Step 3: Create harness/failures.py**
 
 Create `harness/failures.py` and move into it, unchanged, from `coldstart/checks.py`: the `import re` dependency, `FailureClass`, `_Needle`, `_SIGNATURES`, and `classify_failure`. Give it this module docstring:
 
@@ -767,7 +767,7 @@ cold-start stage decomposition specifically -- see spec 6.5 rule 3.
 """
 ```
 
-- [ ] **Step 4: Rewrite the remaining import**
+- [x] **Step 4: Rewrite the remaining import**
 
 `coldstart/driver.py` imports `classify_failure` from `coldstart.checks`:
 
@@ -783,12 +783,12 @@ grep -rn "checks import.*classify_failure\|checks import.*FailureClass" --includ
 
 Expected: no output.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -o addopts="" -q`
 Expected: exit 0, and the last line starts with `<N0> passed`.
 
-- [ ] **Step 6: Run the parity gate**
+- [x] **Step 6: Run the parity gate**
 
 First re-sort the imports in the files this task changed. A renamed module sorts differently, and the gate's `ruff check .` fails on it otherwise:
 
@@ -799,7 +799,7 @@ git diff --name-only --diff-filter=d HEAD -- '*.py' | xargs .venv/bin/ruff check
 Then run: `./scripts/parity_check.sh`
 Expected: `PARITY OK`
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -u
@@ -821,7 +821,7 @@ Expected: `git diff --name-only` prints nothing, and the staged list holds only 
 
 **Signature change** (inventory sign-off required): `JsonlStore(path)` → `JsonlStore(path, record_cls)`.
 
-- [ ] **Step 1: Write the failing test for the new signature**
+- [x] **Step 1: Write the failing test for the new signature**
 
 Add to `tests/test_store.py`:
 
@@ -867,12 +867,12 @@ and change the existing `RunRecord` import line to keep coming from `coldstart.s
 from coldstart.schema import SCHEMA_VERSION, RunRecord
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_store.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'harness.store'`
 
-- [ ] **Step 3: Move and generalize the store**
+- [x] **Step 3: Move and generalize the store**
 
 ```bash
 git mv coldstart/store.py harness/store.py
@@ -929,7 +929,7 @@ class JsonlStore:
         return out
 ```
 
-- [ ] **Step 4: Update every construction site**
+- [x] **Step 4: Update every construction site**
 
 Rewrite the import path everywhere, then pass `RunRecord` at each construction:
 
@@ -962,12 +962,12 @@ grep -rn "JsonlStore(" --include="*.py" . | grep -v "\.venv/" | grep -v "RunReco
 
 Expected: no output.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -o addopts="" -q`
 Expected: exit 0, and the last line starts with `<N0 + 1> passed`.
 
-- [ ] **Step 6: Run the parity gate**
+- [x] **Step 6: Run the parity gate**
 
 First re-sort the imports in the files this task changed. A renamed module sorts differently, and the gate's `ruff check .` fails on it otherwise:
 
@@ -978,7 +978,7 @@ git diff --name-only --diff-filter=d HEAD -- '*.py' | xargs .venv/bin/ruff check
 Then run: `./scripts/parity_check.sh`
 Expected: `PARITY OK` — this proves `analyse.py` and `render_figures.py` still read the campaign correctly through the new signature.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -u
@@ -1001,7 +1001,7 @@ Expected: `git diff --name-only` prints nothing, and the staged list holds only 
 
 The RNG consumption order is untouched, so the same seed produces the same order. `coldstart/driver.py` maps the neutral names back to `arm`/`triple_index` when it builds a `RunRecord`, so **the stored JSONL is unchanged** — which the parity gate proves.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `tests/test_scheduler.py`:
 
@@ -1042,12 +1042,12 @@ Update the file's import:
 from harness.scheduler import build_schedule
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_scheduler.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'harness.scheduler'`
 
-- [ ] **Step 3: Move and rewrite the scheduler**
+- [x] **Step 3: Move and rewrite the scheduler**
 
 ```bash
 git mv coldstart/scheduler.py harness/scheduler.py
@@ -1092,7 +1092,7 @@ def build_schedule(conditions: list[str], blocks: int, seed: int) -> list[Schedu
     return out
 ```
 
-- [ ] **Step 4: Map the names back in the driver**
+- [x] **Step 4: Map the names back in the driver**
 
 In `coldstart/driver.py`, rewrite the import:
 
@@ -1116,7 +1116,7 @@ Then make exactly these five edits:
 
 `run_campaign`'s own signature keeps `arms`/`triples`: it builds artifact 1 records, and the runner scripts and resume-drift error messages all speak that vocabulary.
 
-- [ ] **Step 5: Update the driver test's direct use**
+- [x] **Step 5: Update the driver test's direct use**
 
 `tests/test_driver.py` constructs `ScheduledRun` directly. Rewrite that import:
 
@@ -1130,12 +1130,12 @@ and every construction to the new field names, e.g.:
     scheduled = ScheduledRun(run_index=0, block_index=0, condition="A")
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -o addopts="" -q`
 Expected: exit 0, and the last line starts with `<N0 + 3> passed`.
 
-- [ ] **Step 7: Run the parity gate**
+- [x] **Step 7: Run the parity gate**
 
 First re-sort the imports in the files this task changed. A renamed module sorts differently, and the gate's `ruff check .` fails on it otherwise:
 
@@ -1146,7 +1146,7 @@ git diff --name-only --diff-filter=d HEAD -- '*.py' | xargs .venv/bin/ruff check
 Then run: `./scripts/parity_check.sh`
 Expected: `PARITY OK`
 
-- [ ] **Step 8: Verify the stored record shape did not move**
+- [x] **Step 8: Verify the stored record shape did not move**
 
 The gate re-derives numbers from the *existing* store, which cannot catch a change in what a *new* record would contain. Check that directly:
 
@@ -1165,7 +1165,7 @@ Expected: `B 3 submit_error`
 
 (If Task 12 has not run yet, import `SubmitOutcome` from `coldstart.submitter` instead.)
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add -u
@@ -1189,7 +1189,7 @@ The machinery is generic; the five `REQUIRED_FOR_*` presets name artifact 1's fi
 
 **Signature change** (inventory sign-off required): `failure_rate_by_arm(rows)` → `failure_rate_by_group(rows, key)` and `discard_table(rows)` → `discard_table(rows, key)`, both with the key **required**.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `tests/test_pipeline.py`:
 
@@ -1243,18 +1243,18 @@ from harness.publish import (
 
 Keep whatever additional names the file already imports; route each to whichever of the two modules now owns it.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_pipeline.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'harness.publish'`
 
-- [ ] **Step 3: Move the module**
+- [x] **Step 3: Move the module**
 
 ```bash
 git mv coldstart/analysis/pipeline.py harness/publish.py
 ```
 
-- [ ] **Step 4: Move the presets out of it**
+- [x] **Step 4: Move the presets out of it**
 
 Create `coldstart/analysis/presets.py` containing the module-level block comment ("CONSISTENCY IS THE SHARED FLOOR...") and all five preset constants — `REQUIRED_FOR_WARMUP`, `REQUIRED_FOR_T_TOTAL`, `REQUIRED_FOR_T_WEIGHTS`, `REQUIRED_FOR_T_COMPILE`, `REQUIRED_FOR_T_FAST` — **copied verbatim with every docstring**, under this module docstring:
 
@@ -1296,7 +1296,7 @@ tests/test_harness_boundary.py enforces it.
 """
 ```
 
-- [ ] **Step 5: Require the grouping key**
+- [x] **Step 5: Require the grouping key**
 
 In `harness/publish.py`, change the two grouping functions' signatures and bodies:
 
@@ -1316,7 +1316,7 @@ with `arm = row["arm"]` becoming `group = row[key]` and `out.setdefault(arm, ...
 
 Do the same to `discard_table(discarded_rows, key: str)`.
 
-- [ ] **Step 6: Rewrite every import and call site**
+- [x] **Step 6: Rewrite every import and call site**
 
 ```bash
 EXCLUDE='^(\./)?(\.venv/|autoscale/stats\.py$|autoscale/sim\.py$|tests/test_autoscale_boundary\.py$)'
@@ -1357,12 +1357,12 @@ Prose that names the old function is renamed too: two docstrings in `harness/pub
 
 Expected after the edit: the only remaining `failure_rate_by_arm` is that output key, and every `discard_table(` call passes `key=`.
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -o addopts="" -q`
 Expected: exit 0, and the last line starts with `<N0 + 5> passed`.
 
-- [ ] **Step 8: Run the parity gate**
+- [x] **Step 8: Run the parity gate**
 
 First re-sort the imports in the files this task changed. A renamed module sorts differently, and the gate's `ruff check .` fails on it otherwise:
 
@@ -1373,7 +1373,7 @@ git diff --name-only --diff-filter=d HEAD -- '*.py' | xargs .venv/bin/ruff check
 Then run: `./scripts/parity_check.sh`
 Expected: `PARITY OK` — this is the task most able to change a published number, because it touches what counts as publishable. An `analysis.json` diff here means a preset or the gate changed meaning.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add -u
@@ -1395,7 +1395,7 @@ Expected: `git diff --name-only` prints nothing, and the staged list holds only 
 
 Every spec in the portfolio carries the same figure constraints — N stated, no truncated axes, legible on a phone, empty input refused, a missing arm never silently dropped. Those guards live inside `figures.py` today, and `_row_identity` is duplicated between `figures.py` and `pipeline.py`. This task extracts them once and DRYs the duplicate.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_figure_guards.py`:
 
@@ -1456,12 +1456,12 @@ def test_phone_pt_inverts_the_downscale_relation():
     assert PHONE_WIDTH_PX == 375
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_figure_guards.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'harness.figure_guards'`
 
-- [ ] **Step 3: Create harness/figure_guards.py**
+- [x] **Step 3: Create harness/figure_guards.py**
 
 ```python
 """Input guards and legibility constants every artifact's figures share.
@@ -1560,7 +1560,7 @@ def group_required(rows, key: str, expected) -> dict[str, list[dict]]:
     return by
 ```
 
-- [ ] **Step 4: Rewire figures.py onto the guards**
+- [x] **Step 4: Rewire figures.py onto the guards**
 
 In `coldstart/analysis/figures.py`:
 
@@ -1599,7 +1599,7 @@ and replace each `_by_arm(rows)` call with:
 
 `ARMS`, `S4_SUBPHASE_KEYS`, `RESIDUAL_COLOR`, and the sub-phase labels and colors stay in `figures.py` — they are artifact 1's.
 
-- [ ] **Step 5: Leave publish.py's identity helper where it is, and say why**
+- [x] **Step 5: Leave publish.py's identity helper where it is, and say why**
 
 `harness/publish.py` has its own `_row_identity`, so the shared `row_identity` in `figure_guards` looks like a duplicate worth collapsing. It is not: `figure_guards` imports `NotPublishableError` from `publish`, so importing `row_identity` from `figure_guards` back into `publish` is an import cycle.
 
@@ -1619,7 +1619,7 @@ def _row_identity(row: dict) -> str:
 
 Note that this one keeps artifact 1's fixed field list while `figure_guards.row_identity` scans `IDENTITY_FIELDS` — the second is what a new artifact needs; this one only ever formats rows that came from `partition()`.
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -o addopts="" -q`
 Expected: exit 0, and the last line starts with `<N0 + 12> passed`.
@@ -1627,7 +1627,7 @@ Expected: exit 0, and the last line starts with `<N0 + 12> passed`.
 Run: `.venv/bin/python -m ruff check .`
 Expected: `All checks passed!`
 
-- [ ] **Step 7: Run the parity gate**
+- [x] **Step 7: Run the parity gate**
 
 First re-sort the imports in the files this task changed. A renamed module sorts differently, and the gate's `ruff check .` fails on it otherwise:
 
@@ -1638,13 +1638,13 @@ git diff --name-only --diff-filter=d HEAD -- '*.py' | xargs .venv/bin/ruff check
 Then run: `./scripts/parity_check.sh`
 Expected: `PARITY OK` — the figure bytes are the assertion that no guard changed what gets drawn.
 
-- [ ] **Step 8: Look at the figures**
+- [x] **Step 8: Look at the figures**
 
 Byte-identical PNGs are the same pixels that were inspected and published, so this is a confirmation rather than a fresh review. But per the repo's own rule, a figure task does not end without eyes on the figure. View each of `docs/figures/waterfall.png`, `docs/figures/warmup.png`, `docs/figures/ecdf.png` and `docs/figures/per_host.png` with the Read tool, which displays images.
 
 Confirm each renders, then note in the task report that the gate found the fresh renders `cmp`-identical to them.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add -u
@@ -1671,7 +1671,7 @@ Expected: `git diff --name-only` prints nothing, and the staged list holds only 
 
 **Signature change** (inventory sign-off required): `assert_endpoint_matches(endpoint, pinned=None)` → `assert_endpoint_matches(endpoint, pinned)`, required.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `tests/test_preflight.py`, rewrite the import and add the new case:
 
@@ -1695,12 +1695,12 @@ def test_artifact_ones_pins_still_reject_a_drifted_endpoint():
         assert_endpoint_matches(drifted, PINNED)
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_preflight.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'coldstart.pins'`
 
-- [ ] **Step 3: Move the four modules**
+- [x] **Step 3: Move the four modules**
 
 ```bash
 git mv coldstart/submitter.py harness/submit.py
@@ -1728,7 +1728,7 @@ from harness.submit import SubmitOutcome
 
 `harness/runpod/preflight.py`'s `fetch_endpoint` docstring names `coldstart.runpod_submitter.HttpTransport`; the sed above rewrites it correctly.
 
-- [ ] **Step 4: Split the pins out of preflight**
+- [x] **Step 4: Split the pins out of preflight**
 
 Create `coldstart/pins.py`:
 
@@ -1788,7 +1788,7 @@ In that function's docstring, replace the paragraph explaining the `pinned` defa
     allowed to iterate zero times.
 ```
 
-- [ ] **Step 4b: Re-place the explainer's code quote**
+- [x] **Step 4b: Re-place the explainer's code quote**
 
 This step assumes the owner chose option A at the explainer gate. If they chose option B, STOP: this plan does not cover it.
 
@@ -1818,7 +1818,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_explainer_excerp
 
 Expected: the excerpt prints the comment and the `if not pinned:` raise, with no `PINNED`, and both test files pass.
 
-- [ ] **Step 5: Update the two callers**
+- [x] **Step 5: Update the two callers**
 
 In both `scripts/run_window.py` and `scripts/prime_compile_cache.py`, add the pins import beside the existing ones:
 
@@ -1842,12 +1842,12 @@ grep -rn "assert_endpoint_matches(" --include="*.py" . | grep -v ".venv"
 
 Expected: every call passes two arguments.
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -o addopts="" -q`
 Expected: exit 0, and the last line starts with `<N0 + 14> passed`.
 
-- [ ] **Step 7: Run the parity gate**
+- [x] **Step 7: Run the parity gate**
 
 First re-sort the imports in the files this task changed. A renamed module sorts differently, and the gate's `ruff check .` fails on it otherwise:
 
@@ -1858,7 +1858,7 @@ git diff --name-only --diff-filter=d HEAD -- '*.py' | xargs .venv/bin/ruff check
 Then run: `./scripts/parity_check.sh`
 Expected: `PARITY OK`
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add -u
@@ -1880,7 +1880,7 @@ Expected: `git diff --name-only` prints nothing, and the staged list holds only 
 
 Nothing is deleted in this task — the moves already removed the old locations, and each was gated by a passing parity check as it happened. This task verifies that in one place, and makes the split legible to whoever picks up artifact 2.
 
-- [ ] **Step 1: Verify every moved module landed and nothing dangles**
+- [x] **Step 1: Verify every moved module landed and nothing dangles**
 
 ```bash
 test ! -e coldstart/analysis/stats.py && test ! -e coldstart/analysis/pipeline.py && \
@@ -1897,7 +1897,7 @@ grep -rn "coldstart\.\(store\|scheduler\|recorder\|vllm_logs\|submitter\|runpod_
 
 Expected: no output. Python only: the markdown docs are updated in Step 5 and checked there. The three excluded files are the prose files the find-and-replace skipped, as "How to run this plan" explains.
 
-- [ ] **Step 2: Verify each preserved capability is exercised, not merely importable**
+- [x] **Step 2: Verify each preserved capability is exercised, not merely importable**
 
 Parity is about behavior. Run the capabilities the inventory marked Preserved through their real paths:
 
@@ -1911,12 +1911,12 @@ Parity is about behavior. Run the capabilities the inventory marked Preserved th
 
 Expected: all pass. `test_end_to_end.py` and `test_reproducibility.py` are the two that exercise the whole chain — schedule, submit, store, derive, partition, bootstrap — through the moved modules at once.
 
-- [ ] **Step 3: Run the full parity gate one final time**
+- [x] **Step 3: Run the full parity gate one final time**
 
 Run: `./scripts/parity_check.sh`
 Expected: `PARITY OK`
 
-- [ ] **Step 4: Write the harness README**
+- [x] **Step 4: Write the harness README**
 
 Create `harness/README.md`:
 
@@ -1967,7 +1967,7 @@ sweep. The discrete-event simulators live with their artifacts: `autoscale/`
 for artifact 2, and `placement/` for artifact 4.
 ```
 
-- [ ] **Step 5: Update the docs that name a moved path**
+- [x] **Step 5: Update the docs that name a moved path**
 
 ```bash
 grep -rn "coldstart/\(store\|scheduler\|recorder\|vllm_logs\|submitter\|runpod_api\|runpod_submitter\|preflight\)\.py\|coldstart/analysis/\(stats\|pipeline\)\.py" docs/runbook.md docs/experiment.md fixtures/README.md recon/README.md
@@ -1981,12 +1981,12 @@ grep -rln "coldstart\.\(store\|scheduler\|recorder\|vllm_logs\|submitter\|runpod
 
 Expected: no output. `docs/superpowers/` holds plans and specs, which record the code as it was when they were written. **Do not touch `docs/experiment.md`** — it is the pre-registration, its git timestamp is the evidence that the hypotheses were fixed in advance, and it describes the code as it was when the campaign ran.
 
-- [ ] **Step 6: Re-run everything**
+- [x] **Step 6: Re-run everything**
 
 Run: `./scripts/parity_check.sh`
 Expected: `PARITY OK`
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -u
@@ -1998,7 +1998,7 @@ git commit -m "docs: describe the harness split and update the paths it moved"
 
 Expected: `git diff --name-only` prints nothing, and the staged list holds only this task's files.
 
-- [ ] **Step 8: Confirm the published artifact is still reachable**
+- [x] **Step 8: Confirm the published artifact is still reachable**
 
 ```bash
 git diff --stat artifact-1-published -- data/ docs/figures/
@@ -2006,7 +2006,7 @@ git diff --stat artifact-1-published -- data/ docs/figures/
 
 Expected: no output. The data and the published figures are untouched by this plan; only the code that reads them moved. (`build/` is gitignored, so it cannot be checked this way.)
 
-- [ ] **Step 9: Rebase, re-check, and hand back**
+- [x] **Step 9: Rebase, re-check, and hand back**
 
 ```bash
 git rebase main

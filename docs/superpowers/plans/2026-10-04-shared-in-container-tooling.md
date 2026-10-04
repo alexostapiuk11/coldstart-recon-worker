@@ -1,6 +1,6 @@
 # Shared In-Container Tooling Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Build, with no GPU and no spend, the shared tooling artifacts 2, 4 and 5 run inside the worker image: a `vllm serve` lifecycle (`harness/serve.py`), a `vllm bench serve` wrapper (`harness/bench.py`), an nvidia-smi utilisation sampler (`harness/gpu_util.py`), the campaign loop lifted out of artifact 1 (`harness/campaign.py`), payload submission (`submit_payload`), and the single-engine service-curve sweep from schedule to artifact 2's `ServiceCurve`. Then move artifact 1's driver onto the lifted loop.
 
@@ -145,7 +145,7 @@ Tasks 3 and 14 replace existing code: `RunPodSubmitter.submit` and the loop in `
 **Files:**
 - Create (gitignored, local only): `build/shared-tooling-baseline/driver_baseline.py`, `build/shared-tooling-baseline/before/`, `build/shared-tooling-baseline/notes.txt`
 
-- [ ] **Step 1: Confirm the starting point**
+- [x] **Step 1: Confirm the starting point**
 
 ```bash
 cd /Users/oleksiiostapiuk/projects/ai/artifacts
@@ -156,7 +156,7 @@ grep -n "def submit_payload" harness/runpod/submitter.py
 
 Expected: HEAD at or after `39c20b3`; every `ls` line says `No such file or directory`; the `grep` prints nothing. If `harness/campaign.py` exists, artifact 4's or 5's plan reached it first: run `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_campaign.py -q` (artifact 5's six tests). If they pass, skip Task 2's Steps 1–4 and keep its file; if they fail, stop and reconcile the two interfaces before going on. Apply the same rule to `submit_payload` and Task 3. If `harness/serve.py` or `harness/bench.py` exists, stop: another plan built them, and this one must be reconciled with it first.
 
-- [ ] **Step 2: Re-verify every row of the inventory against the code**
+- [x] **Step 2: Re-verify every row of the inventory against the code**
 
 ```bash
 cd /Users/oleksiiostapiuk/projects/ai/artifacts
@@ -215,7 +215,7 @@ Expected: every line number cited in the tables below appears in the first comma
 | Clock-B stage marks S1–S7, the warm-up trio, `derived` | **Not lifted:** artifact 1's measurement, not lifecycle. The probe keeps them. |
 | (Not in the probe) early exit when the process dies | **Added.** |
 
-- [ ] **Step 3: Record the test baseline**
+- [x] **Step 3: Record the test baseline**
 
 ```bash
 cd /Users/oleksiiostapiuk/projects/ai/artifacts
@@ -239,7 +239,7 @@ submitter: 25 passed in 0.14s
 signature: (submitter, store, arms, triples, seed, on_run=None, resume=False)
 ```
 
-- [ ] **Step 4: Run the parity gate and record it**
+- [x] **Step 4: Run the parity gate and record it**
 
 ```bash
 cd /Users/oleksiiostapiuk/projects/ai/artifacts
@@ -261,7 +261,7 @@ PARITY OK
 
 Anything else: stop. The baseline has to be green before anything can be compared against it.
 
-- [ ] **Step 5: Write the driver baseline script**
+- [x] **Step 5: Write the driver baseline script**
 
 Create `build/shared-tooling-baseline/driver_baseline.py`:
 
@@ -338,7 +338,7 @@ with tempfile.TemporaryDirectory() as tmp:
 print(f"baseline written to {out}")
 ```
 
-- [ ] **Step 6: Capture the "before" behaviour and check it is deterministic**
+- [x] **Step 6: Capture the "before" behaviour and check it is deterministic**
 
 ```bash
 cd /Users/oleksiiostapiuk/projects/ai/artifacts
@@ -377,7 +377,7 @@ Artifacts 4 and 5 both need artifact 1's schedule, submit, record and store loop
 **Files:**
 - Create: `harness/campaign.py`, `tests/test_harness_campaign.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_harness_campaign.py`:
 
@@ -493,12 +493,12 @@ def test_resume_is_off_by_default(tmp_path):
     assert len(store.read_all()) == 4
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_campaign.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'harness.campaign'`.
 
-- [ ] **Step 3: Create `harness/campaign.py`**
+- [x] **Step 3: Create `harness/campaign.py`**
 
 ```python
 """The campaign loop every measurement artifact shares: schedule -> submit ->
@@ -600,12 +600,12 @@ def run_campaign(
     return store
 ```
 
-- [ ] **Step 4: Run the new tests to verify they pass**
+- [x] **Step 4: Run the new tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_campaign.py -v`
 Expected: 6 passed.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 .venv/bin/python -m ruff check harness/campaign.py tests/test_harness_campaign.py
@@ -627,7 +627,7 @@ Expected from ruff: `All checks passed!`
 - Modify: `harness/runpod/submitter.py` (the `submit` method, lines 166–182 at `39c20b3`)
 - Create: `tests/test_harness_submit_payload.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_harness_submit_payload.py`:
 
@@ -709,12 +709,12 @@ def test_artifact_ones_submit_is_now_the_two_field_payload():
     assert transport.started == [{"arm": "B", "run_id": "run-9"}]
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_submit_payload.py -v`
 Expected: FAIL with `AttributeError: 'RunPodSubmitter' object has no attribute 'submit_payload'`.
 
-- [ ] **Step 3: Replace `submit` in `harness/runpod/submitter.py`**
+- [x] **Step 3: Replace `submit` in `harness/runpod/submitter.py`**
 
 Replace the whole existing `submit` method of `RunPodSubmitter` with these two methods:
 
@@ -751,12 +751,12 @@ Replace the whole existing `submit` method of `RunPodSubmitter` with these two m
         )
 ```
 
-- [ ] **Step 4: Run the new tests and artifact 1's submitter tests**
+- [x] **Step 4: Run the new tests and artifact 1's submitter tests**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_submit_payload.py tests/test_runpod_submitter.py -q`
 Expected: all pass (21 at `39c20b3`: 5 new plus artifact 1's 16). The last new test pins that artifact 1's payload is unchanged.
 
-- [ ] **Step 5: Run the parity gate, then commit**
+- [x] **Step 5: Run the parity gate, then commit**
 
 Run: `./scripts/parity_check.sh`. Expected: last line `PARITY OK`.
 
@@ -775,7 +775,7 @@ Every GPU-free test of a payload-taking worker needs a stand-in for `submit_payl
 - Modify: `harness/submit.py` (add `import json`; append `UNHEALTHY_ERROR` and `PayloadStubSubmitter`)
 - Create: `tests/test_payload_stub_submitter.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_payload_stub_submitter.py`:
 
@@ -871,12 +871,12 @@ def test_the_unhealthy_text_matches_the_real_submitters():
     assert real.error == UNHEALTHY_ERROR
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_payload_stub_submitter.py -v`
 Expected: FAIL with `ImportError: cannot import name 'UNHEALTHY_ERROR' from 'harness.submit'`.
 
-- [ ] **Step 3: Replace the whole of `harness/submit.py` with**
+- [x] **Step 3: Replace the whole of `harness/submit.py` with**
 
 (The first 59 lines — `SubmitOutcome` and `StubSubmitter` — are unchanged apart from the added `import json`.)
 
@@ -996,12 +996,12 @@ class PayloadStubSubmitter:
         )
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_payload_stub_submitter.py tests/test_submitter.py tests/test_driver.py -q`
 Expected: all pass (8 new).
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 .venv/bin/python -m ruff check harness/submit.py tests/test_payload_stub_submitter.py
@@ -1020,7 +1020,7 @@ The tests cannot use vLLM — it is not installed here. Each test writes a fake 
 **Files:**
 - Create: `harness/serve.py`, `tests/test_harness_serve.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_harness_serve.py`:
 
@@ -1229,12 +1229,12 @@ def test_a_port_that_already_answers_is_refused_before_spawning(port):
             pass
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_serve.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'harness.serve'`.
 
-- [ ] **Step 3: Create `harness/serve.py`**
+- [x] **Step 3: Create `harness/serve.py`**
 
 ```python
 """Start `vllm serve` on a port, wait for health, tear it down on request.
@@ -1471,7 +1471,7 @@ def served(
         server.stop()
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass — three times**
+- [x] **Step 4: Run the tests to verify they pass — three times**
 
 ```bash
 for i in 1 2 3; do PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_serve.py -q -o addopts="" | tail -1; done
@@ -1479,7 +1479,7 @@ for i in 1 2 3; do PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/te
 
 Expected: `12 passed` three times, each in about 4 s. These tests start real processes; a test that passes once and fails once is a race and must be fixed, not retried.
 
-- [ ] **Step 5: Prove two of the tests can fail**
+- [x] **Step 5: Prove two of the tests can fail**
 
 A test of process behaviour that cannot fail proves nothing. Break each feature, watch its test fail, and restore:
 
@@ -1499,7 +1499,7 @@ cp build/serve.py.bak harness/serve.py && cmp harness/serve.py build/serve.py.ba
 
 Expected: `1 failed, 11 deselected` for the first (the engine's child outlives teardown), `1 failed, 11 deselected` for the second after about 60 s (it waits out the health budget on a dead process), then `restored`. If either mutation still passes, the test is not testing the feature: fix the test before going on.
 
-- [ ] **Step 6: Lint and commit**
+- [x] **Step 6: Lint and commit**
 
 ```bash
 .venv/bin/python -m ruff check harness/serve.py tests/test_harness_serve.py
@@ -1516,7 +1516,7 @@ git commit -m "feat: harness.serve -- the vllm serve lifecycle, killed by proces
 **Files:**
 - Create: `harness/bench.py`, `tests/test_harness_bench.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_harness_bench.py`:
 
@@ -1709,12 +1709,12 @@ def test_zero_concurrency_or_prompts_is_refused(c, n, tmp_path):
         )
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_bench.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'harness.bench'`.
 
-- [ ] **Step 3: Create `harness/bench.py`**
+- [x] **Step 3: Create `harness/bench.py`**
 
 ```python
 """Run `vllm bench serve` against a running engine; return its saved JSON unaltered.
@@ -1933,12 +1933,12 @@ def run_bench(
         return json.load(f)
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_bench.py -q`
 Expected: 19 passed.
 
-- [ ] **Step 5: Confirm artifact 5's prerequisite check now passes for `run_bench`**
+- [x] **Step 5: Confirm artifact 5's prerequisite check now passes for `run_bench`**
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -c "
@@ -1953,7 +1953,7 @@ print('run_bench has the agreed interface')
 
 Expected: `run_bench has the agreed interface`.
 
-- [ ] **Step 6: Lint and commit**
+- [x] **Step 6: Lint and commit**
 
 ```bash
 .venv/bin/python -m ruff check harness/bench.py tests/test_harness_bench.py
@@ -1970,7 +1970,7 @@ Owner decision 3. The command runner is injectable; the tests fake it, because t
 **Files:**
 - Create: `harness/gpu_util.py`, `tests/test_harness_gpu_util.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_harness_gpu_util.py`:
 
@@ -2075,12 +2075,12 @@ def test_a_run_shorter_than_one_interval_still_gets_a_sample():
     assert sampler.summary()["n_valid"] == 1
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_gpu_util.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'harness.gpu_util'`.
 
-- [ ] **Step 3: Create `harness/gpu_util.py`**
+- [x] **Step 3: Create `harness/gpu_util.py`**
 
 ```python
 """GPU utilisation, sampled from nvidia-smi while a bench run is in flight.
@@ -2216,12 +2216,12 @@ class GpuUtilSampler:
         }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_gpu_util.py -q`
 Expected: 10 passed.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 .venv/bin/python -m ruff check harness/gpu_util.py tests/test_harness_gpu_util.py
@@ -2243,7 +2243,7 @@ Everything between "the engine is healthy" and "here is the run's summary". Four
 **Files:**
 - Create: `harness/sweep_worker.py`, `tests/test_harness_sweep_worker.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_harness_sweep_worker.py`:
 
@@ -2522,12 +2522,12 @@ def test_max_num_seqs_is_read_from_the_log_and_never_assumed(lines, expected):
     assert max_num_seqs_from_log(lines) == expected
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_sweep_worker.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'harness.sweep_worker'`.
 
-- [ ] **Step 3: Create `harness/sweep_worker.py`**
+- [x] **Step 3: Create `harness/sweep_worker.py`**
 
 ```python
 """One run of the service-curve sweep, inside the worker.
@@ -2889,12 +2889,12 @@ def max_num_seqs_from_log(lines: Sequence[str]) -> tuple[int | None, str | None]
     return None, None
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_sweep_worker.py -q`
 Expected: 20 passed.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 .venv/bin/python -m ruff check harness/sweep_worker.py tests/test_harness_sweep_worker.py
@@ -2911,7 +2911,7 @@ git commit -m "feat: one service-sweep run in the worker -- exact prompt or reco
 **Files:**
 - Create: `harness/service_sweep.py`, `tests/test_harness_service_sweep.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_harness_service_sweep.py`:
 
@@ -3152,12 +3152,12 @@ def test_engine_facts_report_every_distinct_value_including_absence():
     assert reduce_curve(records).engine["max_num_seqs"] == [256, None]
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_service_sweep.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'harness.service_sweep'`.
 
-- [ ] **Step 3: Create `harness/service_sweep.py`**
+- [x] **Step 3: Create `harness/service_sweep.py`**
 
 ```python
 """The single-engine service-curve sweep, local side.
@@ -3531,12 +3531,12 @@ def reduce_curve(
     )
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_service_sweep.py -q`
 Expected: 25 passed.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 .venv/bin/python -m ruff check harness/service_sweep.py tests/test_harness_service_sweep.py
@@ -3562,7 +3562,7 @@ The handler, the driver (Task 11) and the artifact-2 adapter (Task 12) share one
 - Create: `worker/sweep_handler.py`, `tests/sweep_fakes.py`, `tests/test_sweep_handler.py`
 - Modify: `worker/Dockerfile:32-37`, `tests/test_harness_boundary.py` (append one test)
 
-- [ ] **Step 1: Write the fakes and the failing tests**
+- [x] **Step 1: Write the fakes and the failing tests**
 
 Create `tests/sweep_fakes.py`:
 
@@ -3890,12 +3890,12 @@ def test_model_id_is_required(monkeypatch):
         _run(FakeEngine(), _payload())
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_sweep_handler.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'sweep_handler'`.
 
-- [ ] **Step 3: Create `worker/sweep_handler.py`**
+- [x] **Step 3: Create `worker/sweep_handler.py`**
 
 ```python
 """RunPod handler for one (level, repeat) of the service-curve sweep.
@@ -4161,12 +4161,12 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_sweep_handler.py -q`
 Expected: 15 passed.
 
-- [ ] **Step 5: Append the worker-module COPY guard to `tests/test_harness_boundary.py`**
+- [x] **Step 5: Append the worker-module COPY guard to `tests/test_harness_boundary.py`**
 
 Append at the end of the file, after two blank lines (it already imports `re` and defines `REPO`):
 
@@ -4188,12 +4188,12 @@ def test_dockerfile_copies_every_worker_module():
     )
 ```
 
-- [ ] **Step 6: Run it to verify it fails on the new handler**
+- [x] **Step 6: Run it to verify it fails on the new handler**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_boundary.py -q -o addopts=""`
 Expected: `1 failed, 4 passed`, the failure naming `sweep_handler.py` ("Left contains one more item: 'sweep_handler.py'").
 
-- [ ] **Step 7: Add the COPY line to `worker/Dockerfile`**
+- [x] **Step 7: Add the COPY line to `worker/Dockerfile`**
 
 Replace:
 
@@ -4223,12 +4223,12 @@ CMD ["python3", "-u", "/opt/handler.py"]
 
 `harness/` is already COPYed (line 29) and already in `build-worker.yml`'s paths filter, so no other image change is needed; the existing package guard confirms it in Step 8.
 
-- [ ] **Step 8: Run the boundary and handler tests**
+- [x] **Step 8: Run the boundary and handler tests**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_harness_boundary.py tests/test_sweep_handler.py -q -o addopts=""`
 Expected: `20 passed`.
 
-- [ ] **Step 9: Lint and commit**
+- [x] **Step 9: Lint and commit**
 
 ```bash
 .venv/bin/python -m ruff check worker/sweep_handler.py tests/sweep_fakes.py tests/test_sweep_handler.py tests/test_harness_boundary.py
@@ -4249,7 +4249,7 @@ The tests drive the whole chain — driver, campaign loop, store, `PayloadStubSu
 **Files:**
 - Create: `scripts/run_service_sweep.py`, `tests/test_run_service_sweep.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_run_service_sweep.py`:
 
@@ -4418,12 +4418,12 @@ def test_missing_credentials_refuse_to_start(monkeypatch):
         rss.main(["--preflight-only", "--template-id", "tmpl"])
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_run_service_sweep.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'run_service_sweep'`.
 
-- [ ] **Step 3: Create `scripts/run_service_sweep.py`**
+- [x] **Step 3: Create `scripts/run_service_sweep.py`**
 
 ```python
 """Run the single-engine service-curve sweep on a RunPod endpoint.
@@ -4662,12 +4662,12 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_run_service_sweep.py -q`
 Expected: 9 passed.
 
-- [ ] **Step 5: Check the command line refuses to spend without credentials**
+- [x] **Step 5: Check the command line refuses to spend without credentials**
 
 ```bash
 env -u RUNPOD_API_KEY PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/run_service_sweep.py --preflight-only --template-id x; echo "exit=$?"
@@ -4675,7 +4675,7 @@ env -u RUNPOD_API_KEY PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/run_ser
 
 Expected: `RUNPOD_API_KEY is not set; refusing to start (see this script's docstring)` and `exit=1`. No request is made.
 
-- [ ] **Step 6: Lint and commit**
+- [x] **Step 6: Lint and commit**
 
 ```bash
 .venv/bin/python -m ruff check scripts/run_service_sweep.py tests/test_run_service_sweep.py
@@ -4692,7 +4692,7 @@ The harness emits tuples; artifact 2 adapts them on its own side. `scripts/a2_se
 **Files:**
 - Create: `scripts/a2_service_curve.py`, `tests/test_a2_service_curve.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_a2_service_curve.py`:
 
@@ -4789,12 +4789,12 @@ def test_end_to_end_from_the_stub_sweep(tmp_path, monkeypatch):
     assert meta["max_num_seqs"] == 256
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_a2_service_curve.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'a2_service_curve'`.
 
-- [ ] **Step 3: Create `scripts/a2_service_curve.py`**
+- [x] **Step 3: Create `scripts/a2_service_curve.py`**
 
 ```python
 """Artifact 2's side of the service-curve sweep: tuples in, `ServiceCurve` out.
@@ -4884,12 +4884,12 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 4: Run the tests, and artifact 2's existing boundary test**
+- [x] **Step 4: Run the tests, and artifact 2's existing boundary test**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_a2_service_curve.py tests/test_autoscale_boundary.py tests/test_service.py -q`
 Expected: all pass (9 new). `autoscale/service.py` is not modified.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 .venv/bin/python -m ruff check scripts/a2_service_curve.py tests/test_a2_service_curve.py
@@ -4907,7 +4907,7 @@ git commit -m "feat: artifact 2's adapter from sweep tuples to a ServiceCurve, m
 - Create: `tests/test_shared_tooling_boundary.py`
 - Modify: `harness/README.md` (the table, and the "Not yet here" section)
 
-- [ ] **Step 1: Write the tests**
+- [x] **Step 1: Write the tests**
 
 Create `tests/test_shared_tooling_boundary.py`:
 
@@ -5001,7 +5001,7 @@ def test_no_harness_module_imports_autoscale():
     )
 ```
 
-- [ ] **Step 2: Run them; they should pass, so prove they can fail**
+- [x] **Step 2: Run them; they should pass, so prove they can fail**
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_shared_tooling_boundary.py -q -o addopts=""
@@ -5013,7 +5013,7 @@ cp build/service_sweep.py.bak harness/service_sweep.py && cmp harness/service_sw
 
 Expected: `10 passed`; then `2 failed, 8 passed` (the fresh-interpreter test for `harness.service_sweep` and the static check); then `restored`. A boundary test that has never failed is not known to work.
 
-- [ ] **Step 3: Update `harness/README.md`**
+- [x] **Step 3: Update `harness/README.md`**
 
 In the "What is here" table, replace the `submit.py` and `runpod/` rows:
 
@@ -5054,7 +5054,7 @@ simulator. Nothing here imports `autoscale` either:
 `tests/test_shared_tooling_boundary.py` checks it in a fresh interpreter.
 ```
 
-- [ ] **Step 4: Run the boundary tests and lint, then commit**
+- [x] **Step 4: Run the boundary tests and lint, then commit**
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_shared_tooling_boundary.py tests/test_harness_boundary.py -q -o addopts=""
@@ -5076,7 +5076,7 @@ What changes and what does not is Task 1's log A: every row is Preserved; the tw
 **Files:**
 - Modify: `coldstart/driver.py` (imports, lines 3–8; `run_campaign`'s body, lines 192–228 at `39c20b3`)
 
-- [ ] **Step 1: Confirm the baseline from Task 1 is present**
+- [x] **Step 1: Confirm the baseline from Task 1 is present**
 
 ```bash
 ls build/shared-tooling-baseline/before/
@@ -5084,7 +5084,7 @@ ls build/shared-tooling-baseline/before/
 
 Expected: `campaign.jsonl  drift_messages.txt  on_run.txt  resumed.jsonl`. If it is missing (a fresh clone, a cleaned `build/`), check out the commit Task 1 ran on into a temporary worktree and re-run Task 1 Steps 5–6 there; never capture a "before" from code that already changed.
 
-- [ ] **Step 2: Add the harness import**
+- [x] **Step 2: Add the harness import**
 
 In `coldstart/driver.py`, add this import among the other `harness` imports (between `from coldstart.schema import RunRecord` and `from harness.failures import classify_failure`):
 
@@ -5092,7 +5092,7 @@ In `coldstart/driver.py`, add this import among the other `harness` imports (bet
 from harness.campaign import run_campaign as harness_run_campaign
 ```
 
-- [ ] **Step 3: Keep the old loop under a new name, and give `run_campaign` the new body**
+- [x] **Step 3: Keep the old loop under a new name, and give `run_campaign` the new body**
 
 First, append this function at the end of `coldstart/driver.py`, after two blank lines. Its body is the current body of `run_campaign`, lines 192–228, unchanged:
 
@@ -5170,12 +5170,12 @@ Then keep `run_campaign`'s signature, `(submitter, store, arms, triples, seed, o
 
 The new body keeps the old body's two artifact-1 calls — `submitter.submit(arm=scheduled.condition, ...)` and `record.host["triple_index"] = scheduled.block_index` — moved into `submit` and `build_record`. `make_run_id=_new_run_id` is resolved when `run_campaign` is called, so a test or the baseline script that replaces `driver._new_run_id` still controls the ids.
 
-- [ ] **Step 4: Run artifact 1's driver, end-to-end and campaign tests**
+- [x] **Step 4: Run artifact 1's driver, end-to-end and campaign tests**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_driver.py tests/test_end_to_end.py tests/test_harness_campaign.py -q -o addopts=""`
 Expected: `35 passed` at `39c20b3` (Task 1's 29 plus artifact 5's 6). `test_resume_rejects_a_drifted_seed` and `test_resume_rejects_a_shrunk_schedule` pass on the new wording, because they assert `"run_index 0"`, `"C"`, `"A"`, `"run_index"` and `"beyond"`, which both wordings contain. This is the deliberate handling of the "arm" → "condition" change: the assertions are not edited.
 
-- [ ] **Step 5: Compare old and new loops byte for byte against the baseline**
+- [x] **Step 5: Compare old and new loops byte for byte against the baseline**
 
 ```bash
 rm -rf build/shared-tooling-baseline/new build/shared-tooling-baseline/legacy
@@ -5206,12 +5206,12 @@ resume: stored run_index 6 falls beyond the rebuilt schedule, which only covers 
 
 The stored records (every byte of 12 records), the `on_run` sequence including `triple_index`, and an interrupted-then-resumed window are identical; only the two messages differ, exactly as Task 1's rows 9–10 decided. Any other `DIFFERS` is a parity failure: stop.
 
-- [ ] **Step 6: Run the parity gate**
+- [x] **Step 6: Run the parity gate**
 
 Run: `./scripts/parity_check.sh`
 Expected: last line `PARITY OK`. This runs the whole suite and ruff too.
 
-- [ ] **Step 7: Confirm the callers still import and run**
+- [x] **Step 7: Confirm the callers still import and run**
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -c "
@@ -5223,7 +5223,7 @@ print('callers import: run_window, prime_compile_cache')
 
 Expected: `callers import: run_window, prime_compile_cache`. (Both call `run_campaign` with keywords Task 1's row 4 lists; the signature is unchanged.)
 
-- [ ] **Step 8: Delete the old loop — the last change in this plan**
+- [x] **Step 8: Delete the old loop — the last change in this plan**
 
 Delete the whole `_legacy_run_campaign` function from the end of `coldstart/driver.py` (its `def` line through its final `return store`), and nothing else. Then re-run every gate on the tree without it:
 
@@ -5241,7 +5241,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_driver.py tests/
 
 Expected: the `grep` prints nothing and `grep exit=1`; three `identical` lines; `drift_messages.txt: as Step 5`; `35 passed`; `PARITY OK`.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add coldstart/driver.py
@@ -5256,22 +5256,22 @@ Nothing in this task changes code. It proves the plan's end state and writes dow
 
 **Files:** none modified.
 
-- [ ] **Step 1: The full suite**
+- [x] **Step 1: The full suite**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q`
 Expected: exit 0. Then `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest --collect-only -o addopts="" -q | tail -1` must show at least Task 1's count plus 149 (this plan adds 149 tests: 6 + 5 + 8 + 12 + 19 + 10 + 20 + 25 + 15 + 1 + 9 + 9 + 10). Fewer means a file stopped being collected: stop.
 
-- [ ] **Step 2: Lint**
+- [x] **Step 2: Lint**
 
 Run: `.venv/bin/python -m ruff check .`
 Expected: `All checks passed!`
 
-- [ ] **Step 3: The parity gate**
+- [x] **Step 3: The parity gate**
 
 Run: `./scripts/parity_check.sh`
 Expected: last line `PARITY OK`.
 
-- [ ] **Step 4: The parity audit — every Preserved capability, exercised**
+- [x] **Step 4: The parity audit — every Preserved capability, exercised**
 
 Every row of Task 1's logs A and B is exercised by a test that ran green in Step 1, or by Task 14's byte comparison:
 
@@ -5288,7 +5288,7 @@ Every row of Task 1's logs A and B is exercised by a test that ran green in Step
 
 Confirm with `git diff 39c20b3 --stat -- coldstart/ scripts/run_window.py scripts/prime_compile_cache.py`: only `coldstart/driver.py` changed.
 
-- [ ] **Step 5: The tree holds only what this plan meant to add**
+- [x] **Step 5: The tree holds only what this plan meant to add**
 
 ```bash
 git status --porcelain
