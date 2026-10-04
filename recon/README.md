@@ -4,7 +4,7 @@
 result verbatim into `fixtures/`. It publishes nothing: the sample is far too
 small and the configuration is not frozen.
 
-Everything downstream of this directory is blocked on it. `coldstart/vllm_logs.py`
+Everything downstream of this directory is blocked on it. `harness/vllm_logs.py`
 parses log lines copied out of `fixtures/vllm_logs/startup_0.log`, and
 `coldstart/runpod_api.py` maps the lifecycle fields actually present in
 `fixtures/runpod_api/status_0.json`. The plan forbids inventing either.

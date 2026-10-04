@@ -35,7 +35,7 @@ PROMPT = "Explain what a key-value cache does, in two sentences."
 
 # explainer:probe-markers
 # Predicates read off the real captures in fixtures/vllm_logs/ (vLLM 0.27.1),
-# same discipline as coldstart/vllm_logs.py: message text, never invented.
+# same discipline as harness/vllm_logs.py: message text, never invented.
 #
 # "Model loading took ..." is the engine reporting the model resident on GPU.
 # It is deliberately not "Loading weights took ...", which is the weight loader

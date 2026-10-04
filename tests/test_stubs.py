@@ -4,7 +4,7 @@ from coldstart.analysis.metrics import derive
 from coldstart.schema import RunRecord
 from coldstart.stubs import stub_engine
 from coldstart.stubs.stub_endpoint import StubEndpoint
-from coldstart.vllm_logs import parse_engine_log
+from harness.vllm_logs import parse_engine_log
 
 
 def test_stub_returns_a_bundle_shaped_like_the_real_one():

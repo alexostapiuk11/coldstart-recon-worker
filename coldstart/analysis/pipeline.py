@@ -91,7 +91,7 @@ rejected. `t_compile` is `None` under the exact same "merged phase" policy
 that makes `t_weights` `None` when S2/S3 aren't delineated -- here, when a
 given run's parsed engine log has no `S4b` entry in its phases. The pinned
 engine version normally DOES delineate S4b (unlike S4a/S4d, which it merges
--- see coldstart/vllm_logs.py's PATTERNS and the fixture captures), so on a
+-- see harness/vllm_logs.py's PATTERNS and the fixture captures), so on a
 healthy run this is populated, not the common case; the preset still needs
 its own gate because that nullity condition is independent of clock
 consistency, not because it is expected to fire often. Analogous to `by_w`'s

@@ -452,7 +452,7 @@ def test_records_keep_the_raw_engine_log(tmp_path):
     assert lines, "raw engine log missing from the stored record"
 
     # And it must be the log the parsed values actually came from.
-    from coldstart.vllm_logs import parse_engine_log
+    from harness.vllm_logs import parse_engine_log
 
     reparsed = parse_engine_log("\n".join(lines))
     assert reparsed.phases == record.engine["s4_subphases"]

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from coldstart.vllm_logs import parse_engine_log
+from harness.vllm_logs import parse_engine_log
 
 FIXTURE = Path("fixtures/vllm_logs/startup_0.log")
 WARM_FIXTURE = Path("fixtures/vllm_logs/startup_1.log")

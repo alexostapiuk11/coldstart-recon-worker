@@ -5,7 +5,7 @@ import uuid
 from coldstart.checks import classify_failure
 from coldstart.scheduler import build_schedule
 from coldstart.schema import RunRecord
-from coldstart.vllm_logs import parse_engine_log
+from harness.vllm_logs import parse_engine_log
 
 
 def _new_run_id() -> str:

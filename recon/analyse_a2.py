@@ -33,12 +33,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from coldstart.runpod_api import extract_lifecycle, extract_worker_id
-from coldstart.vllm_logs import parse_engine_log
+from harness.vllm_logs import parse_engine_log
 
 # Present only when weights were NOT already on disk (fixtures/README.md,
 # parser hazard 1), so its presence distinguishes a host that had to fetch.
 #
-# Lives here rather than in coldstart.vllm_logs: that module is artifact 1's
+# Lives here rather than in harness.vllm_logs: that module is artifact 1's
 # frozen parser for the S4 sub-phases (fixtures/vllm_logs/, per its own
 # docstring), and this line is outside what it was written to parse -- it is
 # not a duration, and artifact 1 never needed to know whether weights came

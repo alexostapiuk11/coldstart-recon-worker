@@ -6,7 +6,7 @@ from functools import lru_cache
 
 from coldstart.cache_config import resolve
 from coldstart.stubs.stub_engine import replay_log_lines
-from coldstart.vllm_logs import parse_engine_log
+from harness.vllm_logs import parse_engine_log
 
 # Plausible ground truth in seconds. Values are arbitrary but ordered so the
 # analysis has a known answer to recover.
