@@ -38,12 +38,12 @@ from harness.vllm_logs import parse_engine_log
 # Present only when weights were NOT already on disk (fixtures/README.md,
 # parser hazard 1), so its presence distinguishes a host that had to fetch.
 #
-# Lives here rather than in harness.vllm_logs: that module is artifact 1's
-# frozen parser for the S4 sub-phases (fixtures/vllm_logs/, per its own
-# docstring), and this line is outside what it was written to parse -- it is
-# not a duration, and artifact 1 never needed to know whether weights came
-# from disk or the network. Adding it there would mean touching a module
-# whose whole point is being pinned to one committed log format.
+# Lives here rather than in harness.vllm_logs: that parser is shared by every
+# artifact and pinned to the S4 sub-phase lines in fixtures/vllm_logs/, and this
+# line is outside what it parses -- it is not a duration, and only this recon
+# script needs to know whether weights came from disk or the network. A
+# one-off regex does not belong in a shared module whose whole point is being
+# pinned to one committed log format.
 WEIGHTS_DOWNLOAD = re.compile(r"Time spent downloading weights", re.IGNORECASE)
 
 # Weight loading's completion line (fixtures/README.md, Q1, S4a). Its absence

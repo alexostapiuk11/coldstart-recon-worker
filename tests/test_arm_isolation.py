@@ -4,11 +4,13 @@ and it is the only thing that differs between arms... If arm behavior diverges a
 else in the code the experiment is compromised."
 
 This is a testable, structural version of that claim: no source file outside the places
-that legitimately need to know which arm is running — the interface itself, the
-scheduler that assigns arms to runs, and the analysis layer that groups results by arm —
-may branch on an arm value. That is precisely the shape of the regression this guards
-against: someone later adding `if arm == "C":` inside the probe or the handler, which is
-how this kind of single-variable experiment quietly stops being one.
+that legitimately need to know which arm is running — the interface itself and the
+analysis layer that groups results by arm — may branch on an arm value. (The scheduler
+that assigns runs now lives in `harness/` and speaks conditions, not arms, so it needs
+no exemption; `harness/` is scanned like everything else.) That is precisely the shape
+of the regression this guards against: someone later adding `if arm == "C":` inside the
+probe or the handler, which is how this kind of single-variable experiment quietly stops
+being one.
 """
 
 import ast
@@ -18,15 +20,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Directories that contain runtime code and are worth scanning. Anything else (docs,
 # fixtures, build output, the tests themselves) is out of scope for this check.
-SCAN_ROOTS = ["coldstart", "worker", "recon"]
+SCAN_ROOTS = ["coldstart", "harness", "worker", "recon"]
 
 # Files/prefixes allowed to branch on an arm value, because the job requires it:
 # - cache_config.py *is* the interface; the branch lives there by design.
-# - scheduler.py assigns arms to runs (spec 5, sample plan).
 # - analysis/ groups and compares results by arm — that is what analysis is for.
 ALLOWED_PREFIXES = (
     "coldstart/cache_config.py",
-    "coldstart/scheduler.py",
     "coldstart/analysis/",
 )
 
@@ -92,7 +92,7 @@ def test_no_arm_conditional_logic_outside_the_allowed_files():
         for lineno in _find_arm_branches(tree):
             violations.append(f"{rel}:{lineno}")
     assert violations == [], (
-        "arm-conditional logic found outside cache_config.py/scheduler.py/analysis — "
+        "arm-conditional logic found outside cache_config.py/analysis — "
         f"this breaks the single-variable claim (spec 6.3): {violations}"
     )
 
