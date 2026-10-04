@@ -55,7 +55,7 @@ Fields present in the status payload: `delayTime`, `executionTime`, `id`, `statu
 - => residual **can** be split into queue vs execution, using durations rather than
   absolute timestamps.
 
-`runpod_api.py`'s `FIELD_MAP` as specified in the plan (`delayTime` -> `delay_ms`,
+`harness/runpod/api.py`'s `FIELD_MAP` as specified in the plan (`delayTime` -> `delay_ms`,
 `executionTime` -> `execution_ms`) is correct against these payloads.
 
 ## Q3 — compile-at-startup

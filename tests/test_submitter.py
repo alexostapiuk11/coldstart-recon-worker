@@ -1,7 +1,7 @@
 import pytest
 
 from coldstart.stubs.stub_endpoint import StubEndpoint
-from coldstart.submitter import StubSubmitter
+from harness.submit import StubSubmitter
 
 
 def test_submitter_records_clock_a_and_returns_payload():

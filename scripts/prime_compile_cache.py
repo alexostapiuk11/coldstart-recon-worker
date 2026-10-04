@@ -24,9 +24,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from coldstart.driver import run_campaign
-from coldstart.preflight import assert_endpoint_matches, fetch_endpoint
-from coldstart.runpod_submitter import HttpTransport, RunPodSubmitter
+from coldstart.pins import PINNED
 from coldstart.schema import RunRecord
+from harness.runpod.preflight import assert_endpoint_matches, fetch_endpoint
+from harness.runpod.submitter import HttpTransport, RunPodSubmitter
 from harness.store import JsonlStore
 
 # Repo-anchored for the same reason run_window.py's store is: a cwd-relative
@@ -58,7 +59,7 @@ def _report(record) -> None:
 
 def main() -> None:
     key, endpoint_id = _require_credentials()
-    assert_endpoint_matches(fetch_endpoint(endpoint_id, key))
+    assert_endpoint_matches(fetch_endpoint(endpoint_id, key), PINNED)
     print(f"[preflight] endpoint {endpoint_id} matches the pinned configuration", flush=True)
 
     store = JsonlStore(STORE, RunRecord)

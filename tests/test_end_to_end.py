@@ -10,7 +10,6 @@ from coldstart.analysis.presets import REQUIRED_FOR_T_TOTAL, REQUIRED_FOR_T_WEIG
 from coldstart.driver import run_campaign
 from coldstart.schema import RunRecord
 from coldstart.stubs.stub_endpoint import StubEndpoint, VirtualClock
-from coldstart.submitter import StubSubmitter
 from harness.publish import discard_table, failure_rate_by_group, partition
 from harness.stats import (
     bootstrap_median_diff,
@@ -18,6 +17,7 @@ from harness.stats import (
     within_host_triples,
 )
 from harness.store import JsonlStore
+from harness.submit import StubSubmitter
 
 
 def _campaign(tmp_path, *, seed, triples, hosts=6, endpoint=None):

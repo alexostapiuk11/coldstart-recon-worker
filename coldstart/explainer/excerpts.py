@@ -12,7 +12,7 @@ OPEN = "# explainer:"
 CLOSE = "# explainer:end"
 
 SENTINELS: dict[str, str] = {
-    "preflight-refuses": "coldstart/preflight.py",
+    "preflight-refuses": "harness/runpod/preflight.py",
     "cache-config-env": "coldstart/cache_config.py",
     "probe-markers": "worker/probe.py",
     "handler-snapshot-before": "worker/handler.py",

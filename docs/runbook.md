@@ -117,7 +117,7 @@ API directly; it is not run automatically as part of `run_window.py`.
 ## Pre-flight gate (automatic)
 
 Every invocation of `scripts/run_window.py` fetches the endpoint's current
-configuration and checks it against the pins in `coldstart/preflight.py`
+configuration and checks it against the pins in `coldstart/pins.py`
 (FlashBoot, GPU type, network volume id, template id, workers min) *before*
 submitting any job. If anything has drifted, it raises `PreflightError` and
 exits without spending anything — you'll see output like:

@@ -1,7 +1,7 @@
 import pytest
 import requests
 
-from coldstart.runpod_submitter import HttpTransport, RunPodSubmitter
+from harness.runpod.submitter import HttpTransport, RunPodSubmitter
 
 COMPLETED = {
     "id": "job-1",

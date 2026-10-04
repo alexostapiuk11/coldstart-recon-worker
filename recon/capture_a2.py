@@ -6,12 +6,12 @@ nothing. Responses are kept verbatim except for secrets (see `redact`). Like
 recon/capture.py it imports only the standard library and `requests`, so a
 reader can reproduce the committed fixtures without installing this
 repository's packages; the retry loop is therefore a deliberate third copy
-(coldstart/runpod_submitter.py explains the second).
+(harness/runpod/submitter.py explains the second).
 
 WHAT IS ASSUMED, AND HOW THE CAPTURE CHECKS IT. Known from committed evidence:
 `POST {REST}/endpoints/{id}/update` changes endpoint configuration
 (recon/README.md, the flashboot fix); `workersMin`, `workersMax` and
-`idleTimeout` are endpoint fields (coldstart/preflight.py, docs/experiment.md);
+`idleTimeout` are endpoint fields (harness/runpod/preflight.py, docs/experiment.md);
 `/run` and `/status/{job}` behave as recon/capture.py found. NOT known:
 `GET {API}/{id}/health` as a way to observe worker counts -- every `/health` in
 this repository is vLLM's own local check. The capture polls it anyway and

@@ -32,7 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from coldstart.runpod_api import extract_lifecycle, extract_worker_id
+from harness.runpod.api import extract_lifecycle, extract_worker_id
 from harness.vllm_logs import parse_engine_log
 
 # Present only when weights were NOT already on disk (fixtures/README.md,

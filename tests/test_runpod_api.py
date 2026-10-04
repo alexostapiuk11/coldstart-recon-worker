@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from coldstart.runpod_api import extract_lifecycle, extract_worker_id, residual_splittable
+from harness.runpod.api import extract_lifecycle, extract_worker_id, residual_splittable
 
 FIXTURE = Path("fixtures/runpod_api/status_0.json")
 

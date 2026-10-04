@@ -4,9 +4,9 @@ from coldstart.checks import DiscardReason
 from coldstart.driver import run_campaign
 from coldstart.schema import RunRecord
 from coldstart.stubs.stub_endpoint import StubEndpoint, VirtualClock
-from coldstart.submitter import StubSubmitter
 from harness.scheduler import build_schedule
 from harness.store import JsonlStore
+from harness.submit import StubSubmitter
 
 
 def test_campaign_writes_one_record_per_scheduled_run(tmp_path):
@@ -468,8 +468,8 @@ def test_a_failed_run_keeps_the_evidence_of_why_it_failed():
     lines makes the failure permanently unexplainable -- and failures are the
     rows most in need of explaining."""
     from coldstart.driver import _record_from
-    from coldstart.submitter import SubmitOutcome
     from harness.scheduler import ScheduledRun
+    from harness.submit import SubmitOutcome
 
     lines = ["Model loading took 15.27 GiB and 36.4 seconds", "torch.compile took 12.5 s in total"]
     outcome = SubmitOutcome(
@@ -489,8 +489,8 @@ def test_a_failed_run_keeps_the_evidence_of_why_it_failed():
 
 def test_a_failure_with_no_diagnostics_still_records_cleanly():
     from coldstart.driver import _record_from
-    from coldstart.submitter import SubmitOutcome
     from harness.scheduler import ScheduledRun
+    from harness.submit import SubmitOutcome
 
     outcome = SubmitOutcome(
         clock_A={"t_submit": 0.0, "t_result": 5.0},

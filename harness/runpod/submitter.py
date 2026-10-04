@@ -8,8 +8,8 @@ import time
 
 import requests
 
-from coldstart.runpod_api import TERMINAL_STATES, extract_lifecycle, extract_worker_id
-from coldstart.submitter import SubmitOutcome
+from harness.runpod.api import TERMINAL_STATES, extract_lifecycle, extract_worker_id
+from harness.submit import SubmitOutcome
 
 
 class _UnhealthyRun(RuntimeError):
