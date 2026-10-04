@@ -3,7 +3,7 @@
 For the owner; not a plan step. Do not run any of this without the owner's say-so.
 
 Every command and field name below was checked against the repository when this
-was tracked (HEAD `c0e7c65` plus the commit that adds this file). The pilot reader in F,
+runbook was last edited (no commit hash is quoted: it would be stale at the next commit). The pilot reader in F,
 `scripts/read_sweep_pilot.py`, is tested against a stub pilot store written by
 `run_sweep` with the shared fakes (`tests/test_read_sweep_pilot.py`), so its output on
 a real run will differ in values, not in shape. "UNVERIFIED item N" below is the numbering
@@ -50,21 +50,43 @@ The preflight checks four things only: the GPU type, the network volume, `execut
 the template (`SWEEP_PINNED_BASE` plus the template id). `workersMin`, `workersMax` and `idleTimeout`
 from C are not read back by it; set them by hand and look at them in the console.
 
-**E. Cost estimate.** Jobs = levels x 3 (plus the pilot's 2). Per job = startup (p95 86 s, artifact 1 arm B, `data/analysis.json`) +
+**E. Cost estimate.** Jobs = levels x 3 (plus the pilot's 2). Per job = startup (artifact 1's p95 86 s, arm B, `data/analysis.json`, until the pilot has measured this image's own; see below) +
 probe and `/tokenize` (~5 s) + one warm-up wave (latency) + the measured run (`max(100, 20c)/c x latency`) +
 teardown (<= 30 s). Price = total seconds x RunPod's per-second rate for a 4090 serverless worker on the day
 (UNVERIFIED item 13), plus queue time for a cold image pull on the first job (once observed at 1898 s,
-`harness/runpod/submitter.py`). The script below was re-run at `c0e7c65`; it prints
-`21 jobs, 49.2 GPU-minutes on the placeholder curve` and, at an illustrative `$0.00031/s`, `about $0.92`.
+`harness/runpod/submitter.py`). With no `PILOT_STORE` the script below uses artifact 1's figures and prints
+`21 jobs, 49.2 GPU-minutes on the placeholder curve` and, at an illustrative `$0.00031/s`, `about $0.92`
+(re-run when this was tracked).
+
+After the pilot, re-estimate from what it measured. Every stored run carries `startup_s` (the seconds from
+the job's start to a healthy engine) and `teardown_s` (the seconds to stop it); the reader prints them on
+each run's `timing:` line. Set `PILOT_STORE` to the pilot's store and the script takes the largest
+`startup_s` and `teardown_s` among the pilot's successful runs (the larger is probably the cold-cache job, the
+conservative one for a campaign that starts cold) in place of artifact 1's 86 s and the 30 s ceiling. It
+refuses a store with none, rather than falling back to the old numbers without saying so.
 
 ```bash
-RATE_PER_S=<rate from RunPod's pricing page> PYTHONDONTWRITEBYTECODE=1 .venv/bin/python - <<'PY'
+RATE_PER_S=<rate from RunPod's pricing page> PILOT_STORE=build/sweep-pilot.jsonl \
+  PYTHONDONTWRITEBYTECODE=1 .venv/bin/python - <<'PY'
+import json
 import os
+from pathlib import Path
 from autoscale.service import SERVICE_CURVE_PLACEHOLDER as C
 from harness.service_sweep import num_prompts_for
 levels = [1, 2, 4, 8, 16, 32, 64]
 repeats = 3
 STARTUP_S, TEARDOWN_S, OVERHEAD_S = 86.0, 30.0, 5.0
+if os.environ.get("PILOT_STORE"):
+    runs = [json.loads(line) for line in Path(os.environ["PILOT_STORE"]).read_text().splitlines()
+            if line.strip()]
+    ok = [r for r in runs if r["outcome"] == "ok"]
+    starts = [r["startup_s"] for r in ok if r.get("startup_s") is not None]
+    stops = [r["teardown_s"] for r in ok if r.get("teardown_s") is not None]
+    if not starts or not stops:
+        raise SystemExit("the pilot store has no successful run with startup_s and teardown_s; "
+                         "unset PILOT_STORE to use artifact 1's figures knowingly")
+    STARTUP_S, TEARDOWN_S = max(starts), max(stops)
+    print(f"startup {STARTUP_S:.1f} s and teardown {TEARDOWN_S:.1f} s from {len(ok)} pilot runs")
 per_level = {}
 for c in levels:
     lat = C.latency_at(c)
@@ -77,16 +99,18 @@ print(f"about ${total_s * rate:.2f} at ${rate}/s, plus any cold image pull on th
 PY
 ```
 
-Re-run it with the levels actually chosen, and again after the pilot with its measured startup and latency.
+Re-run it with the levels actually chosen, and again after the pilot with `PILOT_STORE` set (the measured
+startup and teardown) and the pilot's latencies in place of the placeholder curve's.
 It does not include a failed run's cost: a run with any failed request is a run error (below), is stored as
-failed, and the level then needs a re-run (G), which is more jobs.
+failed, and the level then cannot be re-run on its own (G): the choices are the whole campaign again, which
+costs the whole estimate above a second time, or a reduction at `--min-repeats 2` with that disclosed.
 
 **F. The diagnostic pilot: two jobs that answer the UNVERIFIED items.**
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/run_service_sweep.py --template-id <template id> \
   --levels 1,8 --repeats 1 --min-repeats 1 --seed 20261004 --diagnostics \
-  --serve-args "--max-num-seqs 256 --enable-log-requests" \
+  --serve-args "--max-num-seqs 256" \
   --store build/sweep-pilot.jsonl --out build/sweep-pilot-curve.json
 ```
 
@@ -96,8 +120,10 @@ run refuses to start without an explicit `--max-num-seqs N` in `--serve-args` (b
 because the engine logs its default only at DEBUG, so the curve could not record the binding concurrency limit,
 and `scripts/a2_service_curve.py` would refuse it after the sweep was paid for. `--unrecorded-max-num-seqs` runs
 without the pin anyway and prints that consequence; do not use it for a campaign whose curve artifact 2 will read.
-`--preflight-only` and `--reduce-only` are not checked. `--enable-log-requests`
-is for the pilot only (it adds a log line per request); the campaign does not pass it. If the pilot's store holds a
+`--preflight-only` and `--reduce-only` are not checked. The pilot does not pass `--enable-log-requests`:
+in vLLM 0.27.1 it logs only the request id and parameters at INFO and the prompt text only at DEBUG
+(the flag's help text, `vllm/engine/arg_utils.py`), so it would add a log line per request and still not
+put the prompt in the log (item 7 below). If the pilot's store holds a
 failed run, the reduction at the end of the command fails after the store is written; the store is what you read.
 
 Then read every answer with the reader, which prints one block per stored run:
@@ -106,13 +132,16 @@ Then read every answer with the reader, which prints one block per stored run:
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/read_sweep_pilot.py build/sweep-pilot.jsonl
 ```
 
-Per run it prints: the bench flags missing from the image's `--help`; whether pandas imports and the prompt reached
-the engine log; nvidia-smi's raw output; the clock check; whether the serve command carries both pins and the engine's
+Per run it prints: the bench flags missing from the image's `--help=all` (a plain `--help` prints no flags in
+0.27.1); whether pandas imports and whether the prompt text appears in the engine log (expected: False);
+nvidia-smi's raw output; the clock check; whether the serve command carries both pins and the engine's
 `non-default args:` line shows prefix caching off; the engine facts (`max_num_seqs` and where it was read, KV
-capacity, vLLM version) and the log cap; the saved-JSON keys that are missing; the prompt path, token count and the
+capacity, vLLM version) and the log cap; the measured startup and teardown seconds and whether the engine's log
+was read to its end (`timing:`); the saved-JSON keys that are missing (`absent` on a run without
+`--diagnostics`); the prompt path, token count and the
 engine's own input lengths; completed and failed requests with error samples; the reconstructed latency against the
 tool's median; the GPU figure with its method and sample counts; and the wall-clock figures. A failed run prints its
-failure detail and the engine facts only. The reader reports and never gates: each answer has a different remedy.
+failure detail, the engine facts and the timing only. The reader reports and never gates: each answer has a different remedy.
 
 | UNVERIFIED item | Look at | If it is not as assumed |
 |---|---|---|
@@ -123,13 +152,14 @@ failure detail and the engine facts only. The reader reports and never gates: ea
 | 5 tokenizer in the container | both runs `ok`; a failure detail mentioning the Hugging Face hub or a tokenizer | Pass `--tokenizer <local snapshot path>` through `extra_args` (a code change, with a test). |
 | 6 prompt length vs a 16-token block | `tokens` and `engine input_lens` equal | Now low-stakes: prefix caching is pinned off, so the exact and fallback paths measure the same workload whatever the length. Record the token count. Still check the `non-default args` line below, because it is the proof that the pin reached the engine. |
 | 6b prefix caching off reached the engine (new) | `serve cmd pins` both True; `non-default args line has prefix caching off: True`; the job did not fail to start | A job that never became healthy, with an argparse error naming `--no-enable-prefix-caching` in its log, means the flag spelling differs in the image: stop, fix `PREFIX_CACHING_OFF` in `scripts/run_service_sweep.py` and its tests. If the engine started but the line shows no `enable_prefix_caching`, the log format differs: read the `engine.log_lines` head and decide with the owner. |
-| 7 prompt logged | `prompt in log` (computed over the whole engine log, before the 400/400 head/tail cap) | If False, the engine-side evidence is `input_lens == tokens` (the engine's own `usage.prompt_tokens`). |
+| 7 prompt reached the engine | `engine input_lens` equal to `tokens`; `prompt in log` (computed over the whole engine log, before the 400/400 head/tail cap) | Expect `prompt in log: False`: in 0.27.1 the engine logs prompt text only at DEBUG (`--enable-log-requests` at INFO logs the request id and parameters). `input_lens == tokens` (the engine's own `usage.prompt_tokens` against `/tokenize`) is the actual evidence. A `True` would mean the log level is DEBUG, and the log volume with it. |
 | 8 `max_num_seqs` recorded | `engine: max_num_seqs 256, non-default-args` | If `None`, the line's format differs: fix `harness/sweep_worker.py`'s regex against a real line from `engine.log_lines` (the head holds startup), with a test. |
 | 9 nvidia-smi output | `nvidia-smi raw` an integer string; `gpu samples valid` > 0 | Fix `harness/gpu_util.py`'s parser with a test using the real output. |
 | 9b clock alignment (new) | `clocks: child_perf_counter_between` must be `True`; and the run's `gpu: ... windowed: True` | `False` means the sampler's `time.monotonic` and the tool's `time.perf_counter` do not share an epoch in the container: windowing will refuse and every run falls back to the whole-call median (`windowed: False`, a `window note`). Do not run the campaign on that figure without the owner's decision; the whole-call median includes the tool's idle startup and teardown. `None` means the child's output did not parse (read `diagnostics.clocks.child_cmd`). |
 | 10 child processes | (nothing to read) | Handled by group kill regardless. |
 | 12 output size | both jobs completed | If a diagnostic job failed on size, re-run the pilot without `--diagnostics` for the checks that do not need the raw JSON. The log is already capped at 400 head + 400 tail lines of at most 2000 chars; `log: N lines, truncated: ...` shows whether the cap cut anything. |
 | — failed requests (new) | `requests: ... failed 0`; an `outcome` of `failed` with a detail beginning `N of M requests failed (at most 0 allowed)` | Any failed request is a run error, stored as a failed run with no latency. Read `error samples` (first three distinct, 300 chars). Do not lower the bar to get past it; fix the cause (a timeout at the top level is the likely one, and it is the level that becomes the admission cap). |
+| — startup and teardown (new) | `timing: startup ... teardown ... log drained` | Feed the two figures into E (`PILOT_STORE`). `log drained: False` means `engine.log_lines` may be missing its tail; read the last lines with that in mind. |
 | — wall time | `clock_C` (`execution_ms`, `delay_ms`, from the platform), `clock_A` (submit to result, queue delay included, so not a run time) and `summary.duration_s` (the measured run only) | Feed `execution_ms` into E, not `clock_A`: a cold image pull once put 1898 s of queue delay in front of 140 s of execution (`harness/runpod/submitter.py`). `clock_C` is absent on a failed run. |
 
 **GPU utilisation: how to read the figure.** `summary.gpu_util` (and the record's top-level `gpu_util`, which is what the
@@ -166,8 +196,12 @@ experiment from artifact 5's and not what this checklist runs.
 
 A level with a failed run (including one with a single failed request) fails the reduction with
 `level N has 2 successful runs`; the store keeps everything, failed runs included, with the engine log head and tail,
-`log_lines_total`, `log_truncated` and `log_head_lines`. Either re-run that level as its own new campaign and store, or
-accept two with `--reduce-only --levels ... --min-repeats 2` and say so where the curve is reported.
+`log_lines_total`, `log_truncated` and `log_head_lines`. A single level cannot be re-run on its own: `validate_levels`
+refuses fewer than two levels, the reducer reads one store, and there is no tool that merges stores. The real choices are
+(a) the whole campaign again, under a new `--store` and `--out`, which costs everything in E a second time, or (b)
+accept two repeats at the short level with `--reduce-only --levels ... --min-repeats 2` and say so, with the level and
+its repeat count, wherever the curve is reported. `--resume` is not a re-run: it skips every run already stored, failed
+ones included.
 
 `--reduce-only` labels the curve with the `source` its stored runs carry (`runpod` for a paid run). A store whose runs
 carry none needs `--source {runpod,stub}`; a `--source` that contradicts the runs, or a store mixing sources, is
@@ -180,10 +214,14 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/a2_service_curve.py \
   --curve data/a2/service-sweep-curve.json --out data/a2/service-curve.json
 ```
 
-Expected first line: `[a2] N points, max_num_seqs=256, MEASURED`. It then prints, per level, `c / median latency`
+Expected first line: `[a2] N points, max_num_seqs=256, MEASURED, gpu_util=windowed`. The last field is the
+method the curve's utilisation column was measured by (`windowed`, `whole-call`, or `unrecorded` for a curve file
+from before it was recorded); it is also in the output JSON as `gpu_util_method`. A campaign meant for artifact 2
+should say `windowed`. The adapter then prints, per level, `c / median latency`
 against the bench tool's own `request_throughput` and their ratio (Little's law). That is disclosure, not a gate: a
 ratio above 1 means the median latency sits below the mean latency and saturation computed from the curve overstates
-what the engine sustained. A level whose throughput is not stored prints `unavailable`. The output JSON also carries
+what the engine sustained. The throughput is the median of the level's runs' own, written on each level row by the reduction; a level where
+any run lacked it prints `unavailable`. The output JSON also carries
 per-level min..max intervals (`intervals`) for figure 4. It prints a WARNING if the top level is above `max_num_seqs`.
 Wiring the measured curve into artifact 2's simulator and figures is artifact 2's plan 2b, not this plan.
 
@@ -193,7 +231,8 @@ Wiring the measured curve into artifact 2's simulator and figures is artifact 2'
    deliberate way past it, and the resulting curve cannot go through `scripts/a2_service_curve.py`.
 2. A campaign whose runs mix windowed and whole-call GPU figures is refused at the reduction, after the runs are
    paid for and stored. Check the pilot's `windowed: True` (F, row 9b) before the campaign. The store keeps every
-   run, but there is no way to reduce a subset of it; the fix is a re-run of the runs that differ, as a new campaign.
+   run, but there is no way to reduce a subset of it, and no way to re-run a single level; the fix is the whole
+   campaign again under a new store, which costs the whole campaign a second time.
 3. The drift-guard wording changed ("has condition 'C' on disk, but the rebuilt schedule assigns it 'A'", and the
    shrunk-schedule message no longer says "for the given arms/triples/seed" or suggests "fewer triples"). Accepted
    2026-10-04; nothing but the two messages differs from the pre-lift driver's output.
