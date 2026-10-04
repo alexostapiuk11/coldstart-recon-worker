@@ -164,19 +164,32 @@ class RunPodSubmitter:
         return output
 
     def submit(self, arm: str, run_id: str) -> SubmitOutcome:
+        """Artifact 1's job: its payload is exactly an arm and a run id."""
+        return self.submit_payload({"arm": arm, "run_id": run_id})
+
+    def submit_payload(self, payload: dict) -> SubmitOutcome:
+        """Run one job whose input is `payload`, verbatim.
+
+        `submit(arm, run_id)` builds artifact 1's two-field payload. Another
+        artifact's worker needs a different input -- artifact 5's carries a
+        whole instance specification -- and everything around the payload is
+        the same: clock A stamped on both paths, the job awaited to a terminal
+        state, an unhealthy engine's output kept as diagnostics, and failures
+        returned as data rather than raised.
+        """
         t_submit = self._clock()
         try:
-            job_id = self._transport.start({"arm": arm, "run_id": run_id})
-            payload = self._payload_from(self._await_terminal(job_id))
+            job_id = self._transport.start(payload)
+            result = self._payload_from(self._await_terminal(job_id))
             error, diagnostics = None, None
         except _UnhealthyRun as e:
-            payload, error, diagnostics = None, str(e), e.output
+            result, error, diagnostics = None, str(e), e.output
         except Exception as e:  # noqa: BLE001 -- failures are data (spec 6.6)
-            payload, error, diagnostics = None, str(e), None
+            result, error, diagnostics = None, str(e), None
         t_result = self._clock()
         return SubmitOutcome(
             clock_A={"t_submit": t_submit, "t_result": t_result},
-            payload=payload,
+            payload=result,
             error=error,
             diagnostics=diagnostics,
         )
