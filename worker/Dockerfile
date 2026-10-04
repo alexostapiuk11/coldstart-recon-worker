@@ -30,8 +30,12 @@ COPY harness /opt/harness
 COPY worker/recon_handler.py /opt/recon_handler.py
 COPY worker/probe.py /opt/probe.py
 COPY worker/handler.py /opt/handler.py
+# The service-curve sweep's handler (harness/service_sweep.py). Imports only
+# harness/, never coldstart/.
+COPY worker/sweep_handler.py /opt/sweep_handler.py
 
 ENTRYPOINT []
-# The measurement handler. recon_handler.py stays in the image; select it by
-# overriding dockerStartCmd on the template when another capture is needed.
+# The measurement handler. recon_handler.py and sweep_handler.py stay in the
+# image; select one by overriding dockerStartCmd on the template, e.g.
+# `python3 -u /opt/sweep_handler.py` for the service-curve sweep.
 CMD ["python3", "-u", "/opt/handler.py"]

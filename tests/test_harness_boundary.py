@@ -88,3 +88,20 @@ def test_the_ci_image_build_triggers_on_every_copied_package():
         "build-worker.yml's paths filter, so changing them does not rebuild "
         "the image and a GPU run would use a stale one"
     )
+
+
+def test_dockerfile_copies_every_worker_module():
+    """The package check above cannot see worker/*.py: those are copied file by
+    file and run as scripts, not imported as a package. A new handler without
+    its own COPY line passes every other guard and fails on the paid GPU run,
+    when the template's dockerStartCmd names a file the image does not hold."""
+    dockerfile = (REPO / "worker" / "Dockerfile").read_text()
+    pairs = re.findall(r"^COPY\s+worker/(\w+\.py)\s+/opt/(\w+\.py)\s*$", dockerfile, re.MULTILINE)
+    copied = {src for src, dst in pairs if src == dst}
+    modules = sorted(p.name for p in (REPO / "worker").glob("*.py"))
+    missing = [m for m in modules if m not in copied]
+    assert modules, "worker/ has no modules, so this test checks nothing"
+    assert missing == [], (
+        f"worker/Dockerfile does not COPY {missing} to /opt under the same name; a "
+        "template whose dockerStartCmd runs one of them fails on a paid GPU run"
+    )
