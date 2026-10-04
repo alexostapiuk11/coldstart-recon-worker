@@ -113,7 +113,7 @@ def classify_failure(detail: str | None) -> FailureClass:
 
 def _validate_clock_inputs(t_total: float, t_process: float) -> None:
     """Guard both clock readings before any arithmetic — mirrors the
-    precondition guards in StageRecorder.mark (coldstart/recorder.py).
+    precondition guards in StageRecorder.mark (harness/recorder.py).
 
     NaN compares False against every operator, so without this guard a NaN
     input falls through every check downstream and is silently accepted.

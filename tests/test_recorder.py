@@ -1,6 +1,6 @@
 import pytest
 
-from coldstart.recorder import StageRecorder
+from harness.recorder import StageRecorder
 
 
 def test_marks_are_monotonic_and_relative_to_t0():

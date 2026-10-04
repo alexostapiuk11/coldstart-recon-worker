@@ -13,7 +13,7 @@ from probe import run_probe
 
 from coldstart import cache_config
 from coldstart.cache_config import resolve
-from coldstart.recorder import StageRecorder
+from harness.recorder import StageRecorder
 
 # Serve arguments held fixed across arms (spec "Held fixed"). They are read from
 # the endpoint environment rather than the job input: a per-job override would

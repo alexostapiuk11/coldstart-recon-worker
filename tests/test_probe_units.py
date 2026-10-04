@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT / "worker"))
 import probe as probe_mod
 
 from coldstart.analysis import metrics
-from coldstart.recorder import StageRecorder
+from harness.recorder import StageRecorder
 
 CAPTURES = [ROOT / f"fixtures/vllm_logs/startup_{i}.log" for i in range(3)]
 
