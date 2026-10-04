@@ -13,15 +13,15 @@ from coldstart.analysis.pipeline import (
     failure_rate_by_arm,
     partition,
 )
-from coldstart.analysis.stats import (
-    bootstrap_median_diff,
-    bootstrap_paired_median_diff,
-    within_host_triples,
-)
 from coldstart.driver import run_campaign
 from coldstart.store import JsonlStore
 from coldstart.stubs.stub_endpoint import StubEndpoint, VirtualClock
 from coldstart.submitter import StubSubmitter
+from harness.stats import (
+    bootstrap_median_diff,
+    bootstrap_paired_median_diff,
+    within_host_triples,
+)
 
 
 def _campaign(tmp_path, *, seed, triples, hosts=6, endpoint=None):

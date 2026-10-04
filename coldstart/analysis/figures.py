@@ -4,7 +4,7 @@ the KV dividend, the resample frames, and the shortcut panels.
 
 These charts are the artifact for most readers — more people will look at
 the waterfall than will read the method section — so every aggregate drawn
-here goes through ``coldstart.analysis.stats.median``, the same function
+here goes through ``harness.stats.median``, the same function
 ``percentiles()``'s p50 uses. That is deliberate: a chart median computed a
 different way than the reported percentile table's median would put two
 different numbers for the same quantity in the same post. See
@@ -68,7 +68,7 @@ import matplotlib.pyplot as plt
 
 from coldstart.analysis.metrics import FAST_TOLERANCE, steady_state_latency, time_to_fast_index
 from coldstart.analysis.pipeline import NotPublishableError
-from coldstart.analysis.stats import bootstrap_median_ci, ecdf, median
+from harness.stats import bootstrap_median_ci, ecdf, median
 
 ARMS = ["A", "B", "C"]
 ARM_LABEL = {"A": "A — nothing cached", "B": "B — weights cached", "C": "C — weights + compile"}

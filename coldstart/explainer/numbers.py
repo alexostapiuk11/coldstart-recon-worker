@@ -8,8 +8,8 @@ import json
 from pathlib import Path
 
 from coldstart.analysis.metrics import derive, rows_for_arm
-from coldstart.analysis.stats import bootstrap_median_ci
 from coldstart.store import JsonlStore
+from harness.stats import bootstrap_median_ci
 
 KEYS: dict = json.loads(
     (Path(__file__).resolve().parents[2] / "explainer" / "numbers.json").read_text()

@@ -118,7 +118,7 @@ def test_it_agrees_with_artifact_ones_implementation():
     conventions are implemented twice; this test is the only thing making the
     second copy a copy rather than a second answer. Tests may import artifact 1
     -- tests/test_autoscale_boundary.py scans `autoscale/`, not `tests/`."""
-    from coldstart.analysis import stats as a1
+    from harness import stats as a1
 
     xs = [
         3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0, 5.0, 3.0, 5.0, 8.0,

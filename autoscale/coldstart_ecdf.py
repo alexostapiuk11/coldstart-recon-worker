@@ -28,8 +28,8 @@ from coldstart.analysis.pipeline import (
     annotate_first_touch,
     partition,
 )
-from coldstart.analysis.stats import median as _stats_median
 from coldstart.store import JsonlStore
+from harness.stats import median as _stats_median
 
 __all__ = ["LagDistribution", "load_measured_lags"]
 
@@ -55,7 +55,7 @@ class LagDistribution:
             )
         for i, v in enumerate(self.samples):
             # `None` and non-finite are rejected for the same reason
-            # `coldstart.analysis.stats._validate_samples` rejects them, checked
+            # `harness.stats._validate_samples` rejects them, checked
             # here as well because a distribution is built once and then drawn
             # from thousands of times: the stats call that would have caught a
             # NaN might not run until after a whole sweep has been simulated on
@@ -100,7 +100,7 @@ class LagDistribution:
         return rng.choice(self.samples)
 
     def median(self) -> float:
-        """Delegates to `coldstart.analysis.stats.median` deliberately.
+        """Delegates to `harness.stats.median` deliberately.
 
         That function's own docstring exists to stop a second definition of
         "median" being written -- "they are one computation, not two

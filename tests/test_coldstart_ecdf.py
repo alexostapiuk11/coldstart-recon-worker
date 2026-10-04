@@ -107,7 +107,7 @@ def test_medians_are_artifact_ones_median_not_a_second_definition():
     """The delegation in `LagDistribution.median` is load-bearing, not
     incidental: two independent median implementations agree on almost every
     input, so a divergence would never surface in a test."""
-    from coldstart.analysis.stats import median as stats_median
+    from harness.stats import median as stats_median
 
     d = LagDistribution(samples=[10.0, 20.0, 30.0, 41.0])
 

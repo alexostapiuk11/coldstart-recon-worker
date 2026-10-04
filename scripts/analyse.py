@@ -32,7 +32,8 @@ from coldstart.analysis.pipeline import (
     failure_rate_by_arm,
     partition,
 )
-from coldstart.analysis.stats import (
+from coldstart.store import JsonlStore
+from harness.stats import (
     MIN_BOOTSTRAP_SAMPLES,
     MIN_SAMPLES,
     bootstrap_contrast_difference,
@@ -42,7 +43,6 @@ from coldstart.analysis.stats import (
     percentiles,
     within_host_triples,
 )
-from coldstart.store import JsonlStore
 
 ITERATIONS = 10_000
 

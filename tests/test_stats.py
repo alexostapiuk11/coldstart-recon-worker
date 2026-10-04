@@ -4,8 +4,8 @@ import statistics
 
 import pytest
 
-import coldstart.analysis.stats as stats_module
-from coldstart.analysis.stats import (
+import harness.stats as stats_module
+from harness.stats import (
     MIN_BOOTSTRAP_SAMPLES,
     MIN_SAMPLES,
     _percentile_interval,

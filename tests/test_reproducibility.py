@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from coldstart.analysis.metrics import derive
 from coldstart.analysis.pipeline import REQUIRED_FOR_T_COMPILE, REQUIRED_FOR_T_TOTAL, partition
-from coldstart.analysis.stats import MIN_BOOTSTRAP_SAMPLES, bootstrap_median_diff
 from coldstart.store import JsonlStore
+from harness.stats import MIN_BOOTSTRAP_SAMPLES, bootstrap_median_diff
 from scripts.analyse import ITERATIONS
 
 STORE = Path("data/campaign.jsonl")

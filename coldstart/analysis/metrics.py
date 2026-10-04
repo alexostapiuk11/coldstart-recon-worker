@@ -1,8 +1,8 @@
 from typing import TypedDict
 
-from coldstart.analysis.stats import median as stats_median
 from coldstart.checks import DiscardReason, check_consistency, compute_residual
 from coldstart.schema import RunRecord
+from harness.stats import median as stats_median
 
 FAST_TOLERANCE = 0.10  # fixed before data — see spec 7
 
@@ -90,7 +90,7 @@ def steady_state_latency(warmup: list[dict]) -> float | None:
     over every row's last three requests — see the module docstring in
     `figures.py`.
 
-    Routed through `coldstart.analysis.stats.median` rather than
+    Routed through `harness.stats.median` rather than
     `statistics.median` — the one median in this pipeline that used to skip
     both the shared quantile function every other aggregate goes through
     and its non-finite validation, so a NaN `end_to_end` would otherwise

@@ -112,7 +112,7 @@ def test_env_rejects_malformed_run_id(bad_run_id):
 
 def test_unknown_arm_is_a_named_error():
     """Every other module in this codebase fails loudly with a message naming what was
-    valid (see coldstart/analysis/stats.py's `unknown percentile` errors) — this must
+    valid (see harness/stats.py's `unknown percentile` errors) — this must
     match, not raise a bare KeyError."""
     with pytest.raises(ValueError, match=r"unknown arm 'Z'.*'A', 'B', 'C'"):
         resolve("Z")

@@ -338,7 +338,7 @@ def test_steady_state_latency_is_none_for_empty_warmup():
 
 
 def test_steady_state_latency_routes_through_stats_median_and_rejects_nan():
-    """steady_state_latency must go through coldstart.analysis.stats.median,
+    """steady_state_latency must go through harness.stats.median,
     not statistics.median -- the one median in the pipeline that used to
     skip both the shared quantile function every other aggregate uses and
     its non-finite validation. A `statistics.median` implementation would

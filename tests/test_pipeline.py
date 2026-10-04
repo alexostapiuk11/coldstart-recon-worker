@@ -27,9 +27,9 @@ from coldstart.analysis.pipeline import (
     failure_rate_by_arm,
     partition,
 )
-from coldstart.analysis.stats import bootstrap_median_diff, within_host_triples
 from coldstart.checks import DiscardReason
 from coldstart.schema import RunRecord
+from harness.stats import bootstrap_median_diff, within_host_triples
 
 # Ten distinct per-request latencies with a non-flat tail -- copied from
 # tests/test_metrics.py's fixture so steady state (median of the last three =
