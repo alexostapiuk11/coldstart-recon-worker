@@ -39,6 +39,10 @@ class PartitionResult:
 
 
 def _row_identity(row: dict) -> str:
+    # Deliberately not harness.figure_guards.row_identity, which formats the
+    # same thing: figure_guards imports NotPublishableError from this module,
+    # so importing it back here is a cycle. Two four-line formatters is the
+    # cheaper of the two problems.
     return (
         f"arm={row.get('arm')!r} host_id={row.get('host_id')!r} "
         f"triple_index={row.get('triple_index')!r}"

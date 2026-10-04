@@ -29,10 +29,10 @@ B4: a row from a failed run, an inconsistent run, or a merged run does not
 raise a clean error on its own — a bare `r["t_platform"]` inside a
 comprehension either `KeyError`s (failed rows don't have the key at all) or
 feeds `None` to `median()`/`ecdf()`, which fails with a context-free
-`TypeError` from inside `math.isfinite`. `_required_field` below replaces
-every such dereference this module makes with a check that names the row
-(by `arm`/`host_id`, the identity these hand-built and derive()-shaped rows
-both reliably carry) and the field, and raises
+`TypeError` from inside `math.isfinite`. `required_field`, imported from
+`harness.figure_guards`, replaces every such dereference this module makes
+with a check that names the row (by `arm`/`host_id`, the identity these
+hand-built and derive()-shaped rows both reliably carry) and the field, and raises
 `harness.publish.NotPublishableError`. This does not make these
 functions require `"ok"`/`"consistent"` on every row -- that would break the
 "pure consumer of whatever fields a row happens to carry" policy above and
@@ -68,45 +68,19 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from coldstart.analysis.metrics import FAST_TOLERANCE, steady_state_latency, time_to_fast_index
-from harness.publish import NotPublishableError
+from harness.figure_guards import (
+    MIN_PHONE_TEXT_PX,  # noqa: F401  re-exported: tests import it from here
+    PHONE_WIDTH_PX,  # noqa: F401  re-exported: tests import it from here
+    group_required,
+    phone_pt,
+    required_field,
+    validate_rows,
+)
 from harness.stats import bootstrap_median_ci, ecdf, median
 
 ARMS = ["A", "B", "C"]
 ARM_LABEL = {"A": "A — nothing cached", "B": "B — weights cached", "C": "C — weights + compile"}
 RESIDUAL_COLOR = "#9e9e9e"  # deliberately distinct from every measured-stage color
-
-# Phone legibility, as arithmetic instead of guesswork.
-#
-# These figures are published in a post most readers open on a phone, where the
-# PNG is scaled to the viewport width. What survives that downscale is not a
-# font's absolute point size but its size *relative to the figure*: rendering
-# DPI cancels out, leaving
-#
-#     rendered_px = pt * PHONE_WIDTH_PX / (72 * figure_width_in)
-#
-# The consequence is counterintuitive and this module has been caught by it
-# twice: making a crowded chart *wider* to fit its legend makes every label
-# smaller on a phone. Widening must be paid for with a proportional font
-# increase, or the room gained is cancelled exactly.
-#
-# MIN_PHONE_TEXT_PX is calibrated against rendered output, not taste: at the
-# 300-run campaign's figures, 8pt legends on an 8-inch canvas (5.2px) and 11pt
-# arm labels on a 10.9-inch canvas (5.3px) were both unreadable at phone width,
-# while a 12pt callout on an 8-inch canvas (7.8px) was comfortable. The floor
-# sits just below the latter. `test_figures.py` asserts every text artist in
-# all four figures clears it, so this cannot regress silently -- which it did
-# before, because a figure that is illegible on a phone still renders, still
-# passes every assertion about its data, and looks fine on the laptop where it
-# was written.
-PHONE_WIDTH_PX = 375
-MIN_PHONE_TEXT_PX = 7.5
-
-
-def phone_pt(px: float, fig_width_in: float) -> float:
-    """Point size that renders at `px` pixels when a `fig_width_in`-wide figure
-    is displayed `PHONE_WIDTH_PX` wide. Inverse of the relation above."""
-    return px * 72 * fig_width_in / PHONE_WIDTH_PX
-
 
 # The five named S4 sub-phases, in chronological order — must match
 # coldstart.analysis.metrics.S4_SUBPHASE_KEYS. Not imported directly so this
@@ -127,61 +101,6 @@ _SUBPHASE_COLOR = {
     "S4d": "#8a6d3b",
     "S4e": "#c88a2e",
 }
-
-
-def _row_identity(row: dict) -> str:
-    return f"arm={row.get('arm')!r} host_id={row.get('host_id')!r}"
-
-
-def _required_field(row: dict, key: str):
-    """B4: raise `NotPublishableError`, naming the row and `key`, in place of
-    the bare `KeyError` (key absent -- a failed run's short row) or
-    `TypeError` (key present but `None` -- an inconsistent or merged run)
-    that dereferencing `row[key]` directly would produce deep inside
-    `median()`/`ecdf()`. See the module docstring."""
-    if key not in row:
-        raise NotPublishableError(
-            f"row ({_row_identity(row)}) has no {key!r} field -- route rows "
-            "through harness.publish.partition() with that field "
-            "in `required` before calling this figure"
-        )
-    val = row[key]
-    if val is None:
-        raise NotPublishableError(
-            f"row ({_row_identity(row)}) has {key!r} = None -- not publishable "
-            "for this figure; route rows through "
-            "harness.publish.partition() with that field in "
-            "`required` first"
-        )
-    return val
-
-
-def _validate_rows(rows) -> list[dict]:
-    """Fail loudly on the one input domain every figure shares: nothing to
-    plot. A copy is returned so callers get a stable list even if `rows`
-    was a generator (none of the figures consume `rows` more than once, but
-    this keeps that assumption from becoming load-bearing by accident)."""
-    rows = list(rows)
-    if not rows:
-        raise ValueError("rows must not be empty")
-    return rows
-
-
-def _by_arm(rows) -> dict[str, list[dict]]:
-    """Split rows by arm, requiring all of ARMS to be represented. Silently
-    skipping a missing arm (the plan's `if not rs: continue`) would drop
-    that arm's whole series from the chart with no indication anything was
-    wrong — a figure that quietly compares two arms instead of three is a
-    misleading chart, not a smaller one."""
-    rows = _validate_rows(rows)
-    by = {a: [r for r in rows if r["arm"] == a] for a in ARMS}
-    missing = [a for a in ARMS if not by[a]]
-    if missing:
-        raise ValueError(
-            f"no rows for arm(s) {missing}; refusing to silently drop "
-            f"{'an arm' if len(missing) == 1 else 'arms'} from the chart"
-        )
-    return by
 
 
 def _median_present(rs: list[dict], key: str) -> float | None:
@@ -209,7 +128,7 @@ def waterfall(rows, out_path) -> Path:
     sub-phases were merged into it rather than the chart silently being one
     bar short with no explanation.
     """
-    by = _by_arm(rows)
+    by = group_required(rows, "arm", ARMS)
     fig_w = 9.0
     fig, ax = plt.subplots(figsize=(fig_w, 7.0))
     labels, ys = [], []
@@ -226,8 +145,8 @@ def waterfall(rows, out_path) -> Path:
         rs = by[arm]
         labels.append(f"{ARM_LABEL[arm]}\n(n={len(rs)})")
         ys.append(i)
-        platform = median([_required_field(r, "t_platform") for r in rs])
-        process = median([_required_field(r, "t_process") for r in rs])
+        platform = median([required_field(r, "t_platform") for r in rs])
+        process = median([required_field(r, "t_process") for r in rs])
 
         # derive() returns t_weights=None when the engine did not delineate the
         # load boundary. Drawing a merged span as if it were T_weights would be
@@ -352,10 +271,10 @@ def waterfall(rows, out_path) -> Path:
 
 
 def warmup_curve(rows, out_path) -> Path:
-    by = _by_arm(rows)
+    by = group_required(rows, "arm", ARMS)
     all_rows = [r for rs in by.values() for r in rs]
 
-    lengths = {len(_required_field(r, "warmup")) for r in all_rows}
+    lengths = {len(required_field(r, "warmup")) for r in all_rows}
     if len(lengths) != 1:
         raise ValueError(
             f"warmup lists have mismatched lengths across rows: {sorted(lengths)}; "
@@ -550,12 +469,12 @@ def warmup_curve(rows, out_path) -> Path:
 
 
 def ecdf_plot(rows, out_path) -> Path:
-    by = _by_arm(rows)
+    by = group_required(rows, "arm", ARMS)
     fig_w = 8.0
     fig, ax = plt.subplots(figsize=(fig_w, 4.5))
     for arm in ARMS:
         rs = by[arm]
-        xs, ys = ecdf([_required_field(r, "t_total") for r in rs])
+        xs, ys = ecdf([required_field(r, "t_total") for r in rs])
         ax.step(xs, ys, where="post", label=f"{ARM_LABEL[arm]} (n={len(rs)})")
     ax.set_xlabel("T_total (s)", fontsize=phone_pt(8.2, fig_w))
     ax.set_ylabel("fraction of runs ≤ x", fontsize=phone_pt(8.2, fig_w))
@@ -577,11 +496,11 @@ def kv_dividend(rows, out_path) -> Path:
     43040/35792 is +20.3% (warm vs cold) while 35792/43040 is -16.8% (cold vs
     warm). A chart carrying one of them alone invites the other to be quoted.
     """
-    rows = _validate_rows(rows)
+    rows = validate_rows(rows)
     fig_w = 8.0
     fig, ax = plt.subplots(figsize=(fig_w, 4.3))
-    by = _by_arm(rows)
-    caps = {a: median([_required_field(r, "kv_capacity_tokens") for r in by[a]]) for a in ARMS}
+    by = group_required(rows, "arm", ARMS)
+    caps = {a: median([required_field(r, "kv_capacity_tokens") for r in by[a]]) for a in ARMS}
     cold, warm = caps["A"], caps["C"]
 
     ax.barh([0, 1], [cold, warm], height=0.45, color=["#9e9e9e", "#4a8c5f"])
@@ -631,12 +550,12 @@ def kv_dividend(rows, out_path) -> Path:
 
 
 def per_host_medians(rows, out_path) -> Path:
-    rows = _validate_rows(rows)
+    rows = validate_rows(rows)
     hosts = sorted({r["host_id"] for r in rows})
     fig_w = 8.0
     fig, ax = plt.subplots(figsize=(fig_w, 4.5))
     meds = [
-        median([_required_field(r, "t_total") for r in rows if r["host_id"] == h]) for h in hosts
+        median([required_field(r, "t_total") for r in rows if r["host_id"] == h]) for h in hosts
     ]
     counts = [sum(1 for r in rows if r["host_id"] == h) for h in hosts]
     ax.bar(range(len(hosts)), meds, width=0.5 if len(hosts) > 1 else 0.25)
