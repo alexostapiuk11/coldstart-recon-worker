@@ -372,7 +372,9 @@ def test_the_command_line_drives_the_whole_chain_and_passes_its_flags_on(
             "--store", str(tmp_path / "s.jsonl"), "--out", str(tmp_path / "c.json"), *flags]
     rss.main(argv)
     assert [p["diagnostics"] for p in payloads] == [bool(flags)] * 4
-    assert {tuple(p["serve_args"]) for p in payloads} == {("--max-num-seqs", "256")}
+    assert {tuple(p["serve_args"]) for p in payloads} == {
+        ("--max-num-seqs", "256", "--no-enable-prefix-caching")
+    }
     doc = json.loads((tmp_path / "c.json").read_text())
     assert doc["source"] == "runpod"
     assert [p[0] for p in doc["points"]] == [1, 2]
@@ -406,3 +408,129 @@ def test_reduce_only_rebuilds_the_curve_from_a_store_with_no_credentials_or_netw
     again = json.loads((tmp_path / "again.json").read_text())
     assert again["points"] == first["points"]
     assert again["levels"] == first["levels"]
+
+
+def _strip_source(tmp_path):
+    rows = _rows(tmp_path)
+    for r in rows:
+        r.pop("source", None)
+    (tmp_path / "sweep.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+
+def _reduce(tmp_path, *extra):
+    rss.main(["--reduce-only", "--levels", "1,2,4,8", "--store", str(tmp_path / "sweep.jsonl"),
+              "--out", str(tmp_path / "again.json"), *extra])
+    return json.loads((tmp_path / "again.json").read_text())
+
+
+def test_reducing_a_stub_store_labels_the_curve_stub(tmp_path):
+    _sweep(tmp_path, FakeEngine())
+    assert _reduce(tmp_path)["source"] == "stub"
+
+
+def test_a_source_flag_that_contradicts_the_stored_records_is_refused(tmp_path):
+    _sweep(tmp_path, FakeEngine())
+    with pytest.raises(SystemExit, match="stub") as e:
+        _reduce(tmp_path, "--source", "runpod")
+    assert "measured" in str(e.value)
+    assert not (tmp_path / "again.json").exists()
+
+
+def test_a_store_that_names_no_source_is_refused_without_an_explicit_one(tmp_path):
+    _sweep(tmp_path, FakeEngine())
+    _strip_source(tmp_path)
+    with pytest.raises(SystemExit, match="--source") as e:
+        _reduce(tmp_path)
+    assert "measured" in str(e.value), "the message must name the consequence"
+    assert not (tmp_path / "again.json").exists()
+    assert _reduce(tmp_path, "--source", "stub")["source"] == "stub"
+    assert _reduce(tmp_path, "--source", "runpod")["source"] == "runpod"
+
+
+def test_a_store_mixing_sources_is_refused(tmp_path):
+    _sweep(tmp_path, FakeEngine())
+    rows = _rows(tmp_path)
+    rows[0]["source"] = "runpod"
+    (tmp_path / "sweep.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    with pytest.raises(SystemExit, match="more than one"):
+        _reduce(tmp_path)
+    assert not (tmp_path / "again.json").exists()
+
+
+def test_the_default_serve_args_pin_prefix_caching_off_and_the_recorded_command_shows_it(
+    tmp_path,
+):
+    payloads = []
+    engine = FakeEngine()
+    _sweep(tmp_path, engine, submit_payload=_submitter(engine, payloads), serve_args=(),
+           levels=[1, 8], repeats=1, min_repeats=1)
+    assert {tuple(p["serve_args"]) for p in payloads} == {("--no-enable-prefix-caching",)}
+    for row in _rows(tmp_path):
+        assert "--no-enable-prefix-caching" in row["served_cmd"]
+    assert "--no-enable-prefix-caching" in json.loads((tmp_path / "curve.json").read_text())[
+        "serve_args"
+    ]
+
+
+def test_the_pin_is_added_beside_the_callers_serve_args_not_instead_of_them(tmp_path):
+    payloads = []
+    engine = FakeEngine()
+    _sweep(tmp_path, engine, submit_payload=_submitter(engine, payloads),
+           levels=[1, 8], repeats=1, min_repeats=1)
+    assert {tuple(p["serve_args"]) for p in payloads} == {
+        ("--max-num-seqs", "256", "--no-enable-prefix-caching")
+    }
+
+
+def test_a_caller_who_passes_the_pin_themselves_gets_it_once(tmp_path):
+    payloads = []
+    engine = FakeEngine()
+    _sweep(tmp_path, engine, submit_payload=_submitter(engine, payloads),
+           serve_args=["--no-enable-prefix-caching"], levels=[1, 8], repeats=1, min_repeats=1)
+    assert {tuple(p["serve_args"]) for p in payloads} == {("--no-enable-prefix-caching",)}
+
+
+def test_prefix_caching_on_by_request_is_kept_and_said_out_loud(tmp_path, capsys):
+    payloads = []
+    engine = FakeEngine()
+    doc = _sweep(tmp_path, engine, submit_payload=_submitter(engine, payloads),
+                 serve_args=["--enable-prefix-caching"], levels=[1, 8], repeats=1, min_repeats=1)
+    assert {tuple(p["serve_args"]) for p in payloads} == {("--enable-prefix-caching",)}
+    assert "--no-enable-prefix-caching" not in doc["serve_args"]
+    out = capsys.readouterr().out
+    assert "prefix caching is ON by request" in out
+    assert "exact-prompt and random-fallback" in out, "the line must name the consequence"
+
+
+def test_the_pin_reaches_the_engine_through_the_command_line(monkeypatch, tmp_path):
+    engine = FakeEngine()
+    payloads = []
+    monkeypatch.setenv("RUNPOD_API_KEY", FAKE_KEY)
+    monkeypatch.setenv("RUNPOD_SWEEP_ENDPOINT_ID", "ep")
+    monkeypatch.setattr(rss, "fetch_endpoint", lambda ep, key: rss.sweep_pins("tmpl"))
+    monkeypatch.setattr(rss, "HttpTransport", lambda ep, key: (ep, key))
+    monkeypatch.setattr(
+        rss, "RunPodSubmitter", lambda transport: type(
+            "S", (), {"submit_payload": staticmethod(_submitter(engine, payloads))}
+        )()
+    )
+    rss.main(["--template-id", "tmpl", "--levels", "1,2", "--seed", "5", "--repeats", "1",
+              "--min-repeats", "1", "--serve-args=--enable-prefix-caching",
+              "--store", str(tmp_path / "s.jsonl"), "--out", str(tmp_path / "c.json")])
+    assert {tuple(p["serve_args"]) for p in payloads} == {("--enable-prefix-caching",)}
+
+
+def test_both_prefix_caching_flags_together_are_refused_before_any_job(tmp_path):
+    def spy(payload):
+        raise AssertionError("a contradictory serve-args list submitted a job")
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        _sweep(tmp_path, FakeEngine(), submit_payload=spy,
+               serve_args=["--enable-prefix-caching", "--no-enable-prefix-caching"])
+
+
+def test_source_is_only_for_reduce_only_a_paid_run_is_always_runpod(monkeypatch):
+    monkeypatch.setenv("RUNPOD_API_KEY", FAKE_KEY)
+    monkeypatch.setenv("RUNPOD_SWEEP_ENDPOINT_ID", "ep")
+    with pytest.raises(SystemExit):
+        rss.main(["--template-id", "tmpl", "--source", "stub", "--levels", "1,2"])

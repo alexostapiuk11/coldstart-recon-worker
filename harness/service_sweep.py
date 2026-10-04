@@ -162,6 +162,11 @@ class SweepRun:
     clock_C: dict = field(default_factory=dict)
     status: dict = field(default_factory=dict)
     diagnostics: dict = field(default_factory=dict)
+    # "runpod" or "stub", as the driver that ran the campaign named it; None on
+    # a store written before this field existed. A record carries its own
+    # source so a later `--reduce-only` can refuse to label a stub curve as
+    # measured instead of trusting a flag typed at the time.
+    source: str | None = None
     schema_version: int = SCHEMA_VERSION
 
     def to_dict(self) -> dict:
@@ -176,11 +181,31 @@ def _failed_status(detail: str) -> dict:
     return {"failure_class": classify_failure(detail).value, "failure_detail": detail}
 
 
+# What the handler reports about its own log cap (worker/sweep_handler.py
+# `capped_log`). Stored beside `log_lines` so a reader of a record can tell an
+# 800-line head-and-tail from a whole log.
+_LOG_CAP_KEYS = ("log_lines_total", "log_truncated", "log_head_lines")
+
+
 def _engine_of(output: dict) -> dict:
-    return {**(output.get("engine") or {}), "log_lines": list(output.get("log_lines") or [])}
+    """The engine facts plus the (capped) log and what the cap did to it.
+
+    A handler output without the cap fields (an older handler) stores them as
+    None, not as `False` / `len(log_lines)`: those would claim the log was
+    complete, which nothing in that output says. The alternative of leaving
+    the keys out was rejected so every record has the same shape and "unknown"
+    is distinguishable from "forgot to store".
+    """
+    return {
+        **(output.get("engine") or {}),
+        "log_lines": list(output.get("log_lines") or []),
+        **{key: output.get(key) for key in _LOG_CAP_KEYS},
+    }
 
 
-def build_sweep_record(scheduled: ScheduledRun, run_id: str, outcome) -> SweepRun:
+def build_sweep_record(
+    scheduled: ScheduledRun, run_id: str, outcome, *, source: str | None = None
+) -> SweepRun:
     """The `build_record` callback for `harness.campaign.run_campaign`.
 
     Three outcomes. The job failed or the engine never became healthy: stored
@@ -189,6 +214,10 @@ def build_sweep_record(scheduled: ScheduledRun, run_id: str, outcome) -> SweepRu
     worker returns `healthy: True` -- that field means the engine answered
     `/health`, which is all `RunPodSubmitter` checks -- with `run: None` and a
     `run_error`; stored failed with that error. Otherwise stored ok.
+
+    `source` ("runpod" / "stub") goes on every record, failed ones too, so a
+    store can say where it came from without a flag that someone must remember
+    to repeat at reduction time.
     """
     level = level_of(scheduled.condition)
     base = {
@@ -198,6 +227,7 @@ def build_sweep_record(scheduled: ScheduledRun, run_id: str, outcome) -> SweepRu
         "level": level,
         "repeat": scheduled.block_index,
         "clock_A": dict(outcome.clock_A),
+        "source": source,
     }
     if outcome.error is not None:
         diag = outcome.diagnostics or {}

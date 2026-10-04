@@ -17,6 +17,20 @@ interrupted campaign with the same --levels/--repeats/--seed. The curve is
 written as plain tuples plus per-level intervals; artifact 2 turns it into a
 `ServiceCurve` with scripts/a2_service_curve.py.
 
+`--reduce-only` labels the curve with the `source` its stored runs carry
+("runpod" or "stub"). A store written before runs carried one needs an explicit
+`--source {runpod,stub}`; without it the reduction refuses, because a guessed
+label could present a stub curve as measured. A `--source` that contradicts
+what the runs carry is refused too.
+
+Prefix caching is pinned off (`--no-enable-prefix-caching`) in every job's
+serve args. Artifact 5's amendment (3g) disables it, and the two artifacts
+share a failure rule so their latencies mean the same thing; with it off, the
+exact-prompt path and the random-fallback path measure the same workload
+whatever the prompt's token count. Pass `--serve-args=--enable-prefix-caching`
+(with the `=`: argparse reads a bare leading `--` value as a flag) to turn it
+on; the pin is then not added and the script says so.
+
 `--preflight-only` makes one GET (the endpoint's configuration) and nothing
 else: no job is submitted and no store is opened.
 
@@ -42,6 +56,7 @@ import json
 import os
 import shlex
 import sys
+from functools import partial
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -83,6 +98,15 @@ SWEEP_PINNED_BASE = {
 }
 
 
+# vLLM 0.27.1's `engine/arg_utils.py` declares `enable_prefix_caching` as
+# `bool | None`, which its kwargs builder turns into
+# `argparse.BooleanOptionalAction`: `--enable-prefix-caching` and
+# `--no-enable-prefix-caching` (checked against the v0.27.1 tag's source).
+PREFIX_CACHING_OFF = "--no-enable-prefix-caching"
+PREFIX_CACHING_ON = "--enable-prefix-caching"
+SOURCES = ("runpod", "stub")
+
+
 def sweep_pins(template_id: str) -> dict:
     """The pin set for one sweep, with the template the caller provisioned.
 
@@ -97,6 +121,31 @@ def sweep_pins(template_id: str) -> dict:
             "endpoint running any image and any start command"
         )
     return {**SWEEP_PINNED_BASE, "templateId": template_id}
+
+
+def pin_prefix_caching(serve_args) -> list[str]:
+    """The caller's serve args with prefix caching pinned off unless asked on.
+
+    Appended to the list the job payload carries, so it reaches the recorded
+    serve command, which the reducer compares across runs: a run with caching
+    on cannot be pooled with runs that had it off. Left to vLLM's own default
+    (on for this model) the exact-prompt path would serve every request after
+    the first largely from cache while the random-fallback path would not, so
+    the curve's meaning would depend on a path the caller never chose.
+
+    Both flags together are refused, not resolved by argparse's last-wins:
+    the recorded command would then show the opposite of what the caller most
+    likely meant.
+    """
+    args = list(serve_args)
+    on, off = PREFIX_CACHING_ON in args, PREFIX_CACHING_OFF in args
+    if on and off:
+        raise ValueError(
+            f"serve args carry both {PREFIX_CACHING_ON} and {PREFIX_CACHING_OFF}; the "
+            "engine would take whichever came last and the recorded command would be "
+            "ambiguous about which workload was measured. Pass one"
+        )
+    return args if on or off else [*args, PREFIX_CACHING_OFF]
 
 
 def run_sweep(
@@ -126,6 +175,14 @@ def run_sweep(
     """
     schedule = sweep_schedule(levels, repeats=repeats, seed=seed)
     store = JsonlStore(store_path, SweepRun)
+    serve_args = pin_prefix_caching(serve_args)
+    if PREFIX_CACHING_ON in serve_args:
+        print(
+            "[serve-args] prefix caching is ON by request; the exact-prompt and "
+            "random-fallback paths then measure different workloads, and this curve's "
+            "latencies no longer mean what artifact 5's (caching off) do",
+            flush=True,
+        )
 
     def submit(scheduled, run_id):
         return submit_payload(
@@ -145,7 +202,7 @@ def run_sweep(
     run_campaign(
         schedule,
         submit,
-        build_sweep_record,
+        partial(build_sweep_record, source=source),
         store,
         index_of=lambda r: r.run_index,
         condition_of=lambda r: r.condition,
@@ -177,6 +234,45 @@ def reduce_store(store_path, out_path, *, min_repeats: int, meta: dict) -> dict:
     return doc
 
 
+def source_for_reduction(records, explicit: str | None) -> str:
+    """The `source` a reduced curve may carry, from what its runs say about themselves.
+
+    The runs carry the label the driver gave them. A caller's flag cannot
+    override it: reducing a stub store with `--source runpod` would put a
+    stub curve downstream as measured. A store with no label (written before
+    runs carried one) gets the caller's, because there is nothing else to go
+    on, and refuses without it.
+    """
+    stored = {r.source for r in records}
+    named = stored - {None}
+    if len(named) > 1 or (named and None in stored):
+        raise SystemExit(
+            f"the store's runs carry sources {sorted(named)} and "
+            f"{'some carry none' if None in stored else 'no other'}; it holds more than "
+            "one campaign or a hand-edited run, and one label over all of it could "
+            "present stub runs as measured. Reduce each campaign from its own store"
+        )
+    if named:
+        (label,) = named
+        if explicit is not None and explicit != label:
+            raise SystemExit(
+                f"--source {explicit} contradicts the store, whose runs say {label!r}; "
+                + (
+                    "labelling stub runs 'runpod' would present a stub curve as measured"
+                    if label == "stub"
+                    else "labelling measured runs 'stub' would discard a real measurement"
+                )
+            )
+        return label
+    if explicit is None:
+        raise SystemExit(
+            "the store's runs do not say where they came from, so --reduce-only needs an "
+            "explicit --source {runpod,stub}; a guessed label could present a stub curve "
+            "as measured"
+        )
+    return explicit
+
+
 def _levels(text: str) -> list[int]:
     return [int(part) for part in text.split(",") if part.strip()]
 
@@ -206,18 +302,25 @@ def main(argv=None) -> None:
                     help="first paid run only: in-container checks and the raw bench JSON")
     ap.add_argument("--preflight-only", action="store_true")
     ap.add_argument("--reduce-only", action="store_true")
+    ap.add_argument(
+        "--source", choices=SOURCES,
+        help="--reduce-only on a store whose runs do not record their source",
+    )
     args = ap.parse_args(argv)
 
     if args.reduce_only:
         if not (args.store and args.out):
             ap.error("--reduce-only needs --store and --out")
-        meta = {"source": "runpod"}
+        records = JsonlStore(args.store, SweepRun).read_all()
+        meta = {"source": source_for_reduction(records, args.source)}
         if args.levels:
             meta["levels_requested"] = args.levels
         reduce_store(args.store, args.out, min_repeats=args.min_repeats, meta=meta)
         print(f"[reduce] wrote {args.out}", flush=True)
         return
 
+    if args.source is not None:
+        ap.error("--source only applies to --reduce-only; a paid run is always 'runpod'")
     key, endpoint_id = _require("RUNPOD_API_KEY"), _require("RUNPOD_SWEEP_ENDPOINT_ID")
     # Built before the GET, so a missing template id is refused without a request.
     pins = sweep_pins(args.template_id)

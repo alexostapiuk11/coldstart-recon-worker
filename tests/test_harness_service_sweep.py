@@ -107,6 +107,64 @@ def test_an_ok_job_becomes_an_ok_record_with_the_curve_fields_on_top():
     assert SweepRun.from_dict(json.loads(json.dumps(rec.to_dict()))) == rec
 
 
+def test_a_truncated_log_is_recorded_as_truncated_with_its_true_total():
+    """The handler keeps a head and a tail of the engine log. A record that kept
+    only the lines would show 800 of 2000 with no sign the middle was cut."""
+    out = _ok_output(
+        log_lines=["head"] * 400 + ["tail"] * 400,
+        log_lines_total=2000, log_truncated=True, log_head_lines=400,
+    )
+    rec = build_sweep_record(
+        ScheduledRun(5, 1, "c8"), "rid", SubmitOutcome(clock_A=CLOCK_A, payload=out, error=None)
+    )
+    assert rec.engine["log_truncated"] is True
+    assert rec.engine["log_lines_total"] == 2000
+    assert rec.engine["log_head_lines"] == 400
+    assert len(rec.engine["log_lines"]) == 800
+
+
+def test_a_failed_job_keeps_the_log_cap_flags_too():
+    diag = {
+        "healthy": False, "log_lines": ["x"] * 800, "served_cmd": ["vllm"],
+        "log_lines_total": 5000, "log_truncated": True, "log_head_lines": 400,
+    }
+    rec = build_sweep_record(
+        ScheduledRun(0, 0, "c1"), "rid",
+        SubmitOutcome(clock_A=CLOCK_A, payload=None, error=UNHEALTHY_ERROR, diagnostics=diag),
+    )
+    assert (rec.engine["log_truncated"], rec.engine["log_lines_total"]) == (True, 5000)
+
+
+def test_an_untruncated_log_says_so():
+    out = _ok_output(log_lines_total=1, log_truncated=False, log_head_lines=1)
+    rec = build_sweep_record(
+        ScheduledRun(5, 1, "c8"), "rid", SubmitOutcome(clock_A=CLOCK_A, payload=out, error=None)
+    )
+    assert rec.engine["log_truncated"] is False
+    assert rec.engine["log_lines_total"] == 1
+
+
+def test_an_older_handler_output_stores_the_cap_flags_as_none_not_invented_values():
+    """No `log_*` flags in the output: whether the log was cut is unknown, and a
+    stored False or a total of len(log_lines) would claim it was not."""
+    rec = build_sweep_record(
+        ScheduledRun(5, 1, "c8"), "rid",
+        SubmitOutcome(clock_A=CLOCK_A, payload=_ok_output(), error=None),
+    )
+    for key in ("log_truncated", "log_lines_total", "log_head_lines"):
+        assert key in rec.engine and rec.engine[key] is None
+
+
+def test_the_source_is_stored_on_the_record_when_the_driver_names_one():
+    """A stub record must say it is a stub on its own, so a later reduction
+    cannot be talked into labelling it measured."""
+    ok = SubmitOutcome(clock_A=CLOCK_A, payload=_ok_output(), error=None)
+    assert build_sweep_record(ScheduledRun(5, 1, "c8"), "rid", ok, source="stub").source == "stub"
+    assert build_sweep_record(ScheduledRun(5, 1, "c8"), "rid", ok).source is None
+    failed = SubmitOutcome(clock_A=CLOCK_A, payload=None, error=UNHEALTHY_ERROR, diagnostics={})
+    assert build_sweep_record(ScheduledRun(0, 0, "c1"), "rid", failed, source="runpod").source == "runpod"
+
+
 def test_diagnostics_are_carried_into_the_record_when_the_worker_sends_them():
     out = _ok_output(diagnostics={"pandas_importable": False})
     rec = build_sweep_record(
