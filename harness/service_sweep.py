@@ -319,8 +319,10 @@ def reduce_curve(
     result would not be one replica's curve: no successful run; two
     successful runs at one (level, repeat), which means two campaigns share a
     store; runs that took different prompt paths or ran different serve
-    commands; a run with no GPU utilisation (the curve has no honest value to
-    put there); a level with fewer than `min_repeats` successful runs; a
+    commands; runs whose GPU utilisation was measured by different methods (a
+    windowed median for some, the whole-call median for others, or a record
+    that never said which); a run with no GPU utilisation (the curve has no
+    honest value to put there); a level with fewer than `min_repeats` successful runs; a
     requested level absent from the store; fewer than two levels.
     """
     records = list(records)
@@ -348,6 +350,24 @@ def reduce_curve(
         raise ValueError(
             f"successful runs used {len(commands)} different serve commands; a curve "
             "from differently configured engines is not one replica's curve"
+        )
+    # `gpu_util_windowed` is True when the figure is the median over the
+    # measured span, False when it fell back to the whole-call median (idle
+    # startup and teardown included), and absent on a record written before the
+    # field existed. Absent is "unknown", a third value, not a guess at either:
+    # an older run could have been either, so it cannot be pooled with a known
+    # one. Pooling was rejected over refusing because the median of the two
+    # kinds is a number that belongs to neither statistic.
+    methods = {r.summary.get("gpu_util_windowed") for r in ok}
+    if len(methods) > 1:
+        described = sorted("unrecorded" if m is None else ("windowed" if m else "whole-call")
+                           for m in methods)
+        raise ValueError(
+            f"successful runs measured GPU utilisation by different methods {described}; "
+            "the curve's utilisation column would mix two measurements (a median over "
+            "the measured span and a median that includes idle startup and teardown) "
+            "under one label. Re-run the runs that differ, in a new campaign and store, "
+            "so every run in a curve used one method"
         )
     no_util = [r.run_id for r in ok if r.gpu_util is None]
     if no_util:

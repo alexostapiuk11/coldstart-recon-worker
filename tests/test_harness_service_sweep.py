@@ -205,15 +205,20 @@ def test_an_answer_for_another_run_is_refused():
         )
 
 
+_NO_FIELD = object()
+
+
 def _rec(level, repeat, *, latency=0.5, tps=32.0, util=0.4, path="exact", outcome="ok",
-         cmd=("vllm", "serve", "m"), mns=256):
+         cmd=("vllm", "serve", "m"), mns=256, windowed=_NO_FIELD):
     ok = outcome == "ok"
+    summary = {} if windowed is _NO_FIELD else {"gpu_util_windowed": windowed}
     return SweepRun(
         run_id=f"r{level}-{repeat}", run_index=0, condition=condition_for(level), level=level,
         repeat=repeat, outcome=outcome,
         latency_s=latency if ok else None, ttft_median_s=0.05 if ok else None,
         throughput_tps=tps if ok else None, gpu_util=util if ok else None,
         prompt_path=path if ok else None, served_cmd=list(cmd),
+        summary=summary,
         engine={"max_num_seqs": mns, "kv_capacity_tokens": 35792},
     )
 
@@ -259,6 +264,33 @@ def test_mixed_serve_commands_are_refused():
     records = _three(1, [0.3] * 3) + _three(2, [0.4] * 3, cmd=("vllm", "serve", "other"))
     with pytest.raises(ValueError, match="serve commands"):
         reduce_curve(records)
+
+
+def test_mixed_gpu_utilisation_methods_are_refused():
+    records = _three(1, [0.3] * 3, windowed=True) + _three(2, [0.4] * 3, windowed=True)
+    assert reduce_curve(records).levels[0]["n_runs"] == 3, "all windowed is one method"
+    records[3].summary["gpu_util_windowed"] = False
+    with pytest.raises(ValueError, match="would mix two measurements"):
+        reduce_curve(records)
+
+
+def test_a_run_that_never_says_how_its_utilisation_was_measured_is_not_pooled_with_ones_that_do():
+    older = _three(1, [0.3] * 3)  # no gpu_util_windowed in the summary: unknown
+    newer = _three(2, [0.4] * 3, windowed=False)
+    with pytest.raises(ValueError, match="would mix two measurements"):
+        reduce_curve(older + newer)
+    with pytest.raises(ValueError, match="would mix two measurements"):
+        reduce_curve(_three(2, [0.4] * 3, windowed=True) + older)
+    assert reduce_curve(older + _three(2, [0.4] * 3)).levels[1]["n_runs"] == 3, (
+        "an all-unknown store (written before the field existed) is one method, not a mix"
+    )
+    assert reduce_curve(_three(1, [0.3] * 3, windowed=False) + newer).levels[1]["n_runs"] == 3
+
+
+def test_a_failed_run_does_not_count_towards_the_utilisation_methods():
+    records = _three(1, [0.3] * 3, windowed=True) + _three(2, [0.4] * 3, windowed=True)
+    records.append(_rec(2, 3, outcome="failed", windowed=False))
+    assert reduce_curve(records).levels[1]["n_failed"] == 1
 
 
 def test_a_missing_utilisation_is_refused_rather_than_invented():

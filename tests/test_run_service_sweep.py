@@ -326,6 +326,7 @@ def test_a_drifted_endpoint_is_refused_before_any_job(monkeypatch, tmp_path):
     monkeypatch.setattr(rss, "RunPodSubmitter", lambda *a, **k: built.append(a))
     with pytest.raises(PreflightError, match="executionTimeoutMs"):
         rss.main(["--template-id", "tmpl", "--levels", "1,2", "--seed", "1",
+                  "--serve-args", "--max-num-seqs 256",
                   "--store", str(tmp_path / "s.jsonl"), "--out", str(tmp_path / "c.json")])
     assert built == [], "a submitter was built for a drifted endpoint"
     assert not (tmp_path / "s.jsonl").exists()
@@ -393,7 +394,7 @@ def test_a_paid_run_without_its_required_arguments_refuses_after_the_free_prefli
     monkeypatch.setenv("RUNPOD_SWEEP_ENDPOINT_ID", "ep")
     monkeypatch.setattr(rss, "fetch_endpoint", lambda ep, key: rss.sweep_pins("tmpl"))
     with pytest.raises(SystemExit):
-        rss.main(["--template-id", "tmpl", "--levels", "1,2"])
+        rss.main(["--template-id", "tmpl", "--levels", "1,2", "--serve-args", "--max-num-seqs 8"])
 
 
 def test_reduce_only_rebuilds_the_curve_from_a_store_with_no_credentials_or_network(
@@ -457,6 +458,20 @@ def test_a_store_mixing_sources_is_refused(tmp_path):
     assert not (tmp_path / "again.json").exists()
 
 
+def test_reduce_only_goes_through_the_same_utilisation_refusal(tmp_path):
+    """`--reduce-only` calls `reduce_curve` like the end of a paid run, so a
+    store whose runs measured utilisation two ways is refused there too, and no
+    curve is written."""
+    _sweep(tmp_path, FakeEngine())
+    rows = _rows(tmp_path)
+    assert {r["summary"]["gpu_util_windowed"] for r in rows} == {True}
+    rows[0]["summary"]["gpu_util_windowed"] = False
+    (tmp_path / "sweep.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    with pytest.raises(ValueError, match="would mix two measurements"):
+        _reduce(tmp_path)
+    assert not (tmp_path / "again.json").exists()
+
+
 def test_the_default_serve_args_pin_prefix_caching_off_and_the_recorded_command_shows_it(
     tmp_path,
 ):
@@ -515,9 +530,11 @@ def test_the_pin_reaches_the_engine_through_the_command_line(monkeypatch, tmp_pa
         )()
     )
     rss.main(["--template-id", "tmpl", "--levels", "1,2", "--seed", "5", "--repeats", "1",
-              "--min-repeats", "1", "--serve-args=--enable-prefix-caching",
+              "--min-repeats", "1", "--serve-args=--enable-prefix-caching --max-num-seqs 256",
               "--store", str(tmp_path / "s.jsonl"), "--out", str(tmp_path / "c.json")])
-    assert {tuple(p["serve_args"]) for p in payloads} == {("--enable-prefix-caching",)}
+    assert {tuple(p["serve_args"]) for p in payloads} == {
+        ("--enable-prefix-caching", "--max-num-seqs", "256")
+    }
 
 
 def test_both_prefix_caching_flags_together_are_refused_before_any_job(tmp_path):
@@ -534,3 +551,104 @@ def test_source_is_only_for_reduce_only_a_paid_run_is_always_runpod(monkeypatch)
     monkeypatch.setenv("RUNPOD_SWEEP_ENDPOINT_ID", "ep")
     with pytest.raises(SystemExit):
         rss.main(["--template-id", "tmpl", "--source", "stub", "--levels", "1,2"])
+
+
+# --- the max_num_seqs pin cannot be forgotten --------------------------------------
+
+
+def _paid_cli(monkeypatch, tmp_path, *extra, get_allowed=True):
+    """Run `main` as a paid run against a fake endpoint. Returns (payloads, calls):
+    the jobs submitted and the network-side steps taken, so a refusal can be
+    shown to have come before any of them."""
+    engine = FakeEngine()
+    payloads, calls = [], []
+    monkeypatch.setenv("RUNPOD_API_KEY", FAKE_KEY)
+    monkeypatch.setenv("RUNPOD_SWEEP_ENDPOINT_ID", "ep")
+
+    def fetch(ep, key):
+        assert get_allowed, "the endpoint was queried before the refusal"
+        calls.append("GET")
+        return rss.sweep_pins("tmpl")
+
+    monkeypatch.setattr(rss, "fetch_endpoint", fetch)
+    monkeypatch.setattr(rss, "HttpTransport", lambda ep, key: (ep, key))
+    monkeypatch.setattr(
+        rss, "RunPodSubmitter", lambda transport: type(
+            "S", (), {"submit_payload": staticmethod(_submitter(engine, payloads))}
+        )()
+    )
+    rss.main(["--template-id", "tmpl", "--levels", "1,2", "--seed", "5", "--repeats", "1",
+              "--min-repeats", "1", "--store", str(tmp_path / "s.jsonl"),
+              "--out", str(tmp_path / "c.json"), *extra])
+    return payloads, calls
+
+
+@pytest.mark.parametrize(
+    "serve_args",
+    [[], ["--serve-args=--enable-log-requests"], ["--serve-args=--max-num-seqs"],
+     ["--serve-args=--max-num-seqs --enable-log-requests"],
+     ["--serve-args=--max-num-seqs=abc"], ["--serve-args=--max-num-batched-tokens 256"]],
+    ids=["absent", "other-flag", "no-value", "value-is-a-flag", "not-a-number", "similar-flag"],
+)
+def test_a_paid_run_without_an_explicit_max_num_seqs_refuses_before_any_request(
+    monkeypatch, tmp_path, capsys, serve_args
+):
+    with pytest.raises(SystemExit) as refusal:
+        _paid_cli(monkeypatch, tmp_path, *serve_args, get_allowed=False)
+    message = str(refusal.value)
+    assert "--max-num-seqs" in message
+    assert (
+        "the engine logs its default only at DEBUG, so the curve could not record the "
+        "binding concurrency limit, and artifact 2's adapter would refuse it after the "
+        "sweep was paid for"
+    ) in message
+    assert "--unrecorded-max-num-seqs" in message, "the way out is named"
+    assert not (tmp_path / "s.jsonl").exists(), "nothing was stored"
+    assert "[preflight]" not in capsys.readouterr().out, "the refusal came before the GET"
+
+
+def test_the_refusal_comes_before_the_credentials_are_even_read(monkeypatch, tmp_path):
+    monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
+    monkeypatch.delenv("RUNPOD_SWEEP_ENDPOINT_ID", raising=False)
+    with pytest.raises(SystemExit, match="--max-num-seqs"):
+        rss.main(["--template-id", "tmpl", "--levels", "1,2", "--seed", "5",
+                  "--store", str(tmp_path / "s.jsonl"), "--out", str(tmp_path / "c.json")])
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    ["--max-num-seqs 256", "--max-num-seqs=256", "--max_num_seqs 256", "--max_num_seqs=256"],
+)
+def test_an_explicit_max_num_seqs_in_any_spelling_the_engine_takes_lets_the_run_start(
+    monkeypatch, tmp_path, spelling
+):
+    payloads, calls = _paid_cli(monkeypatch, tmp_path, f"--serve-args={spelling}")
+    assert calls == ["GET"] and len(payloads) == 2
+
+
+def test_the_escape_flag_lets_an_unpinned_run_start_and_says_what_it_costs(
+    monkeypatch, tmp_path, capsys
+):
+    payloads, calls = _paid_cli(monkeypatch, tmp_path, "--unrecorded-max-num-seqs")
+    out = capsys.readouterr().out
+    assert len(payloads) == 2 and calls == ["GET"], "the run went ahead"
+    assert "--max-num-seqs" not in {a for p in payloads for a in p["serve_args"]}
+    assert "[max-num-seqs]" in out
+    assert "artifact 2's adapter will refuse this curve" in out, "the line names the consequence"
+
+
+def test_the_escape_flag_is_silent_when_the_pin_is_there(monkeypatch, tmp_path, capsys):
+    _paid_cli(monkeypatch, tmp_path, "--serve-args=--max-num-seqs 256",
+              "--unrecorded-max-num-seqs")
+    assert "[max-num-seqs]" not in capsys.readouterr().out
+
+
+def test_preflight_only_and_reduce_only_need_no_max_num_seqs(monkeypatch, tmp_path):
+    """Neither spends: `--preflight-only` is one GET and `--reduce-only` reads
+    a store, so a pin they would not use must not be demanded of them."""
+    monkeypatch.setenv("RUNPOD_API_KEY", FAKE_KEY)
+    monkeypatch.setenv("RUNPOD_SWEEP_ENDPOINT_ID", "ep")
+    monkeypatch.setattr(rss, "fetch_endpoint", lambda ep, key: rss.sweep_pins("tmpl"))
+    rss.main(["--preflight-only", "--template-id", "tmpl", "--serve-args=--enable-log-requests"])
+    _sweep(tmp_path, FakeEngine())
+    assert _reduce(tmp_path, "--serve-args=--enable-log-requests")["source"] == "stub"

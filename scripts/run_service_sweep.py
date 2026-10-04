@@ -31,6 +31,14 @@ whatever the prompt's token count. Pass `--serve-args=--enable-prefix-caching`
 (with the `=`: argparse reads a bare leading `--` value as a flag) to turn it
 on; the pin is then not added and the script says so.
 
+A paid run refuses to start unless `--serve-args` carries an explicit
+`--max-num-seqs N`: vLLM logs the default it would otherwise choose only at
+DEBUG, so the curve could not record the binding concurrency limit and
+scripts/a2_service_curve.py would refuse it after the sweep was paid for.
+`--unrecorded-max-num-seqs` runs without the pin anyway and prints that
+consequence; it is for a caller who knowingly wants a curve artifact 2 cannot
+use. `--preflight-only` and `--reduce-only` spend nothing and are not checked.
+
 `--preflight-only` makes one GET (the endpoint's configuration) and nothing
 else: no job is submitted and no store is opened.
 
@@ -54,6 +62,7 @@ measured and is not; the estimate belongs to the owner's paid-run checklist
 import argparse
 import json
 import os
+import re
 import shlex
 import sys
 from functools import partial
@@ -106,6 +115,11 @@ PREFIX_CACHING_OFF = "--no-enable-prefix-caching"
 PREFIX_CACHING_ON = "--enable-prefix-caching"
 SOURCES = ("runpod", "stub")
 
+# `--max-num-seqs N` or `--max-num-seqs=N`, with either dash style (vLLM's
+# parser accepts underscores). A bare flag, a flag followed by another flag,
+# and a non-integer do not count: the engine would not take them as a value.
+_MAX_NUM_SEQS_PIN = re.compile(r"--max[-_]num[-_]seqs(?:=|\s+)\d+(?:\s|$)")
+
 
 def sweep_pins(template_id: str) -> dict:
     """The pin set for one sweep, with the template the caller provisioned.
@@ -121,6 +135,17 @@ def sweep_pins(template_id: str) -> dict:
             "endpoint running any image and any start command"
         )
     return {**SWEEP_PINNED_BASE, "templateId": template_id}
+
+
+def has_explicit_max_num_seqs(serve_args) -> bool:
+    """Whether the serve args carry `--max-num-seqs N` with an integer N.
+
+    Checked on the joined args, not token by token, so the `=` spelling and
+    the two-token spelling go through one pattern. A token-wise check was
+    rejected: it would accept `--max-num-seqs --enable-log-requests`, where the
+    engine's parser would swallow the next flag as the value or refuse.
+    """
+    return bool(_MAX_NUM_SEQS_PIN.search(" ".join(serve_args)))
 
 
 def pin_prefix_caching(serve_args) -> list[str]:
@@ -301,6 +326,11 @@ def main(argv=None) -> None:
     ap.add_argument("--diagnostics", action="store_true",
                     help="first paid run only: in-container checks and the raw bench JSON")
     ap.add_argument("--preflight-only", action="store_true")
+    ap.add_argument(
+        "--unrecorded-max-num-seqs", action="store_true",
+        help="run a paid sweep without --max-num-seqs in --serve-args; artifact 2's adapter "
+        "will refuse the curve",
+    )
     ap.add_argument("--reduce-only", action="store_true")
     ap.add_argument(
         "--source", choices=SOURCES,
@@ -321,6 +351,22 @@ def main(argv=None) -> None:
 
     if args.source is not None:
         ap.error("--source only applies to --reduce-only; a paid run is always 'runpod'")
+    serve_args = shlex.split(args.serve_args)
+    if not args.preflight_only and not has_explicit_max_num_seqs(serve_args):
+        if not args.unrecorded_max_num_seqs:
+            raise SystemExit(
+                "a paid run needs an explicit --max-num-seqs N in --serve-args (for example "
+                '--serve-args "--max-num-seqs 256"): the engine logs its default only at '
+                "DEBUG, so the curve could not record the binding concurrency limit, and "
+                "artifact 2's adapter would refuse it after the sweep was paid for. Pass the "
+                "pin, or --unrecorded-max-num-seqs to run without it knowingly"
+            )
+        print(
+            "[max-num-seqs] --unrecorded-max-num-seqs: no --max-num-seqs in the serve args, "
+            "so the engine's INFO log will not carry the limit and artifact 2's adapter "
+            "will refuse this curve; the sweep's own numbers are unaffected",
+            flush=True,
+        )
     key, endpoint_id = _require("RUNPOD_API_KEY"), _require("RUNPOD_SWEEP_ENDPOINT_ID")
     # Built before the GET, so a missing template id is refused without a request.
     pins = sweep_pins(args.template_id)
@@ -348,7 +394,7 @@ def main(argv=None) -> None:
         seed=args.seed,
         source="runpod",
         repeats=args.repeats,
-        serve_args=shlex.split(args.serve_args),
+        serve_args=serve_args,
         waves=args.waves,
         min_prompts=args.min_prompts,
         min_repeats=args.min_repeats,
