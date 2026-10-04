@@ -1,0 +1,562 @@
+{
+ "excluded_levels": [
+  {
+   "concurrency": 256,
+   "failure_details": [
+    "ValueError: no request succeeded (5120 failed); this run has no latency, and storing it as ok would put a point on the curve that was never measured"
+   ],
+   "n_failed": 3,
+   "n_runs": 3,
+   "reason": "engine died of CUDA out-of-memory at its first step with 256 requests running (EngineDeadError); 0 of 5120 requests served, in 3 of 3 runs",
+   "run_ids": [
+    "f0cc7e1a10dc46208fd3803b0c863120",
+    "49d1fef6c2014e4682b9cdaa05de48dd",
+    "93c7a766ccce4b4b876a983808239e31"
+   ]
+  }
+ ],
+ "gpu_util_method": "windowed",
+ "intervals": [
+  {
+   "concurrency": 1,
+   "gpu_util_range": [
+    1,
+    1
+   ],
+   "latency_s_range": [
+    0.2840092374244705,
+    0.2841339400038123
+   ],
+   "throughput_tps_range": [
+    56.249705503343215,
+    56.289665796542174
+   ],
+   "ttft_median_s_range": [
+    0.026372001506388187,
+    0.026564814033918083
+   ]
+  },
+  {
+   "concurrency": 2,
+   "gpu_util_range": [
+    1,
+    1
+   ],
+   "latency_s_range": [
+    0.3059882720699534,
+    0.3073273474583402
+   ],
+   "throughput_tps_range": [
+    103.75155884050433,
+    104.42740383826813
+   ],
+   "ttft_median_s_range": [
+    0.04851958097424358,
+    0.049584613530896604
+   ]
+  },
+  {
+   "concurrency": 4,
+   "gpu_util_range": [
+    0.995,
+    1
+   ],
+   "latency_s_range": [
+    0.3081453079357743,
+    0.32073063496500254
+   ],
+   "throughput_tps_range": [
+    199.52610942583996,
+    207.0501381916278
+   ],
+   "ttft_median_s_range": [
+    0.04036474064923823,
+    0.05284973594825715
+   ]
+  },
+  {
+   "concurrency": 8,
+   "gpu_util_range": [
+    1,
+    1
+   ],
+   "latency_s_range": [
+    0.3244880323763937,
+    0.32540879398584366
+   ],
+   "throughput_tps_range": [
+    387.86441356096395,
+    391.01728180929223
+   ],
+   "ttft_median_s_range": [
+    0.054250784567557275,
+    0.05455926398281008
+   ]
+  },
+  {
+   "concurrency": 16,
+   "gpu_util_range": [
+    1,
+    1
+   ],
+   "latency_s_range": [
+    0.3488409935962409,
+    0.34918983606621623
+   ],
+   "throughput_tps_range": [
+    726.1651842655108,
+    729.443001831751
+   ],
+   "ttft_median_s_range": [
+    0.07195159303955734,
+    0.07217468391172588
+   ]
+  },
+  {
+   "concurrency": 32,
+   "gpu_util_range": [
+    1,
+    1
+   ],
+   "latency_s_range": [
+    0.37490877765230834,
+    0.37950623175129294
+   ],
+   "throughput_tps_range": [
+    1315.9036893241419,
+    1327.5860549418608
+   ],
+   "ttft_median_s_range": [
+    0.07869885594118387,
+    0.07906884350813925
+   ]
+  },
+  {
+   "concurrency": 64,
+   "gpu_util_range": [
+    1,
+    1
+   ],
+   "latency_s_range": [
+    0.43607093940954655,
+    0.4578347249189392
+   ],
+   "throughput_tps_range": [
+    2191.214130216143,
+    2251.943855133968
+   ],
+   "ttft_median_s_range": [
+    0.09254256496205926,
+    0.11199778248555958
+   ]
+  },
+  {
+   "concurrency": 128,
+   "gpu_util_range": [
+    1,
+    1
+   ],
+   "latency_s_range": [
+    0.603716863784939,
+    0.6142893270589411
+   ],
+   "throughput_tps_range": [
+    3247.8855165142368,
+    3289.8687742300885
+   ],
+   "ttft_median_s_range": [
+    0.1614402086706832,
+    0.19571457337588072
+   ]
+  }
+ ],
+ "levels": [
+  {
+   "concurrency": 1,
+   "gpu_util": 1,
+   "gpu_util_range": [
+    1,
+    1
+   ],
+   "latency_s": 0.2840178180485964,
+   "latency_s_range": [
+    0.2840092374244705,
+    0.2841339400038123
+   ],
+   "n_failed": 0,
+   "n_runs": 3,
+   "request_throughput": 3.5174550884900753,
+   "run_ids": [
+    "7f2fb691cef84728b0fe16bf89173a5b",
+    "be5d27c00cc3489491a5916d91125281",
+    "ad1f98d229494d2ebec2cf7a5d07104a"
+   ],
+   "throughput_tps": 56.279281415841204,
+   "throughput_tps_range": [
+    56.249705503343215,
+    56.289665796542174
+   ],
+   "ttft_median_s": 0.026502945576794446,
+   "ttft_median_s_range": [
+    0.026372001506388187,
+    0.026564814033918083
+   ]
+  },
+  {
+   "concurrency": 2,
+   "gpu_util": 1,
+   "gpu_util_range": [
+    1,
+    1
+   ],
+   "latency_s": 0.3061685978900641,
+   "latency_s_range": [
+    0.3059882720699534,
+    0.3073273474583402
+   ],
+   "n_failed": 0,
+   "n_runs": 3,
+   "request_throughput": 6.522672345091268,
+   "run_ids": [
+    "ef5d74431ea243e78c6155fcd9343bf3",
+    "c9ef7e262e614b1d9e53622064fa7b6a",
+    "6e3886a4c7104286b8761c3249725acd"
+   ],
+   "throughput_tps": 104.36275752146028,
+   "throughput_tps_range": [
+    103.75155884050433,
+    104.42740383826813
+   ],
+   "ttft_median_s": 0.04947228590026498,
+   "ttft_median_s_range": [
+    0.04851958097424358,
+    0.049584613530896604
+   ]
+  },
+  {
+   "concurrency": 4,
+   "gpu_util": 1,
+   "gpu_util_range": [
+    0.995,
+    1
+   ],
+   "latency_s": 0.30818285583518445,
+   "latency_s_range": [
+    0.3081453079357743,
+    0.32073063496500254
+   ],
+   "n_failed": 0,
+   "n_runs": 3,
+   "request_throughput": 12.932405565333717,
+   "run_ids": [
+    "be93e24c8d4949d48e3220d305b2734f",
+    "ba962a586ace495a820a3202f21a8ba9",
+    "54c42163ecfc44b8a864664dd99721a0"
+   ],
+   "throughput_tps": 206.91848904533947,
+   "throughput_tps_range": [
+    199.52610942583996,
+    207.0501381916278
+   ],
+   "ttft_median_s": 0.04043295548763126,
+   "ttft_median_s_range": [
+    0.04036474064923823,
+    0.05284973594825715
+   ]
+  },
+  {
+   "concurrency": 8,
+   "gpu_util": 1,
+   "gpu_util_range": [
+    1,
+    1
+   ],
+   "latency_s": 0.3252505944110453,
+   "latency_s_range": [
+    0.3244880323763937,
+    0.32540879398584366
+   ],
+   "n_failed": 0,
+   "n_runs": 3,
+   "request_throughput": 24.32257951293198,
+   "run_ids": [
+    "7c3a9b1b94a249a6b1422329e8d84f09",
+    "a716536ff08544c8acf20b665fe52447",
+    "904e08c76e764a25ad2a0d78cc9dd65c"
+   ],
+   "throughput_tps": 389.1612722069117,
+   "throughput_tps_range": [
+    387.86441356096395,
+    391.01728180929223
+   ],
+   "ttft_median_s": 0.05432172352448106,
+   "ttft_median_s_range": [
+    0.054250784567557275,
+    0.05455926398281008
+   ]
+  },
+  {
+   "concurrency": 16,
+   "gpu_util": 1,
+   "gpu_util_range": [
+    1,
+    1
+   ],
+   "latency_s": 0.3490839935839176,
+   "latency_s_range": [
+    0.3488409935962409,
+    0.34918983606621623
+   ],
+   "n_failed": 0,
+   "n_runs": 3,
+   "request_throughput": 45.49140420460382,
+   "run_ids": [
+    "8314d6b655e94cd3bf1e825805b5da4c",
+    "403b9cf8366f4d69a5c333ac4a581402",
+    "6098863ba2f84d7cba8d0a57450a7d4e"
+   ],
+   "throughput_tps": 727.8624672736611,
+   "throughput_tps_range": [
+    726.1651842655108,
+    729.443001831751
+   ],
+   "ttft_median_s": 0.07196978793945163,
+   "ttft_median_s_range": [
+    0.07195159303955734,
+    0.07217468391172588
+   ]
+  },
+  {
+   "concurrency": 32,
+   "gpu_util": 1,
+   "gpu_util_range": [
+    1,
+    1
+   ],
+   "latency_s": 0.37574920791666955,
+   "latency_s_range": [
+    0.37490877765230834,
+    0.37950623175129294
+   ],
+   "n_failed": 0,
+   "n_runs": 3,
+   "request_throughput": 82.58073722420912,
+   "run_ids": [
+    "1e9846e2a08b44dab10bf756e19b1a1c",
+    "2923f80387944f77bb7f18f53e1d9333",
+    "9efd5a52b36840b992413bd14af3537c"
+   ],
+   "throughput_tps": 1321.2917955873459,
+   "throughput_tps_range": [
+    1315.9036893241419,
+    1327.5860549418608
+   ],
+   "ttft_median_s": 0.07892339455429465,
+   "ttft_median_s_range": [
+    0.07869885594118387,
+    0.07906884350813925
+   ]
+  },
+  {
+   "concurrency": 64,
+   "gpu_util": 1,
+   "gpu_util_range": [
+    1,
+    1
+   ],
+   "latency_s": 0.43883609015028924,
+   "latency_s_range": [
+    0.43607093940954655,
+    0.4578347249189392
+   ],
+   "n_failed": 0,
+   "n_runs": 3,
+   "request_throughput": 139.5465603349838,
+   "run_ids": [
+    "06ab2082a06e432d8d0899074aa723d6",
+    "da5400c8318e4f14aaf761f8c7c2b94b",
+    "5c8f205163af43d688fc8291b1ce71ca"
+   ],
+   "throughput_tps": 2232.744965359741,
+   "throughput_tps_range": [
+    2191.214130216143,
+    2251.943855133968
+   ],
+   "ttft_median_s": 0.09616601339075714,
+   "ttft_median_s_range": [
+    0.09254256496205926,
+    0.11199778248555958
+   ]
+  },
+  {
+   "concurrency": 128,
+   "gpu_util": 1,
+   "gpu_util_range": [
+    1,
+    1
+   ],
+   "latency_s": 0.6060636208858341,
+   "latency_s_range": [
+    0.603716863784939,
+    0.6142893270589411
+   ],
+   "n_failed": 0,
+   "n_runs": 3,
+   "request_throughput": 204.42247536742502,
+   "run_ids": [
+    "48be2921b93744ac91b7409bdc3f454c",
+    "cf6983b485f4401b996df048c8b3ea26",
+    "a9591b0f907e4f188129d96153f0bbde"
+   ],
+   "throughput_tps": 3270.7596058788004,
+   "throughput_tps_range": [
+    3247.8855165142368,
+    3289.8687742300885
+   ],
+   "ttft_median_s": 0.17279233306180686,
+   "ttft_median_s_range": [
+    0.1614402086706832,
+    0.19571457337588072
+   ]
+  }
+ ],
+ "littles_law": [
+  {
+   "c_over_latency": 3.5209058603108367,
+   "concurrency": 1,
+   "latency_s": 0.2840178180485964,
+   "ratio": 1.0009810421836098,
+   "request_throughput": 3.5174550884900753,
+   "unavailable": null
+  },
+  {
+   "c_over_latency": 6.532348561488137,
+   "concurrency": 2,
+   "latency_s": 0.3061685978900641,
+   "ratio": 1.0014834742395349,
+   "request_throughput": 6.522672345091268,
+   "unavailable": null
+  },
+  {
+   "c_over_latency": 12.979307330902246,
+   "concurrency": 4,
+   "latency_s": 0.30818285583518445,
+   "ratio": 1.0036266853317881,
+   "request_throughput": 12.932405565333717,
+   "unavailable": null
+  },
+  {
+   "c_over_latency": 24.59641930704593,
+   "concurrency": 8,
+   "latency_s": 0.3252505944110453,
+   "ratio": 1.011258665799339,
+   "request_throughput": 24.32257951293198,
+   "unavailable": null
+  },
+  {
+   "c_over_latency": 45.834241311765275,
+   "concurrency": 16,
+   "latency_s": 0.3490839935839176,
+   "ratio": 1.0075363052241584,
+   "request_throughput": 45.49140420460382,
+   "unavailable": null
+  },
+  {
+   "c_over_latency": 85.16318684322201,
+   "concurrency": 32,
+   "latency_s": 0.37574920791666955,
+   "ratio": 1.0312718159926506,
+   "request_throughput": 82.58073722420912,
+   "unavailable": null
+  },
+  {
+   "c_over_latency": 145.84032953643757,
+   "concurrency": 64,
+   "latency_s": 0.43883609015028924,
+   "ratio": 1.0451015717359529,
+   "request_throughput": 139.5465603349838,
+   "unavailable": null
+  },
+  {
+   "c_over_latency": 211.19894939893072,
+   "concurrency": 128,
+   "latency_s": 0.6060636208858341,
+   "ratio": 1.0331493590385588,
+   "request_throughput": 204.42247536742502,
+   "unavailable": null
+  }
+ ],
+ "max_num_seqs": 256,
+ "max_num_seqs_source": "non-default-args",
+ "measured": true,
+ "points": [
+  [
+   1,
+   0.2840178180485964,
+   56.279281415841204,
+   1
+  ],
+  [
+   2,
+   0.3061685978900641,
+   104.36275752146028,
+   1
+  ],
+  [
+   4,
+   0.30818285583518445,
+   206.91848904533947,
+   1
+  ],
+  [
+   8,
+   0.3252505944110453,
+   389.1612722069117,
+   1
+  ],
+  [
+   16,
+   0.3490839935839176,
+   727.8624672736611,
+   1
+  ],
+  [
+   32,
+   0.37574920791666955,
+   1321.2917955873459,
+   1
+  ],
+  [
+   64,
+   0.43883609015028924,
+   2232.744965359741,
+   1
+  ],
+  [
+   128,
+   0.6060636208858341,
+   3270.7596058788004,
+   1
+  ]
+ ],
+ "prompt_path": "random-fallback",
+ "served_cmd": [
+  "vllm",
+  "serve",
+  "Qwen/Qwen3-8B",
+  "--port",
+  "8000",
+  "--revision",
+  "b968826d9c46dd6066d109eabc6255188de91218",
+  "--max-model-len",
+  "8192",
+  "--max-num-seqs",
+  "256",
+  "--no-enable-prefix-caching"
+ ],
+ "source_curve": "data/a2/service-sweep-curve.json",
+ "source_store": "data/a2/service-sweep.jsonl",
+ "statistic": "per run: the median, over successful requests, of ttft + sum(itls) (end-to-end request latency); per level: the median of the run medians, with min..max of the run medians as the interval",
+ "sweep_source": "runpod",
+ "top_level_above_max_num_seqs": false
+}
