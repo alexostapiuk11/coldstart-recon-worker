@@ -4,9 +4,84 @@
 **Revised:** 2026-10-03: corrected by plan 2a. Step 3 of "What it would take to
 close the gate" now reads the capture with Q2's three-way split, and the
 endpoint checklist gains `workersMin` and `idleTimeout`.
-**Verdict: NOT YET DECIDABLE. Q1 and Q2 are unanswered, and cannot be answered
-from any capture now in the repository.** Q3 is answered from existing data and
-its answer stands.
+**Revised:** 2026-10-04: Q1 and Q2 answered by the capture in `fixtures/a2_recon/`
+(next section), and Q3's range measured by the service sweep in `data/a2/`. The
+2026-09-17 text below that section is kept as written; where it says "unanswered"
+it describes the repository before the capture.
+**Verdict: GO. Q1 passes (capacity can be pinned and released through the API).
+Q2 shows genuine cold starts, so by §9's table both gates stand as the August
+design wrote them.** Q3 is a range-setting measurement and is recorded below.
+
+## 2026-10-04 capture: the answers
+
+Endpoint `7h0aglrmsjovyc` (RTX 4090, EU-RO-1, `workersMin` 0, `workersMax` 2,
+`idleTimeout` 5 s, `flashboot` false, re-read after creation because create
+ignores `false`), template `ws1ptql2n8` (the sweep's image digest, starting
+`/opt/recon_handler.py`). One run of `recon/capture_a2.py`, exit 0, about 28
+minutes, $0.57 by the account balance (6.07 → 5.49). Read off
+`recon/analyse_a2.py fixtures/a2_recon` and `fixtures/a2_recon/capture.jsonl`.
+
+| job | workerId | delayTime (ms) | executionTime (ms) | torch.compile (s) | KV tokens |
+|---|---|---|---|---|---|
+| burst1_0 | `t8tnuv6d4x7xm8` | 56,819 | 151,528 | 39.60 | 35,792 |
+| burst1_1 | `vutpl4jnz8ql1g` | 149,587 | 77,897 | 18.13 | 35,808 |
+| burst2_0 | `ae85x6xif5b57v` | 18,488 | 144,478 | 39.57 | 35,808 |
+| burst2_1 | `d4namklhg7dpuc` | 24,318 | 149,504 | 43.95 | 35,792 |
+
+**Q2 — distinct workers under concurrent load: yes. Cold or warm-host restart:
+cold.** Each burst's two jobs ran on two different workers at the same time
+(burst 1: about 57–208 s and 150–228 s after submission; burst 2: about 18–163 s
+and 24–174 s). No workerId repeats across the bursts, 60 s apart with a 5 s idle
+timeout, so the host affinity artifact 1 saw (23 of 27 runs on one host) did not
+show here. Every job's engine log shows a full startup: a complete
+`torch.compile` (18–44 s, against the 0.3 s of a surviving container in
+`fixtures/README.md`) and the cold-compile KV size (~35,800 tokens, not the warm
+43,040). None of §9's warm cases fits: no container survived, and no host was
+reused. What the capture cannot say is whether the image was already on those
+hosts. `delayTime` of 18–150 s is far below the 743 s and 1,898 s pulls seen
+elsewhere, so the image was probably cached at the hosts or in the datacenter.
+That is the platform's normal case, and it is a cold start for the engine. One
+compile (burst1_1, 18 s) is about half the others with a full log; it is
+unexplained and noted.
+
+**Q1 — replica-count control: yes, through `workersMin`.** `POST
+/endpoints/{id}/update` with `{"workersMin": 2}` returned 200 in 0.66 s and
+echoed the new value; `{"workersMin": 0}` returned 200 in 0.58 s. Two caveats bound
+what was measured:
+
+- **Time to effect from cold was not measured.** The pin was sent about 3 s after
+  burst 2's last job finished, inside its worker's 5 s idle timeout, so the two
+  workers `/health` reported 0.1 s later may have been burst 2's. Plan 2b's
+  open-loop gate pins capacity and then waits for it before sending load, so it
+  needs only the acknowledgement, which is synchronous. The closed-loop gate,
+  which measures how long a scale-up takes, will measure it.
+- **`/health`'s worker counts are not an instrument for billing.** They answered
+  (the docstring allowed for a 404), but they flicker between `running` and
+  `idle` with no job in flight. They also never reached zero: 598 s after the
+  release they still read `idle 1, throttled 1`. At the same time GraphQL listed
+  no pods and the spend rate was $0.005/h, which is storage only. Artifact 1's
+  long-idle endpoint reads `idle 1` too. The balance is the better evidence. Jobs
+  account for 523 s ($0.16 at $0.000306/s), and two workers held for the 604 s pin
+  for 1,208 s ($0.37). Together that is $0.53 of the $0.57 spent. So the pin held
+  two billed workers for its window, and billing stopped after the release
+  (medium confidence: the per-second rate is RunPod's list price, and a balance
+  can lag).
+
+**Consequences for plan 2b.** The open-loop gate's capacity pinning is `workersMin
+= workersMax = N` through the REST update, then a wait for N workers. Release is
+`workersMin` 0, confirmed by a re-read and by the spend rate, not by `/health`. The
+closed-loop gate stands: a driven scale-up here is a cold start. Record `host_id`
+per replica (§10); the recon handler's output already carries the worker id.
+
+**Q3, measured.** The service sweep (`data/a2/service-curve.json`, 3 repeats per
+level, `max_num_seqs` 256, prefix caching off) bends between 64 and 128. Per
+doubling, throughput rose about 70–80% up to 64 and 46% from 64 to 128; median
+latency went from 0.284 s at 1 to 0.606 s at 128. At 256 the engine died of CUDA
+out-of-memory at its first step in 3 of 3 runs, with KV cache use at 11%. So what
+binds first is activation memory under `gpu_memory_utilization` 0.92, not KV and
+not `max_num_seqs`. The curve stops at 128 and records 256 as unservable.
+
+---
 
 Everything below is read off committed artifacts: `fixtures/runpod_api/`,
 `fixtures/vllm_logs/`, `data/campaign.jsonl`, and `recon/README.md`. Nothing
