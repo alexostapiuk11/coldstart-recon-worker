@@ -17,6 +17,31 @@ FLAT = ServiceCurve(
 NARROW = ServiceCurve(points=[(1, 0.5, 2.0, 0.5), (2, 0.5, 4.0, 0.6)], measured=True)
 
 
+@pytest.fixture
+def policy_run_result():
+    import random
+
+    from autoscale.arrivals import arrival_times
+    from autoscale.coldstart_ecdf import LagDistribution
+    from autoscale.controller import Controller
+    from autoscale.service import SERVICE_CURVE_PLACEHOLDER
+    from autoscale.sim import run_with_policy
+    from autoscale.traffic import spike_shape
+
+    rng = random.Random(3)
+    shape = spike_shape(SERVICE_CURVE_PLACEHOLDER, "step", sustain=40.0)
+    return run_with_policy(
+        arrivals=arrival_times(shape, until=100.0, rng=rng),
+        signal="queue_depth",
+        controller=Controller(scale_up_at=2.0, scale_down_at=0.5, cooldown=30.0, max_replicas=4),
+        lags=LagDistribution(samples=[20.0]),
+        curve=SERVICE_CURVE_PLACEHOLDER,
+        until=100.0,
+        evaluate_every=5.0,
+        rng=rng,
+    )
+
+
 def test_one_arrival_on_an_idle_replica_waits_only_for_service():
     result = run_fixed_capacity(arrivals=[0.0], replicas=1, curve=FLAT, until=10.0)
 
@@ -470,3 +495,44 @@ def test_p99_has_its_own_floor_above_the_others():
     from autoscale.stats import percentiles as raw
 
     assert set(raw(hundred, want=("p50", "p90", "p95"))) == {"p50", "p90", "p95"}
+
+
+def test_each_completed_latency_carries_its_arrival_time():
+    """`latencies` is appended in COMPLETION order and used to drop the arrival
+    time, so a latency-over-time trajectory -- what the open-loop validation
+    gate compares -- could not be rebuilt from a SimResult at all."""
+    from autoscale.service import SERVICE_CURVE_PLACEHOLDER
+
+    arrivals = [0.0, 0.5, 1.0]
+    result = run_fixed_capacity(arrivals, replicas=1, curve=SERVICE_CURVE_PLACEHOLDER, until=10.0)
+    pairs = result.completed_requests()
+    assert [a for a, _ in pairs] == arrivals
+    assert [lat for _, lat in pairs] == result.latencies
+
+
+def test_unfinished_requests_keep_their_arrival_times():
+    """An unfinished request is the backlog. Dropping its arrival time would
+    let a trajectory show the bins it came from as uncongested."""
+    from autoscale.service import SERVICE_CURVE_PLACEHOLDER
+
+    result = run_fixed_capacity([0.0, 0.1, 9.99], replicas=1,
+                                curve=SERVICE_CURVE_PLACEHOLDER, until=10.0)
+    assert result.unfinished_arrivals == [9.99]
+    assert len(result.unfinished_arrivals) == result.unfinished
+
+
+def test_a_half_populated_result_is_refused():
+    """A SimResult built by hand with latencies but no arrivals must not pass
+    for a complete one."""
+    with pytest.raises(ValueError, match="arrival"):
+        SimResult(latencies=[1.0, 2.0], completed=2).completed_requests()
+
+
+def test_the_policy_loop_records_arrival_times_too(policy_run_result):
+    """Both loops, or the field lies about any closed-loop result."""
+    assert len(policy_run_result.completed_arrivals) == len(policy_run_result.latencies)
+    # This run leaves a backlog at the horizon. Without that, the length check
+    # below compares two empties: dropping the policy loop's tally line zeroes
+    # `unfinished_arrivals` AND `unfinished` together, and it still passes.
+    assert policy_run_result.unfinished_arrivals
+    assert len(policy_run_result.unfinished_arrivals) == policy_run_result.unfinished

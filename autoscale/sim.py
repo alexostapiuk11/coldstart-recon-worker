@@ -61,6 +61,15 @@ class SimResult:
     """
 
     latencies: list[float] = field(default_factory=list)
+    # Arrival time of each entry in `latencies`, index for index. Kept because
+    # `latencies` is appended in COMPLETION order and the open-loop validation
+    # gate compares latency by ARRIVAL time -- which request came in when the
+    # fleet was saturated is the whole comparison.
+    completed_arrivals: list[float] = field(default_factory=list)
+    # Arrival times of the requests still waiting or in flight when the window
+    # closed. They are the backlog, and a trajectory that dropped them would
+    # report the bins they arrived in as uncongested.
+    unfinished_arrivals: list[float] = field(default_factory=list)
     completed: int = 0
     unfinished: int = 0
     extrapolated_samples: int = 0
@@ -103,6 +112,22 @@ class SimResult:
                 "rather than publishing zeros"
             )
         return _percentiles(self.latencies, want=("p50", "p90", "p95", "p99"))
+
+    def completed_requests(self) -> list[tuple[float, float]]:
+        """(arrival_time, latency) for every completed request.
+
+        Refuses a result whose two lists disagree in length -- one built by
+        hand, or by a loop that appends to `latencies` without recording the
+        arrival. Pairing them up to the shorter list would silently attribute
+        latencies to the wrong arrivals.
+        """
+        if len(self.completed_arrivals) != len(self.latencies):
+            raise ValueError(
+                f"{len(self.latencies)} latencies but {len(self.completed_arrivals)} "
+                "arrival times; this result did not record when its requests "
+                "arrived, so no latency can be placed in time"
+            )
+        return list(zip(self.completed_arrivals, self.latencies, strict=True))
 
 
 def run_fixed_capacity(
@@ -264,10 +289,12 @@ def run_fixed_capacity(
         elif event.kind == "done":
             arrived = in_flight.pop(event.payload["id"])
             result.latencies.append(event.time - arrived)
+            result.completed_arrivals.append(arrived)
             result.completed += 1
             start_service(event.time)
 
-    result.unfinished = len(waiting) + len(in_flight)
+    result.unfinished_arrivals = sorted(waiting + list(in_flight.values()))
+    result.unfinished = len(result.unfinished_arrivals)
     return result
 
 
@@ -529,6 +556,7 @@ def run_with_policy(
         elif event.kind == "done":
             arrived = in_flight.pop(event.payload["id"])
             result.latencies.append(event.time - arrived)
+            result.completed_arrivals.append(arrived)
             result.completed += 1
             start_service(event.time)
         elif event.kind == "evaluate":
@@ -599,7 +627,8 @@ def run_with_policy(
     result.replica_seconds += len(replicas) * (until - last_time)
     result.peak_serving_replicas = max(result.peak_serving_replicas, serving_count(until))
 
-    result.unfinished = len(waiting) + len(in_flight)
+    result.unfinished_arrivals = sorted(waiting + list(in_flight.values()))
+    result.unfinished = len(result.unfinished_arrivals)
     if result.scale_up_events == 0:
         result.discard_reason = "no_scaling_action"
     else:
