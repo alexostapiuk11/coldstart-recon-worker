@@ -3,13 +3,14 @@ from coldstart.cache_config import resolve
 from coldstart.checks import DiscardReason
 from coldstart.driver import run_campaign
 from coldstart.scheduler import build_schedule
-from coldstart.store import JsonlStore
+from coldstart.schema import RunRecord
 from coldstart.stubs.stub_endpoint import StubEndpoint, VirtualClock
 from coldstart.submitter import StubSubmitter
+from harness.store import JsonlStore
 
 
 def test_campaign_writes_one_record_per_scheduled_run(tmp_path):
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(StubEndpoint(seed=3)),
         store=store,
@@ -35,7 +36,7 @@ def test_failed_runs_are_recorded_and_never_retried(tmp_path):
             return self._inner.run(arm=arm, run_id=run_id)
 
     ep = SometimesBroken()
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(ep), store=store, arms=["A", "B", "C"], triples=3, seed=1
     )
@@ -63,7 +64,7 @@ def test_record_run_id_is_the_id_the_endpoint_ran_under(tmp_path):
             seen.append(run_id)
             return self._inner.run(arm=arm, run_id=run_id)
 
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(Recording()), store=store, arms=["A"], triples=3, seed=2
     )
@@ -72,7 +73,7 @@ def test_record_run_id_is_the_id_the_endpoint_ran_under(tmp_path):
 
 
 def test_cold_cache_paths_are_reconstructible_from_the_stored_record(tmp_path):
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(StubEndpoint(seed=9)),
         store=store,
@@ -88,7 +89,7 @@ def test_cold_cache_paths_are_reconstructible_from_the_stored_record(tmp_path):
 def test_run_ids_are_unique_across_the_campaign(tmp_path):
     """Two runs sharing an id would share a cold cache directory, and the
     second would find the first's compiled artifacts."""
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(StubEndpoint(seed=6)),
         store=store,
@@ -104,7 +105,7 @@ def test_run_ids_are_unique_across_the_campaign(tmp_path):
 
 
 def test_records_carry_the_resolved_arm_configuration(tmp_path):
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(StubEndpoint(seed=8)),
         store=store,
@@ -119,7 +120,7 @@ def test_records_carry_the_resolved_arm_configuration(tmp_path):
 
 
 def test_triple_and_run_indices_are_preserved(tmp_path):
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(StubEndpoint(seed=2)),
         store=store,
@@ -137,7 +138,7 @@ def test_failed_record_still_carries_clock_a_and_triple_index(tmp_path):
         def run(self, arm, run_id):
             raise RuntimeError("health check timed out")
 
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(AlwaysBroken()),
         store=store,
@@ -159,7 +160,7 @@ def test_a_stub_campaign_derives_end_to_end(tmp_path):
     submitter and the endpoint share a virtual clock, so the clock-A span
     actually contains the clock-B timeline it is supposed to."""
     clock = VirtualClock()
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(StubEndpoint(seed=12, clock=clock), clock=clock),
         store=store,
@@ -182,7 +183,7 @@ def test_clock_a_span_contains_the_clock_b_timeline(tmp_path):
     shorter than the clock-B marks inside it, and derive() then computes a
     negative T_total. The shared virtual clock is what prevents that."""
     clock = VirtualClock()
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(StubEndpoint(seed=13, clock=clock), clock=clock),
         store=store,
@@ -198,7 +199,7 @@ def test_clock_a_span_contains_the_clock_b_timeline(tmp_path):
 
 def test_derived_t_total_is_positive_for_every_run(tmp_path):
     clock = VirtualClock()
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(StubEndpoint(seed=14, clock=clock), clock=clock),
         store=store,
@@ -230,7 +231,7 @@ def test_resume_skips_completed_runs_and_keeps_the_schedule(tmp_path):
                 raise KeyboardInterrupt("operator stopped the window")
             return self._inner.run(arm=arm, run_id=run_id)
 
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     kw = {"store": store, "arms": ["A", "B", "C"], "triples": 4, "seed": 31}
     try:
         run_campaign(submitter=StubSubmitter(FailsAfter(5)), **kw)
@@ -254,7 +255,7 @@ def test_resume_skips_completed_runs_and_keeps_the_schedule(tmp_path):
 def test_resume_is_off_by_default(tmp_path):
     """Appending a second campaign to a populated store must not silently
     skip runs the operator meant to perform."""
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     kw = {"store": store, "arms": ["A"], "triples": 2, "seed": 1}
     run_campaign(submitter=StubSubmitter(StubEndpoint(seed=22)), **kw)
     run_campaign(submitter=StubSubmitter(StubEndpoint(seed=23)), **kw)
@@ -266,7 +267,7 @@ def test_resume_rejects_a_drifted_seed(tmp_path):
     accepting a different seed would splice two different interleavings
     together with nothing downstream able to tell -- the confound
     interleaving exists to prevent."""
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(StubEndpoint(seed=21)),
         store=store,
@@ -326,7 +327,7 @@ def test_missing_compile_cache_observed_is_an_ok_record_discarded_by_arm_state(t
     # clock here would make derive() see a negative T_total unrelated to
     # what this test is checking.
     clock = VirtualClock()
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(DropsObserved(clock), clock=clock),
         store=store,
@@ -368,7 +369,7 @@ def test_missing_expected_compile_cache_warm_is_an_ok_record_discarded_by_arm_st
             return payload
 
     clock = VirtualClock()
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(DropsExpected(clock), clock=clock),
         store=store,
@@ -390,7 +391,7 @@ def test_present_arm_state_telemetry_still_yields_a_consistent_ok_record(tmp_pat
     every field present must still produce an ordinary, consistent ok
     record, with no `arm_state_unverifiable` key at all."""
     clock = VirtualClock()
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(StubEndpoint(seed=17, clock=clock), clock=clock),
         store=store,
@@ -408,7 +409,7 @@ def test_resume_rejects_a_shrunk_schedule(tmp_path):
     """Resuming with fewer triples than the original window leaves stored
     run_indices the rebuilt schedule doesn't cover -- the same class of drift
     as a wrong seed, and must not be silently ignored."""
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(StubEndpoint(seed=21)),
         store=store,
@@ -439,7 +440,7 @@ def test_records_keep_the_raw_engine_log(tmp_path):
     dataset unrepeatable instead of re-parseable. Cannot be added
     retroactively: unrecorded logs are gone."""
     clock = VirtualClock()
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(StubEndpoint(seed=5, clock=clock), clock=clock),
         store=store,

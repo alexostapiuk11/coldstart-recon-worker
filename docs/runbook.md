@@ -269,7 +269,7 @@ history — move the old file aside first if you might need it later.
 ## Truncated store: `ValueError` on read
 
 If a run (or your terminal) is killed mid-write, the JSONL store can end
-with a truncated last line. `JsonlStore.read_all()` (`coldstart/store.py`)
+with a truncated last line. `JsonlStore.read_all()` (`harness/store.py`)
 detects this and raises a `ValueError` naming the file and the offending
 line number, rather than silently dropping it:
 

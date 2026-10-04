@@ -13,8 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from coldstart.analysis.metrics import derive
 from coldstart.analysis.pipeline import REQUIRED_FOR_T_COMPILE, REQUIRED_FOR_T_TOTAL, partition
-from coldstart.store import JsonlStore
+from coldstart.schema import RunRecord
 from harness.stats import MIN_BOOTSTRAP_SAMPLES, bootstrap_median_diff
+from harness.store import JsonlStore
 from scripts.analyse import ITERATIONS
 
 STORE = Path("data/campaign.jsonl")
@@ -60,7 +61,7 @@ CONTRASTS = [
 
 
 def _rows():
-    return [derive(r) for r in JsonlStore(STORE).read_all()]
+    return [derive(r) for r in JsonlStore(STORE, RunRecord).read_all()]
 
 
 def test_every_record_reads_back_at_the_current_schema():
@@ -70,7 +71,7 @@ def test_every_record_reads_back_at_the_current_schema():
     the versions agree. This also pins that derive() still recognises every
     row well enough to name it by arm and host -- the minimum a
     reproducibility check owes its own name."""
-    records = JsonlStore(STORE).read_all()
+    records = JsonlStore(STORE, RunRecord).read_all()
     assert records, "store is empty"
     for row in _rows():
         assert row["arm"] in ("A", "B", "C")

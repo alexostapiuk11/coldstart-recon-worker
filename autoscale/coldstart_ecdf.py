@@ -28,8 +28,9 @@ from coldstart.analysis.pipeline import (
     annotate_first_touch,
     partition,
 )
-from coldstart.store import JsonlStore
+from coldstart.schema import RunRecord
 from harness.stats import median as _stats_median
+from harness.store import JsonlStore
 
 __all__ = ["LagDistribution", "load_measured_lags"]
 
@@ -151,7 +152,7 @@ def load_measured_lags(
             "an autoscaler that never pays a cold start"
         )
 
-    records = JsonlStore(path).read_all()
+    records = JsonlStore(path, RunRecord).read_all()
 
     # The `run_index` merge is load-bearing, not tidiness. `annotate_first_touch`
     # documents its ordering as "deterministic and independent of read order"

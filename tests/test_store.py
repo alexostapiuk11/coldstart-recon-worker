@@ -1,7 +1,8 @@
 import json
+from dataclasses import asdict, dataclass
 
 from coldstart.schema import SCHEMA_VERSION, RunRecord
-from coldstart.store import JsonlStore
+from harness.store import JsonlStore
 
 
 def make_record(run_id="r1", run_index=0, arm="A"):
@@ -22,7 +23,7 @@ def make_record(run_id="r1", run_index=0, arm="A"):
 
 def test_every_field_survives_the_round_trip(tmp_path):
     path = tmp_path / "runs.jsonl"
-    store = JsonlStore(path)
+    store = JsonlStore(path, RunRecord)
     store.append(make_record())
 
     on_disk = json.loads(path.read_text().strip())
@@ -44,7 +45,7 @@ def test_every_field_survives_the_round_trip(tmp_path):
 
 
 def test_append_is_additive(tmp_path):
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     store.append(make_record("r1", 0, "A"))
     store.append(make_record("r2", 1, "B"))
     assert [r.run_id for r in store.read_all()] == ["r1", "r2"]
@@ -53,7 +54,7 @@ def test_append_is_additive(tmp_path):
 def test_unknown_schema_version_is_rejected(tmp_path):
     path = tmp_path / "runs.jsonl"
     path.write_text('{"schema_version": 999, "run_id": "x"}\n')
-    store = JsonlStore(path)
+    store = JsonlStore(path, RunRecord)
     try:
         store.read_all()
     except ValueError as e:
@@ -63,7 +64,7 @@ def test_unknown_schema_version_is_rejected(tmp_path):
 
 
 def test_missing_file_reads_as_empty(tmp_path):
-    assert JsonlStore(tmp_path / "nope.jsonl").read_all() == []
+    assert JsonlStore(tmp_path / "nope.jsonl", RunRecord).read_all() == []
 
 
 def test_fields_from_a_newer_build_are_ignored(tmp_path):
@@ -71,13 +72,13 @@ def test_fields_from_a_newer_build_are_ignored(tmp_path):
     rec = make_record().to_dict()
     rec["field_from_the_future"] = 42
     path.write_text(json.dumps(rec) + "\n")
-    got = JsonlStore(path).read_all()
+    got = JsonlStore(path, RunRecord).read_all()
     assert len(got) == 1
     assert got[0].run_id == "r1"
 
 
 def test_parent_directories_are_created(tmp_path):
-    store = JsonlStore(tmp_path / "deep" / "nested" / "runs.jsonl")
+    store = JsonlStore(tmp_path / "deep" / "nested" / "runs.jsonl", RunRecord)
     store.append(make_record())
     assert len(store.read_all()) == 1
 
@@ -88,7 +89,7 @@ def test_a_truncated_trailing_line_raises_an_actionable_error(tmp_path):
     analysis layer quietly compute a published result from an incomplete
     store."""
     path = tmp_path / "runs.jsonl"
-    store = JsonlStore(path)
+    store = JsonlStore(path, RunRecord)
     store.append(make_record("r1", 0, "A"))
     store.append(make_record("r2", 1, "B"))
     # Simulate a kill mid-write: append a truncated (non-JSON) trailing line.
@@ -103,3 +104,30 @@ def test_a_truncated_trailing_line_raises_an_actionable_error(tmp_path):
         assert "3" in msg  # 1-based line number of the corrupt line
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_store_round_trips_a_record_type_that_is_not_runrecord(tmp_path):
+    """The store is the harness's, not artifact 1's: any record with to_dict()
+    and from_dict() goes through the same append-only file discipline. Artifact
+    2's service-curve rows and artifact 5's sweep points are not RunRecords."""
+
+    @dataclass
+    class SweepPoint:
+        concurrency: int
+        ttft: float
+
+        def to_dict(self) -> dict:
+            return asdict(self)
+
+        @classmethod
+        def from_dict(cls, d: dict) -> "SweepPoint":
+            return cls(**d)
+
+    store = JsonlStore(tmp_path / "sweep.jsonl", SweepPoint)
+    store.append(SweepPoint(concurrency=8, ttft=0.42))
+    store.append(SweepPoint(concurrency=16, ttft=0.61))
+
+    assert store.read_all() == [
+        SweepPoint(concurrency=8, ttft=0.42),
+        SweepPoint(concurrency=16, ttft=0.61),
+    ]

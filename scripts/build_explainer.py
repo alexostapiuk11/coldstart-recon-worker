@@ -22,7 +22,8 @@ from coldstart.analysis.metrics import derive, rows_for_arm
 from coldstart.explainer.excerpts import extract
 from coldstart.explainer.jargon import TERMS, undefined_terms
 from coldstart.explainer.numbers import resolve
-from coldstart.store import JsonlStore
+from coldstart.schema import RunRecord
+from harness.store import JsonlStore
 
 REPO = Path(__file__).resolve().parents[1]
 PLACEHOLDER = re.compile(r"\{\{([^}]+)\}\}")
@@ -174,7 +175,7 @@ class _Charts:
 
     def rows(self) -> list[dict]:
         if self._rows is None:
-            store = JsonlStore(str(self.repo / "data" / "campaign.jsonl"))
+            store = JsonlStore(str(self.repo / "data" / "campaign.jsonl"), RunRecord)
             self._rows = [derive(r) for r in store.read_all()]
         return self._rows
 

@@ -15,7 +15,8 @@ from coldstart.analysis.pipeline import (
     annotate_first_touch,
     partition,
 )
-from coldstart.store import JsonlStore
+from coldstart.schema import RunRecord
+from harness.store import JsonlStore
 
 
 def main() -> None:
@@ -26,7 +27,7 @@ def main() -> None:
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    rows = annotate_first_touch([derive(r) for r in JsonlStore(args.store).read_all()])
+    rows = annotate_first_touch([derive(r) for r in JsonlStore(args.store, RunRecord).read_all()])
     # Kept as two separately-named PartitionResults (not collapsed into one
     # call) even though REQUIRED_FOR_T_TOTAL and REQUIRED_FOR_WARMUP are both
     # `("consistent",)` today, so `total_part` and `warm_part` gate identical

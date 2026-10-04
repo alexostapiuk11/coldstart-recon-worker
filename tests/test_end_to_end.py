@@ -14,7 +14,7 @@ from coldstart.analysis.pipeline import (
     partition,
 )
 from coldstart.driver import run_campaign
-from coldstart.store import JsonlStore
+from coldstart.schema import RunRecord
 from coldstart.stubs.stub_endpoint import StubEndpoint, VirtualClock
 from coldstart.submitter import StubSubmitter
 from harness.stats import (
@@ -22,6 +22,7 @@ from harness.stats import (
     bootstrap_paired_median_diff,
     within_host_triples,
 )
+from harness.store import JsonlStore
 
 
 def _campaign(tmp_path, *, seed, triples, hosts=6, endpoint=None):
@@ -33,7 +34,7 @@ def _campaign(tmp_path, *, seed, triples, hosts=6, endpoint=None):
     """
     clock = VirtualClock()
     ep = endpoint if endpoint is not None else StubEndpoint(seed=seed, hosts=hosts, clock=clock)
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(ep, clock=clock),
         store=store,
@@ -119,7 +120,7 @@ def test_failures_and_discards_are_counted_separately(tmp_path):
             return self._inner.run(arm=arm, run_id=run_id)
 
     clock = VirtualClock()
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(SometimesBroken(clock), clock=clock),
         store=store,
@@ -155,7 +156,7 @@ def test_no_failed_run_reaches_the_paired_analysis(tmp_path):
             return self._inner.run(arm=arm, run_id=run_id)
 
     clock = VirtualClock()
-    store = JsonlStore(tmp_path / "runs.jsonl")
+    store = JsonlStore(tmp_path / "runs.jsonl", RunRecord)
     run_campaign(
         submitter=StubSubmitter(AlwaysBrokenArmB(clock), clock=clock),
         store=store,

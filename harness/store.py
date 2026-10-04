@@ -1,21 +1,28 @@
 import json
 from pathlib import Path
 
-from coldstart.schema import RunRecord
-
 
 class JsonlStore:
-    """Append-only. Never rewrites or deletes a record — see spec 6.6."""
+    """Append-only. Never rewrites or deletes a record — see artifact 1 spec 6.6.
 
-    def __init__(self, path):
+    `record_cls` is the artifact's own record type: anything with a `to_dict()`
+    method and a `from_dict()` classmethod. It is a constructor argument rather
+    than a hard import of `RunRecord` so a second artifact can store its own
+    record shape through the same file discipline -- the append-only rule and
+    the truncated-line diagnostic below are what is worth sharing, and neither
+    depends on what a record contains.
+    """
+
+    def __init__(self, path, record_cls):
         self.path = Path(path)
+        self.record_cls = record_cls
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    def append(self, record: RunRecord) -> None:
+    def append(self, record) -> None:
         with self.path.open("a") as f:
             f.write(json.dumps(record.to_dict(), sort_keys=True) + "\n")
 
-    def read_all(self) -> list[RunRecord]:
+    def read_all(self) -> list:
         if not self.path.exists():
             return []
         out = []
@@ -35,5 +42,5 @@ class JsonlStore:
                         "truncating it is the fix -- read_all() will not "
                         "silently drop it for you."
                     ) from e
-                out.append(RunRecord.from_dict(data))
+                out.append(self.record_cls.from_dict(data))
         return out

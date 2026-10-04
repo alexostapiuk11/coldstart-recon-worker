@@ -32,7 +32,7 @@ from coldstart.analysis.pipeline import (
     failure_rate_by_arm,
     partition,
 )
-from coldstart.store import JsonlStore
+from coldstart.schema import RunRecord
 from harness.stats import (
     MIN_BOOTSTRAP_SAMPLES,
     MIN_SAMPLES,
@@ -43,6 +43,7 @@ from harness.stats import (
     percentiles,
     within_host_triples,
 )
+from harness.store import JsonlStore
 
 ITERATIONS = 10_000
 
@@ -368,7 +369,7 @@ def main() -> None:
     ap.add_argument("--summary-only", action="store_true")
     args = ap.parse_args()
 
-    rows = [derive(r) for r in JsonlStore(args.store).read_all()]
+    rows = [derive(r) for r in JsonlStore(args.store, RunRecord).read_all()]
     out: dict = {"n_records": len(rows)}
 
     # Always-safe: no bootstrap, no percentile floor, nothing here can raise

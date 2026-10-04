@@ -23,7 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from coldstart.driver import run_campaign
 from coldstart.preflight import assert_endpoint_matches, fetch_endpoint
 from coldstart.runpod_submitter import HttpTransport, RunPodSubmitter
-from coldstart.store import JsonlStore
+from coldstart.schema import RunRecord
+from harness.store import JsonlStore
 
 # Anchored to the repo root, like the sys.path line above -- a cwd-relative
 # default (e.g. `Path("data/campaign.jsonl")`) would resolve against whatever
@@ -163,7 +164,7 @@ def main() -> None:
     assert_endpoint_matches(fetch_endpoint(endpoint_id, key))
     print(f"[preflight] endpoint {endpoint_id} matches the pinned configuration", flush=True)
 
-    store = JsonlStore(args.store)
+    store = JsonlStore(args.store, RunRecord)
     _guard_against_silent_restart(store, args.store, resume=args.resume, force=args.force_restart)
 
     started = time.monotonic()

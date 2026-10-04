@@ -8,8 +8,9 @@ import json
 from pathlib import Path
 
 from coldstart.analysis.metrics import derive, rows_for_arm
-from coldstart.store import JsonlStore
+from coldstart.schema import RunRecord
 from harness.stats import bootstrap_median_ci
+from harness.store import JsonlStore
 
 KEYS: dict = json.loads(
     (Path(__file__).resolve().parents[2] / "explainer" / "numbers.json").read_text()
@@ -19,7 +20,7 @@ _FIRST_TOUCH_THRESHOLD_S = 200.0
 
 
 def _rows(repo: Path) -> list[dict]:
-    return [derive(r) for r in JsonlStore(str(Path(repo) / "data" / "campaign.jsonl")).read_all()]
+    return [derive(r) for r in JsonlStore(str(Path(repo) / "data" / "campaign.jsonl"), RunRecord).read_all()]
 
 
 def _dig(obj, path: str):

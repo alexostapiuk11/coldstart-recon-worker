@@ -26,7 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from coldstart.driver import run_campaign
 from coldstart.preflight import assert_endpoint_matches, fetch_endpoint
 from coldstart.runpod_submitter import HttpTransport, RunPodSubmitter
-from coldstart.store import JsonlStore
+from coldstart.schema import RunRecord
+from harness.store import JsonlStore
 
 # Repo-anchored for the same reason run_window.py's store is: a cwd-relative
 # default would silently start a fresh file somewhere else.
@@ -60,7 +61,7 @@ def main() -> None:
     assert_endpoint_matches(fetch_endpoint(endpoint_id, key))
     print(f"[preflight] endpoint {endpoint_id} matches the pinned configuration", flush=True)
 
-    store = JsonlStore(STORE)
+    store = JsonlStore(STORE, RunRecord)
     run_campaign(
         submitter=RunPodSubmitter(HttpTransport(endpoint_id, key)),
         store=store,
