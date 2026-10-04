@@ -1,6 +1,9 @@
 # Artifact 2 — reconnaissance record (spec §9)
 
 **Date:** 2026-09-17
+**Revised:** 2026-10-03: corrected by plan 2a. Step 3 of "What it would take to
+close the gate" now reads the capture with Q2's three-way split, and the
+endpoint checklist gains `workersMin` and `idleTimeout`.
 **Verdict: NOT YET DECIDABLE. Q1 and Q2 are unanswered, and cannot be answered
 from any capture now in the repository.** Q3 is answered from existing data and
 its answer stands.
@@ -194,13 +197,30 @@ as its records describe:
    re-check, since `recon/README.md` documents that availability flaps. Its
    template must start `/opt/recon_handler.py`, not the image's default
    measurement handler, which rejects a recon job (`recon/README.md`, "Artifact
-   2 capture"). `recon/capture_a2.py` automates steps 2–4.
-2. Submit concurrently, enough to force a second worker.
+   2 capture"). Set `workersMin` to 0 and `idleTimeout` below 60 s — 5 s, its
+   minimum, is recommended — or `recon/capture_a2.py`'s preflight refuses the
+   endpoint: a standing worker stays warm between bursts and hides the cold
+   start Q2 asks about, and an idle timeout no shorter than the 60 s wait
+   between bursts could keep burst 1's containers alive into burst 2.
+   `recon/capture_a2.py` automates steps 2–4.
+2. Submit concurrently, enough to allow a second worker.
 3. Record, per job: `workerId`, `delayTime`, `executionTime`, and the vLLM
-   startup log. A second *distinct* `workerId` whose log shows a full S4
-   (weights load, compile, KV allocation) is a genuine cold start; one that skips
-   those stages is a warm-host restart, and §9's table then drops the
-   confirmatory gate and publishes the reason.
+   startup log. A person reads these off `recon/analyse_a2.py`'s table; no rule
+   is fixed in advance, because the rule is what the capture is meant to
+   inform. What each of Q2's three cases looks like:
+   - a **surviving container**: warm compile cache, so the log's S4 skips
+     compilation or keeps it short — recon runs 1–2's 0.3 s against run 0's
+     39 s;
+   - a **re-allocated host**: the image is cached but the container is cold, so
+     the log shows a full S4 (weights load, compile, KV allocation) and
+     `delayTime` shows no image pull;
+   - a **new host**: a full S4, plus an image pull visible in `delayTime`.
+
+   A full S4 alone therefore does not mark a genuine cold start, and a second
+   distinct `workerId` alone does not separate the last two cases. A driven
+   scale-up that lands only on re-allocated hosts is the "warm-host restart"
+   outcome §9 asks about; what its table then does with the confirmatory gate,
+   and the reason published, is decided there from what the capture shows.
 4. Exercise scale-up and scale-down explicitly, timing acknowledgement against
    effect, to answer Q1.
 
