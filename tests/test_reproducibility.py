@@ -12,8 +12,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from coldstart.analysis.metrics import derive
-from coldstart.analysis.pipeline import REQUIRED_FOR_T_COMPILE, REQUIRED_FOR_T_TOTAL, partition
+from coldstart.analysis.presets import REQUIRED_FOR_T_COMPILE, REQUIRED_FOR_T_TOTAL
 from coldstart.schema import RunRecord
+from harness.publish import partition
 from harness.stats import MIN_BOOTSTRAP_SAMPLES, bootstrap_median_diff
 from harness.store import JsonlStore
 from scripts.analyse import ITERATIONS
@@ -157,7 +158,7 @@ def test_t_compile_is_never_missing_on_a_t_compile_publishable_row():
 
 def test_s4_bracket_and_kv_capacity_are_populated_on_most_publishable_rows():
     """`t_s4_bracket` and `kv_capacity_tokens` have no dedicated
-    REQUIRED_FOR_* preset (coldstart/analysis/pipeline.py) -- each has its
+    REQUIRED_FOR_* preset (coldstart/analysis/presets.py) -- each has its
     own independent nullity condition (missing S4_start/S4_end marks; an
     engine that reports neither total tokens nor blocks*block_size) that is
     expected to fire occasionally without indicating anything is broken, so

@@ -8,14 +8,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from coldstart.analysis import figures
 from coldstart.analysis.metrics import derive
-from coldstart.analysis.pipeline import (
-    REQUIRED_FOR_T_TOTAL,
-    REQUIRED_FOR_WARMUP,
+from coldstart.analysis.presets import REQUIRED_FOR_T_TOTAL, REQUIRED_FOR_WARMUP
+from coldstart.schema import RunRecord
+from harness.publish import (
     NotPublishableError,
     annotate_first_touch,
     partition,
 )
-from coldstart.schema import RunRecord
 from harness.store import JsonlStore
 
 
@@ -32,7 +31,7 @@ def main() -> None:
     # call) even though REQUIRED_FOR_T_TOTAL and REQUIRED_FOR_WARMUP are both
     # `("consistent",)` today, so `total_part` and `warm_part` gate identical
     # rows right now. That agreement is incidental, not structural -- see the
-    # REQUIRED_FOR_* docstrings in pipeline.py -- and `warmup_curve` must keep
+    # REQUIRED_FOR_* docstrings in coldstart/analysis/presets.py -- and `warmup_curve` must keep
     # tracking REQUIRED_FOR_WARMUP specifically, not whatever preset the
     # T_total figures happen to use. If this were "simplified" to a single
     # partition shared by all four figures, the day the two presets diverge

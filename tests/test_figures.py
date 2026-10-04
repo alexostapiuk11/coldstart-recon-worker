@@ -36,7 +36,7 @@ from coldstart.analysis.figures import (
     waterfall,
 )
 from coldstart.analysis.metrics import steady_state_latency
-from coldstart.analysis.pipeline import NotPublishableError
+from harness.publish import NotPublishableError
 
 # Distinct per-arm warmup shape (different plateau and different initial
 # spike): a fixture where all three arms shared one warmup curve — the

@@ -64,7 +64,7 @@ def _validate_samples(values: list[float], name: str) -> list[float]:
                 f"{name}[{i}] is None -- likely an unfiltered optional field from "
                 "metrics.derive() (e.g. t_weights on an engine-merged run, or "
                 "t_platform on an inconsistent run); route rows through "
-                "coldstart.analysis.pipeline.partition() with that field in "
+                "harness.publish.partition() with that field in "
                 "`required` before pooling values into a sample"
             )
         if not math.isfinite(v):
@@ -343,7 +343,7 @@ def _row_value(row: dict, value) -> float:
     if v is None:
         raise ValueError(
             f"row is missing a value for this paired contrast (got None): {row!r} "
-            "-- route rows through coldstart.analysis.pipeline.partition() with "
+            "-- route rows through harness.publish.partition() with "
             "the field in `required` before building triples with "
             "within_host_triples"
         )

@@ -6,17 +6,12 @@ ordering through the real driver, store, parser, metrics, gate and statistics.
 """
 
 from coldstart.analysis.metrics import derive
-from coldstart.analysis.pipeline import (
-    REQUIRED_FOR_T_TOTAL,
-    REQUIRED_FOR_T_WEIGHTS,
-    discard_table,
-    failure_rate_by_arm,
-    partition,
-)
+from coldstart.analysis.presets import REQUIRED_FOR_T_TOTAL, REQUIRED_FOR_T_WEIGHTS
 from coldstart.driver import run_campaign
 from coldstart.schema import RunRecord
 from coldstart.stubs.stub_endpoint import StubEndpoint, VirtualClock
 from coldstart.submitter import StubSubmitter
+from harness.publish import discard_table, failure_rate_by_group, partition
 from harness.stats import (
     bootstrap_median_diff,
     bootstrap_paired_median_diff,
@@ -134,11 +129,11 @@ def test_failures_and_discards_are_counted_separately(tmp_path):
     assert len(result.failed) > 0
     assert len(result.publishable) + len(result.discarded) + len(result.failed) == len(rows)
 
-    rates = failure_rate_by_arm(rows)
+    rates = failure_rate_by_group(rows, key="arm")
     assert sum(v["failed"] for v in rates.values()) == len(result.failed)
 
     # A failed run can never appear in the discard table, and vice versa.
-    discards = discard_table(result.discarded)
+    discards = discard_table(result.discarded, key="arm")
     assert sum(v["total"] for v in discards.values()) == len(result.discarded)
 
 

@@ -23,16 +23,18 @@ from coldstart.analysis.economics import (
     supported_concurrency,
 )
 from coldstart.analysis.metrics import derive
-from coldstart.analysis.pipeline import (
+from coldstart.analysis.presets import (
     REQUIRED_FOR_T_COMPILE,
     REQUIRED_FOR_T_TOTAL,
     REQUIRED_FOR_T_WEIGHTS,
-    PartitionResult,
-    discard_table,
-    failure_rate_by_arm,
-    partition,
 )
 from coldstart.schema import RunRecord
+from harness.publish import (
+    PartitionResult,
+    discard_table,
+    failure_rate_by_group,
+    partition,
+)
 from harness.stats import (
     MIN_BOOTSTRAP_SAMPLES,
     MIN_SAMPLES,
@@ -224,7 +226,7 @@ def _full_analysis(rows: list[dict], total_part: PartitionResult, out: dict) -> 
     raises, every field already computed is still sitting in `out` for
     `main()` to print. Isolated from `main()` only so the risky section can
     be wrapped in one try/except there; an exception raised in here must
-    never cost the caller `failure_rate_by_arm`/`discard_table` (already in
+    never cost the caller `failure_rate_by_group`/`discard_table` (already in
     `out` before this is called), nor any of this function's own
     already-computed fields -- both are exactly the diagnostics an operator
     reaches for when a campaign looks broken.
@@ -376,9 +378,9 @@ def main() -> None:
     # on thin or empty data. This is exactly what an operator reaches for
     # first when a campaign looks broken, so it must survive even if
     # everything below it doesn't.
-    out["failure_rate_by_arm"] = failure_rate_by_arm(rows)
+    out["failure_rate_by_arm"] = failure_rate_by_group(rows, key="arm")
     total_part = partition(rows, required=REQUIRED_FOR_T_TOTAL)
-    out["discard_table"] = discard_table(total_part.discarded)
+    out["discard_table"] = discard_table(total_part.discarded, key="arm")
     out["counts"] = {
         "publishable_t_total": len(total_part.publishable),
         "discarded": len(total_part.discarded),

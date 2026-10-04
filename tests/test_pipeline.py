@@ -16,19 +16,21 @@ partition()'s own formula.
 import pytest
 
 from coldstart.analysis.metrics import derive
-from coldstart.analysis.pipeline import (
+from coldstart.analysis.presets import (
     REQUIRED_FOR_T_COMPILE,
     REQUIRED_FOR_T_FAST,
     REQUIRED_FOR_T_TOTAL,
     REQUIRED_FOR_T_WEIGHTS,
     REQUIRED_FOR_WARMUP,
-    NotPublishableError,
-    discard_table,
-    failure_rate_by_arm,
-    partition,
 )
 from coldstart.checks import DiscardReason
 from coldstart.schema import RunRecord
+from harness.publish import (
+    NotPublishableError,
+    discard_table,
+    failure_rate_by_group,
+    partition,
+)
 from harness.stats import bootstrap_median_diff, within_host_triples
 
 # Ten distinct per-request latencies with a non-flat tail -- copied from
@@ -398,12 +400,12 @@ def test_partition_does_not_mutate_the_original_rows():
 
 
 # ---------------------------------------------------------------------------
-# failure_rate_by_arm / discard_table -- separable, per plan's requirement
+# failure_rate_by_group / discard_table -- separable, per plan's requirement
 # ---------------------------------------------------------------------------
 
 
-def test_failure_rate_by_arm_counts_only_the_failed_run():
-    rates = failure_rate_by_arm(_campaign())
+def test_failure_rate_by_group_counts_only_the_failed_run():
+    rates = failure_rate_by_group(_campaign(), key="arm")
     assert rates["A"] == {"total": 5, "failed": 0, "by_class": {}, "rate": 0.0}
     assert rates["B"] == {"total": 3, "failed": 1, "by_class": {"oom": 1}, "rate": pytest.approx(1 / 3)}
     assert rates["C"] == {"total": 4, "failed": 0, "by_class": {}, "rate": 0.0}
@@ -411,10 +413,38 @@ def test_failure_rate_by_arm_counts_only_the_failed_run():
 
 def test_discard_table_counts_only_the_discarded_row_for_the_given_preset():
     result = partition(_campaign(), required=REQUIRED_FOR_T_TOTAL)
-    table = discard_table(result.discarded)
+    table = discard_table(result.discarded, key="arm")
     assert table == {
         "C": {"total": 1, "by_reason": {DiscardReason.PROCESS_EXCEEDS_TOTAL.value: 1}}
     }
+
+
+def test_failure_rate_groups_by_the_key_the_caller_names():
+    """Grouping was hardcoded to `arm`. Artifact 2's rows are keyed by signal,
+    artifact 5's by regime -- and a default of "arm" would have let either one
+    group by a column it does not have and emit a plausible one-bucket table."""
+    rows = [
+        {"signal": "queue_depth", "ok": True},
+        {"signal": "queue_depth", "ok": False, "failure_class": "oom"},
+        {"signal": "utilization", "ok": True},
+    ]
+
+    out = failure_rate_by_group(rows, key="signal")
+
+    assert out["queue_depth"] == {
+        "total": 2,
+        "failed": 1,
+        "by_class": {"oom": 1},
+        "rate": 0.5,
+    }
+    assert out["utilization"]["rate"] == 0.0
+
+
+def test_grouping_functions_refuse_to_guess_the_key():
+    with pytest.raises(TypeError):
+        failure_rate_by_group([{"arm": "A", "ok": True}])
+    with pytest.raises(TypeError):
+        discard_table([{"arm": "A", "exclusion_reason": "x"}])
 
 
 def test_failure_rate_and_discard_rate_are_nonzero_on_different_arms_and_cannot_be_confused():
@@ -423,9 +453,9 @@ def test_failure_rate_and_discard_rate_are_nonzero_on_different_arms_and_cannot_
     B4 names) cannot pass by coincidence. Arm B has the only failure; arm C
     has the only discard (under the T_total preset) -- disjoint arms, and
     arm B's own row never appears in discard_table's output at all."""
-    rates = failure_rate_by_arm(_campaign())
+    rates = failure_rate_by_group(_campaign(), key="arm")
     result = partition(_campaign(), required=REQUIRED_FOR_T_TOTAL)
-    table = discard_table(result.discarded)
+    table = discard_table(result.discarded, key="arm")
 
     assert rates["B"]["failed"] > 0
     assert table.get("C", {}).get("total", 0) > 0
@@ -513,7 +543,7 @@ def test_task19_pooling_pattern_works_through_the_gate_on_a_campaign_with_a_merg
 
 
 def test_annotate_first_touch_marks_only_the_first_run_on_each_host():
-    from coldstart.analysis.pipeline import annotate_first_touch
+    from harness.publish import annotate_first_touch
 
     rows = [
         {"run_index": 0, "host_id": "h1"},
@@ -528,7 +558,7 @@ def test_annotate_first_touch_marks_only_the_first_run_on_each_host():
 def test_annotate_first_touch_uses_run_index_not_list_order():
     """Order must come from the scheduler's index, not however the store was
     read, or which run counts as first becomes an artifact of read order."""
-    from coldstart.analysis.pipeline import annotate_first_touch
+    from harness.publish import annotate_first_touch
 
     rows = [
         {"run_index": 5, "host_id": "h1"},
@@ -539,14 +569,14 @@ def test_annotate_first_touch_uses_run_index_not_list_order():
 
 
 def test_annotate_first_touch_does_not_guess_for_a_run_with_no_host():
-    from coldstart.analysis.pipeline import annotate_first_touch
+    from harness.publish import annotate_first_touch
 
     out = annotate_first_touch([{"run_index": 0, "host_id": None}])
     assert out[0]["first_touch"] is None
 
 
 def test_annotate_first_touch_does_not_mutate_its_input():
-    from coldstart.analysis.pipeline import annotate_first_touch
+    from harness.publish import annotate_first_touch
 
     rows = [{"run_index": 0, "host_id": "h1"}]
     annotate_first_touch(rows)

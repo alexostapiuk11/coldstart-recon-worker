@@ -33,12 +33,13 @@ feeds `None` to `median()`/`ecdf()`, which fails with a context-free
 every such dereference this module makes with a check that names the row
 (by `arm`/`host_id`, the identity these hand-built and derive()-shaped rows
 both reliably carry) and the field, and raises
-`coldstart.analysis.pipeline.NotPublishableError`. This does not make these
+`harness.publish.NotPublishableError`. This does not make these
 functions require `"ok"`/`"consistent"` on every row -- that would break the
 "pure consumer of whatever fields a row happens to carry" policy above and
 this module's own tests, which hand-build rows without either key. A caller
-that has already gated rows through `pipeline.partition()` for the fields a
-given figure needs (see the `REQUIRED_FOR_*` constants there) can hand the
+that has already gated rows through `harness.publish.partition()` for the fields a
+given figure needs (see the `REQUIRED_FOR_*` constants in
+`coldstart/analysis/presets.py`) can hand the
 result straight through; a caller that has not gets a clear error instead of
 a crash three stack frames into a library call.
 
@@ -67,7 +68,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from coldstart.analysis.metrics import FAST_TOLERANCE, steady_state_latency, time_to_fast_index
-from coldstart.analysis.pipeline import NotPublishableError
+from harness.publish import NotPublishableError
 from harness.stats import bootstrap_median_ci, ecdf, median
 
 ARMS = ["A", "B", "C"]
@@ -141,7 +142,7 @@ def _required_field(row: dict, key: str):
     if key not in row:
         raise NotPublishableError(
             f"row ({_row_identity(row)}) has no {key!r} field -- route rows "
-            "through coldstart.analysis.pipeline.partition() with that field "
+            "through harness.publish.partition() with that field "
             "in `required` before calling this figure"
         )
     val = row[key]
@@ -149,7 +150,7 @@ def _required_field(row: dict, key: str):
         raise NotPublishableError(
             f"row ({_row_identity(row)}) has {key!r} = None -- not publishable "
             "for this figure; route rows through "
-            "coldstart.analysis.pipeline.partition() with that field in "
+            "harness.publish.partition() with that field in "
             "`required` first"
         )
     return val
