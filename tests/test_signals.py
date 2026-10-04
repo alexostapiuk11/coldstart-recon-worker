@@ -3,7 +3,17 @@ import dataclasses
 import pytest
 
 from autoscale.service import ServiceCurve
-from autoscale.signals import SIGNALS, FleetState, in_flight_concurrency, queue_depth, utilization
+from autoscale.signals import (
+    ALL_SIGNALS,
+    SENSITIVITY_SIGNALS,
+    SIGNALS,
+    FleetState,
+    in_flight_concurrency,
+    queue_depth,
+    utilization,
+    utilization_throughput,
+)
+from autoscale.thresholds import SENSITIVITY_THRESHOLDS, THRESHOLDS
 
 CURVE = ServiceCurve(
     points=[(1, 0.30, 53.0, 0.18), (8, 0.38, 337.0, 0.85), (32, 0.95, 539.0, 0.99)],
@@ -151,3 +161,35 @@ def test_every_signal_shares_one_signature_so_the_controller_can_swap_them():
         "in_flight_concurrency": pytest.approx(2.0),
         "utilization": pytest.approx(CURVE.utilization_at(2.0)),
     }
+
+
+def _tp_curve():
+    return ServiceCurve(points=[(0, 0.3, 0.0, 0.0), (1, 0.3, 50.0, 1.0), (4, 0.4, 200.0, 1.0)],
+                        measured=True)
+
+
+def test_throughput_fraction_rises_with_load_where_nvidia_smi_is_flat():
+    curve = _tp_curve()
+    low = utilization_throughput(FleetState(waiting=0, in_flight=1, serving_replicas=1), curve)
+    high = utilization_throughput(FleetState(waiting=0, in_flight=4, serving_replicas=1), curve)
+    assert low == pytest.approx(0.25)
+    assert high == pytest.approx(1.0)
+    assert utilization(FleetState(0, 1, 1), curve) == utilization(FleetState(0, 4, 1), curve) == 1.0
+
+
+def test_throughput_fraction_is_zero_when_idle_and_saturated_with_unserved_work():
+    curve = _tp_curve()
+    assert utilization_throughput(FleetState(0, 0, 1), curve) == 0.0
+    assert utilization_throughput(FleetState(3, 0, 0), curve) == 1.0
+    assert utilization_throughput(FleetState(0, 0, 0), curve) == 0.0
+
+
+def test_the_headline_registry_is_unchanged_and_the_sensitivity_one_is_separate():
+    assert sorted(SIGNALS) == ["in_flight_concurrency", "queue_depth", "utilization"]
+    assert sorted(SENSITIVITY_SIGNALS) == ["utilization_throughput"]
+    assert dict(ALL_SIGNALS) == {**SIGNALS, **SENSITIVITY_SIGNALS}
+
+
+def test_the_sensitivity_signal_uses_utilizations_grid_outside_the_pre_registered_dict():
+    assert SENSITIVITY_THRESHOLDS["utilization_throughput"] == THRESHOLDS["utilization"]
+    assert "utilization_throughput" not in THRESHOLDS

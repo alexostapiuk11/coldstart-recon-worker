@@ -16,10 +16,10 @@ from autoscale.coldstart_ecdf import LagDistribution
 from autoscale.controller import Controller
 from autoscale.frontier import PolicyPoint
 from autoscale.service import ServiceCurve
-from autoscale.signals import SIGNALS
+from autoscale.signals import ALL_SIGNALS, SIGNALS
 from autoscale.sim import run_with_policy
 from autoscale.stats import MIN_SAMPLES
-from autoscale.thresholds import THRESHOLDS
+from autoscale.thresholds import SENSITIVITY_THRESHOLDS, THRESHOLDS
 
 __all__ = ["SweepConfig", "run_sweep"]
 
@@ -142,7 +142,8 @@ class SweepConfig:
 
 
 def run_sweep(
-    config: SweepConfig, seed: int, allow_unmeasured: bool = False
+    config: SweepConfig, seed: int, allow_unmeasured: bool = False,
+    signals: tuple[str, ...] | None = None,
 ) -> tuple[list[PolicyPoint], list[str]]:
     """Every (signal, up, down) combination, `REPETITIONS` times each.
 
@@ -170,13 +171,28 @@ def run_sweep(
     TYPICAL run of that policy delivers, and "typical" is what a median
     reports. The pre-registration fixes the repetition count but not the
     aggregator; the change is disclosed in docs/experiment-a2.md.
+
+    `signals` names the signals to sweep; the default is the three arms in
+    `SIGNALS`. Naming one outside them (the utilisation sensitivity arm) runs
+    only what is named, so a sensitivity sweep never changes the arms' output.
+    An unknown name is refused before any run, not discovered 25 minutes in.
     """
     _require_measured_curve(config.curve, allow_unmeasured)
     points: list[PolicyPoint] = []
     discards: list[str] = []
 
-    for signal in sorted(SIGNALS):
-        up_grid, down_grid = THRESHOLDS[signal]
+    names = tuple(sorted(SIGNALS)) if signals is None else tuple(signals)
+    # Built here, not at import: a test that reassigns `sweep.THRESHOLDS` must
+    # still change what this sweep iterates.
+    grids = {**THRESHOLDS, **SENSITIVITY_THRESHOLDS}
+    unknown = [s for s in names if s not in ALL_SIGNALS or s not in grids]
+    if unknown:
+        raise KeyError(
+            f"unknown signals {unknown}; known: {sorted(ALL_SIGNALS)}. A typo here would "
+            "otherwise surface only when the first policy of that signal runs"
+        )
+    for signal in names:
+        up_grid, down_grid = grids[signal]
         for up in up_grid:
             for down in down_grid:
                 # `Controller` refuses `scale_down_at >= scale_up_at` outright

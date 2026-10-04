@@ -796,3 +796,19 @@ def test_max_replicas_caps_the_fleet_not_just_the_serving_replicas():
     assert result.peak_serving_replicas == 1
     assert result.peak_replicas == 3
     assert result.scale_up_events == 2
+
+
+def test_run_with_policy_accepts_the_sensitivity_signal():
+    curve = ServiceCurve(points=[(0, 0.3, 0.0, 0.0), (1, 0.3, 50.0, 1.0), (4, 0.4, 200.0, 1.0)],
+                         measured=True)
+    result = run_with_policy(
+        arrivals=[i * 0.05 for i in range(1, 400)],
+        signal="utilization_throughput",
+        controller=Controller(scale_up_at=0.5, scale_down_at=0.05, cooldown=5.0, max_replicas=3),
+        lags=LagDistribution(samples=[1.0]),
+        curve=curve,
+        until=30.0,
+        evaluate_every=1.0,
+        rng=random.Random(0),
+    )
+    assert result.completed > 0

@@ -45,7 +45,7 @@ from autoscale.controller import Controller, Decision
 from autoscale.events import Event, EventQueue
 from autoscale.replica import Replica, ReplicaState
 from autoscale.service import ServiceCurve
-from autoscale.signals import SIGNALS, FleetState
+from autoscale.signals import ALL_SIGNALS, FleetState
 from autoscale.stats import percentiles as _percentiles
 
 __all__ = ["SimResult", "run_fixed_capacity", "run_with_policy"]
@@ -368,8 +368,8 @@ def run_with_policy(
     the policy, so the launched population is empty and the never-served
     check has nothing to range over.
     """
-    if signal not in SIGNALS:
-        raise KeyError(f"{signal!r} is not a signal; expected one of {sorted(SIGNALS)}")
+    if signal not in ALL_SIGNALS:
+        raise KeyError(f"{signal!r} is not a signal; expected one of {sorted(ALL_SIGNALS)}")
 
     # A `Controller` is stateful: `decide` stamps `_last_action_at`, and the
     # cooldown is measured against it. Re-using one across runs is not a
@@ -473,7 +473,7 @@ def run_with_policy(
                 "window deliberately instead"
             )
 
-    signal_fn = SIGNALS[signal]
+    signal_fn = ALL_SIGNALS[signal]
     queue = EventQueue()
     # Arrivals are pushed BEFORE the evaluation ticks, so `EventQueue`'s
     # insertion-order tiebreak makes an arrival that lands exactly on a tick

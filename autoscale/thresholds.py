@@ -13,7 +13,7 @@ longer uses. `autoscale.sweep` re-exports the name, so its readers are
 unchanged.
 """
 
-__all__ = ["THRESHOLDS"]
+__all__ = ["SENSITIVITY_THRESHOLDS", "THRESHOLDS"]
 
 # PER-SIGNAL THRESHOLD GRIDS. The three signals do not share units, so one
 # numeric grid cannot span all three:
@@ -39,4 +39,13 @@ THRESHOLDS: dict[str, tuple[tuple[float, ...], tuple[float, ...]]] = {
     "queue_depth": ((1.0, 2.0, 4.0, 8.0, 16.0), (0.0, 0.25, 0.5, 1.0)),
     "in_flight_concurrency": ((2.0, 4.0, 8.0, 12.0, 16.0), (0.5, 1.0, 2.0, 4.0)),
     "utilization": ((0.50, 0.65, 0.80, 0.90, 0.95), (0.05, 0.15, 0.30, 0.50)),
+}
+
+# Sensitivity arms (owner decision 2026-10-04), kept OUT of THRESHOLDS: that
+# dict is the pre-registered grids, pinned by tests/test_frontier.py, and
+# `run_sweep`'s default iterates it. Utilisation's grid, unchanged: the same
+# fraction scale, so a grid of its own would add a second difference between
+# the two utilisation definitions.
+SENSITIVITY_THRESHOLDS: dict[str, tuple[tuple[float, ...], tuple[float, ...]]] = {
+    "utilization_throughput": THRESHOLDS["utilization"],
 }

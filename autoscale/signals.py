@@ -17,7 +17,8 @@ from types import MappingProxyType
 
 from autoscale.service import ServiceCurve
 
-__all__ = ["SIGNALS", "FleetState", "in_flight_concurrency", "queue_depth", "utilization"]
+__all__ = ["ALL_SIGNALS", "SENSITIVITY_SIGNALS", "SIGNALS", "FleetState", "in_flight_concurrency",
+           "queue_depth", "utilization", "utilization_throughput"]
 
 
 @dataclass(frozen=True)
@@ -162,6 +163,33 @@ def utilization(state: FleetState, curve: ServiceCurve) -> float:
     return curve.utilization_at(per_replica)
 
 
+def utilization_throughput(state: FleetState, curve: ServiceCurve) -> float:
+    """Utilisation as the fraction of the replica's peak throughput in use.
+
+    The sensitivity arm for H2 (owner decision 2026-10-04). nvidia-smi's
+    utilisation, which `utilization` reads, saturates at one request in flight
+    on this engine, so a policy on it cannot tell a lightly loaded replica from
+    a collapsing one. That is what a DCGM-driven autoscaler sees, and it is
+    the headline. This signal answers the obvious objection -- "you beat
+    utilisation by picking its worst definition" -- with the best definition
+    the measured curve supports: throughput at the current per-replica load
+    over the curve's maximum throughput, which rises until the knee. Same
+    fraction scale, so utilisation's threshold grid applies unchanged.
+    Rejected: a fourth headline signal, which would change every figure and
+    the pre-registered three-arm comparison.
+    """
+    if state.serving_replicas == 0:
+        return _zero_replica_reading(state, 1.0)
+    peak = max(p[2] for p in curve.points)
+    if peak <= 0:
+        raise ValueError(
+            "the curve's maximum throughput is 0; a throughput fraction has no denominator, "
+            "and returning 0 would read every load as idle"
+        )
+    per_replica = state.in_flight / state.serving_replicas
+    return min(1.0, curve.throughput_at(per_replica) / peak)
+
+
 # A read-only view, not a plain dict: this registry is how a sweep names the
 # three arms, and a module-level dict could be mutated by any importer --
 # silently swapping the function a published arm was actually run with.
@@ -172,4 +200,15 @@ SIGNALS: Mapping[str, Callable[[FleetState, ServiceCurve], float]] = MappingProx
         "in_flight_concurrency": in_flight_concurrency,
         "utilization": utilization,
     }
+)
+
+# Signals run only when named: a sensitivity analysis, not an arm of the
+# experiment. Kept out of SIGNALS so `run_sweep`'s default and every figure
+# built on the three arms are untouched.
+SENSITIVITY_SIGNALS: Mapping[str, Callable[[FleetState, ServiceCurve], float]] = MappingProxyType(
+    {"utilization_throughput": utilization_throughput}
+)
+
+ALL_SIGNALS: Mapping[str, Callable[[FleetState, ServiceCurve], float]] = MappingProxyType(
+    {**SIGNALS, **SENSITIVITY_SIGNALS}
 )
