@@ -80,9 +80,9 @@ def _summary(latency=0.5, util=0.4, path="exact"):
     }
 
 
-def _ok_output(run_id="rid", level=8, run=None, **over):
+def _ok_output(run_id="rid", level=8, run=None, repeat=0, **over):
     out = {
-        "healthy": True, "run_id": run_id, "level": level, "repeat": 0,
+        "healthy": True, "run_id": run_id, "level": level, "repeat": repeat,
         "run": _summary() if run is None else run, "run_error": None,
         "served_cmd": ["vllm", "serve", "m", "--port", "8000"],
         "engine": {"max_num_seqs": 256, "kv_capacity_tokens": 35792},
@@ -96,7 +96,7 @@ def _ok_output(run_id="rid", level=8, run=None, **over):
 def test_an_ok_job_becomes_an_ok_record_with_the_curve_fields_on_top():
     rec = build_sweep_record(
         ScheduledRun(5, 1, "c8"), "rid",
-        SubmitOutcome(clock_A=CLOCK_A, payload=_ok_output(), error=None),
+        SubmitOutcome(clock_A=CLOCK_A, payload=_ok_output(repeat=1), error=None),
     )
     assert (rec.outcome, rec.level, rec.repeat, rec.run_index) == ("ok", 8, 1, 5)
     assert (rec.latency_s, rec.throughput_tps, rec.gpu_util) == (0.5, 32.0, 0.4)
@@ -111,7 +111,7 @@ def test_a_truncated_log_is_recorded_as_truncated_with_its_true_total():
     """The handler keeps a head and a tail of the engine log. A record that kept
     only the lines would show 800 of 2000 with no sign the middle was cut."""
     out = _ok_output(
-        log_lines=["head"] * 400 + ["tail"] * 400,
+        repeat=1, log_lines=["head"] * 400 + ["tail"] * 400,
         log_lines_total=2000, log_truncated=True, log_head_lines=400,
     )
     rec = build_sweep_record(
@@ -136,7 +136,7 @@ def test_a_failed_job_keeps_the_log_cap_flags_too():
 
 
 def test_an_untruncated_log_says_so():
-    out = _ok_output(log_lines_total=1, log_truncated=False, log_head_lines=1)
+    out = _ok_output(repeat=1, log_lines_total=1, log_truncated=False, log_head_lines=1)
     rec = build_sweep_record(
         ScheduledRun(5, 1, "c8"), "rid", SubmitOutcome(clock_A=CLOCK_A, payload=out, error=None)
     )
@@ -149,7 +149,7 @@ def test_an_older_handler_output_stores_the_cap_flags_as_none_not_invented_value
     stored False or a total of len(log_lines) would claim it was not."""
     rec = build_sweep_record(
         ScheduledRun(5, 1, "c8"), "rid",
-        SubmitOutcome(clock_A=CLOCK_A, payload=_ok_output(), error=None),
+        SubmitOutcome(clock_A=CLOCK_A, payload=_ok_output(repeat=1), error=None),
     )
     for key in ("log_truncated", "log_lines_total", "log_head_lines"):
         assert key in rec.engine and rec.engine[key] is None
@@ -158,7 +158,7 @@ def test_an_older_handler_output_stores_the_cap_flags_as_none_not_invented_value
 def test_the_source_is_stored_on_the_record_when_the_driver_names_one():
     """A stub record must say it is a stub on its own, so a later reduction
     cannot be talked into labelling it measured."""
-    ok = SubmitOutcome(clock_A=CLOCK_A, payload=_ok_output(), error=None)
+    ok = SubmitOutcome(clock_A=CLOCK_A, payload=_ok_output(repeat=1), error=None)
     assert build_sweep_record(ScheduledRun(5, 1, "c8"), "rid", ok, source="stub").source == "stub"
     assert build_sweep_record(ScheduledRun(5, 1, "c8"), "rid", ok).source is None
     failed = SubmitOutcome(clock_A=CLOCK_A, payload=None, error=UNHEALTHY_ERROR, diagnostics={})
@@ -166,7 +166,7 @@ def test_the_source_is_stored_on_the_record_when_the_driver_names_one():
 
 
 def test_diagnostics_are_carried_into_the_record_when_the_worker_sends_them():
-    out = _ok_output(diagnostics={"pandas_importable": False})
+    out = _ok_output(repeat=1, diagnostics={"pandas_importable": False})
     rec = build_sweep_record(
         ScheduledRun(5, 1, "c8"), "rid", SubmitOutcome(clock_A=CLOCK_A, payload=out, error=None)
     )
@@ -197,6 +197,58 @@ def test_a_failed_measurement_on_a_healthy_engine_is_a_failed_record():
     assert rec.engine["log_lines"]
 
 
+def test_an_answer_for_another_repeat_is_refused():
+    with pytest.raises(ValueError, match="repeat"):
+        build_sweep_record(
+            ScheduledRun(0, 2, "c8"), "rid",
+            SubmitOutcome(clock_A=CLOCK_A, payload=_ok_output(repeat=1), error=None),
+        )
+    with pytest.raises(ValueError, match="repeat"):
+        build_sweep_record(
+            ScheduledRun(0, 2, "c8"), "rid",
+            SubmitOutcome(clock_A=CLOCK_A, payload=_ok_output(repeat=None), error=None),
+        )
+
+
+def test_timings_and_the_log_readers_state_are_stored_on_every_kind_of_record():
+    timing = {"startup_s": 88.5, "teardown_s": 3.25, "drain_completed": False,
+              "drain_error": "OSError('x')"}
+    expected = {"startup_s": 88.5, "teardown_s": 3.25, "drain_completed": False,
+                "drain_error": "OSError('x')"}
+
+    def stored(rec):
+        return {k: getattr(rec, k) for k in expected}
+
+    ok = build_sweep_record(
+        ScheduledRun(0, 0, "c8"), "rid",
+        SubmitOutcome(clock_A=CLOCK_A, payload=_ok_output(**timing), error=None),
+    )
+    assert stored(ok) == expected
+    no_run = _ok_output(run=None, run_error="BenchError: x", **timing)
+    no_run["run"] = None
+    failed = build_sweep_record(
+        ScheduledRun(0, 0, "c8"), "rid", SubmitOutcome(clock_A=CLOCK_A, payload=no_run, error=None)
+    )
+    assert stored(failed) == expected
+    unhealthy = build_sweep_record(
+        ScheduledRun(0, 0, "c8"), "rid",
+        SubmitOutcome(clock_A=CLOCK_A, payload=None, error=UNHEALTHY_ERROR,
+                      diagnostics={"healthy": False, "log_lines": [], **timing}),
+    )
+    assert stored(unhealthy) == expected
+    assert SweepRun.from_dict(json.loads(json.dumps(ok.to_dict()))) == ok
+
+
+def test_a_record_with_no_timings_stores_none_not_zero():
+    rec = build_sweep_record(
+        ScheduledRun(0, 0, "c8"), "rid",
+        SubmitOutcome(clock_A=CLOCK_A, payload=_ok_output(), error=None),
+    )
+    assert (rec.startup_s, rec.teardown_s, rec.drain_completed, rec.drain_error) == (
+        None, None, None, None
+    )
+
+
 def test_an_answer_for_another_run_is_refused():
     with pytest.raises(ValueError, match="another run"):
         build_sweep_record(
@@ -209,9 +261,11 @@ _NO_FIELD = object()
 
 
 def _rec(level, repeat, *, latency=0.5, tps=32.0, util=0.4, path="exact", outcome="ok",
-         cmd=("vllm", "serve", "m"), mns=256, windowed=_NO_FIELD):
+         cmd=("vllm", "serve", "m"), mns=256, windowed=_NO_FIELD, rt=_NO_FIELD):
     ok = outcome == "ok"
     summary = {} if windowed is _NO_FIELD else {"gpu_util_windowed": windowed}
+    if rt is not _NO_FIELD:
+        summary["bench_scalars"] = {} if rt is None else {"request_throughput": rt}
     return SweepRun(
         run_id=f"r{level}-{repeat}", run_index=0, condition=condition_for(level), level=level,
         repeat=repeat, outcome=outcome,
@@ -260,6 +314,38 @@ def test_mixed_prompt_paths_are_refused():
         reduce_curve(records)
 
 
+def test_each_level_carries_the_median_request_throughput_of_its_runs():
+    records = (_three(1, [0.3] * 3, rt=3.0)
+               + [_rec(2, i, latency=0.4, rt=v) for i, v in enumerate([79.0, 81.0, 80.0])])
+    red = reduce_curve(records)
+    assert [row["request_throughput"] for row in red.levels] == [3.0, 80.0]
+    assert red.to_dict()["levels"][1]["request_throughput"] == 80.0
+
+
+def test_a_level_whose_run_lacks_the_throughput_carries_none_not_a_median_of_the_rest():
+    records = (_three(1, [0.3] * 3, rt=3.0)
+               + [_rec(2, 0, rt=80.0), _rec(2, 1, rt=None), _rec(2, 2)])
+    assert [row["request_throughput"] for row in reduce_curve(records).levels] == [3.0, None]
+
+
+def test_the_mixed_method_refusal_does_not_offer_a_single_level_re_run():
+    records = _three(1, [0.3] * 3, windowed=True) + _three(2, [0.4] * 3, windowed=False)
+    with pytest.raises(ValueError) as e:
+        reduce_curve(records)
+    text = str(e.value)
+    assert "whole campaign" in text and "new store" in text
+    assert "runs that differ" not in text, "a re-run of a subset cannot be reduced"
+
+
+def test_the_short_level_refusal_names_the_options_that_can_be_carried_out():
+    records = _three(1, [0.3] * 3) + _three(2, [0.4] * 2)
+    with pytest.raises(ValueError) as e:
+        reduce_curve(records)
+    text = str(e.value)
+    assert "whole campaign" in text and "min-repeats 2" in text and "disclose" in text
+    assert "its own" not in text and "Re-run the level" not in text
+
+
 def test_mixed_serve_commands_are_refused():
     records = _three(1, [0.3] * 3) + _three(2, [0.4] * 3, cmd=("vllm", "serve", "other"))
     with pytest.raises(ValueError, match="serve commands"):
@@ -285,6 +371,16 @@ def test_a_run_that_never_says_how_its_utilisation_was_measured_is_not_pooled_wi
         "an all-unknown store (written before the field existed) is one method, not a mix"
     )
     assert reduce_curve(_three(1, [0.3] * 3, windowed=False) + newer).levels[1]["n_runs"] == 3
+
+
+@pytest.mark.parametrize(
+    ("windowed", "label"), [(True, "windowed"), (False, "whole-call"), (_NO_FIELD, "unrecorded")]
+)
+def test_the_curve_says_which_utilisation_method_its_runs_agreed_on(windowed, label):
+    records = _three(1, [0.3] * 3, windowed=windowed) + _three(2, [0.4] * 3, windowed=windowed)
+    red = reduce_curve(records)
+    assert red.gpu_util_method == label
+    assert red.to_dict()["gpu_util_method"] == label
 
 
 def test_a_failed_run_does_not_count_towards_the_utilisation_methods():

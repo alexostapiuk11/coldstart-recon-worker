@@ -3,6 +3,7 @@ the real driver (`run_sweep`) and the real handler over the shared fakes, so the
 reader is checked against the record shape the code actually stores, not against
 a hand-built dict that could drift from it."""
 
+import json
 import sys
 from pathlib import Path
 
@@ -77,6 +78,50 @@ def test_each_run_gets_a_block_that_answers_the_checklists_questions(tmp_path, c
     assert "non-default args line has prefix caching off: False" in out
     assert "requests: completed" in out and "failed 0" in out
     assert "clock_A submit-to-result" in out
+
+
+def test_each_run_prints_the_measured_startup_teardown_and_whether_the_log_drained(tmp_path, capsys):
+    reader.main([str(_pilot(tmp_path))])
+    out = capsys.readouterr().out
+    timing = [line for line in out.splitlines() if line.startswith("  timing:")]
+    assert len(timing) == 2
+    assert all("teardown 1.5 s" in line and "log drained: True" in line for line in timing)
+    assert all("startup " in line and "startup None" not in line for line in timing)
+
+
+def test_a_log_that_did_not_drain_is_said_so_with_its_error(tmp_path, capsys):
+    engine = FakeEngine(drain_completed=False, drain_error=OSError("pipe"))
+    reader.main([str(_pilot(tmp_path, engine))])
+    assert "log drained: False (OSError('pipe'))" in capsys.readouterr().out
+
+
+def test_a_failed_run_still_prints_its_timing(tmp_path, capsys):
+    with pytest.raises(ValueError, match="no successful run"):
+        _pilot(tmp_path, FakeEngine(healthy=False))
+    reader.main([str(tmp_path / "pilot.jsonl")])
+    assert "  timing: startup" in capsys.readouterr().out
+
+
+def test_a_run_without_diagnostics_has_no_saved_json_and_the_reader_says_absent(
+    tmp_path, capsys
+):
+    reader.main([str(_pilot(tmp_path, diagnostics=False))])
+    out = capsys.readouterr().out
+    assert out.count("--- run ") == 2
+    assert "saved JSON missing keys: absent" in out
+    assert "--diagnostics" in out.split("saved JSON missing keys:")[1].split("\n")[0]
+
+
+def test_a_summary_without_the_tools_median_prints_absent_not_a_traceback(tmp_path, capsys):
+    store = _pilot(tmp_path)
+    rows = [json.loads(line) for line in store.read_text().splitlines()]
+    for row in rows:
+        del row["summary"]["bench_median_e2el_s"]
+    store.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    reader.main([str(store)])
+    out = capsys.readouterr().out
+    assert "tool median_e2el absent" in out
+    assert "gap" not in out.split("tool median_e2el absent")[1].split("\n")[0]
 
 
 def test_a_failed_run_prints_its_detail_and_the_engine_facts_and_no_summary(tmp_path, capsys):

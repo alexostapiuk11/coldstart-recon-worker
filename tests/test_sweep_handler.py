@@ -11,6 +11,7 @@ from sweep_fakes import (
     KV_LINE,
     NON_DEFAULT_LINE,
     PROMPT_TOKENS,
+    VERSION_LINE,
     FakeEngine,
     model_latency,
     model_util,
@@ -173,7 +174,9 @@ def test_a_diagnostic_job_answers_the_first_paid_runs_questions():
     engine = FakeEngine()
     out = _run(engine, _payload(diagnostics=True))
     diag = out["diagnostics"]
-    assert diag["bench_help"]["cmd"] == ["vllm", "bench", "serve", "--help"]
+    # vLLM 0.27.1's plain `--help` prints a group summary and no flags; only
+    # `--help=all` lists them (vllm/utils/argparse_utils.py, format_help)
+    assert diag["bench_help"]["cmd"] == ["vllm", "bench", "serve", "--help=all"]
     assert "--save-detailed" in diag["bench_help"]["stdout"]
     assert diag["nvidia_smi"]["stdout"] == "42"
     assert isinstance(diag["pandas_importable"], bool)
@@ -183,6 +186,14 @@ def test_a_diagnostic_job_answers_the_first_paid_runs_questions():
     assert clocks["child_cmd"][-1].endswith("print(time.perf_counter())")
     assert diag["prompt_in_log"] is False
     assert out["run"]["raw_bench"]["ttfts"], "the diagnostic job keeps the saved JSON"
+
+
+def test_no_diagnostic_asks_the_engine_for_help_in_a_form_that_prints_no_flags():
+    engine = FakeEngine()
+    _run(engine, _payload(diagnostics=True))
+    helps = [c for c in engine.commands if c[0] == "vllm"]
+    assert helps, "the bench help was never captured"
+    assert all(c[-1] == "--help=all" for c in helps), helps
 
 
 def test_the_clock_diagnostic_says_whether_another_process_shares_the_monotonic_epoch():
@@ -284,3 +295,120 @@ def test_one_enormous_log_line_cannot_defeat_the_line_cap():
     assert len(out["log_lines"]) == 3
     assert all(len(line) <= sweep_handler.LOG_LINE_CHARS + 100 for line in out["log_lines"])
     assert len(json.dumps(out)) < 200_000
+
+
+def test_startup_teardown_and_the_log_readers_state_come_back_with_the_result():
+    out = _run(FakeEngine(), _payload())
+    assert out["startup_s"] >= 0
+    assert out["teardown_s"] == 1.5
+    assert out["drain_completed"] is True
+    assert out["drain_error"] is None
+
+
+def test_a_log_reader_that_failed_is_reported_with_its_error():
+    engine = FakeEngine(drain_completed=False, drain_error=ValueError("bad byte"))
+    out = _run(engine, _payload())
+    assert out["drain_completed"] is False
+    assert out["drain_error"] == "ValueError('bad byte')"
+
+
+def test_an_unhealthy_engines_timings_and_drain_state_come_back_too():
+    out = _run(FakeEngine(healthy=False, drain_completed=False), _payload())
+    assert out["healthy"] is False
+    assert out["teardown_s"] == 1.5
+    assert out["drain_completed"] is False
+    assert out["drain_error"] is None
+    assert out["startup_s"] >= 0
+
+
+def test_an_unhealthy_engine_still_reports_the_facts_its_log_holds():
+    log = ["INFO fake engine starting", VERSION_LINE, NON_DEFAULT_LINE, "ERROR it died"]
+    out = _run(FakeEngine(healthy=False, log_lines=log), _payload())
+    assert out["engine"]["vllm_version"] == "0.27.1"
+    assert out["engine"]["max_num_seqs"] == 256
+    outcome = PayloadStubSubmitter(
+        lambda p: _run(FakeEngine(healthy=False, log_lines=log), p)
+    ).submit_payload(_payload(level=4))
+    rec = build_sweep_record(ScheduledRun(3, 0, "c4"), "rid", outcome)
+    assert rec.engine["vllm_version"] == "0.27.1"
+
+
+def test_an_unhealthy_engines_facts_come_from_the_whole_log_not_its_capped_head_and_tail():
+    out = _run(FakeEngine(healthy=False, log_lines=_huge_log()), _payload())
+    assert out["engine"]["max_num_seqs"] == 256
+    assert out["engine"]["kv_capacity_tokens"] == 35792
+
+
+def test_the_record_stores_the_timings_and_drain_state_of_an_ok_and_an_unhealthy_run():
+    for healthy in (True, False):
+        engine = FakeEngine(healthy=healthy, drain_completed=healthy)
+        outcome = PayloadStubSubmitter(lambda p, e=engine: _run(e, p)).submit_payload(
+            _payload(level=4)
+        )
+        rec = build_sweep_record(ScheduledRun(3, 0, "c4"), "rid", outcome)
+        assert rec.teardown_s == 1.5
+        assert rec.startup_s is not None
+        assert rec.drain_completed is healthy
+        assert rec.drain_error is None
+
+
+def test_each_diagnostic_capture_is_capped_well_inside_the_teardown_reserve():
+    engine = FakeEngine()
+    timeouts = []
+    real = engine.run_command
+
+    def recording(cmd, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        return real(cmd, **kwargs)
+
+    sweep_handler.collect_diagnostics(recording, [])
+    assert len(timeouts) == 3
+    # a capture starts only before the job deadline, which is the reserve ahead of
+    # the job's end, so one that then runs its whole timeout still leaves most of
+    # the reserve for the upload; the old 120 s per capture could eat all of it
+    assert all(0 < t <= 30 for t in timeouts), timeouts
+
+
+def test_diagnostics_past_the_job_deadline_are_skipped_and_say_so():
+    calls = []
+
+    def run_command(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "1.0", "")
+
+    now = [0.0]
+
+    def clock():
+        now[0] += 10.0  # each look at the clock is 10 s later
+        return now[0]
+
+    diag = sweep_handler.collect_diagnostics(run_command, [], deadline=25.0, clock=clock)
+    # first look 10, second 20 (both before the deadline); the third is at 30
+    assert len(calls) == 2
+    assert "skipped" in diag["nvidia_smi"]
+    assert "deadline" in diag["nvidia_smi"]["skipped"]
+    assert "skipped" not in diag["bench_help"]
+
+
+def test_a_job_whose_budget_is_spent_skips_its_diagnostics_instead_of_overrunning():
+    engine = FakeEngine()
+    out = _run(engine, _payload(diagnostics=True, job_budget_s=60))
+    assert engine.commands == []
+    assert all("skipped" in out["diagnostics"][k] for k in ("bench_help", "nvidia_smi"))
+    assert out["diagnostics"]["clocks"]["child_perf_counter_between"] is None
+    assert "skipped" in out["diagnostics"]["clocks"]
+
+
+@pytest.mark.parametrize(
+    "flag", ["--max_model_len=4096", "--max_model_len", "--revision=abc", "--max-model_len"]
+)
+def test_the_endpoints_flags_are_protected_in_the_underscore_spelling_too(flag):
+    # vLLM's parser turns `_` into `-` in flag names, so these reach the engine
+    with pytest.raises(ValueError, match="endpoint environment owns"):
+        sweep_handler.serve_args_for([flag])
+
+
+def test_a_flag_that_merely_resembles_an_owned_one_passes():
+    assert sweep_handler.serve_args_for(["--max-num-seqs", "256"])[-2:] == [
+        "--max-num-seqs", "256"
+    ]

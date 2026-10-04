@@ -47,6 +47,7 @@ def _doc(source="runpod", max_num_seqs=(256,), top=64):
             _row(top, 0.95, 1077.9, 0.99, [f"r{top}a", f"r{top}b", f"r{top}c"]),
         ],
         "statistic": "per run: ...",
+        "gpu_util_method": "windowed",
         "prompt_path": "exact",
         "served_cmd": ["vllm", "serve", "m", "--port", "8000", "--max-num-seqs", "256"],
         "engine": {"max_num_seqs": list(max_num_seqs), "max_num_seqs_source": ["non-default-args"]},
@@ -74,6 +75,38 @@ def test_a_measured_sweep_becomes_a_measured_curve_with_its_cap_recorded():
     assert meta["max_num_seqs"] == 256
     assert meta["max_num_seqs_source"] == "non-default-args"
     assert meta["top_level_above_max_num_seqs"] is False
+
+
+@pytest.mark.parametrize("method", ["windowed", "whole-call", "unrecorded"])
+def test_the_utilisation_method_the_reduction_recorded_is_carried_into_the_output(method):
+    doc = _doc()
+    doc["gpu_util_method"] = method
+    _, meta = a2.build_service_curve(doc)
+    assert meta["gpu_util_method"] == method
+
+
+def test_a_curve_file_from_before_the_method_was_recorded_says_unrecorded_not_windowed():
+    doc = _doc()
+    del doc["gpu_util_method"]
+    _, meta = a2.build_service_curve(doc)
+    assert meta["gpu_util_method"] == "unrecorded"
+
+
+def test_a_method_that_is_not_one_of_the_three_is_refused():
+    doc = _doc()
+    doc["gpu_util_method"] = "sampled"
+    with pytest.raises(ValueError, match="gpu_util_method"):
+        a2.build_service_curve(doc)
+
+
+def test_the_summary_line_names_the_utilisation_method(tmp_path, capsys):
+    doc = _doc()
+    doc["gpu_util_method"] = "whole-call"
+    (tmp_path / "sweep.json").write_text(json.dumps(doc))
+    a2.main(["--curve", str(tmp_path / "sweep.json"), "--out", str(tmp_path / "a2.json")])
+    first = capsys.readouterr().out.splitlines()[0]
+    assert first == "[a2] 2 points, max_num_seqs=256, MEASURED, gpu_util=whole-call"
+    assert json.loads((tmp_path / "a2.json").read_text())["gpu_util_method"] == "whole-call"
 
 
 def test_a_top_level_above_the_engines_limit_is_flagged():
@@ -174,6 +207,17 @@ def test_littles_law_ratio_reads_a_level_row_that_carries_the_throughput():
     assert meta["littles_law"][0]["request_throughput"] == pytest.approx(3.1)
     assert meta["littles_law"][0]["ratio"] == pytest.approx((1 / 0.31) / 3.1)
     assert meta["littles_law"][1]["ratio"] is None
+
+
+def test_a_level_row_the_reduction_left_without_a_throughput_is_unavailable_whatever_the_store_says():
+    doc = _doc()
+    doc["levels"][0]["request_throughput"] = None  # the reducer found a run without it
+    doc["levels"][1]["request_throughput"] = 80.0
+    _, meta = a2.build_service_curve(doc, runs=_runs(doc, {1: 3.0, 64: 99.0}))
+    low, high = meta["littles_law"]
+    assert low["request_throughput"] is None and low["ratio"] is None
+    assert "reduction" in low["unavailable"]
+    assert high["request_throughput"] == pytest.approx(80.0), "the row's own value wins"
 
 
 def test_littles_law_is_unavailable_not_invented_when_the_throughput_is_missing():

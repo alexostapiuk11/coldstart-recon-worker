@@ -5,7 +5,7 @@
 The paid-run checklist (docs/runbook-service-sweep.md, section F) runs a two-job
 diagnostic pilot with `--diagnostics`, and the answers to its UNVERIFIED items
 (docs/superpowers/plans/2026-10-04-shared-in-container-tooling.md) are spread
-over a dozen fields of each stored run: whether `vllm bench serve --help` lists
+over a dozen fields of each stored run: whether `vllm bench serve --help=all` lists
 every flag the harness passes, which prompt path ran, whether prefix caching
 reached the engine, whether the GPU figure was windowed, how the tool's median
 agrees with the reconstructed latency. This prints one block per run with each
@@ -46,6 +46,10 @@ KEYS = [
 ]
 
 
+def _seconds(value) -> str:
+    return "absent" if value is None else f"{value:.1f} s"
+
+
 def describe(row: dict) -> list[str]:
     """One run's answers, as printable lines."""
     r = row
@@ -71,17 +75,34 @@ def describe(row: dict) -> list[str]:
              ("max_num_seqs", "max_num_seqs_source", "kv_capacity_tokens", "vllm_version")}
     say(f"  engine: {facts}")
     say(f"  log: {e.get('log_lines_total')} lines, truncated: {e.get('log_truncated')}")
+    # What the handler measured for this job. The cost estimate (runbook E) takes
+    # its startup and teardown from here, not from artifact 1's figures.
+    drained = r.get("drain_completed")
+    drain_error = r.get("drain_error")
+    say(f"  timing: startup {_seconds(r.get('startup_s'))} | teardown "
+        f"{_seconds(r.get('teardown_s'))} | log drained: {drained}"
+        + (f" ({drain_error})" if drain_error else ""))
     if r["outcome"] != "ok":
         return out
     s = r["summary"]
-    gap_ms = (s["latency_s"] - s["bench_median_e2el_s"]) * 1000
-    say(f"  saved JSON missing keys: {[k for k in KEYS if k not in s['raw_bench']]}")
+    # `raw_bench` is only kept for a `--diagnostics` job, and the tool's median is
+    # absent when the saved JSON lacked it: either is reported, not a crash that
+    # hides the rest of the block.
+    median_s = s.get("bench_median_e2el_s")
+    raw = s.get("raw_bench")
+    say("  saved JSON missing keys: "
+        + ("absent (this run had no raw saved JSON; it needs --diagnostics)" if raw is None
+           else str([k for k in KEYS if k not in raw])))
     say(f"  prompt: {s['prompt_path']} tokens {s['prompt']['prompt_tokens']} "
         f"engine input_lens {s['input_lens_unique']} | probe_error: {s['prompt']['probe_error']}")
     say(f"  requests: completed {s['completed']} failed {s['failed']} | error samples: "
         f"{s['error_samples']}")
-    say(f"  latency {s['latency_s']:.4f} s vs tool median_e2el {s['bench_median_e2el_s']:.4f} s "
-        f"(gap {gap_ms:+.2f} ms)")
+    if median_s is None:
+        say(f"  latency {s['latency_s']:.4f} s vs tool median_e2el absent")
+    else:
+        gap_ms = (s["latency_s"] - median_s) * 1000
+        say(f"  latency {s['latency_s']:.4f} s vs tool median_e2el {median_s:.4f} s "
+            f"(gap {gap_ms:+.2f} ms)")
     say(f"  gpu: reported {s['gpu_util']} | whole-call {s['gpu_util_whole_call']} | "
         f"windowed: {s['gpu_util_windowed']}")
     if s["gpu_util_windowed"]:

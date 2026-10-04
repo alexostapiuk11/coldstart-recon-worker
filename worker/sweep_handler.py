@@ -52,6 +52,14 @@ A1_PROMPT = "Explain what a key-value cache does, in two sentences."
 # Seconds kept back from the job budget for teardown and the result upload.
 TEARDOWN_RESERVE_S = 120.0
 _HELP_CHARS = 200_000
+# Longest one diagnostic capture may run. A capture started before the job's
+# deadline still runs on past it, so the cap, not the deadline, bounds how much
+# of TEARDOWN_RESERVE_S a diagnostic job can spend. The first version gave each
+# capture 120 s: three of them, after a 30 s stop grace and a 15 s log join,
+# could outlast the reserve and cost the whole job's result (the platform kills
+# the job and returns nothing). None of the three commands should take more
+# than a few seconds; a 30 s cap says "hung" and records the timeout.
+DIAGNOSTIC_CAPTURE_TIMEOUT_S = 30.0
 # What comes back of the engine's log, and why it is a head and a tail rather
 # than the whole of it. RunPod's maximum job-output size is UNVERIFIED (plan
 # item 12), and `--enable-log-requests` (which a diagnostic job may pass) logs
@@ -91,8 +99,15 @@ def fixed_serve_args() -> list[str]:
 
 
 def serve_args_for(payload_args) -> list[str]:
+    """The endpoint's fixed flags, then the job's, refusing a job flag that clashes.
+
+    A flag is compared with `_` read as `-`, because vLLM's argument parser
+    treats `--max_model_len` and `--max-model-len` as the same flag: a check on
+    the dashed spelling alone let the underscore one through, and the engine
+    then ran with a per-job value the endpoint is meant to own.
+    """
     owned = {flag for _, flag in _FIXED_SERVE_ENV}
-    clash = [a for a in payload_args if a.split("=", 1)[0] in owned]
+    clash = [a for a in payload_args if a.split("=", 1)[0].replace("_", "-") in owned]
     if clash:
         raise ValueError(
             f"serve_args {clash} set flags the endpoint environment owns; a per-job "
@@ -130,6 +145,21 @@ def _engine_facts(lines) -> dict:
     }
 
 
+def _drain_state(server) -> dict:
+    """Whether the engine log is whole, as the log reader reports it.
+
+    `drain_completed` False means `log_lines` may be missing its tail (the
+    reader failed, or `stop()` gave up waiting for it), which a reader of the
+    stored log cannot tell from a log that simply ends. `drain_error` is the
+    exception's `repr`, a string, so the output stays JSON.
+    """
+    error = server.drain_error
+    return {
+        "drain_completed": bool(server.drain_completed),
+        "drain_error": None if error is None else repr(error),
+    }
+
+
 def capped_log(lines) -> dict:
     """The log fields of the job output: head, tail, the true count, a flag.
 
@@ -155,25 +185,54 @@ def capped_log(lines) -> dict:
     }
 
 
-def collect_diagnostics(run_command: Callable, log_lines) -> dict:
+def collect_diagnostics(
+    run_command: Callable,
+    log_lines,
+    *,
+    deadline: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> dict:
     """In-container checks the first paid run needs, asked for per job.
 
     Each answers an item this repository could not verify without the image:
     whether the tool accepts every flag `harness.bench` passes (its help
     text), whether `pandas` -- which the custom dataset needs -- is installed,
     what nvidia-smi prints for the sampler's query, whether the engine
-    logged artifact 1's prompt text (only if the job's serve args turned
-    request logging on), and whether another process on this machine reads
+    logged artifact 1's prompt text (vLLM 0.27.1 logs prompt text only at
+    DEBUG, so False is the expected answer and `input_lens` is the evidence),
+    and whether another process on this machine reads
     the same monotonic clock (`clocks`: the GPU-utilisation window compares
     the sampler's `time.monotonic` with the bench tool's `time.perf_counter`
     request times; on Linux both are CLOCK_MONOTONIC, which is not checked
     until a diagnostic job runs on the image). Never part of an ordinary job:
     the help text alone is tens of kilobytes.
+
+    The bench help is `--help=all`: in vLLM 0.27.1 a plain `--help` prints the
+    usage line and a summary of the option groups, not the flags
+    (`FlexibleArgumentParser.format_help`, vllm/utils/argparse_utils.py), so
+    "the flag is missing from the help" would be true of every flag.
+
+    These run after the engine is stopped, inside the seconds the job keeps
+    back for teardown and the upload. Each capture is capped at
+    DIAGNOSTIC_CAPTURE_TIMEOUT_S, and once `clock()` reaches `deadline` (the
+    job's own, `TEARDOWN_RESERVE_S` before its end) the remaining captures are
+    not run and say so under `skipped`. Running them anyway was rejected: a
+    job the platform kills returns nothing, and that loses the measurement
+    along with the checks. `deadline=None` never skips.
     """
 
     def capture(cmd):
+        if deadline is not None and clock() >= deadline:
+            return {
+                "cmd": cmd,
+                "skipped": "the job deadline had passed before this check could start; "
+                "running it would have risked the job's result",
+            }
         try:
-            proc = run_command(cmd, capture_output=True, text=True, check=False, timeout=120)
+            proc = run_command(
+                cmd, capture_output=True, text=True, check=False,
+                timeout=DIAGNOSTIC_CAPTURE_TIMEOUT_S,
+            )
         except Exception as e:  # noqa: BLE001 -- a diagnostic never fails the job
             return {"cmd": cmd, "error": repr(e)}
         return {
@@ -206,9 +265,11 @@ def collect_diagnostics(run_command: Callable, log_lines) -> dict:
             None if child_value is None else before <= child_value <= after
         ),
     }
+    if "skipped" in child:
+        clocks["skipped"] = child["skipped"]
     return {
         "clocks": clocks,
-        "bench_help": capture(["vllm", "bench", "serve", "--help"]),
+        "bench_help": capture(["vllm", "bench", "serve", "--help=all"]),
         "nvidia_smi": capture(
             ["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits",
              "--id=0"]
@@ -266,16 +327,29 @@ def handler(job, deps: Deps | None = None) -> dict:
     with d.served(model, args=args, env={}) as server, tempfile.TemporaryDirectory() as tmp:
         startup_s = d.clock() - t0
         if not server.healthy:
+            # `served` stopped this engine before yielding it, so `startup_s`
+            # here is the health wait PLUS that stop (harness/serve.py); the
+            # second `stop()` returns the first one's seconds and signals nothing,
+            # so `startup_s - teardown_s` is the wait alone.
+            teardown_s = server.stop()
             lines = list(server.log_lines)
             out = {
                 "healthy": False,
+                # The facts a diagnosis needs (vllm_version, max_num_seqs, ...) are
+                # exactly what a run that never became healthy would otherwise lose,
+                # read from the whole log before the cap.
+                "engine": _engine_facts(lines),
                 **capped_log(lines),
                 "served_cmd": list(server.cmd),
                 "startup_s": startup_s,
+                "teardown_s": teardown_s,
+                **_drain_state(server),
                 **common,
             }
             if want_diagnostics:
-                out["diagnostics"] = collect_diagnostics(d.run_command, lines)
+                out["diagnostics"] = collect_diagnostics(
+                    d.run_command, lines, deadline=deadline, clock=d.clock
+                )
             return out
         try:
             plan = choose_prompt_path(
@@ -319,10 +393,13 @@ def handler(job, deps: Deps | None = None) -> dict:
         **capped_log(lines),
         "startup_s": startup_s,
         "teardown_s": teardown_s,
+        **_drain_state(server),
         **common,
     }
     if want_diagnostics:
-        out["diagnostics"] = collect_diagnostics(d.run_command, lines)
+        out["diagnostics"] = collect_diagnostics(
+            d.run_command, lines, deadline=deadline, clock=d.clock
+        )
     return out
 
 

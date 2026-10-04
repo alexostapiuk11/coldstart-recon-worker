@@ -17,6 +17,15 @@ NON_DEFAULT_LINE = (
     "'max_num_seqs': 256}"
 )
 KV_LINE = "(EngineCore pid=340) INFO 10-04 12:00:40 [kv_cache_utils.py:2235] GPU KV cache size: 35,792 tokens"
+VERSION_LINE = (
+    "(EngineCore pid=340) INFO 10-04 12:00:10 [core.py:121] Initializing a V1 LLM engine "
+    "(v0.27.1) with config: model='Qwen/Qwen3-8B'"
+)
+# vLLM 0.27.1's FlexibleArgumentParser.format_help prints the usage line and a group
+# summary for a plain `--help`, and the flag list only for `--help=all`
+# (vllm/utils/argparse_utils.py). A caller that asks for the plain form gets no flags.
+BENCH_HELP_USAGE_ONLY = "usage: vllm bench serve [options]\n\nConfig Groups:\nBenchmarkArgs"
+BENCH_HELP_ALL = "usage: vllm bench serve [options]\n--max-concurrency --save-detailed"
 
 
 def model_latency(level: int, repeat: int = 0) -> float:
@@ -58,7 +67,8 @@ def bench_json(
 
 
 class FakeServer:
-    def __init__(self, model, args, healthy, log_lines=None):
+    def __init__(self, model, args, healthy, log_lines=None, drain_completed=True,
+                 drain_error=None):
         self.base_url = "http://127.0.0.1:8000"
         self.cmd = ["vllm", "serve", model, "--port", "8000", *args]
         self.healthy = healthy
@@ -68,6 +78,8 @@ class FakeServer:
             else ["INFO fake engine starting", NON_DEFAULT_LINE, KV_LINE]
         )
         self.stops = 0
+        self.drain_completed = drain_completed
+        self.drain_error = drain_error
 
     def stop(self) -> float:
         self.stops += 1
@@ -104,8 +116,10 @@ class FakeEngine:
 
     def __init__(
         self, *, healthy=True, probe_ok=True, fail_measured_at=None, log_lines=None,
-        failed_requests=0,
+        failed_requests=0, drain_completed=True, drain_error=None,
     ):
+        self.drain_completed = drain_completed
+        self.drain_error = drain_error
         self.failed_requests = failed_requests
         self.healthy = healthy
         self.log_lines = log_lines
@@ -121,7 +135,9 @@ class FakeEngine:
     @contextlib.contextmanager
     def served(self, model, *, args, env):
         self.served_calls.append({"model": model, "args": list(args), "env": dict(env)})
-        server = FakeServer(model, args, self.healthy, self.log_lines)
+        server = FakeServer(
+            model, args, self.healthy, self.log_lines, self.drain_completed, self.drain_error
+        )
         self.servers.append(server)
         try:
             yield server
@@ -162,6 +178,8 @@ class FakeEngine:
 
     def run_command(self, cmd, **kwargs):
         self.commands.append(cmd)
-        is_help = cmd[:3] == ["vllm", "bench", "serve"]
-        stdout = "--max-concurrency --save-detailed" if is_help else "42"
+        if cmd[:3] == ["vllm", "bench", "serve"]:
+            stdout = BENCH_HELP_ALL if cmd[3:] == ["--help=all"] else BENCH_HELP_USAGE_ONLY
+        else:
+            stdout = "42"
         return subprocess.CompletedProcess(cmd, 0, stdout, "")

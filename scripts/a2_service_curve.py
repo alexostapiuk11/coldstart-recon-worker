@@ -17,6 +17,13 @@ still converts, so the GPU-free tests exercise this path, but as
 A curve with no `source` at all is also not measured: the flag is earned by
 the one positive value, never defaulted into.
 
+The curve's utilisation column is a median over the measured span (`windowed`)
+or over the whole call, idle startup and teardown included (`whole-call`); the
+reduction refuses a store that mixes the two and records which one it got
+(`gpu_util_method`, `unrecorded` for runs from before the field existed). This
+adapter carries it into its output and prints it in its summary line, because
+figures that plot the column should say which statistic it is.
+
 `ServiceCurve` holds only points, but figure 4 draws an interval per level
 (spec section 11), so the output JSON carries the reduction's per-level
 min..max ranges beside the points (`intervals`). Dropping them here would
@@ -26,9 +33,11 @@ Little's-law disclosure. The curve's latency is a MEDIAN, and
 `autoscale/traffic.py` takes saturation as max(c / latency_at(c)); Little's
 law gives c = throughput x MEAN latency. Latency is right-skewed, so the
 median sits below the mean and c / median_latency overstates the rate the
-engine sustained. `--store` (default: the store the curve file names) lets the
-adapter compare c / latency_s with the bench tool's own `request_throughput`
-per level and print the ratio. It is DISCLOSURE, not a gate: nobody knows yet
+engine sustained. The adapter compares c / latency_s with the bench tool's own
+`request_throughput` per level and prints the ratio. The reduction writes that
+throughput on each level row (the median of the level's runs'); only a curve
+file reduced before it did needs `--store` (default: the store the curve file
+names), which the adapter then reads for the same figure. It is DISCLOSURE, not a gate: nobody knows yet
 what ratio is too far from 1, and a made-up threshold would refuse a good
 sweep or bless a bad one. A level whose throughput cannot be found is reported
 as unavailable; it is never filled from a neighbour or recomputed from other
@@ -50,6 +59,25 @@ from harness.stats import median
 # ttft is carried too (it is not a curve column) so the figure can show it.
 _INTERVAL_FIELDS = ("latency_s", "throughput_tps", "gpu_util", "ttft_median_s")
 _BOUNDS_POINT_COLUMN = {"latency_s": 1, "throughput_tps": 2, "gpu_util": 3}
+_GPU_UTIL_METHODS = ("windowed", "whole-call", "unrecorded")
+
+
+def gpu_util_method_of(curve_doc: dict) -> str:
+    """How the curve's utilisation column was measured, as the reduction recorded it.
+
+    A curve file with no `gpu_util_method` predates the field, so it is
+    `unrecorded`; defaulting it to `windowed` was rejected because that would
+    label an unknown statistic as the better one. A value outside the three the
+    reduction writes is refused rather than printed: a label nobody defined
+    would read as a finding.
+    """
+    method = curve_doc.get("gpu_util_method", "unrecorded")
+    if method not in _GPU_UTIL_METHODS:
+        raise ValueError(
+            f"the curve's gpu_util_method is {method!r}, not one of {_GPU_UTIL_METHODS}; "
+            "the utilisation column would carry a label no reduction writes"
+        )
+    return method
 
 
 def max_num_seqs_of(curve_doc: dict) -> tuple[int, str]:
@@ -121,13 +149,24 @@ def _usable(value) -> bool:
 def _level_request_throughput(row: dict, runs) -> tuple[float | None, str | None]:
     """(value, None) or (None, why-not): the level's measured request_throughput.
 
-    Every stored run of the level must have a usable one, because the latency
+    From the level row when the reduction wrote one; otherwise (a curve file
+    from before it did) from the store's runs. Every run of the level must have
+    a usable one, because the latency
     it is compared with is a median over those same runs; a median over the
     survivors would be a different set of runs. A zero, negative or non-finite
     value is data corruption and is reported as unavailable: dividing by it
     would print an infinite or negative ratio that looks like a finding.
     """
-    if row.get("request_throughput") is not None:
+    if "request_throughput" in row:
+        # Written by `reduce_curve`: the median of the level's runs, or None when
+        # a run lacked it. None is final: the store holds the same runs, and
+        # reading it again would put a median over a different set under the
+        # latency.
+        if row["request_throughput"] is None:
+            return None, (
+                f"the reduction found a run at level {row['concurrency']} with no "
+                "request_throughput in its bench scalars, so it wrote none for the level"
+            )
         values = [row["request_throughput"]]
     elif runs is None:
         return None, "the curve rows carry no request_throughput and no store was given"
@@ -197,6 +236,7 @@ def build_service_curve(curve_doc: dict, runs=None) -> tuple[ServiceCurve, dict]
         "served_cmd": curve_doc["served_cmd"],
         "max_num_seqs": max_num_seqs,
         "max_num_seqs_source": source,
+        "gpu_util_method": gpu_util_method_of(curve_doc),
         "top_level_above_max_num_seqs": curve.max_measured_concurrency > max_num_seqs,
         "sweep_source": curve_doc.get("source"),
     }
@@ -228,7 +268,8 @@ def main(argv=None) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(meta, indent=1, sort_keys=True) + "\n")
     label = "MEASURED" if curve.measured else "NOT MEASURED (stub)"
-    print(f"[a2] {len(curve.points)} points, max_num_seqs={meta['max_num_seqs']}, {label}")
+    print(f"[a2] {len(curve.points)} points, max_num_seqs={meta['max_num_seqs']}, {label}, "
+          f"gpu_util={meta['gpu_util_method']}")
     if meta["top_level_above_max_num_seqs"]:
         print(f"[a2] WARNING: top level {curve.max_measured_concurrency} is above max_num_seqs")
     print("[a2] Little's law, c / median latency vs the bench tool's request_throughput "

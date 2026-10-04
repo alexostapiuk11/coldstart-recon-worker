@@ -30,8 +30,9 @@ COPY harness /opt/harness
 COPY worker/recon_handler.py /opt/recon_handler.py
 COPY worker/probe.py /opt/probe.py
 COPY worker/handler.py /opt/handler.py
-# The service-curve sweep's handler (harness/service_sweep.py). Imports only
-# harness/, never coldstart/.
+# The service-curve sweep's handler (worker/sweep_handler.py), which runs
+# harness/sweep_worker.py inside the container; harness/service_sweep.py is the
+# local side and is not called here. Imports only harness/, never coldstart/.
 COPY worker/sweep_handler.py /opt/sweep_handler.py
 
 ENTRYPOINT []

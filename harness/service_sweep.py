@@ -162,6 +162,10 @@ class SweepRun:
     clock_C: dict = field(default_factory=dict)
     status: dict = field(default_factory=dict)
     diagnostics: dict = field(default_factory=dict)
+    startup_s: float | None = None
+    teardown_s: float | None = None
+    drain_completed: bool | None = None
+    drain_error: str | None = None
     # "runpod" or "stub", as the driver that ran the campaign named it; None on
     # a store written before this field existed. A record carries its own
     # source so a later `--reduce-only` can refuse to label a stub curve as
@@ -203,6 +207,15 @@ def _engine_of(output: dict) -> dict:
     }
 
 
+# What the handler reports about its own timing and its log reader; stored on
+# the record as top-level fields (see SweepRun).
+_TIMING_KEYS = ("startup_s", "teardown_s", "drain_completed", "drain_error")
+
+
+def _timing_of(output: dict) -> dict:
+    return {key: output.get(key) for key in _TIMING_KEYS}
+
+
 def build_sweep_record(
     scheduled: ScheduledRun, run_id: str, outcome, *, source: str | None = None
 ) -> SweepRun:
@@ -236,16 +249,22 @@ def build_sweep_record(
             outcome="failed",
             served_cmd=list(diag.get("served_cmd") or []),
             engine=_engine_of(diag),
+            **_timing_of(diag),
             host=dict(diag.get("host") or {}),
             status=_failed_status(outcome.error),
             diagnostics=dict(diag.get("diagnostics") or {}),
         )
     out = outcome.payload
-    if out.get("run_id") != run_id or out.get("level") != level:
+    if (
+        out.get("run_id") != run_id
+        or out.get("level") != level
+        or out.get("repeat") != scheduled.block_index
+    ):
         raise ValueError(
             f"the worker answered for run_id={out.get('run_id')!r} level="
-            f"{out.get('level')!r}, but this job was run_id={run_id!r} level={level}; "
-            "storing it would put another run's numbers under this one"
+            f"{out.get('level')!r} repeat={out.get('repeat')!r}, but this job was "
+            f"run_id={run_id!r} level={level} repeat={scheduled.block_index}; storing it "
+            "would put another run's numbers under this one"
         )
     common = {
         "served_cmd": list(out.get("served_cmd") or []),
@@ -253,6 +272,7 @@ def build_sweep_record(
         "host": dict(out.get("host") or {}),
         "clock_C": dict(out.get("clock_C") or {}),
         "diagnostics": dict(out.get("diagnostics") or {}),
+        **_timing_of(out),
     }
     run = out.get("run")
     if not run:
@@ -286,6 +306,11 @@ class CurveReduction:
     prompt_path: str
     served_cmd: tuple
     engine: dict
+    # "windowed", "whole-call" or "unrecorded": how the utilisation column was
+    # measured, the one value every successful run agreed on (a store that
+    # disagrees is refused). Carried so a reader of the curve file, and
+    # artifact 2's adapter, can say which statistic the column is.
+    gpu_util_method: str
 
     @property
     def points(self) -> list[tuple[int, float, float, float]]:
@@ -304,7 +329,22 @@ class CurveReduction:
             "prompt_path": self.prompt_path,
             "served_cmd": list(self.served_cmd),
             "engine": dict(self.engine),
+            "gpu_util_method": self.gpu_util_method,
         }
+
+
+def _median_request_throughput(runs) -> float | None:
+    """The median of the level's runs' bench `request_throughput`, or None.
+
+    From each run's `summary.bench_scalars`, written by the worker from the
+    tool's saved JSON. None when ANY run lacks it: a median over the runs that
+    kept it would describe a different set of runs than the level's latency,
+    which is what artifact 2's Little's-law comparison sets it against. Not
+    validated here (a zero or non-finite value is reported by the comparison,
+    not dropped); not a curve column and has no interval.
+    """
+    values = [((r.summary.get("bench_scalars") or {}).get("request_throughput")) for r in runs]
+    return None if None in values else median(values)
 
 
 def reduce_curve(
@@ -358,17 +398,24 @@ def reduce_curve(
     # an older run could have been either, so it cannot be pooled with a known
     # one. Pooling was rejected over refusing because the median of the two
     # kinds is a number that belongs to neither statistic.
-    methods = {r.summary.get("gpu_util_windowed") for r in ok}
-    if len(methods) > 1:
-        described = sorted("unrecorded" if m is None else ("windowed" if m else "whole-call")
-                           for m in methods)
+    method_names = {
+        r.summary.get("gpu_util_windowed"): "unrecorded"
+        if r.summary.get("gpu_util_windowed") is None
+        else ("windowed" if r.summary["gpu_util_windowed"] else "whole-call")
+        for r in ok
+    }
+    if len(method_names) > 1:
         raise ValueError(
-            f"successful runs measured GPU utilisation by different methods {described}; "
-            "the curve's utilisation column would mix two measurements (a median over "
-            "the measured span and a median that includes idle startup and teardown) "
-            "under one label. Re-run the runs that differ, in a new campaign and store, "
-            "so every run in a curve used one method"
+            f"successful runs measured GPU utilisation by different methods "
+            f"{sorted(method_names.values())}; the curve's utilisation column would mix "
+            "two measurements (a median over the measured span and a median that includes "
+            "idle startup and teardown) under one label. No reduction can leave out the "
+            "differing runs, and a single level cannot be re-run alone (the sweep needs "
+            "at least two levels and the reducer reads one store): re-run the whole "
+            "campaign into a new store so every run used one method. That costs the "
+            "whole campaign again"
         )
+    (gpu_util_method,) = method_names.values()
     no_util = [r.run_id for r in ok if r.gpu_util is None]
     if no_util:
         raise ValueError(
@@ -391,8 +438,12 @@ def reduce_curve(
             raise ValueError(
                 f"level {level} has {len(runs)} successful runs, fewer than "
                 f"min_repeats={min_repeats}; its median and min-max interval would rest "
-                "on fewer repeats than registered. Re-run the level in a new campaign, "
-                "or pass a lower min_repeats and report it"
+                "on fewer repeats than registered. A single level cannot be re-run "
+                "alone (the sweep needs at least two levels and the reducer reads one "
+                "store), so either re-run the whole campaign into a new store, which "
+                "costs the whole campaign again, or reduce with a lower bar (for "
+                "example `--min-repeats 2`) and disclose the reduced repeat count "
+                "wherever the curve is reported"
             )
         row = {
             "concurrency": level,
@@ -404,6 +455,7 @@ def reduce_curve(
             values = [getattr(r, name) for r in runs]
             row[name] = median(values)
             row[f"{name}_range"] = [min(values), max(values)]
+        row["request_throughput"] = _median_request_throughput(runs)
         rows.append(row)
     if len(rows) < 2:
         raise ValueError(f"only level {present} is present; a curve needs at least two")
@@ -416,4 +468,5 @@ def reduce_curve(
         prompt_path=paths[0],
         served_cmd=next(iter(commands)),
         engine=engine,
+        gpu_util_method=gpu_util_method,
     )

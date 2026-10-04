@@ -43,9 +43,11 @@ use. `--preflight-only` and `--reduce-only` spend nothing and are not checked.
 else: no job is submitted and no store is opened.
 
 `--diagnostics` is for the first paid run only. Each job then also returns
-the in-container checks (the bench tool's help text, nvidia-smi's raw output,
-whether pandas imports, whether the prompt reached the engine log) and the
-tool's raw saved JSON, which is tens of kilobytes a job. It is off by
+the in-container checks (the bench tool's `--help=all` text, nvidia-smi's raw
+output, whether pandas imports, whether the prompt text appears in the engine
+log, which in vLLM 0.27.1 it does not at the default log level, and whether the
+sampler's clock and the bench tool's share an epoch) and the tool's raw saved
+JSON, which is tens of kilobytes a job. It is off by
 default so an ordinary sweep stores none of it.
 
 `--store` and `--out` have no defaults. Artifacts 2 and 4 both run this
@@ -56,7 +58,7 @@ level lists happened to agree.
 This script prints no cost estimate. RunPod's per-second price on the day is
 UNVERIFIED (plan item 13) and a hard-coded rate would be a number that looks
 measured and is not; the estimate belongs to the owner's paid-run checklist
-(Task 15), where the price is read off the console.
+(docs/runbook-service-sweep.md, section E), where the price is read off the console.
 """
 
 import argparse
