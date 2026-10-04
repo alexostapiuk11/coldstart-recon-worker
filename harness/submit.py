@@ -1,5 +1,6 @@
 """Clock A. Stamps submit and result around a job, and captures failures as data."""
 
+import json
 import time
 from dataclasses import dataclass
 
@@ -56,4 +57,57 @@ class StubSubmitter:
             clock_A={"t_submit": t_submit, "t_result": t_result},
             payload=payload,
             error=error,
+        )
+
+
+# The text harness.runpod.submitter raises for a completed job whose engine
+# never became healthy, phrased to match harness.failures' HEALTH_TIMEOUT
+# needle. Repeated here rather than imported: the RunPod submitter imports this
+# module, so importing back would be a cycle. tests/test_payload_stub_submitter.py
+# pins that the two stay identical.
+UNHEALTHY_ERROR = "health check timed out: probe reported unhealthy"
+
+
+class PayloadStubSubmitter:
+    """`submit_payload(payload)` against an in-process worker function.
+
+    The GPU-free twin of `RunPodSubmitter.submit_payload`, for workers whose
+    input is more than artifact 1's arm and run id. `StubSubmitter` cannot
+    stand in for that: its interface is `submit(arm, run_id)`.
+
+    It copies the real submitter's one decision about a worker's output: a job
+    that completes with an output whose `healthy` is falsy is a FAILURE, with
+    the output kept as diagnostics. A stub that accepted any output would let a
+    GPU-free test pass a handler that forgets to return `healthy: True` -- and
+    the real submitter would then record every paid run as failed.
+
+    The payload and the output both round-trip through JSON, because the real
+    transport serialises both. A payload that only works in-process (a tuple
+    that comes back a list, a Path that does not serialise at all) fails here,
+    as data, instead of on the first paid job.
+
+    Not reproduced: clock C and the platform's worker id, which only the
+    platform knows. Records built from this stub carry neither.
+    """
+
+    def __init__(self, worker, clock=time.monotonic):
+        self._worker = worker
+        self._clock = clock
+
+    def submit_payload(self, payload: dict) -> SubmitOutcome:
+        t_submit = self._clock()
+        try:
+            output = json.loads(json.dumps(self._worker(json.loads(json.dumps(payload)))))
+            if output.get("healthy"):
+                result, error, diagnostics = output, None, None
+            else:
+                result, error, diagnostics = None, UNHEALTHY_ERROR, output
+        except Exception as e:  # noqa: BLE001 -- failures are data (spec 6.6)
+            result, error, diagnostics = None, str(e), None
+        t_result = self._clock()
+        return SubmitOutcome(
+            clock_A={"t_submit": t_submit, "t_result": t_result},
+            payload=result,
+            error=error,
+            diagnostics=diagnostics,
         )
