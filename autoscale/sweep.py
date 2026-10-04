@@ -19,6 +19,7 @@ from autoscale.service import ServiceCurve
 from autoscale.signals import SIGNALS
 from autoscale.sim import run_with_policy
 from autoscale.stats import MIN_SAMPLES
+from autoscale.thresholds import THRESHOLDS
 
 __all__ = ["SweepConfig", "run_sweep"]
 
@@ -95,31 +96,12 @@ def _require_measured_curve(curve: ServiceCurve, allow_unmeasured: bool) -> None
     )
 
 
-# PER-SIGNAL THRESHOLD GRIDS. The three signals do not share units, so one
-# numeric grid cannot span all three:
-#
-#   queue_depth            requests waiting per replica     0 .. unbounded
-#   in_flight_concurrency  active requests per replica      0 .. max_measured_concurrency
-#   utilization            a FRACTION                       0 .. 1
-#
-# Sweeping the single grid (2, 4, 8, 16) across all three -- the original
-# design -- puts every threshold above utilization's maximum possible value, so
-# that policy never fires and its whole frontier collapses to one "never scale"
-# point. H2 ("utilization is worst") would then be confirmed trivially by a
-# units mismatch rather than by the censoring mechanism the artifact publishes,
-# which would make the headline indefensible.
-#
-# This is NOT the per-signal tuning the design rejects. That rejection is about
-# refusing to hand-pick each signal's best operating point; giving each signal a
-# grid that spans its own range is what makes the frontiers comparable at all.
-# The grids are pre-registered in docs/experiment-a2.md before any sweep runs,
-# so they cannot be chosen to produce a result.
-THRESHOLDS: dict[str, tuple[tuple[float, ...], tuple[float, ...]]] = {
-    # signal: (scale_up_grid, scale_down_grid)
-    "queue_depth": ((1.0, 2.0, 4.0, 8.0, 16.0), (0.0, 0.25, 0.5, 1.0)),
-    "in_flight_concurrency": ((2.0, 4.0, 8.0, 12.0, 16.0), (0.5, 1.0, 2.0, 4.0)),
-    "utilization": ((0.50, 0.65, 0.80, 0.90, 0.95), (0.05, 0.15, 0.30, 0.50)),
-}
+# The per-signal threshold grids live in `autoscale.thresholds`, which imports
+# nothing: figure 4 reads the top of utilization's grid, and reading it from
+# HERE dragged the simulator and artifact 1's package into a plotting module.
+# Bound as a name in this module, not referenced through the other, so every
+# `sweep.THRESHOLDS` reader keeps working and a test that reassigns
+# `sweep.THRESHOLDS` still changes what `run_sweep` iterates.
 
 
 @dataclass(frozen=True)

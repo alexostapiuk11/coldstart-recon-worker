@@ -63,7 +63,7 @@ from matplotlib.ticker import MaxNLocator
 
 from autoscale.frontier import pareto_frontier
 from autoscale.stats import MIN_BOOTSTRAP_SAMPLES
-from autoscale.sweep import THRESHOLDS
+from autoscale.thresholds import THRESHOLDS
 
 __all__ = [
     "SIGNAL_ORDER",
@@ -106,10 +106,12 @@ MEASURED_BANNER = "#2f6b34"
 MODELED_BANNER = "#1f4f9e"
 NOTE_COLOR = "#3f3f3f"
 
-# The top of utilization's pre-registered scale-up grid. Above the load where
-# utilization reaches it, utilization exceeds EVERY threshold the utilization
-# policy can be set to, so more load is invisible to that policy -- H2's
-# censoring mechanism, read off the grid rather than chosen for the chart.
+# The top of utilization's pre-registered scale-up grid. Once utilization
+# reaches it, every utilization policy on the grid has already crossed its
+# scale-up threshold, so its decision is fixed at "scale up" and further load
+# cannot change it. The signal itself keeps rising, from 0.95 towards 1.0;
+# what is censored is the DECISION, which no longer depends on that rise.
+# H2's censoring mechanism, read off the grid rather than chosen for the chart.
 UTILIZATION_CENSOR_AT = max(THRESHOLDS["utilization"][0])
 CENSOR_COLOR = "#c0392b"
 CURVE_COLOR = "#333333"
@@ -631,14 +633,36 @@ def censoring_onset(curve, threshold: float = UTILIZATION_CENSOR_AT) -> float | 
     `ServiceCurve` itself uses, so the shaded region begins where the model
     the simulator runs on says it does. None if utilization never reaches the
     threshold in the measured range.
+
+    Refuses a curve that falls back below the threshold after reaching it.
+    The figure shades from the onset to the right edge as ONE region, and its
+    note says every point in it is at or above the threshold; on a curve that
+    dips, part of that region is load the utilization policy can still respond
+    to. Shading only the stretches above the threshold was the rejected
+    alternative: a band with holes in it is a claim about a non-monotone
+    utilization curve, which is a measurement to investigate before it is a
+    chart to draw.
     """
     points = [(c, u) for c, _, _, u in curve.points]
+    onset = None
     if points[0][1] >= threshold:
-        return float(points[0][0])
-    for (c0, u0), (c1, u1) in pairwise(points):
-        if u0 < threshold <= u1:
-            return c0 + (threshold - u0) / (u1 - u0) * (c1 - c0)
-    return None
+        onset, after = float(points[0][0]), 0
+    else:
+        for i, ((c0, u0), (c1, u1)) in enumerate(pairwise(points)):
+            if u0 < threshold <= u1:
+                onset, after = c0 + (threshold - u0) / (u1 - u0) * (c1 - c0), i + 1
+                break
+    if onset is None:
+        return None
+    dips = [(c, u) for c, u in points[after:] if u < threshold]
+    if dips:
+        raise ValueError(
+            f"utilization reaches {threshold:g} at concurrency {onset:.1f} and then "
+            f"falls back below it at {', '.join(f'{c:g} ({u:g})' for c, u in dips)}; "
+            "the censored band runs from the onset to the edge, so it would claim "
+            "censoring over a range where the utilization policy can still act"
+        )
+    return onset
 
 
 def _figure_banner(fig, left: float, right: float, word: str, subtitle: str, color: str) -> None:
@@ -651,7 +675,9 @@ def _figure_banner(fig, left: float, right: float, word: str, subtitle: str, col
     1's pixels; a stacked figure has one header for all its panels, so it is
     drawn once, against the figure, spanning the panels' shared width.
     """
-    fig.patches.append(
+    # `add_artist`, not `fig.patches.append`: appending to the list draws the
+    # rectangle without attaching it, so it has no figure to resolve against.
+    fig.add_artist(
         Rectangle((left, 0.935), right - left, 0.05, transform=fig.transFigure,
                   facecolor=color, edgecolor="none", zorder=5)
     )
@@ -671,6 +697,11 @@ def service_curve(curve, path, return_figure=False):
     every panel because the point of the figure is the COINCIDENCE -- latency
     still climbing while utilization has flattened -- and a reader has to see
     both sides of the boundary in one glance.
+
+    "Censored" means every utilization policy's decision is already fixed at
+    scale-up: the signal still rises from 0.95 towards 1.0 inside the band,
+    but no threshold on the pre-registered grid sits in that range, so further
+    load cannot change what any utilization policy does.
 
     No interval band yet: `ServiceCurve` carries one value per level. Plan 2b
     adds per-level dispersion when the sweep format is fixed.
@@ -709,7 +740,7 @@ def service_curve(curve, path, return_figure=False):
     # Two lines, each short: at the phone floor a note line wider than ~75
     # characters runs past 375 px, and the off-canvas test fails on it.
     shading = (
-        f"shaded: utilization ≥ {UTILIZATION_CENSOR_AT:g} (from {onset:.3g}), "
+        f"shaded: utilization ≥ {UTILIZATION_CENSOR_AT:g} (from {onset:.1f}), "
         "above every utilization threshold"
         if onset is not None
         else f"utilization ≥ {UTILIZATION_CENSOR_AT:g} never reached in the measured range"

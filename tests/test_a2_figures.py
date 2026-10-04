@@ -1,3 +1,7 @@
+import subprocess
+import sys
+from pathlib import Path
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -5,6 +9,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pytest
 from matplotlib.collections import PolyCollection
+from matplotlib.colors import to_rgb
+from matplotlib.patches import Rectangle
+from PIL import Image
 
 from autoscale.figures import (
     SIGNAL_ORDER,
@@ -16,6 +23,7 @@ from autoscale.figures import (
 )
 from autoscale.frontier import PolicyPoint
 from autoscale.service import SERVICE_CURVE_PLACEHOLDER, ServiceCurve
+from autoscale.thresholds import THRESHOLDS
 
 # `harness.figure_guards` does not exist yet -- the harness extraction that owns
 # it has not run. `coldstart.analysis.figures` is where the constant currently
@@ -24,6 +32,8 @@ from autoscale.service import SERVICE_CURVE_PLACEHOLDER, ServiceCurve
 # phones, and must clear the same calibrated floor. Re-point this import at
 # `harness.figure_guards` when the extraction lands.
 from coldstart.analysis.figures import MIN_PHONE_TEXT_PX
+
+REPO = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(autouse=True)
@@ -674,7 +684,51 @@ def test_censoring_starts_where_utilization_crosses_the_top_of_its_grid():
     """Placeholder: utilization 0.85 at 8, 0.96 at 16. Linear interpolation --
     the same ServiceCurve uses -- puts 0.95 at 8 + 0.10/0.11 x 8."""
     assert UTILIZATION_CENSOR_AT == 0.95
+    # Read off the pre-registered grid, not chosen for the chart: if the grid's
+    # top moves, the shading has to move with it.
+    assert UTILIZATION_CENSOR_AT == max(THRESHOLDS["utilization"][0])
     assert censoring_onset(SERVICE_CURVE_PLACEHOLDER) == pytest.approx(8 + 0.10 / 0.11 * 8)
+
+
+def test_the_censoring_threshold_follows_the_grid_when_the_grid_moves():
+    """Equality with the grid's top cannot tell "read off the grid" from "0.95
+    typed in" while both are 0.95. A fresh interpreter edits the grid BEFORE
+    the figure module is imported, which only the first survives."""
+    code = (
+        "import autoscale.thresholds as t; "
+        "t.THRESHOLDS['utilization'] = ((0.5, 0.88), (0.1,)); "
+        "import autoscale.figures as f; print(f.UTILIZATION_CENSOR_AT)"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], cwd=REPO, capture_output=True, text=True, check=True
+    )
+    assert out.stdout.strip() == "0.88"
+
+
+def test_utilization_reaching_the_threshold_exactly_at_the_last_level_starts_censoring_there():
+    """"Reaches" includes "equals": every utilization policy's top threshold
+    is crossed AT 0.95, so a curve that tops out exactly there is censored from
+    that level on, not uncensored."""
+    edge = ServiceCurve(points=[(1, 0.3, 50.0, 0.5), (8, 0.4, 300.0, UTILIZATION_CENSOR_AT)], measured=False)
+    assert censoring_onset(edge) == 8.0
+
+
+def test_a_utilization_dip_after_the_onset_is_refused(tmp_path):
+    """Shading runs from the onset to the edge and says "utilization >= 0.95"
+    over all of it. A curve that falls back below the threshold has a stretch
+    inside that band where the utilization policy CAN still act -- the band
+    would claim censoring where there is none."""
+    dip = ServiceCurve(
+        points=[
+            (c, 0.3 + 0.02 * c, 50.0 + 7.0 * c, u)
+            for c, u in zip((1, 8, 16, 32, 64), (0.20, 0.96, 0.90, 0.93, 0.97), strict=True)
+        ],
+        measured=False,
+    )
+    with pytest.raises(ValueError, match="can still act"):
+        censoring_onset(dip)
+    with pytest.raises(ValueError, match="can still act"):
+        service_curve(dip, path=tmp_path / "s.png")
 
 
 def test_censoring_starts_at_the_first_level_when_utilization_is_already_over():
@@ -702,6 +756,51 @@ def test_the_censored_region_is_painted_on_every_panel(tmp_path):
     spans = [p for ax in fig.axes for p in ax.patches if p.get_gid() == "censored"]
     assert len(spans) == 3
     assert all(p.get_window_extent(renderer).width > 20 for p in spans)
+    assert all(p.get_facecolor()[3] > 0 for p in spans), "the band is fully transparent"
+
+
+def test_the_censored_band_changes_the_saved_pixels_on_every_panel(tmp_path):
+    """Width and alpha are properties of the artist; this is the PNG. Each
+    panel is sampled inside the band, low in the panel where no curve runs,
+    and the pixel must differ from that panel's own background -- a band that
+    is wide, opaque on paper and drawn under the background still fails."""
+    path = tmp_path / "s.png"
+    fig = service_curve(SERVICE_CURVE_PLACEHOLDER, path=path, return_figure=True)
+    fig.canvas.draw()
+    image = Image.open(path).convert("RGB")
+    scale = image.width / fig.bbox.width
+    onset = censoring_onset(SERVICE_CURVE_PLACEHOLDER)
+    for axis in fig.axes:
+        x = axis.transData.transform(((onset + axis.get_xlim()[1]) / 2, 0))[0]
+        y = axis.transAxes.transform((0, 0.08))[1]
+        pixel = image.getpixel((round(x * scale), round(image.height - y * scale)))
+        background = tuple(round(255 * c) for c in to_rgb(axis.get_facecolor()))
+        assert sum(abs(a - b) for a, b in zip(pixel, background, strict=True)) > 30, (
+            f"inside the band the PNG shows {pixel}, which is the panel's own "
+            f"background {background}: the band paints nothing"
+        )
+
+
+def test_the_censored_band_starts_at_the_censoring_onset_on_every_panel(tmp_path):
+    """Width alone passes a band drawn from zero. Pinned in pixels against the
+    onset `censoring_onset` computes, which is the number the note prints."""
+    fig = service_curve(SERVICE_CURVE_PLACEHOLDER, path=tmp_path / "s.png", return_figure=True)
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    onset = censoring_onset(SERVICE_CURVE_PLACEHOLDER)
+    for axis in fig.axes:
+        [span] = [p for p in axis.patches if p.get_gid() == "censored"]
+        expected = axis.transData.transform((onset, 0))[0]
+        assert span.get_window_extent(renderer).x0 == pytest.approx(expected, abs=1)
+
+
+def test_the_note_states_where_censoring_starts(tmp_path):
+    """The number is computed here independently of `censoring_onset`, so a
+    wrong onset cannot agree with itself: 0.95 is 0.10 of the way from 0.85 to
+    0.96, which is 8 + 0.10/0.11 x 8."""
+    fig = service_curve(SERVICE_CURVE_PLACEHOLDER, path=tmp_path / "s.png", return_figure=True)
+    note = " ".join(t.get_text() for t in fig.axes[2].texts)
+    assert f"from {8 + 0.10 / 0.11 * 8:.1f})" in note, note
 
 
 def test_an_unmeasured_curve_says_so_on_the_chart(tmp_path):
@@ -735,7 +834,10 @@ def test_the_figure_4_banner_holds_its_word_and_clears_the_panels(curve, tmp_pat
     fig = service_curve(curve, path=tmp_path / "s.png", return_figure=True)
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
-    [strip] = fig.patches
+    [strip] = [a for a in fig.get_children() if isinstance(a, Rectangle) and a is not fig.patch]
+    # Attached to the figure, not just appended to a list it happens to draw:
+    # an artist with no figure has no dpi to resolve against.
+    assert strip.get_figure() is fig
     strip_box = strip.get_window_extent(renderer)
     word = next(t for t in fig.texts if t.get_text() in ("MEASURED", "NOT MEASURED"))
     word_box = word.get_window_extent(renderer)
@@ -788,3 +890,36 @@ def test_the_censoring_threshold_is_drawn_across_the_utilization_panel(tmp_path)
         and list(line.get_xdata()) == [0, 1]
     ]
     assert len(lines) == 1, "no full-width line at the censoring threshold on the utilization panel"
+
+
+def test_importing_the_figures_does_not_load_the_simulator_or_artifact_one():
+    """A fresh interpreter, because in-process `sys.modules` already holds
+    whatever other test modules imported. `tests/test_autoscale_boundary.py`
+    parses DIRECT imports only, and the road to `coldstart` here was
+    transitive: figure 4 read the utilization grid from `autoscale.sweep`,
+    which imports `autoscale.sim` and `autoscale.coldstart_ecdf`, so a module
+    that only draws charts could no longer be imported without artifact 1's
+    package."""
+    code = (
+        "import sys; import autoscale.figures; "
+        "print(sorted(m for m in sys.modules if m == 'coldstart' or m.startswith('coldstart.')"
+        " or m in ('autoscale.sim', 'autoscale.coldstart_ecdf')))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], cwd=REPO, capture_output=True, text=True, check=True
+    )
+    assert out.stdout.strip() == "[]", (
+        f"importing autoscale.figures loads {out.stdout.strip()}; a plotting module "
+        "that drags in the simulator and artifact 1's package cannot be rendered, "
+        "reused or tested without them"
+    )
+
+
+def test_the_threshold_grid_has_one_home_and_sweep_re_exports_it():
+    """Moved, not copied: a second dict with the same values would drift the
+    first time a grid is edited, and figure 4 would shade against a grid the
+    sweep no longer uses."""
+    import autoscale.sweep
+    import autoscale.thresholds
+
+    assert autoscale.sweep.THRESHOLDS is autoscale.thresholds.THRESHOLDS
