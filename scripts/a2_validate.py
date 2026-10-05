@@ -30,9 +30,11 @@ What a record means when something fails mid-run:
   was interrupted) writes nothing. Such a run has no complete replay, so a
   record of it, void or not, would be a partial run that looks like data. The
   slot stays as it was, so the attempt costs the owner no "rerun" allowance.
-- Anything other than a failed release that escapes the pin AFTER the replay
-  (for instance workersMax changed during the run) marks the record void:
-  the evidence was collected under a ceiling nobody checked.
+- Any other error that escapes the pin AFTER the replay (for instance workersMax
+  changed during the run) is recorded in `post_run_error` and printed, but does
+  not void the record: the void list is the signed amendment's, and a new void
+  category would burn the one allowed rerun. The owner reads the error and
+  decides what the evidence is worth.
 """
 
 import argparse
@@ -122,7 +124,8 @@ def record_from(outcomes, *, repeat, schedule, host_ids, endpoint_id, template_i
     no_latency = sum(1 for o, s in zip(outcomes, server, strict=True)
                      if o.status == 200 and s is None)
     if no_latency:
-        void.append(f"{no_latency} responses without a usable server-latency header")
+        void.append(f"{no_latency} 200 responses without a usable server-latency header "
+                    "(absent or unparseable)")
     return {
         "schema_version": SCHEMA_VERSION, "repeat": repeat, "started_at": started_at,
         "endpoint_id": endpoint_id, "template_id": template_id, "replicas": replicas,
@@ -211,11 +214,6 @@ def run_repeat(*, k, schedule, pin, send, warm_fn, replay_fn, endpoint_id, templ
                 record["post_run_error"] = f"{type(escaped).__name__}: {escaped}"[:300]
                 if isinstance(escaped, ReleaseFailed):
                     record["release"] = "FAILED"
-                elif isinstance(escaped, Exception):
-                    record["void"].append(
-                        f"after the replay the pin's exit raised {type(escaped).__name__}: "
-                        f"{str(escaped)[:200]}; the run's evidence was collected under "
-                        "conditions nobody confirmed")
             write_record(path, record)
     return record
 
@@ -328,8 +326,10 @@ def main(argv=None) -> None:
             path=path)
     except BaseException as e:
         wrote = path.exists()
-        print(f"[repeat {args.repeat}] {type(e).__name__}: {str(e)[:300]}; "
-              + (f"the record was still written to {path}" if wrote else
+        print(f"[repeat {args.repeat}] {'WARNING after the replay: ' if wrote else ''}"
+              f"{type(e).__name__}: {str(e)[:300]}; "
+              + (f"the record was still written to {path} with this error in post_run_error "
+                 "(not voided; the owner decides what it means)" if wrote else
                  "no complete replay, so NO record was written and the slot is unchanged"),
               file=sys.stderr)
         raise

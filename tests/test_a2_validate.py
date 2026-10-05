@@ -82,7 +82,7 @@ def test_void_reasons_non_200_novel_worker_and_missing_header():
     assert "without a 200" in " ".join(_record(s, _outs(s, status=503))["void"])
     assert "outside the pinned set" in " ".join(
         _record(s, _outs(s, workers=("w1", "w2", "w9")))["void"])
-    assert "server-latency header" in " ".join(_record(s, _outs(s, drop_header_at=3))["void"])
+    assert "usable server-latency header (absent or unparseable)" in " ".join(_record(s, _outs(s, drop_header_at=3))["void"])
 
 
 def test_a_transport_error_row_is_a_non_200_void_reason():
@@ -96,7 +96,7 @@ def test_a_transport_error_row_is_a_non_200_void_reason():
 def test_an_unparseable_server_latency_header_is_void_not_a_crash():
     s = _schedule()
     rec = _record(s, _outs(s, bad_header_at=4))
-    assert "server-latency header" in " ".join(rec["void"])
+    assert "usable server-latency header (absent or unparseable)" in " ".join(rec["void"])
     assert rec["server_latency_s"][4] is None
 
 
@@ -210,12 +210,13 @@ def test_a_release_failure_after_the_replay_keeps_a_valid_record(tmp_path):
     assert "RELEASE FAILED" in rec["post_run_error"]
 
 
-def test_any_other_post_replay_pin_error_makes_the_record_void(tmp_path):
+def test_any_other_post_replay_pin_error_is_recorded_not_voided(tmp_path):
     pin = FakePin(release_error=RuntimeError("workersMax is 5 after the run"))
     with pytest.raises(RuntimeError):
         _run(tmp_path, pin)
     rec = v.read_record(tmp_path / "repeat-1.json.gz")
-    assert rec["release"] == "ok" and "workersMax is 5" in " ".join(rec["void"])
+    assert rec["void"] == [] and rec["release"] == "ok"
+    assert "workersMax is 5" in rec["post_run_error"]
 
 
 def _three(tmp_path, factors, hosts=(("w1", "w2"),) * 3):
