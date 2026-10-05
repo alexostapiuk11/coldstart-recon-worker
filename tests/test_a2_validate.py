@@ -2,7 +2,9 @@
 
 import gzip
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import ClassVar
 
@@ -82,7 +84,8 @@ def test_void_reasons_non_200_novel_worker_and_missing_header():
     assert "without a 200" in " ".join(_record(s, _outs(s, status=503))["void"])
     assert "outside the pinned set" in " ".join(
         _record(s, _outs(s, workers=("w1", "w2", "w9")))["void"])
-    assert "usable server-latency header (absent or unparseable)" in " ".join(_record(s, _outs(s, drop_header_at=3))["void"])
+    missing = " ".join(_record(s, _outs(s, drop_header_at=3))["void"])
+    assert "usable server-latency header (absent or unparseable)" in missing
 
 
 def test_a_transport_error_row_is_a_non_200_void_reason():
@@ -144,6 +147,91 @@ def test_a_record_is_written_atomically(tmp_path):
     assert not list(tmp_path.glob("*.tmp")) and v.read_record(path)["repeat"] == 1
 
 
+@pytest.mark.parametrize("fault", ["replace", "dump"])
+def test_a_failed_write_leaves_the_previous_file_intact(tmp_path, monkeypatch, fault):
+    s = _schedule()
+    path = tmp_path / "repeat-1.json.gz"
+    v.write_record(path, _record(s, _outs(s)))
+    before = path.read_bytes()
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    if fault == "replace":
+        monkeypatch.setattr(v.os, "replace", boom)
+    else:
+        monkeypatch.setattr(v.json, "dump", boom)
+    with pytest.raises(OSError, match="disk full"):
+        v.write_record(path, _record(s, _outs(s, status=503), k=2))
+    assert path.read_bytes() == before and v.read_record(path)["void"] == []
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_an_unwritable_out_dir_is_refused_by_check_slot(tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    with pytest.raises(SystemExit, match="cannot write to.*nowhere to put its record"):
+        v.check_slot(blocker / "validation", 1)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+def test_a_read_only_out_dir_is_refused_by_check_slot(tmp_path):
+    out = tmp_path / "validation"
+    out.mkdir()
+    out.chmod(0o500)
+    try:
+        with pytest.raises(SystemExit, match="cannot write to"):
+            v.check_slot(out, 1)
+    finally:
+        out.chmod(0o700)
+
+
+def test_check_slot_creates_the_out_dir_and_leaves_nothing_in_it(tmp_path):
+    out = tmp_path / "a" / "validation"
+    v.check_slot(out, 1)
+    assert out.is_dir() and not list(out.iterdir())
+
+
+class FakeResource:
+    RLIMIT_NOFILE = 8
+    RLIM_INFINITY = 2**63 - 1
+
+    def __init__(self, soft, hard, can_set=True):
+        self.limits = (soft, hard)
+        self.can_set = can_set
+        self.sets = []
+
+    def getrlimit(self, which):
+        return self.limits
+
+    def setrlimit(self, which, limits):
+        self.sets.append(limits)
+        if not self.can_set:
+            raise ValueError("current limit exceeds maximum limit")
+        self.limits = limits
+
+
+def test_the_open_files_limit_is_left_alone_when_high_enough():
+    res = FakeResource(10240, 10240)
+    v.ensure_fd_limit(8192, res)
+    assert res.sets == []
+
+
+def test_a_low_soft_limit_is_raised_up_to_the_hard_limit():
+    res = FakeResource(256, FakeResource.RLIM_INFINITY)
+    v.ensure_fd_limit(8192, res)
+    assert res.limits == (8192, FakeResource.RLIM_INFINITY)
+    res = FakeResource(256, 9000)
+    v.ensure_fd_limit(8192, res)
+    assert res.limits == (8192, 9000)
+
+
+def test_a_limit_that_cannot_be_raised_is_refused_naming_the_sockets():
+    for res in (FakeResource(256, 1024), FakeResource(256, 10240, can_set=False)):
+        with pytest.raises(SystemExit, match="pool threads each hold a socket.*ulimit -n 8192"):
+            v.ensure_fd_limit(8192, res)
+
+
 class FakePin:
     def __init__(self, release_error=None):
         self.events = []
@@ -160,22 +248,31 @@ class FakePin:
         return False
 
 
-def _run(tmp_path, pin, *, replay_fn=None, warm_fn=None, s=None):
+def _run(tmp_path, pin, *, replay_fn=None, warm_fn=None, s=None, prepare=None):
     s = s if s is not None else _schedule()
+
+    def warm(send, summary):
+        pin.events.append("warm")
+        summary.update({"requests": 3})
+        return ["w1", "w2"]
+
+    def replay(sch, send):
+        pin.events.append("replay")
+        return _outs(s)
+
     return v.run_repeat(
-        k=1, schedule=s, pin=pin, send=lambda i: (200, {}),
-        warm_fn=warm_fn or (lambda send, summary: (summary.update({"requests": 3}),
-                                                    ["w1", "w2"])[1]),
-        replay_fn=replay_fn or (lambda sch, send: _outs(s)), endpoint_id="ep",
-        template_id="tpl", replicas=2, until=UNTIL, now=lambda: "t",
-        path=tmp_path / "repeat-1.json.gz", seed=1, drain=20.0)
+        k=1, schedule=s, pin=pin, send=lambda i: (200, {}), warm_fn=warm_fn or warm,
+        replay_fn=replay_fn or replay, endpoint_id="ep", template_id="tpl", replicas=2,
+        until=UNTIL, now=lambda: "t", path=tmp_path / "repeat-1.json.gz", seed=1, drain=20.0,
+        prepare=prepare)
 
 
 def test_run_repeat_pins_warms_replays_releases_and_writes(tmp_path):
     pin = FakePin()
     rec = _run(tmp_path, pin)
-    assert pin.events == ["pin", "release"] and rec["host_ids"] == ["w1", "w2"]
-    assert rec["warmup"] == {"requests": 3}
+    # Every paid step sits inside the pin: moving warm-up or the replay out of it breaks this.
+    assert pin.events == ["pin", "warm", "replay", "release"]
+    assert rec["host_ids"] == ["w1", "w2"] and rec["warmup"] == {"requests": 3}
     assert v.read_record(tmp_path / "repeat-1.json.gz")["void"] == []
 
 
@@ -187,7 +284,7 @@ def test_run_repeat_releases_and_writes_nothing_when_the_replay_fails(tmp_path):
 
     with pytest.raises(RuntimeError):
         _run(tmp_path, pin, replay_fn=boom)
-    assert pin.events == ["pin", "release"] and not list(tmp_path.iterdir())
+    assert pin.events == ["pin", "warm", "release"] and not list(tmp_path.iterdir())
 
 
 def test_run_repeat_writes_nothing_when_warm_up_fails(tmp_path):
@@ -217,6 +314,76 @@ def test_any_other_post_replay_pin_error_is_recorded_not_voided(tmp_path):
     rec = v.read_record(tmp_path / "repeat-1.json.gz")
     assert rec["void"] == [] and rec["release"] == "ok"
     assert "workersMax is 5" in rec["post_run_error"]
+
+
+def test_prepare_runs_after_warm_up_and_before_the_replay(tmp_path):
+    pin = FakePin()
+    _run(tmp_path, pin, prepare=lambda: pin.events.append("prepare"))
+    assert pin.events == ["pin", "warm", "prepare", "replay", "release"]
+
+
+def test_prepare_does_not_run_when_warm_up_fails(tmp_path):
+    pin = FakePin()
+
+    def gives_up(send, summary):
+        raise TimeoutError("0 of 2 workers answered")
+
+    with pytest.raises(TimeoutError):
+        _run(tmp_path, pin, warm_fn=gives_up, prepare=lambda: pin.events.append("prepare"))
+    assert "prepare" not in pin.events
+
+
+def _fallback_dir(tmp_path, monkeypatch):
+    d = tmp_path / "systmp"
+    d.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(d))
+    return d
+
+
+def test_a_failed_write_dumps_the_raw_outcomes_and_keeps_the_release_failure_visible(
+        tmp_path, monkeypatch, capsys):
+    d = _fallback_dir(tmp_path, monkeypatch)
+
+    def no_space(path, record):
+        raise PermissionError("read-only file system")
+
+    monkeypatch.setattr(v, "write_record", no_space)
+    pin = FakePin(release_error=ReleaseFailed("RELEASE FAILED: set it by hand"))
+    with pytest.raises(v.RecordLost) as info:
+        _run(tmp_path, pin)
+    err = info.value
+    assert "RELEASE FAILED: set it by hand" in str(err)
+    assert isinstance(err.__cause__, ReleaseFailed)
+    assert err.fallback is not None and err.fallback.parent == d
+    assert "a2-repeat-1-" in err.fallback.name
+    dump = json.loads(err.fallback.read_text())
+    assert len(dump["outcomes"]) == len(_schedule()) and dump["context"]["repeat"] == 1
+    assert dump["context"]["host_ids"] == ["w1", "w2"]
+    assert str(err.fallback) in capsys.readouterr().err
+
+
+def test_a_failed_write_without_a_release_failure_chains_the_write_error(tmp_path, monkeypatch):
+    _fallback_dir(tmp_path, monkeypatch)
+
+    def no_space(path, record):
+        raise PermissionError("read-only file system")
+
+    monkeypatch.setattr(v, "write_record", no_space)
+    with pytest.raises(v.RecordLost) as info:
+        _run(tmp_path, FakePin())
+    assert isinstance(info.value.__cause__, PermissionError)
+    assert info.value.fallback is not None and info.value.fallback.exists()
+
+
+def test_a_failed_record_build_also_falls_back(tmp_path, monkeypatch):
+    _fallback_dir(tmp_path, monkeypatch)
+
+    def bad(*a, **k):
+        raise ValueError("malformed outcome")
+
+    monkeypatch.setattr(v, "record_from", bad)
+    with pytest.raises(v.RecordLost, match="malformed outcome"):
+        _run(tmp_path, FakePin())
 
 
 def _three(tmp_path, factors, hosts=(("w1", "w2"),) * 3):
@@ -252,6 +419,26 @@ def test_judge_refuses_a_missing_or_void_repeat(tmp_path):
         v.judge(tmp_path, CURVE)
     v.write_record(v.prepare_slot(tmp_path, 2), _record(s, _outs(s, status=503), k=2))
     with pytest.raises(SystemExit, match="repeat 2 is void"):
+        v.judge(tmp_path, CURVE)
+
+
+def test_judge_surfaces_a_post_run_error_and_a_void_attempt_file(tmp_path):
+    s = _schedule()
+    for k in (1, 2, 3):
+        rec = _record(s, _outs(s), k=k)
+        if k == 2:
+            rec["post_run_error"] = "ReleaseFailed: RELEASE FAILED"
+        v.write_record(v.prepare_slot(tmp_path, k), rec)
+    verdict = v.judge(tmp_path, CURVE)
+    assert [r["post_run_error"] for r in verdict["per_repeat"]] == [
+        None, "ReleaseFailed: RELEASE FAILED", None]
+
+
+def test_judge_names_a_void_attempt_when_the_repeat_is_missing(tmp_path):
+    s = _schedule()
+    v.write_record(v.prepare_slot(tmp_path, 1), _record(s, _outs(s)))
+    v.write_record(tmp_path / "repeat-2.void.json.gz", _record(s, _outs(s, status=503), k=2))
+    with pytest.raises(SystemExit, match=r"repeat 2 is missing.*earlier void attempt is kept"):
         v.judge(tmp_path, CURVE)
 
 
@@ -309,15 +496,20 @@ def rig(monkeypatch, tmp_path):
     monkeypatch.setattr(v, "sender", lambda *a: (lambda i: (200, {})))
     monkeypatch.setattr(v, "build_schedule", lambda *a, **k: s)
     monkeypatch.setattr(v, "load_measured_curve", lambda path: type("M", (), {"curve": CURVE})())
-    monkeypatch.setattr(
-        v, "warm_up",
-        lambda send, summary_out=None, **kw: (summary_out.update({"requests": 3}),
-                                              ["w1", "w2"])[1])
+    monkeypatch.setattr(v, "ensure_fd_limit", lambda: None)
+
+    def warm(send, summary_out=None, **kw):
+        MainPin.instances[-1].log.append("warm")
+        summary_out.update({"requests": 3})
+        return ["w1", "w2"]
+
+    monkeypatch.setattr(v, "warm_up", warm)
     calls = []
 
     def set_replay(behaviour):
         def fake(schedule, send, **kw):
             calls.append(kw)
+            MainPin.instances[-1].log.append("replay")
             return behaviour(schedule)
         monkeypatch.setattr(v, "replay", fake)
 
@@ -361,7 +553,7 @@ def test_main_a_repeat_writes_a_record_without_the_api_key(rig, capsys):
     assert rec["release"] == "ok" and rec["warmup"] == {"requests": 3}
     assert rig["calls"] == [{"max_in_flight": v.REPLAY_MAX_IN_FLIGHT}]
     assert v.REPLAY_MAX_IN_FLIGHT == 4096
-    assert MainPin.instances[0].log == ["preflight", "pin", "release"]
+    assert MainPin.instances[0].log == ["preflight", "pin", "warm", "replay", "release"]
     assert KEY not in gzip.decompress(path.read_bytes()).decode()
     captured = capsys.readouterr()
     assert KEY not in captured.out + captured.err and "valid" in captured.out
@@ -388,8 +580,8 @@ def test_main_a_failed_replay_writes_no_record_and_leaves_the_slot_unchanged(rig
     with pytest.raises(RuntimeError, match="driver broke"):
         v.main(rig["argv"])
     assert not rig["out"].exists() or not list(rig["out"].iterdir())
-    assert MainPin.instances[0].log[-2:] == ["pin", "release"]
-    assert "NO record was written" in capsys.readouterr().err
+    assert MainPin.instances[0].log == ["preflight", "pin", "warm", "replay", "release"]
+    assert "NO record was written and the slot is unchanged" in capsys.readouterr().err
 
 
 def test_main_a_void_rerun_moves_the_void_aside_only_after_the_preflight(rig, monkeypatch):
@@ -414,3 +606,110 @@ def test_main_judge_writes_a_verdict(rig, capsys):
     v.main(["--judge", "--out", str(rig["out"])])
     verdict = json.loads((rig["out"] / "verdict.json").read_text())
     assert verdict["outcome"] == "passed" and "[judge] passed" in capsys.readouterr().out
+
+
+def test_main_refuses_an_unwritable_out_before_any_pin(rig, tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    argv = ["--repeat", "1", "--template-id", "tpl-1", "--out", str(blocker / "validation")]
+    with pytest.raises(SystemExit, match="cannot write to"):
+        v.main(argv)
+    assert MainPin.instances == [] and rig["calls"] == []
+
+
+def test_main_refuses_a_too_low_open_files_limit_before_any_pin(rig, monkeypatch):
+    def refuse():
+        raise SystemExit("the open-files soft limit is 256")
+
+    monkeypatch.setattr(v, "ensure_fd_limit", refuse)
+    with pytest.raises(SystemExit, match="open-files"):
+        v.main(rig["argv"])
+    assert MainPin.instances == [] and rig["calls"] == []
+
+
+def test_main_moves_a_void_aside_only_once_warm_up_has_succeeded(rig, monkeypatch):
+    s = rig["schedule"]
+    out = rig["out"]
+    v.write_record(v.prepare_slot(out, 1), _record(s, _outs(s, status=503)))
+    seen = {}
+    orig_warm = v.warm_up
+
+    def watching_warm(send, summary_out=None, **kw):
+        seen["at_warm"] = (out / "repeat-1.json.gz").exists(), (
+            out / "repeat-1.void.json.gz").exists()
+        return orig_warm(send, summary_out=summary_out, **kw)
+
+    monkeypatch.setattr(v, "warm_up", watching_warm)
+    rig["set_replay"](lambda schedule: (
+        seen.__setitem__("at_replay", ((out / "repeat-1.json.gz").exists(),
+                                       (out / "repeat-1.void.json.gz").exists())),
+        _outs(s))[1])
+    v.main(rig["argv"])
+    assert seen["at_warm"] == (True, False)       # void still in the slot while warming
+    assert seen["at_replay"] == (False, True)     # moved aside just before the replay
+    assert v.read_record(out / "repeat-1.json.gz")["void"] == []
+
+
+def test_main_a_failed_warm_up_leaves_a_void_slot_untouched(rig, monkeypatch, capsys):
+    s = rig["schedule"]
+    out = rig["out"]
+    v.write_record(v.prepare_slot(out, 1), _record(s, _outs(s, status=503)))
+    before = (out / "repeat-1.json.gz").read_bytes()
+
+    def gives_up(send, summary_out=None, **kw):
+        raise TimeoutError("0 of 2 pinned workers answered")
+
+    monkeypatch.setattr(v, "warm_up", gives_up)
+    with pytest.raises(TimeoutError):
+        v.main(rig["argv"])
+    assert (out / "repeat-1.json.gz").read_bytes() == before
+    assert not (out / "repeat-1.void.json.gz").exists()
+    assert "the slot is unchanged" in capsys.readouterr().err
+
+
+def test_main_a_failed_replay_after_the_void_moved_aside_says_so(rig, capsys):
+    s = rig["schedule"]
+    out = rig["out"]
+    v.write_record(v.prepare_slot(out, 1), _record(s, _outs(s, status=503)))
+
+    def boom(schedule):
+        raise RuntimeError("the driver broke")
+
+    rig["set_replay"](boom)
+    with pytest.raises(RuntimeError):
+        v.main(rig["argv"])
+    err = capsys.readouterr().err
+    assert "slot is unchanged" not in err and "moved aside" in err
+    assert (out / "repeat-1.void.json.gz").exists() and not (out / "repeat-1.json.gz").exists()
+
+
+def test_main_a_failed_write_after_a_release_failure_names_both(rig, monkeypatch, tmp_path, capsys):
+    d = tmp_path / "systmp"
+    d.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(d))
+
+    class FailingPin(MainPin):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.release_error = ReleaseFailed("RELEASE FAILED: set it by hand")
+
+    def no_space(path, record):
+        raise PermissionError("read-only file system")
+
+    monkeypatch.setattr(v, "WorkerPin", FailingPin)
+    monkeypatch.setattr(v, "write_record", no_space)
+    with pytest.raises(v.RecordLost, match="RELEASE FAILED: set it by hand"):
+        v.main(rig["argv"])
+    assert len(list(d.iterdir())) == 1
+    assert "raw outcomes are in" in capsys.readouterr().err
+
+
+def test_main_judge_warns_about_a_recorded_post_run_error(rig, capsys):
+    s = rig["schedule"]
+    for k, f in enumerate((0.97, 1.0, 1.03), start=1):
+        rec = _record(s, _outs(s, f), k=k)
+        if k == 3:
+            rec["post_run_error"] = "ReleaseFailed: RELEASE FAILED"
+        v.write_record(v.prepare_slot(rig["out"], k), rec)
+    v.main(["--judge", "--out", str(rig["out"])])
+    assert "repeat 3 recorded an error after its replay" in capsys.readouterr().err

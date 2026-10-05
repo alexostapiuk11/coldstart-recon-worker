@@ -7,7 +7,8 @@ RUNPOD_API_KEY and RUNPOD_A2_LB_ENDPOINT_ID; never prints the key or writes it
 into a record.
 
 One repeat: preflight (GPU, volume, template; workersMin 0, workersMax == N),
-check the slot and build the schedule (both before any pin), pin, warm up until
+check the slot (and that the out dir is writable and the open-files limit holds
+the replay's sockets) and build the schedule, all before any pin; then pin, warm up until
 all N workers answer cleanly (their ids are the run's host_ids), replay the ONE
 pre-registered schedule open-loop, release on any exit, and write every request
 to data/a2/validation/repeat-K.json.gz. `--judge` builds RealRuns from the
@@ -26,10 +27,14 @@ What a record means when something fails mid-run:
   "FAILED"`: the run was paid for and its evidence is sound, and the failure is
   a billing problem the exception already shouts about. Dropping the record
   because a later step failed was rejected: it throws away ~$0.30 of evidence.
+- If the record cannot be built or written after the replay, the raw outcomes go
+  to a temp file (path on stderr) and `RecordLost` is raised, chained to the pin's
+  own error so a ReleaseFailed stays visible.
 - A failure BEFORE the replay completes (warm-up gave up, the replay raised or
   was interrupted) writes nothing. Such a run has no complete replay, so a
   record of it, void or not, would be a partial run that looks like data. The
-  slot stays as it was, so the attempt costs the owner no "rerun" allowance.
+  slot stays as it was (a void repeat is moved aside only just before the
+  replay starts), so the attempt costs the owner no "rerun" allowance.
 - Any other error that escapes the pin AFTER the replay (for instance workersMax
   changed during the run) is recorded in `post_run_error` and printed, but does
   not void the record: the void list is the signed amendment's, and a new void
@@ -43,7 +48,9 @@ import gzip
 import json
 import math
 import os
+import resource
 import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from statistics import median
@@ -80,6 +87,45 @@ SCHEMA_VERSION = 1
 # small does not fail: the requests queue and leave late, which RealRun refuses
 # above 0.5 s of jitter, so the paid run would be spent on a refusal.
 REPLAY_MAX_IN_FLIGHT = 4096
+# Each pool thread keeps one keep-alive socket, so the replay needs about 4096
+# descriptors plus the process's own files. macOS defaults to a soft limit of 256.
+MIN_OPEN_FILES = 8192
+
+
+class RecordLost(RuntimeError):
+    """The replay completed but its record could not be built or written.
+
+    `fallback` is the raw-outcomes file (or None if even that failed): the paid
+    data is in it, not in the slot.
+    """
+
+    def __init__(self, message: str, fallback: Path | None):
+        super().__init__(message)
+        self.fallback = fallback
+
+
+def ensure_fd_limit(needed: int = MIN_OPEN_FILES, res=resource) -> None:
+    """Raise the soft open-files limit to `needed`, or refuse before the pin.
+
+    Refusing after the workers are pinned was rejected: the replay would hit
+    "Too many open files" on the first few hundred sockets and the run would
+    be billed for nothing. Only the soft limit is raised, up to the hard one.
+    """
+    soft, hard = res.getrlimit(res.RLIMIT_NOFILE)
+    if soft >= needed:
+        return
+    target = needed if hard in (res.RLIM_INFINITY, -1) else min(hard, needed)
+    try:
+        res.setrlimit(res.RLIMIT_NOFILE, (target, hard))
+    except (ValueError, OSError):
+        pass
+    soft, _ = res.getrlimit(res.RLIMIT_NOFILE)
+    if soft < needed:
+        raise SystemExit(
+            f"the open-files soft limit is {soft} and could not be raised to {needed}: the "
+            f"replay's {REPLAY_MAX_IN_FLIGHT} pool threads each hold a socket, so the run "
+            "would fail with 'Too many open files' after the workers were pinned and billing. "
+            f"Run `ulimit -n {needed}` in this shell and start again")
 
 
 def lb_pins(template_id: str) -> dict:
@@ -153,9 +199,13 @@ def write_record(path: Path, record: dict) -> None:
     """Atomic: a half-written .gz in the slot would crash the next slot check."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    with gzip.open(tmp, "wt") as fh:
-        json.dump(record, fh)
-    os.replace(tmp, path)
+    try:
+        with gzip.open(tmp, "wt") as fh:
+            json.dump(record, fh)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)  # a failed write leaves the slot as it was
+        raise
 
 
 def _slot(out: Path, k: int) -> tuple[Path, Path, bool]:
@@ -172,8 +222,38 @@ def _slot(out: Path, k: int) -> tuple[Path, Path, bool]:
 
 
 def check_slot(out: Path, k: int) -> None:
-    """Refuse a slot that may not be run, touching nothing."""
+    """Refuse a slot that may not be run, or an out dir that cannot take the record.
+
+    Creates `out` and writes then deletes a probe file, BEFORE any pin. Finding
+    out after the replay that the record cannot be written would waste the
+    whole paid run (the data would survive only in the fallback dump).
+    """
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+        probe = out / f".write-probe-{os.getpid()}"
+        probe.write_text("")
+        probe.unlink()
+    except OSError as e:
+        raise SystemExit(
+            f"cannot write to {out} ({type(e).__name__}: {e}); a repeat started now would "
+            "pay for ten minutes of pinned GPUs and then have nowhere to put its record. "
+            "Fix the path or its permissions and start again") from e
     _slot(out, k)
+
+
+def _dump_fallback(k, outcomes, context) -> Path | None:
+    """Raw outcomes and context to the system temp dir, for when the record cannot be written."""
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    try:
+        fd, name = tempfile.mkstemp(prefix=f"a2-repeat-{k}-{stamp}-", suffix=".json",
+                                    dir=tempfile.gettempdir())
+        with os.fdopen(fd, "w") as fh:
+            json.dump({"context": context,
+                       "outcomes": [dataclasses.asdict(o) for o in outcomes]},
+                      fh, default=str)
+        return Path(name)
+    except Exception:  # noqa: BLE001 -- the dump is the last resort; its failure is reported
+        return None
 
 
 def prepare_slot(out: Path, k: int) -> Path:
@@ -185,13 +265,24 @@ def prepare_slot(out: Path, k: int) -> Path:
 
 def run_repeat(*, k, schedule, pin, send, warm_fn, replay_fn, endpoint_id, template_id,
                replicas, until, now, path, seed=VALIDATION_SEED,
-               drain=VALIDATION_DRAIN_SECONDS) -> dict:
+               drain=VALIDATION_DRAIN_SECONDS, prepare=None) -> dict:
     """Pin, warm up, replay, release; write the record to `path` once the replay is complete.
 
     The record is written in a `finally` that runs after the pin's release, so a
     release failure cannot cost the evidence (see the module docstring). No
     replay, no record. Returns the record; an exception from the pin's exit is
     re-raised after the write.
+
+    `prepare`, if given, runs once the pin is held and warm-up has succeeded,
+    immediately before the replay: the slot is touched (a void repeat moved
+    aside) only when the run is really starting, so a failed pin or warm-up
+    leaves it exactly as it was.
+
+    If building or writing the record fails after the replay, the raw outcomes
+    go to a temp file and `RecordLost` is raised, chained to the pin's own
+    error when there was one (a ReleaseFailed must stay visible: a worker may
+    be billing). A signal-driven SystemExit or KeyboardInterrupt keeps
+    propagating as itself, with the fallback path printed.
     """
     warmup: dict = {}
     host_ids = started_at = outcomes = None
@@ -199,6 +290,8 @@ def run_repeat(*, k, schedule, pin, send, warm_fn, replay_fn, endpoint_id, templ
     try:
         with pin:
             host_ids = warm_fn(send, warmup)
+            if prepare is not None:
+                prepare()
             started_at = now()
             outcomes = replay_fn(schedule, send)
     except BaseException as e:
@@ -206,15 +299,33 @@ def run_repeat(*, k, schedule, pin, send, warm_fn, replay_fn, endpoint_id, templ
         raise
     finally:
         if outcomes is not None:
-            record = record_from(outcomes, repeat=k, schedule=schedule, host_ids=host_ids,
-                                 endpoint_id=endpoint_id, template_id=template_id,
-                                 started_at=started_at, replicas=replicas, until=until,
-                                 seed=seed, drain=drain, warmup=warmup)
-            if escaped is not None:
-                record["post_run_error"] = f"{type(escaped).__name__}: {escaped}"[:300]
-                if isinstance(escaped, ReleaseFailed):
-                    record["release"] = "FAILED"
-            write_record(path, record)
+            try:
+                record = record_from(outcomes, repeat=k, schedule=schedule, host_ids=host_ids,
+                                     endpoint_id=endpoint_id, template_id=template_id,
+                                     started_at=started_at, replicas=replicas, until=until,
+                                     seed=seed, drain=drain, warmup=warmup)
+                if escaped is not None:
+                    record["post_run_error"] = f"{type(escaped).__name__}: {escaped}"[:300]
+                    if isinstance(escaped, ReleaseFailed):
+                        record["release"] = "FAILED"
+                write_record(path, record)
+            except Exception as lost:  # noqa: BLE001 -- whatever failed, the paid data must survive
+                fallback = _dump_fallback(k, outcomes, {
+                    "repeat": k, "endpoint_id": endpoint_id, "template_id": template_id,
+                    "host_ids": host_ids, "started_at": started_at, "replicas": replicas,
+                    "until": until, "seed": seed, "drain": drain, "schedule": list(schedule),
+                    "pin_exit_error": None if escaped is None else
+                    f"{type(escaped).__name__}: {escaped}"})
+                where = (f"the raw outcomes are in {fallback}" if fallback else
+                         "the fallback dump failed too, so the replay's data is lost")
+                print(f"[repeat {k}] the replay completed but its record could not be written "
+                      f"({type(lost).__name__}: {lost}); {where}", file=sys.stderr)
+                if escaped is None or isinstance(escaped, Exception):
+                    raise RecordLost(
+                        f"the replay completed but its record could not be built or written "
+                        f"({type(lost).__name__}: {lost}); {where}"
+                        + (f". The pin's exit also failed: {escaped}" if escaped else ""),
+                        fallback) from (escaped or lost)
     return record
 
 
@@ -223,7 +334,11 @@ def judge(out: Path, curve) -> dict:
     for k in range(1, REPEATS + 1):
         path = out / f"repeat-{k}.json.gz"
         if not path.exists():
-            raise SystemExit(f"repeat {k} is missing ({path}); the gate needs all {REPEATS}")
+            void_path = out / f"repeat-{k}.void.json.gz"
+            aside = (f"; an earlier void attempt is kept at {void_path}"
+                     if void_path.exists() else "")
+            raise SystemExit(
+                f"repeat {k} is missing ({path}){aside}; the gate needs all {REPEATS}")
         rec = read_record(path)
         if rec["void"]:
             raise SystemExit(f"repeat {k} is void ({rec['void']}); run it once more or stop")
@@ -250,7 +365,8 @@ def judge(out: Path, curve) -> dict:
         client = [x for x in r["client_latency_s"] if x is not None]
         per_repeat.append({"repeat": r["repeat"], "host_ids": r["host_ids"],
                            "server_p50_s": median(server), "client_p50_s": median(client),
-                           "max_jitter_s": r["max_jitter_s"], "release": r.get("release")})
+                           "max_jitter_s": r["max_jitter_s"], "release": r.get("release"),
+                           "post_run_error": r.get("post_run_error")})
     bins = []
     for b in result.bins:
         d = dataclasses.asdict(b)
@@ -296,11 +412,17 @@ def main(argv=None) -> None:
         os.replace(tmp, out / "verdict.json")
         print(f"[judge] {verdict['outcome']}: {verdict['detail']} (judged {verdict['compared']}, "
               f"outside {verdict['misses']}); host novelty {verdict['host_novelty'] or 'none'}")
+        for r in verdict["per_repeat"]:
+            if r["post_run_error"]:
+                print(f"[judge] WARNING: repeat {r['repeat']} recorded an error after its "
+                      f"replay ({r['post_run_error']}); the verdict stands, the owner decides "
+                      "what it means", file=sys.stderr)
         return
     if not args.template_id:
         ap.error("--preflight-only and --repeat need --template-id")
     if args.repeat is not None:
         check_slot(out, args.repeat)  # before the network, never after a pin
+        ensure_fd_limit()
     key = os.environ["RUNPOD_API_KEY"]
     endpoint = os.environ["RUNPOD_A2_LB_ENDPOINT_ID"]
     pin = _preflight(endpoint, key, args.template_id)
@@ -311,7 +433,15 @@ def main(argv=None) -> None:
     schedule = build_schedule(curve, replicas=VALIDATION_REPLICAS, kind=VALIDATION_KIND,
                               until=VALIDATION_UNTIL, drain=VALIDATION_DRAIN_SECONDS,
                               seed=VALIDATION_SEED)
-    path = prepare_slot(out, args.repeat)
+    path = out / f"repeat-{args.repeat}.json.gz"
+    void_path = out / f"repeat-{args.repeat}.void.json.gz"
+    had_void = path.exists()  # check_slot proved it is a void repeat, not a valid one
+    moved = {"void": False}
+
+    def prepare():
+        moved["void"] = had_void
+        prepare_slot(out, args.repeat)
+
     send = sender(endpoint, key)
     unwind_on_hangup_and_term()
     try:
@@ -323,15 +453,23 @@ def main(argv=None) -> None:
             replay_fn=lambda sch, s: replay(sch, s, max_in_flight=REPLAY_MAX_IN_FLIGHT),
             endpoint_id=endpoint, template_id=args.template_id, replicas=VALIDATION_REPLICAS,
             until=VALIDATION_UNTIL, now=lambda: datetime.now(UTC).isoformat(timespec="seconds"),
-            path=path)
+            path=path, prepare=prepare)
     except BaseException as e:
-        wrote = path.exists()
+        # A void still sitting in the slot is not this run's record.
+        wrote = (path.exists() and not isinstance(e, RecordLost)
+                 and (not had_void or moved["void"]))
+        if isinstance(e, RecordLost):
+            tail = "see the line above for where the raw outcomes were saved"
+        elif wrote:
+            tail = (f"the record was still written to {path} with this error in post_run_error "
+                    "(not voided; the owner decides what it means)")
+        elif moved["void"]:
+            tail = (f"no complete replay, so NO new record was written; the earlier void "
+                    f"repeat was moved aside to {void_path} when the replay was about to start")
+        else:
+            tail = "no complete replay, so NO record was written and the slot is unchanged"
         print(f"[repeat {args.repeat}] {'WARNING after the replay: ' if wrote else ''}"
-              f"{type(e).__name__}: {str(e)[:300]}; "
-              + (f"the record was still written to {path} with this error in post_run_error "
-                 "(not voided; the owner decides what it means)" if wrote else
-                 "no complete replay, so NO record was written and the slot is unchanged"),
-              file=sys.stderr)
+              f"{type(e).__name__}: {str(e)[:300]}; {tail}", file=sys.stderr)
         raise
     jitter = record["max_jitter_s"]
     print(f"[repeat {args.repeat}] {len(schedule)} requests, host_ids {record['host_ids']}, "
