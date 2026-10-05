@@ -1,0 +1,330 @@
+{
+ "0.88": {
+  "gaps": {
+   "arm A": {
+    "point": 0.13848787205375146,
+    "lo": 0.050562596737790955,
+    "hi": 0.6253507362349406,
+    "budget": 3094.9999999999877,
+    "paired_repetitions": 30,
+    "frontiers": {
+     "in_flight_concurrency": [
+      [
+       2420,
+       5.233,
+       30
+      ],
+      [
+       2435,
+       4.979,
+       30
+      ],
+      [
+       2532,
+       4.914,
+       30
+      ],
+      [
+       2535,
+       4.892,
+       30
+      ]
+     ],
+     "queue_depth": [
+      [
+       700,
+       4.754,
+       30
+      ]
+     ],
+     "utilization": [
+      [
+       3095,
+       4.782,
+       30
+      ]
+     ]
+    },
+    "discards": 0
+   },
+   "arm C": {
+    "point": 1.379354569049211,
+    "lo": 1.1853993714644822,
+    "hi": 1.9109689319271705,
+    "budget": 3095.0000000000064,
+    "paired_repetitions": 30,
+    "frontiers": {
+     "in_flight_concurrency": [
+      [
+       2278,
+       2.551,
+       30
+      ],
+      [
+       2535,
+       2.497,
+       30
+      ]
+     ],
+     "queue_depth": [
+      [
+       640,
+       3.877,
+       30
+      ]
+     ],
+     "utilization": [
+      [
+       3095,
+       2.509,
+       30
+      ]
+     ]
+    },
+    "discards": 0
+   },
+   "ramp arm A": {
+    "point": 3.834167000574954,
+    "lo": 3.6686322163796588,
+    "hi": 4.301656508391302,
+    "budget": 3094.999999999998,
+    "paired_repetitions": 30,
+    "frontiers": {
+     "in_flight_concurrency": [
+      [
+       2448,
+       0.614,
+       30
+      ],
+      [
+       2530,
+       0.603,
+       30
+      ],
+      [
+       2535,
+       0.591,
+       30
+      ],
+      [
+       2857,
+       0.59,
+       30
+      ]
+     ],
+     "queue_depth": [
+      [
+       790,
+       4.424,
+       30
+      ]
+     ],
+     "utilization": [
+      [
+       3095,
+       0.591,
+       30
+      ]
+     ]
+    },
+    "discards": 0
+   },
+   "ramp arm C": {
+    "point": 3.4172568734140922,
+    "lo": 3.3153892243201337,
+    "hi": 3.812731140629352,
+    "budget": 3095.000000000011,
+    "paired_repetitions": 30,
+    "frontiers": {
+     "in_flight_concurrency": [
+      [
+       2297,
+       0.438,
+       30
+      ]
+     ],
+     "queue_depth": [
+      [
+       640,
+       3.855,
+       30
+      ]
+     ],
+     "utilization": [
+      [
+       3095,
+       0.439,
+       30
+      ]
+     ]
+    },
+    "discards": 0
+   }
+  },
+  "h3": {
+   "holds": false,
+   "partial": false,
+   "evaluable": true,
+   "detail": "gap did not halve under either shape"
+  }
+ },
+ "1.12": {
+  "gaps": {
+   "arm A": {
+    "point": 0.17337018664140302,
+    "lo": 0.07827113130618812,
+    "hi": 1.2682317692689828,
+    "budget": 3094.999999999993,
+    "paired_repetitions": 30,
+    "frontiers": {
+     "in_flight_concurrency": [
+      [
+       2535,
+       21.984,
+       30
+      ]
+     ],
+     "queue_depth": [
+      [
+       880,
+       21.972,
+       30
+      ]
+     ],
+     "utilization": [
+      [
+       3095,
+       22.145,
+       30
+      ]
+     ]
+    },
+    "discards": 0
+   },
+   "arm C": {
+    "point": 1.2603719343354065,
+    "lo": 0.9546475799727467,
+    "hi": 1.5834528845196232,
+    "budget": 3095.000000000002,
+    "paired_repetitions": 30,
+    "frontiers": {
+     "in_flight_concurrency": [
+      [
+       2535,
+       11.037,
+       30
+      ]
+     ],
+     "queue_depth": [
+      [
+       790,
+       12.29,
+       30
+      ]
+     ],
+     "utilization": [
+      [
+       3095,
+       11.03,
+       30
+      ]
+     ]
+    },
+    "discards": 0
+   },
+   "ramp arm A": {
+    "point": 8.713728604233173,
+    "lo": 8.1485673161241,
+    "hi": 9.127494751683642,
+    "budget": 3095.000000000001,
+    "paired_repetitions": 30,
+    "frontiers": {
+     "in_flight_concurrency": [
+      [
+       2720,
+       6.198,
+       30
+      ],
+      [
+       2975,
+       6.025,
+       30
+      ]
+     ],
+     "queue_depth": [
+      [
+       1000,
+       15.871,
+       30
+      ],
+      [
+       1005,
+       15.287,
+       30
+      ],
+      [
+       1120,
+       15.187,
+       30
+      ],
+      [
+       1125,
+       14.641,
+       30
+      ]
+     ],
+     "utilization": [
+      [
+       3095,
+       5.927,
+       30
+      ]
+     ]
+    },
+    "discards": 0
+   },
+   "ramp arm C": {
+    "point": 16.710064435344705,
+    "lo": 16.504717183261217,
+    "hi": 17.014517675702,
+    "budget": 3095.0000000000055,
+    "paired_repetitions": 30,
+    "frontiers": {
+     "in_flight_concurrency": [
+      [
+       2535,
+       0.787,
+       30
+      ],
+      [
+       2870,
+       0.753,
+       30
+      ]
+     ],
+     "queue_depth": [
+      [
+       790,
+       17.453,
+       30
+      ]
+     ],
+     "utilization": [
+      [
+       3095,
+       0.743,
+       30
+      ]
+     ]
+    },
+    "discards": 0
+   }
+  },
+  "h3": {
+   "holds": false,
+   "partial": false,
+   "evaluable": true,
+   "detail": "gap did not halve under either shape"
+  }
+ }
+}
