@@ -42,6 +42,9 @@ from placement.traffic import decile_of, zipf_shares
 # repetition it is sizing.
 PILOT_SEED_OFFSET = 1_000_003
 CROSSOVER_ITERATIONS = 2000
+# Bumped whenever an evaluation gains a field, so a cache written by older code
+# is never read back with the new fields silently empty.
+CACHE_VERSION = 2
 
 
 def _require_measured(design: Design, engines: Engines, swap_time: EmpiricalDistribution, allow: bool) -> None:
@@ -87,7 +90,8 @@ def grid(design: Design, scenario: Scenario) -> list[GridPoint]:
 
 def _cache_key(design, engines, swap_time) -> str:
     material = json.dumps(
-        [asdict(design), asdict(engines.solo), asdict(engines.colocated), asdict(swap_time)],
+        [CACHE_VERSION, asdict(design), asdict(engines.solo), asdict(engines.colocated),
+         asdict(swap_time)],
         sort_keys=True, default=str,
     )
     return hashlib.sha256(material.encode()).hexdigest()[:16]
@@ -126,6 +130,7 @@ def run(
                     [swap_time] * len(points),
                     [design.repetitions] * len(points),
                     [design.seed] * len(points),
+                    [design.slo_seconds] * len(points),
                 )
             )
         dump_evaluations(cache, evaluations)

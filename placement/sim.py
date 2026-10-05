@@ -62,6 +62,12 @@ class RunResult:
     completed: int = 0
     swaps: int = 0
     extrapolated: int = 0
+    # Post-warm-up arrivals whose model was resident and admitting on some GPU
+    # when the request arrived: August §8's hit rate is hits / len(latencies).
+    hits: int = 0
+    # When each swap began. `swaps` counts warm-up and drain-out swaps too; a
+    # swap rate is read from the starts inside the measured window.
+    swap_starts: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -167,6 +173,7 @@ def simulate(
     def start_swap(g: int, now: float) -> None:
         gpus[g].state = _SWAPPING
         result.swaps += 1
+        result.swap_starts.append(now)
         events.push(Event(now + swap_time.draw(rng), "swap_done", {"gpu": g}))
 
     def victim() -> int | None:
@@ -198,6 +205,8 @@ def simulate(
         now = event.time
         if event.kind == "arrival":
             m = event.payload["model"]
+            if now >= warmup and hosts[m]:
+                result.hits += 1
             last_used[m] = now
             queues[m].append(now)
             dispatch(m, now)
