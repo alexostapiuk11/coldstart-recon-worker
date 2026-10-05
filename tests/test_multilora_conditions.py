@@ -40,7 +40,27 @@ def test_every_condition_gets_the_pre_registered_instance_count(prereg):
 def test_the_gate_has_its_own_schedule(prereg):
     sched = gate_schedule(prereg)
     assert {s.condition for s in sched} == {GATE}
-    assert len(sched) == prereg.instances_per_condition
+    assert len(sched) == prereg.gate_instances
+
+
+def test_the_gate_is_sized_by_its_own_field_not_the_campaigns():
+    larger = example_prereg(gate_instances=30)
+    sched = gate_schedule(larger)
+    assert len(sched) == 30 != larger.instances_per_condition
+    assert [s.run_index for s in sched] == list(range(30))
+    counts = Counter(s.condition for s in campaign_schedule(larger))
+    assert set(counts.values()) == {larger.instances_per_condition}
+
+
+def test_a_larger_gate_repeats_a_smaller_gates_first_instances(prereg):
+    """The gate is one condition, so its schedule seed orders nothing; each
+    instance's phase order comes from phase_plan(run_index). A larger gate's
+    first instances therefore repeat a smaller gate's (amendment 1 says so)."""
+    larger = example_prereg(gate_instances=30)
+    assert gate_schedule(larger)[:24] == gate_schedule(prereg)
+    gate = parse_condition(GATE, prereg)
+    for i in range(24):
+        assert phase_plan(gate, larger, i) == phase_plan(gate, prereg, i)
 
 
 def test_parse_condition_sets_the_per_job_switches(prereg):

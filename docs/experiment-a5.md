@@ -140,3 +140,168 @@ point, so memory does not bind (amendment §3c).
   condition falls below 20 instances, top-up instances are scheduled before any
   analysis, and the post discloses them (amendment §4, "Blocks, jobs and
   instance counts").
+
+## Amendment 1 — a larger equivalence gate (2026-10-05)
+
+This amendment is post-hoc. It was written after the first equivalence gate
+returned its verdict, and in response to that verdict. The post will say so.
+Nothing above this section has been edited: the text and the table above remain
+the record of what was pre-registered before the first measured run.
+
+### What happened
+
+The first gate ran 24 instances under the rule above. One instance (run index 5)
+read its compile cache cold and was excluded, which left 23 usable instances.
+Its records are kept as the pilot, at `data/a5/gate-pilot.jsonl` (commit
+4b31c3f has them at their original path, `data/a5/gate.jsonl`). The verdict was
+inconclusive:
+
+- Throughput: median relative difference (synthetic minus real, over real)
+  -0.8%, 90% bootstrap interval [-2.2%, +0.3%], inside ±5%, and resolved: the
+  real-versus-real resolution check gave -0.6% [-2.4%, +1.1%].
+- TTFT p50: median +2.9%, 90% interval [-2.7%, +10.7%], not inside ±5%, and
+  unresolved: the real-versus-real resolution check gave +8.9% [-6.4%, +11.7%].
+
+Because the TTFT resolution check failed, the rule reads inconclusive, not
+fail.
+
+### What the pilot's records show
+
+Recomputed from `data/a5/gate-pilot.jsonl`, the 23 usable instances only:
+
+- No drift with phase position. The median single-phase TTFT p50 by position
+  in the instance is 112.9 ms, 113.6 ms, 112.6 ms and 112.8 ms for positions
+  0 to 3 (23 phases each).
+- Real and synthetic phases are within a few milliseconds of each other: the
+  median single-phase TTFT p50 is 111.4 ms over the 46 real phases and
+  114.8 ms over the 46 synthetic phases.
+- Single-phase TTFT p50 varies by roughly ±10-15% between phases of one
+  instance. The real-versus-real relative difference (second real phase
+  against the first, per instance) has quartiles -8.2%, +8.9% and +16.2%, and
+  ranges from -33.6% to +30.9%.
+
+The pilot shows noise, not evidence of bias. At 23 usable instances the gate
+cannot establish equivalence on TTFT p50 within ±5%. It does not show that
+synthetic and real adapters differ. The real-versus-real median of +8.9% is far
+from the zero expected of two phases of the same adapter set; with the
+position medians flat, it is read here as noise, but if it recurs the larger
+gate will read inconclusive too.
+
+### What changes
+
+Only the gate's size. The gate runs 144 instances instead of 24
+(`gate_instances` 144) in a fresh store, `data/a5/gate.jsonl`. Everything else
+about the gate is unchanged: the configuration held fixed above, the 4 real and
+4 synthetic adapters, four spread phases per instance (two over the real set,
+two over the synthetic set, in randomized order), the statistic, the margin
+δ = τ/2 = 0.05, the 90% bootstrap interval, the resolution check and the
+verdict rule.
+
+The fresh gate's instances 0 to 23 repeat the pilot's phase orders and request
+seeds. The design is indexed by run index: each instance's phase order comes
+from `phase_plan` with the run index, and the bench request seeds are derived
+from the run index inside the worker. The gate is a single condition, so a
+schedule seed orders nothing. Nothing is pooled, so this does not matter
+statistically: the new gate's instances 0 to 23 are new measurements of the
+same design, not reuses of the pilot's records.
+
+The pilot is not pooled with the new gate. The verdict is computed from the new
+gate's records alone. The post reports the pilot as a pilot, with its numbers.
+The pilot was renamed to `data/a5/gate-pilot.jsonl` so that a resumed run of the
+gate, which matches stored records by run index and condition, can never pick
+up the pilot's records as its own. The campaign and the analysis read only
+`data/a5/gate.jsonl`.
+
+### Sizing
+
+The pilot's TTFT interval half-width was 6.70%, and its real-versus-real
+resolution interval half-width about 9.0%, at 23 usable instances. If both
+shrink with the square root of the count, then at about 139 usable instances
+(144 less the expected cold-compile exclusions; the pilot lost 1 in 24) they
+would be about 2.7% and 3.7%. An earlier sizing of 72 instances considered only
+the TTFT interval and left out the resolution check. That check needs roughly
+75 usable instances before its half-width falls below 5% even if it is centred
+on zero, so 144 was chosen.
+
+These are estimates, not guarantees. A pass needs the TTFT interval's median
+plus its half-width inside ±5%. If the true bias stays near the pilot's +2.9%,
+an interval of about 2.7% still crosses +5%; the true bias must be below about
+2.3% for a pass. The larger gate may still be inconclusive or fail. A fail
+would be a finding (synthetic adapters slower in TTFT p50 by a few percent),
+not an error.
+
+### What happens next
+
+The campaign runs only if the new gate passes. If the new gate is inconclusive
+or fails, the August fallback applies as §4 of the design amendment says
+("Fail or inconclusive: the August fallback applies unchanged"). The gate is
+not run a third time under this amendment.
+
+### Cost
+
+The pilot's instances took 156 to 202 s of wall time each when warm (median
+161 s, mean 174 s including the 357 s cold-compile instance; the whole pilot
+took 1.16 hours). At about 174 s each, 144 instances take about 7 hours, or
+about $7 to $8 at the illustrative $1.00 to $1.11 per GPU-hour. These are
+estimates.
+
+### Budget, revised
+
+The budget bullet above (3.87 GPU-hours for 216 instances) used a 24-instance
+gate and a per-instance model of about 52 to 75 s (53 s for the gate's 8
+slots), built from reconnaissance's setup, warm-startup and per-request
+timings. The pilot measured about 174 s per instance from submission to result,
+roughly three times the model. Recomputed from the measured time:
+
+- New gate: 144 × 174.4 s = 6.98 hours.
+- Campaign: 192 instances (the seven sweep points and the gauge control, 24
+  each) × the same 174.4 s = 9.30 hours. No campaign instance has been
+  measured; this assumes they take as long as a gate instance.
+- Already spent: the priming runs took 33 minutes of wall time (0.55 hours) and
+  the pilot 1.16 hours, from the `clock_A` fields of `data/a5/priming.jsonl`
+  and `data/a5/gate-pilot.jsonl`.
+- Total: about 18.0 hours, so about $18.0 at $1.00 per GPU-hour and about $20.0
+  at $1.11.
+
+The total approaches the $20 cap: at the upper rate it reaches it. The design
+amendment's §6 cut order (the gauge control first) remains the rule if the
+campaign estimate exceeds the cap, and that decision is the owner's.
+
+### Decision
+
+Chosen by the owner in chat on 2026-10-05, among a larger gate in a fresh
+store, the August fallback, or changing the decision rule. The size was chosen
+between 72, 108 and 144 instances after the sizing was corrected to include the
+resolution check.
+
+### Parameters as amended
+
+| parameter | value |
+|---|---|
+| `concurrency` | `64` |
+| `rank` | `16` |
+| `target_modules` | `('q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj')` |
+| `gate_adapters` | `4` |
+| `warmup_requests_per_adapter` | `2` |
+| `scrape_interval_s` | `1.0` |
+| `knee_threshold` | `0.1` |
+| `request_tokens` | `29` |
+| `context_length_tokens` | `8192` |
+| `slo_ttft_p95_s` | `1.0` |
+| `requests_per_tenant_month` | `100000.0` |
+| `peak_to_average` | `3.0` |
+| `gpu_hourly_rate` | `1.0` |
+| `schedule_seed` | `20261001` |
+| `include_diagnostic` | `False` |
+| `include_control` | `True` |
+| `bench_dataset_args` | `('--dataset-name', 'random', '--random-input-len', '13', '--random-output-len', '16')` |
+| `real_adapters` | `(('AIsakawaii/task_b_method2_qwen4b', '8ba6625bbb5f5a8770109f003ae55fcaef4fb117'), ('davemaxuellkr/KIRD-project_QLoRa-Qwen3-4B_en-ko', 'f7eb9b54171b1212347ebb0e3bb26008d81e92db'), ('hanghang1024/Qwen3-4b-Qlora-Fin', '47d3fc76a0d748497e726134ee5092e68bb0cacf'), ('jacobcd52/qwen3_4b_hacker', '89cb5e72a31c2f2ce53e9c4f9aee9ee38b7c26e2'))` |
+| `sweep` | `(1, 2, 4, 8, 16, 32, 64)` |
+| `concentrated_k` | `1` |
+| `instances_per_condition` | `24` |
+| `phases_per_regime` | `2` |
+| `diagnostic_points` | `(1, 16, 64)` |
+| `control_point` | `64` |
+| `gate_instances` | `144` |
+| `equivalence_margin` (derived) | `0.05` |
+| `requests_per_phase` (derived) | `640` |

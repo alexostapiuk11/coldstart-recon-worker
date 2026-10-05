@@ -35,3 +35,11 @@ def test_over_the_cap_the_control_goes_first_then_the_diagnostic():
     assert res["include_control"] is False
     tight = estimate(pricey, TIMINGS, cold_startup_s=COLD, cap_usd=1.0)
     assert tight["include_diagnostic"] is False and tight["over_cap"] is True
+
+
+def test_the_gate_is_counted_with_its_own_instance_count(prereg):
+    small = estimate(example_prereg(gate_instances=24), TIMINGS, cold_startup_s=COLD, cap_usd=1e9)
+    large = estimate(example_prereg(gate_instances=72), TIMINGS, cold_startup_s=COLD, cap_usd=1e9)
+    extra_hours = 48 * instance_seconds(prereg.gate_slots, prereg, TIMINGS) / 3600.0
+    assert large["gpu_hours"] - small["gpu_hours"] == pytest.approx(extra_hours)
+    assert extra_hours > 0
