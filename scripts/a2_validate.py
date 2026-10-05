@@ -56,7 +56,16 @@ from statistics import median
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from a2_lb_common import RETRY_MARK, WORKER, ensure_fd_limit, sender, server_latency_s, warm_up
+from a2_lb_common import (
+    POOL_THREADS,
+    RETRY_MARK,
+    WORKER,
+    ensure_fd_limit,
+    ensure_thread_headroom,
+    sender,
+    server_latency_s,
+    warm_up,
+)
 
 from autoscale.figures import validation_overlay
 from autoscale.measured_curve import DEFAULT_PATH, load_measured_curve
@@ -89,12 +98,12 @@ from harness.runpod.preflight import assert_endpoint_matches, fetch_endpoint
 OUT = Path("data/a2/validation")
 SCHEMA_VERSION = 1
 # The peak is ~401 req/s over 2 workers, and client latency adds the WAN and the
-# load balancer to the engine's ~0.6 s. 4096 threads hold about 10 s of latency
-# (4096 / 401) before the driver's own pool, not the endpoint, causes send
-# jitter. The replay default of 1024 holds only ~2.5 s, and a pool that is too
+# load balancer to the engine's ~0.6 s. The shared pool (3500 threads; see
+# a2_lb_common.POOL_THREADS for why not 4096) holds about 8.7 s of latency at
+# 401 req/s before the driver's own pool, not the endpoint, causes send jitter. The replay default of 1024 holds only ~2.5 s, and a pool that is too
 # small does not fail: the requests queue and leave late, which RealRun refuses
 # above 0.5 s of jitter, so the paid run would be spent on a refusal.
-REPLAY_MAX_IN_FLIGHT = 4096
+REPLAY_MAX_IN_FLIGHT = POOL_THREADS
 
 
 class RecordLost(RuntimeError):
@@ -456,6 +465,7 @@ def main(argv=None) -> None:
     if args.repeat is not None:
         check_slot(out, args.repeat)  # before the network, never after a pin
         ensure_fd_limit()
+        ensure_thread_headroom()
     key = os.environ["RUNPOD_API_KEY"]
     endpoint = os.environ["RUNPOD_A2_LB_ENDPOINT_ID"]
     pin = _preflight(endpoint, key, args.template_id)

@@ -14,6 +14,7 @@ import requests
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "scripts"))
 
+import a2_lb_common as common
 import a2_validate as v
 from a2_lb_common import SERVER_LATENCY, WORKER
 
@@ -491,6 +492,7 @@ def rig(monkeypatch, tmp_path):
     monkeypatch.setattr(v, "build_schedule", lambda *a, **k: s)
     monkeypatch.setattr(v, "load_measured_curve", lambda path: type("M", (), {"curve": CURVE})())
     monkeypatch.setattr(v, "ensure_fd_limit", lambda: None)
+    monkeypatch.setattr(v, "ensure_thread_headroom", lambda: None)
 
     def warm(send, summary_out=None, **kw):
         MainPin.instances[-1].log.append("warm")
@@ -546,7 +548,7 @@ def test_main_a_repeat_writes_a_record_without_the_api_key(rig, capsys):
     assert rec["void"] == [] and rec["host_ids"] == ["w1", "w2"] and rec["endpoint_id"] == "ep123"
     assert rec["release"] == "ok" and rec["warmup"] == {"requests": 3}
     assert rig["calls"] == [{"max_in_flight": v.REPLAY_MAX_IN_FLIGHT}]
-    assert v.REPLAY_MAX_IN_FLIGHT == 4096
+    assert v.REPLAY_MAX_IN_FLIGHT == common.POOL_THREADS
     assert MainPin.instances[0].log == ["preflight", "pin", "warm", "replay", "release"]
     assert KEY not in gzip.decompress(path.read_bytes()).decode()
     captured = capsys.readouterr()

@@ -182,7 +182,7 @@ def test_the_ladder_and_thresholds_are_the_amendments():
     assert probe.RATES == (25.0, 50.0, 100.0, 200.0, 300.0, 450.0)
     assert probe.STEP_SECONDS == 30.0
     assert probe.MIN_WORKER_SHARE == 0.35 and probe.MAX_JITTER_S == 0.25
-    assert probe.LADDER_MAX_IN_FLIGHT == 4096 and probe.EARLY_STOP_FAILURE_FRACTION == 0.5
+    assert probe.LADDER_MAX_IN_FLIGHT == common.POOL_THREADS and probe.EARLY_STOP_FAILURE_FRACTION == 0.5
 
 
 class FakeResource:
@@ -261,6 +261,7 @@ def rig(monkeypatch, tmp_path):
     monkeypatch.setattr(probe, "WorkerPin", FakePin)
     monkeypatch.setattr(probe, "unwind_on_hangup_and_term", lambda: None)
     monkeypatch.setattr(probe, "ensure_fd_limit", lambda needed: None)
+    monkeypatch.setattr(probe, "ensure_thread_headroom", lambda: None)
     monkeypatch.setattr(probe, "sender", lambda *a: (lambda i: (200, {})))
     monkeypatch.setattr(probe, "warm_up",
                         lambda send, summary_out=None, **kw: (summary_out.update(
@@ -295,7 +296,7 @@ def test_main_runs_the_ladder_and_leaves_a_complete_summary(rig, capsys):
     s = _summary(rig["out"])
     assert s["status"] == "complete" and s["release"] == "ok" and s["workers"] == ["w1", "w2"]
     assert list(s["steps"]) == ["10", "20", "30"] and s["warmup"]["requests"] == 3
-    assert all(kw == {"max_in_flight": 4096} for kw in rig["calls"])
+    assert all(kw == {"max_in_flight": common.POOL_THREADS} for kw in rig["calls"])
     assert FakePin.instances[0].log == ["pin", "release"]
     assert "[accept] PASS" in capsys.readouterr().out
 
@@ -458,3 +459,12 @@ def test_preflight_only_does_not_touch_the_open_files_limit(rig, monkeypatch):
     calls = _with_resource(monkeypatch, FakeResource(256, 1024))
     probe.main(["--out", str(rig["out"]), "--preflight-only"])
     assert calls == []
+
+
+def test_main_refuses_too_few_threads_before_any_pin_or_write(rig, monkeypatch):
+    monkeypatch.setattr(probe, "ensure_thread_headroom",
+                        lambda: common.ensure_thread_headroom(limit_fn=lambda: 2048))
+    with pytest.raises(SystemExit, match="kern.num_taskthreads"):
+        probe.main(["--out", str(rig["out"])])
+    assert FakePin.instances[0].log == [] and rig["calls"] == []
+    assert not rig["out"].exists()

@@ -10,6 +10,7 @@ generation_config).
 """
 
 import resource
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -32,8 +33,15 @@ REQUEST_TIMEOUT_S = 120.0
 # Each pool thread keeps one keep-alive socket, so a replay with up to POOL_THREADS
 # threads needs about that many descriptors plus the process's own files. macOS
 # defaults to a soft limit of 256. The probe's ladder and the validation driver
-# both run at 4096 in flight (their own constants); this is the shared check.
-POOL_THREADS = 4096
+# both cap their replay pool at POOL_THREADS; this is the shared value and check.
+#
+# 3500, not 4096: macOS allows 4096 threads per process (kern.num_taskthreads),
+# the main thread and the libraries' own threads count against it, and a pool
+# capped at 4096 crashed repeat 1 (2026-10-05) with "can't start new thread"
+# once the load balancer held ~4000 requests. Under the cap a full pool does not
+# fail: further requests wait to be sent, which the gate reads as send jitter.
+POOL_THREADS = 3500
+THREAD_HEADROOM = 256
 MIN_OPEN_FILES = 8192
 
 
@@ -85,6 +93,34 @@ def retry_lb_502(send):
             headers = {**headers, RETRY_MARK: f"{LB_RETRY_STATUS}:{first:.3f}"}
         return status, headers
     return wrapped
+
+
+def macos_thread_limit() -> int | None:
+    """kern.num_taskthreads, or None off macOS or if it cannot be read."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        out = subprocess.run(["sysctl", "-n", "kern.num_taskthreads"], capture_output=True,
+                             text=True, check=True, timeout=5).stdout
+        return int(out.strip())
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def ensure_thread_headroom(pool: int = POOL_THREADS, limit_fn=macos_thread_limit) -> None:
+    """Refuse before the pin if the OS cannot give the pool its threads.
+
+    Rejected: finding out mid-replay, which is how repeat 1 found out: the
+    workers were pinned and billing, and no record was written. An unknown
+    limit is not refused: Linux has no per-process cap this low by default.
+    """
+    limit = limit_fn()
+    if limit is not None and pool + THREAD_HEADROOM > limit:
+        raise SystemExit(
+            f"this machine allows {limit} threads per process (kern.num_taskthreads) and the "
+            f"replay pool may need {pool} plus about {THREAD_HEADROOM} of the process's own; "
+            "the replay would die with \"can't start new thread\" after the workers were "
+            "pinned. Lower POOL_THREADS or run the driver elsewhere")
 
 
 def lb_url(endpoint_id: str) -> str:

@@ -36,7 +36,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from a2_lb_common import constant_rate, ensure_fd_limit, sender, summarize, warm_up
+from a2_lb_common import (
+    POOL_THREADS,
+    constant_rate,
+    ensure_fd_limit,
+    ensure_thread_headroom,
+    sender,
+    summarize,
+    warm_up,
+)
 
 from autoscale.validation_schedule import (
     VALIDATION_REPLICAS,
@@ -62,11 +70,11 @@ EARLY_STOP_FAILURE_FRACTION = 0.5
 # to the acceptance, which is pre-registered and would need an amendment.
 EARLY_STOP_CLIENT_P50_S = 5.0
 # 450 req/s over 2 workers is above one replica's 211 req/s saturation, so
-# latency climbs through the step. 4096 threads hold about 9 s of latency
-# (4096 / 450) before the driver's pool, not the load balancer, causes send
-# jitter. The replay default of 1024 holds only ~2.3 s and would blame the LB
-# for the driver's own queueing.
-LADDER_MAX_IN_FLIGHT = 4096
+# latency climbs through the step. The shared pool (3500 threads) holds about
+# 7.8 s of latency at 450 req/s before the driver's pool, not the load balancer,
+# causes send jitter. The replay default of 1024 holds only ~2.3 s and would
+# blame the LB for the driver's own queueing.
+LADDER_MAX_IN_FLIGHT = POOL_THREADS
 
 
 def accept(summary: dict, *, workers: int) -> tuple[bool, list[str]]:
@@ -108,6 +116,7 @@ def main(argv=None) -> None:
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f"{out} is not empty; move the earlier probe aside first")
     ensure_fd_limit(8192)  # before the pin and before anything is written
+    ensure_thread_headroom()
     out.mkdir(parents=True, exist_ok=True)
     send = sender(endpoint, key)
     unwind_on_hangup_and_term()
