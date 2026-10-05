@@ -201,6 +201,17 @@ def warm_up(send, *, workers: int, rps: float, min_clean: float, max_seconds: fl
             summary_out.clear()
             summary_out.update(last)
         seen |= {o.headers[WORKER] for o in outs if WORKER in o.headers}
+        # A worker answering without the engine-arrival stamp runs an image from
+        # before the amendment of 2026-10-05 (third). RunPod restarted exactly such
+        # a worker after the template moved to the new image, and the repeat was
+        # paid for and voided. Waiting cannot change a worker's image, so stop now.
+        stale = sorted({o.headers[WORKER] for o in outs if o.status == 200
+                        and WORKER in o.headers and SERVER_RECEIVED not in o.headers})
+        if stale:
+            raise RuntimeError(
+                f"workers {stale} answered without {SERVER_RECEIVED}: they run an image from "
+                "before the engine-arrival amendment, and every request they serve would void "
+                "the run. Make the endpoint start workers on the current image first")
         if len(seen) > workers:
             raise RuntimeError(
                 f"{len(seen)} distinct workers answered ({sorted(seen)}) with {workers} pinned; "

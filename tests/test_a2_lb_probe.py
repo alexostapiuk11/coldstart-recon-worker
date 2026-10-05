@@ -66,8 +66,10 @@ class Clock:
 class FakeReplay:
     """Answers each warm-up chunk from a script of worker ids.
 
-    None answers 503; "headerless" answers 200 without the worker header. Each
-    call advances `clock` by `seconds`, so a chunk that hangs shows as wall time.
+    None answers 503; "headerless" answers 200 without the worker header; a name
+    starting "stale:" answers 200 from that worker without the received-time
+    header (an image older than the engine-arrival amendment). Each call
+    advances `clock` by `seconds`, so a chunk that hangs shows as wall time.
     """
 
     def __init__(self, chunks, clock=None, seconds=0.0):
@@ -83,7 +85,12 @@ class FakeReplay:
         workers = self.chunks.pop(0)
         outs = []
         for i, (t, w) in enumerate(zip(schedule, workers * len(schedule), strict=False)):
-            headers = {common.WORKER: w} if w and w != "headerless" else {}
+            if not w or w == "headerless":
+                headers = {}
+            elif w.startswith("stale:"):
+                headers = {common.WORKER: w[len("stale:"):]}
+            else:
+                headers = {common.WORKER: w, common.SERVER_RECEIVED: "1000.000000"}
             outs.append(Outcome(i, t, t, 0.3, 200 if w else 503, headers))
         return outs
 
@@ -143,6 +150,16 @@ def test_warm_up_fails_fast_when_200s_never_carry_the_worker_header():
     with pytest.raises(RuntimeError, match="x-a2-worker"):
         _warm(rep, clock)
     assert len(rep.kwargs) == 6  # at min_clean, long before the 600 s deadline
+
+
+def test_warm_up_fails_at_once_on_a_worker_without_the_received_header():
+    """2026-10-05: RunPod restarted a worker created on the previous image, which
+    has no engine-arrival stamp, and a whole repeat was paid for and voided."""
+    clock = Clock()
+    rep = FakeReplay([["stale:w-old"]] * 10, clock, 5.0)
+    with pytest.raises(RuntimeError, match=r"w-old.*x-a2-server-received"):
+        _warm(rep, clock)
+    assert len(rep.kwargs) == 1  # the first chunk, not the clean streak
 
 
 def test_acceptance_reads_the_amendments_three_conditions():
