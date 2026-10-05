@@ -568,6 +568,75 @@ req/s):
 predictions, the warm-up, the other two void rules, the probe's 35% split and
 0.25 s jitter conditions, and the pass rule.
 
+## Amendment, 2026-10-05 (second): one validation replica, because the load balancer fills workers in turn
+
+Made after three feasibility probes and one failed repeat, before any valid
+validation record exists. Signed off by the owner on 2026-10-05.
+
+**Changed:**
+- The gate validates **1 replica**, not 2.
+- The endpoint's scaler value is **512**, above the engine's 128-request cap.
+- The probe's ladder is resized to one replica, and its acceptance gains a
+  load-balancer check.
+
+The schedule's shape (the step at 0.25 additional replicas), its seed, window,
+drain and warm-up, the three void rules, the retry of the load balancer's own
+502s, and the pass rule are unchanged.
+
+**Why.** RunPod's load balancer does not split load evenly. It fills one worker
+up to the endpoint's scaler value before sending anything to the next.
+Reconstructed from the probes' per-request records (scaler value 128):
+
+| Probe 3 step | Worker 1, mean / max in flight | Worker 2, mean / max |
+|---|---|---|
+| 100 req/s | 37 / 56 | none |
+| 200 req/s | 90 / 128 | 1 / 34 |
+| 300 req/s | 100 / 128 | 33 / 95 |
+| 450 req/s | 85 / 128 | 87 / 128 |
+
+Probe 2 shows the same. The simulator, and so every prediction the gate checks,
+splits load evenly across replicas. With 2 replicas the gate would have compared
+an even-split prediction against fill-first routing, and missed for a reason
+that is the platform's, not the engine model's.
+
+The cap also holds the overflow in the load balancer, outside the measured
+server latency. At 450 req/s in probe 3, server latency never exceeded 0.55 s,
+but client p99 was 18.9 s. Over a 400 s replay that queue grew until the
+driver's thread pool hit the operating system's limit, and repeat 1 died with
+no record (the pool is now capped below that limit; it slows down rather than
+dies).
+
+With one worker there is nothing to route. A scaler value above the engine's
+cap means the load balancer forwards every request at once, and vLLM queues
+past its 128 sequences inside the span the middleware measures, which is the
+queue the simulator models.
+
+**What this gate no longer checks.** How load is spread across replicas. The
+simulator's even split stays an assumption, and the post says so beside the
+verdict, with the fill-first routing above as a finding about this platform.
+
+**The operating point, from `scripts/a2_traffic_rates.py`:**
+- **1 replica** pinned (`workersMin = workersMax = 1`).
+- Baseline **147.8 req/s**, peak **200.6 req/s** (0.95× one replica's
+  saturation), sustain 190 s.
+- Window until 400 s, drain 30 s, seed 20261004: **64,784 requests**, no
+  arrival after 370.0 s.
+- The simulator's prediction: p50 0.543 s, p99 0.702 s, 0 unfinished.
+
+**The probe, resized:**
+- Ladder: **25, 50, 100, 150, 180, 210 req/s**, 30 s each. The top step covers
+  the schedule's busiest 10 s bin (207.4 req/s).
+- Acceptance at the top step:
+  - every request's final status is 200;
+  - the maximum send jitter is at or below 0.25 s;
+  - **new: client p99 minus server p99 is at or below 1.0 s**, so requests
+    are not waiting in the load balancer. Probe 3's clean steps sat at about
+    0.4 s.
+- The worker-split condition is dropped: with one worker it is always 100%.
+
+**Cost:** one worker instead of two. About $0.15 for the probe, about $0.55
+for three repeats.
+
 ## Stopping rule
 
 The sweep is exhaustive over the pre-declared threshold grid; there is no

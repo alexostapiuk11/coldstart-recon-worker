@@ -97,12 +97,13 @@ from harness.runpod.preflight import assert_endpoint_matches, fetch_endpoint
 
 OUT = Path("data/a2/validation")
 SCHEMA_VERSION = 1
-# The peak is ~401 req/s over 2 workers, and client latency adds the WAN and the
+# The peak is ~201 req/s on 1 worker, and client latency adds the WAN and the
 # load balancer to the engine's ~0.6 s. The shared pool (3500 threads; see
-# a2_lb_common.POOL_THREADS for why not 4096) holds about 8.7 s of latency at
-# 401 req/s before the driver's own pool, not the endpoint, causes send jitter. The replay default of 1024 holds only ~2.5 s, and a pool that is too
-# small does not fail: the requests queue and leave late, which RealRun refuses
-# above 0.5 s of jitter, so the paid run would be spent on a refusal.
+# a2_lb_common.POOL_THREADS for why not 4096) holds about 17 s of latency at 201
+# req/s before the driver's own pool, not the endpoint, causes send jitter. A
+# pool that is too small does not fail: the requests queue and leave late,
+# which RealRun refuses above 0.5 s of jitter, so the paid run would be spent
+# on a refusal.
 REPLAY_MAX_IN_FLIGHT = POOL_THREADS
 
 

@@ -24,7 +24,7 @@ def _section() -> str:
 
 def test_the_operating_point_matches_the_constants():
     s = _section()
-    assert f"**{vs.VALIDATION_REPLICAS} replicas**" in s
+    # The replica count was amended 2026-10-05 (second); see the test on that section.
     assert f"until **{vs.VALIDATION_UNTIL:g} s**" in s
     assert f"drain **{vs.VALIDATION_DRAIN_SECONDS:g} s**" in s
     assert f"seed **{vs.VALIDATION_SEED}**" in s
@@ -64,11 +64,10 @@ def test_the_warm_up_window_matches_the_constants():
     assert f"giving up after {vs.WARMUP_MAX_SECONDS:g} s" in s
 
 
-def test_the_probe_acceptance_matches_the_probe():
+def test_the_first_probe_acceptance_is_kept_as_signed():
+    """Superseded by the 2026-10-05 (second) amendment; the text stays as history."""
     s = _flat()
-    assert f"{probe.RATES[-1]:g} req/s step" in s
-    assert f"at least {probe.MIN_WORKER_SHARE:.0%} of requests" in s
-    assert f"at or below {probe.MAX_JITTER_S:g} s" in s
+    assert "450 req/s step" in s and "at least 35% of requests" in s
     assert "every response was 200" in s
 
 
@@ -80,10 +79,11 @@ def test_the_request_count_and_the_scaled_rates_match_the_committed_curve():
     facts = vs.schedule_facts(schedule, curve, replicas=vs.VALIDATION_REPLICAS,
                               until=vs.VALIDATION_UNTIL, drain=vs.VALIDATION_DRAIN_SECONDS)
     shape = vs.validation_shape(curve, replicas=vs.VALIDATION_REPLICAS, kind=vs.VALIDATION_KIND)
-    s = _flat()
-    assert f"{facts['requests']:,} requests" in s
-    assert f"baseline **{shape.baseline_rate:.1f} req/s**" in s
+    s = _one_replica()
+    assert f"**{facts['requests']:,} requests**" in s
+    assert f"Baseline **{shape.baseline_rate:.1f} req/s**" in s
     assert f"peak **{shape.baseline_rate * shape.k:.1f} req/s**" in s
+    assert f"p50 {facts['predicted_p50_s']:.3f} s, p99 {facts['predicted_p99_s']:.3f} s" in s
 
 
 def test_the_three_void_rules_are_stated_and_no_others():
@@ -125,7 +125,7 @@ def test_the_second_amendment_pins_the_validation_spike_and_the_engine_cap():
     import lb_serve
     s = _second()
     assert f"baseline + **{vs.VALIDATION_ADDITIONAL_REPLICAS:g}** × saturation" in s
-    assert f"**{vs.VALIDATION_REPLICAS} replicas**" in s
+    assert "**2 replicas**" in s  # as signed then; amended 2026-10-05 (second)
     assert f"**`--max-num-seqs {lb_serve.MAX_NUM_SEQS}`**" in s
 
 
@@ -141,3 +141,27 @@ def test_the_retry_amendment_states_what_the_driver_retries():
     assert "retried **once**" in s
     assert "`lb_502_retried`" in s
     assert "scaler value is **128**" in s
+
+
+FOURTH = DOC.split("## Amendment, 2026-10-05 (second): one validation replica", 1)
+
+
+def _one_replica() -> str:
+    assert len(FOURTH) == 2, "the 2026-10-05 (second) amendment is missing"
+    return " ".join(FOURTH[1].split("\n## ", 1)[0].split())
+
+
+def test_the_one_replica_amendment_matches_the_constants():
+    s = _one_replica()
+    assert "Signed off by the owner on 2026-10-05" in s
+    assert f"**{vs.VALIDATION_REPLICAS} replica** pinned" in s
+    assert "scaler value is **512**" in s
+
+
+def test_the_one_replica_probe_matches_the_probe():
+    s = _one_replica()
+    ladder = ", ".join(f"{r:g}" for r in probe.RATES)
+    assert f"Ladder: **{ladder} req/s**" in s
+    assert f"jitter is at or below {probe.MAX_JITTER_S:g} s" in s
+    assert f"client p99 minus server p99 is at or below {probe.MAX_CLIENT_TAIL_S:.1f} s" in s
+    assert "every request's final status is 200" in s

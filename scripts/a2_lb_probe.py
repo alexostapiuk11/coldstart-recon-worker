@@ -4,7 +4,7 @@ SPENDS MONEY: two pinned RTX 4090 workers for ~10 minutes. The owner runs it
 (docs/runbook-a2-validation.md). Reads RUNPOD_API_KEY and
 RUNPOD_A2_LB_ENDPOINT_ID; never prints the key or writes it anywhere.
 
-Pins 2 workers, warms up until both answer, then runs a constant-rate ladder
+Pins VALIDATION_REPLICAS workers, warms up until each answers, then runs a constant-rate ladder
 through the load balancer and releases (on any exit, including SIGTERM and
 SIGHUP). Each step's outcomes go to <out>/step-<rate>.jsonl. The evidence is
 <out>/summary.json, rewritten (atomically) after warm-up and after every step
@@ -15,7 +15,7 @@ run, or a release that failed after a complete ladder, still leaves its
 evidence. Writing it only after the ladder was rejected: the steps that did
 run are exactly what the owner needs after a failure, and they cost money.
 
-The verdict at 450 req/s is the amendment's acceptance rule, evaluated only
+The verdict at the top step is the amendments' acceptance rule, evaluated only
 if that step completed; otherwise the probe prints that acceptance was not
 evaluable. Anything short of a pass stops the validation runs until the owner
 decides.
@@ -55,10 +55,18 @@ from autoscale.validation_schedule import (
 from harness.open_loop import replay
 from harness.runpod.pinning import ReleaseFailed, WorkerPin, unwind_on_hangup_and_term
 
-RATES = (25.0, 50.0, 100.0, 200.0, 300.0, 450.0)
+# One replica (amendment 2026-10-05, second): the top step covers the
+# schedule's busiest 10 s bin, 207.4 req/s.
+RATES = (25.0, 50.0, 100.0, 150.0, 180.0, 210.0)
 STEP_SECONDS = 30.0
 MIN_WORKER_SHARE = 0.35
 MAX_JITTER_S = 0.25
+# Client p99 minus server p99 at the top step. Above it, requests are waiting in
+# the load balancer, outside the measured server latency: probe 3 passed the
+# first-signed acceptance at 450 req/s with client p99 18.9 s against a server
+# maximum of 0.55 s, and repeat 1 then died on that queue. Clean steps sat near
+# 0.4 s.
+MAX_CLIENT_TAIL_S = 1.0
 EARLY_STOP_FAILURE_FRACTION = 0.5
 # The first real probe (2026-10-05): every response 200 and server p50 0.31 s,
 # but client p50 21.7 s at 50 req/s and 52 s at 100 -- requests queued in front
@@ -69,10 +77,8 @@ EARLY_STOP_FAILURE_FRACTION = 0.5
 # top step reads "not evaluable"; it judges nothing. Rejected: adding latency
 # to the acceptance, which is pre-registered and would need an amendment.
 EARLY_STOP_CLIENT_P50_S = 5.0
-# 450 req/s over 2 workers is above one replica's 211 req/s saturation, so
-# latency climbs through the step. The shared pool (3500 threads) holds about
-# 7.8 s of latency at 450 req/s before the driver's pool, not the load balancer,
-# causes send jitter. The replay default of 1024 holds only ~2.3 s and would
+# The shared pool (3500 threads) holds about 16 s of latency at the 210 req/s
+# top step before the driver's pool, not the load balancer, causes send jitter. The replay default of 1024 holds only ~2.3 s and would
 # blame the LB for the driver's own queueing.
 LADDER_MAX_IN_FLIGHT = POOL_THREADS
 
@@ -86,6 +92,13 @@ def accept(summary: dict, *, workers: int) -> tuple[bool, list[str]]:
         why.append(f"worker shares {shares}: each of {workers} must serve >= {MIN_WORKER_SHARE:.0%}")
     if summary["max_jitter_s"] > MAX_JITTER_S:
         why.append(f"max send jitter {summary['max_jitter_s']:.3f} s > {MAX_JITTER_S} s")
+    c99, s99 = summary.get("client_p99_s"), summary.get("server_p99_s")
+    if c99 is None or s99 is None:
+        why.append("no client or server p99 at the top step, so the load balancer's queue "
+                   "cannot be ruled out")
+    elif c99 - s99 > MAX_CLIENT_TAIL_S:
+        why.append(f"client p99 {c99:.2f} s is {c99 - s99:.2f} s above server p99 {s99:.2f} s "
+                   f"(over {MAX_CLIENT_TAIL_S:g} s): requests are waiting in the load balancer")
     return (not why, why)
 
 

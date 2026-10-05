@@ -25,7 +25,7 @@ CURVE = ServiceCurve(points=[(0, 0.2, 0.0, 0.0), (1, 0.2, 50.0, 1.0), (8, 0.3, 3
 
 def test_the_constants_are_the_proposed_operating_point():
     assert (VALIDATION_REPLICAS, VALIDATION_KIND, VALIDATION_UNTIL, VALIDATION_DRAIN_SECONDS,
-            VALIDATION_SEED, LATENCY_SOURCE) == (2, "step", 400.0, 30.0, 20261004, "server")
+            VALIDATION_SEED, LATENCY_SOURCE) == (1, "step", 400.0, 30.0, 20261004, "server")
 
 
 def test_the_shape_scales_the_baseline_by_the_replica_count_and_nothing_else():
@@ -107,5 +107,6 @@ def test_the_committed_curve_gives_a_finishable_schedule():
     assert f["predicted_unfinished"] == 0
     assert f["bins_with_20_requests"] >= 30
     assert abs(f["last_arrival_s"] - (VALIDATION_UNTIL - VALIDATION_DRAIN_SECONDS)) < 1.0
-    # The amendment quotes this size; a change must fail loudly, not drift.
-    assert len(s) == 129876
+    # The amendment (2026-10-05, second) quotes this size; a change must fail
+    # loudly, not drift.
+    assert len(s) == 64784

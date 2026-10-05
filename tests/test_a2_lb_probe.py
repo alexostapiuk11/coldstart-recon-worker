@@ -146,15 +146,18 @@ def test_warm_up_fails_fast_when_200s_never_carry_the_worker_header():
 
 
 def test_acceptance_reads_the_amendments_three_conditions():
-    ok = {"non_200": 0, "errors": 0, "worker_share": {"a": 0.5, "b": 0.5}, "max_jitter_s": 0.1}
+    ok = {"non_200": 0, "errors": 0, "worker_share": {"a": 0.5, "b": 0.5}, "max_jitter_s": 0.1,
+          "client_p99_s": 0.9, "server_p99_s": 0.5}
     assert probe.accept(ok, workers=2) == (True, [])
-    bad = {"non_200": 2, "errors": 0, "worker_share": {"a": 0.8, "b": 0.2}, "max_jitter_s": 0.4}
+    bad = {"non_200": 2, "errors": 0, "worker_share": {"a": 0.8, "b": 0.2}, "max_jitter_s": 0.4,
+           "client_p99_s": 18.9, "server_p99_s": 0.55}
     passed, why = probe.accept(bad, workers=2)
-    assert not passed and len(why) == 3
+    assert not passed and len(why) == 4
 
 
 def test_acceptance_single_conditions_and_exact_boundaries():
-    base = {"non_200": 0, "errors": 0, "worker_share": {"a": 0.5, "b": 0.5}, "max_jitter_s": 0.1}
+    base = {"non_200": 0, "errors": 0, "worker_share": {"a": 0.5, "b": 0.5}, "max_jitter_s": 0.1,
+            "client_p99_s": 0.9, "server_p99_s": 0.5}
     passed, why = probe.accept({**base, "errors": 1}, workers=2)
     assert not passed and len(why) == 1 and "errors" in why[0]
     passed, why = probe.accept({**base, "worker_share": {"a": 1.0}}, workers=2)
@@ -164,6 +167,23 @@ def test_acceptance_single_conditions_and_exact_boundaries():
     edge = {**base, "worker_share": {"a": 0.35, "b": 0.65}, "max_jitter_s": 0.25}
     assert probe.accept(edge, workers=2) == (True, [])
     assert probe.accept({**base, "worker_share": {}}, workers=2)[0] is False
+
+
+def test_acceptance_refuses_a_client_tail_the_load_balancer_queued():
+    base = {"non_200": 0, "errors": 0, "worker_share": {"a": 1.0}, "max_jitter_s": 0.1,
+            "server_p99_s": 0.5}
+    assert probe.accept({**base, "client_p99_s": 1.5}, workers=1) == (True, [])  # exactly 1.0 s
+    passed, why = probe.accept({**base, "client_p99_s": 1.51}, workers=1)
+    assert not passed and len(why) == 1 and "load balancer" in why[0]
+    passed, why = probe.accept({**base, "client_p99_s": None}, workers=1)
+    assert not passed and "p99" in why[0]
+
+
+def test_summarize_reports_nearest_rank_p99s():
+    outs = [_o(i, client=0.5 + i / 100) for i in range(100)]
+    s = common.summarize(outs)
+    assert s["client_p99_s"] == pytest.approx(0.5 + 98 / 100)
+    assert s["server_p99_s"] is not None
 
 
 def test_summarize_with_no_200s_has_no_shares_or_latencies():
@@ -179,9 +199,10 @@ def test_summarize_counts_200s_without_the_worker_header():
 
 
 def test_the_ladder_and_thresholds_are_the_amendments():
-    assert probe.RATES == (25.0, 50.0, 100.0, 200.0, 300.0, 450.0)
+    assert probe.RATES == (25.0, 50.0, 100.0, 150.0, 180.0, 210.0)
     assert probe.STEP_SECONDS == 30.0
     assert probe.MIN_WORKER_SHARE == 0.35 and probe.MAX_JITTER_S == 0.25
+    assert probe.MAX_CLIENT_TAIL_S == 1.0
     assert probe.LADDER_MAX_IN_FLIGHT == common.POOL_THREADS and probe.EARLY_STOP_FAILURE_FRACTION == 0.5
 
 
@@ -267,6 +288,9 @@ def rig(monkeypatch, tmp_path):
                         lambda send, summary_out=None, **kw: (summary_out.update(
                             {"requests": 3, "headerless_200": 0}), ["w1", "w2"])[1])
     monkeypatch.setattr(probe, "RATES", (10.0, 20.0, 30.0))
+    # The rig's fake replay answers from two workers; main() is generic in the
+    # replica count, and two exercises the split it reports.
+    monkeypatch.setattr(probe, "VALIDATION_REPLICAS", 2)
     monkeypatch.setattr(probe, "STEP_SECONDS", 1.0)
     calls = []
 

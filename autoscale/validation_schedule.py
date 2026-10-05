@@ -3,7 +3,8 @@
 Spec §10 fixes the gate's rules (`autoscale/validation.py`) but not where it
 is run: how many replicas, which spike, how the schedule ends. These constants
 are that choice, pre-registered in docs/experiment-a2.md (amendment
-2026-10-04) and pinned to it by tests/test_prereg_a2_plan2b.py.
+2026-10-04, with the replica count amended 2026-10-05) and pinned to it by
+tests/test_prereg_a2_plan2b.py.
 
 The shape is `traffic.spike_shape`'s step at the baseline the frontiers use,
 with the baseline multiplied by the replica count. The pre-registered rates
@@ -49,7 +50,9 @@ __all__ = [
     "WARMUP_RPS", "build_schedule", "schedule_facts", "validation_shape",
 ]
 
-VALIDATION_REPLICAS = 2
+# 1, not the 2 first signed: RunPod's load balancer fills one worker before the
+# next, and the simulator splits load evenly (amendment 2026-10-05, second).
+VALIDATION_REPLICAS = 1
 # The spike the 2026-10-04 amendment signed, kept when the sweep moved to 0.5.
 VALIDATION_ADDITIONAL_REPLICAS = 0.25
 VALIDATION_KIND = "step"

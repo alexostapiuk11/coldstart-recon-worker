@@ -9,6 +9,7 @@ requests sent none, so both use the server's defaults (the model's
 generation_config).
 """
 
+import math
 import resource
 import subprocess
 import sys
@@ -216,6 +217,16 @@ def warm_up(send, *, workers: int, rps: float, min_clean: float, max_seconds: fl
             raise give_up()
 
 
+def _p99(values) -> float | None:
+    """Nearest-rank p99, or None for no values. Nearest-rank, not interpolated:
+    the probe compares two tails, and a value that was actually observed is
+    the plainer reading of each."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    return ordered[max(0, math.ceil(0.99 * len(ordered)) - 1)]
+
+
 def summarize(outcomes) -> dict:
     ok = [o for o in outcomes if o.status == 200]
     workers = [o.headers.get(WORKER) for o in ok if o.headers.get(WORKER)]
@@ -224,6 +235,7 @@ def summarize(outcomes) -> dict:
     server = [s for s in (server_latency_s(o) for o in ok) if s is not None]
     c50 = median(client) if client else None
     s50 = median(server) if server else None
+    c99, s99 = _p99(client), _p99(server)
     return {
         "requests": len(outcomes),
         "non_200": sum(1 for o in outcomes if o.status is not None and o.status != 200),
@@ -234,5 +246,7 @@ def summarize(outcomes) -> dict:
         "client_p50_s": c50,
         "server_p50_s": s50,
         "client_minus_server_p50_s": None if c50 is None or s50 is None else c50 - s50,
+        "client_p99_s": c99,
+        "server_p99_s": s99,
         "max_jitter_s": max_jitter(outcomes),
     }
