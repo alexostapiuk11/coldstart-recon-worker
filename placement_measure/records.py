@@ -51,6 +51,9 @@ class A4Run:
 def _failure_of(kind: str, output: dict) -> str | None:
     if kind == "swap":
         return None if output.get("swap_s") is not None else (output.get("failure") or "no swap time")
+    if kind == "sleep":
+        return None if output.get("switch_s") is not None else (
+            output.get("failure") or "no switch time")
     if output.get("run") is None:
         return output.get("run_error") or "no measured run"
     return None
