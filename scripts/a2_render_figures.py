@@ -49,7 +49,10 @@ from autoscale.measured_curve import DEFAULT_PATH, select_curve
 from autoscale.sweep import SweepConfig, run_sweep
 from autoscale.thresholds import SENSITIVITY_THRESHOLDS, THRESHOLDS
 from autoscale.traffic import (
+    ADDITIONAL_REPLICAS_AT_PEAK,
+    BASELINE_FRACTION_OF_SATURATION,
     RAMP_SECONDS,  # noqa: F401 -- tests/test_a2_end_to_end.py reads render.RAMP_SECONDS
+    SUSTAIN_SECONDS,
     spike_shape,
 )
 
@@ -126,6 +129,12 @@ def sweep_identity(label: str, store: str) -> dict:
     return {
         "curve": label,
         "store": str(store),
+        # The traffic model: the 2026-10-04 (second) amendment changed it, and a
+        # checkpoint or cache from the old spike would otherwise be resumed as
+        # if nothing had.
+        "baseline_fraction": BASELINE_FRACTION_OF_SATURATION,
+        "additional_replicas": ADDITIONAL_REPLICAS_AT_PEAK,
+        "sustain": SUSTAIN_SECONDS,
         "seed": SEED,
         "until": UNTIL,
         "repetitions": sweep_module.REPETITIONS,
@@ -138,6 +147,36 @@ def sweep_identity(label: str, store: str) -> dict:
         },
         "swept_lags": list(SWEPT_LAGS),
     }
+
+
+def _changed(got: dict, want: dict) -> list[str]:
+    return sorted(k for k in {*got, *want} if got.get(k) != want.get(k))
+
+
+def check_cache_identity(raw: dict, identity: dict) -> None:
+    """Refuse a sweep cache made under different sweep inputs.
+
+    `check_cache_curve` checks the curve only. The traffic model changed after
+    caches existed (amendment 2026-10-04, second), and a cache from the old
+    spike would otherwise be drawn as the new one. A cache with no identity
+    predates that check and is refused, for the reason `check_cache_curve`
+    refuses an untagged one.
+    """
+    got = raw.get("identity")
+    if got is None:
+        raise SystemExit(
+            "the sweep cache does not record its sweep inputs (it predates the 2026-10-04 "
+            "traffic amendment); re-run with --refresh rather than draw it under the "
+            "current traffic model unchecked"
+        )
+    changed = _changed(got, identity)
+    if changed:
+        raise SystemExit(
+            f"the sweep cache was made with different {changed} (cache "
+            f"{[got.get(k) for k in changed]!r}, this run {[identity.get(k) for k in changed]!r}); "
+            "drawing it would label one configuration's frontiers as another's. Use --refresh "
+            "or another --out"
+        )
 
 
 def _rows(points):
@@ -174,7 +213,7 @@ class SweepCheckpoint:
         if path is not None and path.exists():
             raw = json.loads(path.read_text())
             got = raw.get("identity", {})
-            changed = sorted(k for k in {*got, *identity} if got.get(k) != identity.get(k))
+            changed = _changed(got, identity)
             if changed:
                 raise SystemExit(
                     f"the sweep checkpoint at {path} was made with different {changed} "
@@ -398,11 +437,12 @@ def _run_everything(store: str, curve, checkpoint: SweepCheckpoint | None = None
     return sources, swept, gaps
 
 
-def _dump(path: Path, sources, swept, gaps, label: str) -> None:
+def _dump(path: Path, sources, swept, gaps, label: str, identity: dict | None = None) -> None:
     path.write_text(
         json.dumps(
             {
                 "curve": label,
+                "identity": identity,
                 "sources": {label: _rows(points) for label, points in sources.items()},
                 "swept": {str(k): v for k, v in swept.items()},
                 "gaps": gaps,
@@ -442,6 +482,7 @@ def main(argv=None) -> None:
     path = None if args.placeholder else (args.curve or DEFAULT_PATH)
     curve, measured = select_curve(path, placeholder=args.placeholder)
     label = curve_label(path)
+    identity = sweep_identity(label, args.store)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -461,11 +502,11 @@ def main(argv=None) -> None:
         print(f"reusing the cached sweep at {cache} (--refresh to re-run it)")
         sources, swept, gaps, raw = _load(cache)
         check_cache_curve(raw, label)
+        check_cache_identity(raw, identity)
     else:
-        checkpoint = open_checkpoint(out, sweep_identity(label, args.store),
-                                     refresh=args.refresh)
+        checkpoint = open_checkpoint(out, identity, refresh=args.refresh)
         sources, swept, gaps = _run_everything(args.store, curve, checkpoint)
-        _dump(cache, sources, swept, gaps, label)
+        _dump(cache, sources, swept, gaps, label, identity)
         print(f"cached the sweep to {cache}")
 
     # Figure 2 first: it needs one sweep with all three signals, which is a
@@ -503,8 +544,9 @@ def main(argv=None) -> None:
             "These are the figures' own guards refusing to draw a chart that "
             "would read as a comparison it is not.\n\n"
             "Under the traffic model in force (the measured service curve and "
-            "the 2026-10-04 amendment in docs/experiment-a2.md) all three "
-            "signals are expected to survive on both arms and both shapes, so "
+            "the two 2026-10-04 amendments in docs/experiment-a2.md) all three "
+            "signals survived on both arms and both shapes when the regime "
+            "search verified it (docs/regime-search-a2-measured.md), so "
             "reaching here means something changed. The likely "
             "causes, in order: a signal whose whole grid was excluded -- read "
             "the per-signal discard counts printed above, since "

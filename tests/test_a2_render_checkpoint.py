@@ -80,15 +80,17 @@ def test_a_checkpoint_from_another_curve_store_or_grid_is_refused(tmp_path):
     render.SweepCheckpoint(path, _identity()).put("arm A", [_pp("queue_depth")], [])
     for changed in (_identity(curve="data/a2/service-curve.json"),
                     _identity(store="other.jsonl"),
-                    _identity(repetitions=31)):
+                    _identity(repetitions=31),
+                    _identity(additional_replicas=0.25)):
         with pytest.raises(SystemExit, match="checkpoint"):
             render.SweepCheckpoint(path, changed)
 
 
 def test_the_identity_names_what_the_sweeps_depend_on():
     ident = render.sweep_identity("placeholder", "data/campaign.jsonl")
-    for key in ("curve", "store", "seed", "until", "repetitions", "cooldown",
-                "evaluate_every", "max_replicas", "thresholds", "swept_lags"):
+    for key in ("curve", "store", "baseline_fraction", "additional_replicas", "sustain",
+                "seed", "until", "repetitions", "cooldown", "evaluate_every", "max_replicas",
+                "thresholds", "swept_lags"):
         assert key in ident, key
     assert ident["thresholds"]["utilization_throughput"]
     json.dumps(ident)  # it is written to the file as-is
@@ -154,3 +156,19 @@ def test_refresh_discards_the_checkpoint_and_a_plain_run_keeps_it(tmp_path):
     assert render.open_checkpoint(tmp_path, _identity(), refresh=False).tags == ["arm A"]
     assert render.open_checkpoint(tmp_path, _identity(), refresh=True).tags == []
     assert not path.exists()
+
+
+def test_a_cache_from_other_sweep_inputs_or_with_none_recorded_is_refused():
+    ident = _identity()
+    render.check_cache_identity({"identity": ident}, ident)
+    with pytest.raises(SystemExit, match="does not record"):
+        render.check_cache_identity({"curve": "placeholder"}, ident)
+    with pytest.raises(SystemExit, match="additional_replicas"):
+        render.check_cache_identity({"identity": _identity(additional_replicas=0.25)}, ident)
+
+
+def test_the_cache_records_its_identity(tmp_path):
+    path = tmp_path / "cache.json"
+    render._dump(path, {"arm A": [_pp("queue_depth")]}, {}, {}, "placeholder", _identity())
+    *_, raw = render._load(path)
+    render.check_cache_identity(raw, _identity())
