@@ -34,6 +34,12 @@ COPY worker/handler.py /opt/handler.py
 # harness/sweep_worker.py inside the container; harness/service_sweep.py is the
 # local side and is not called here. Imports only harness/, never coldstart/.
 COPY worker/sweep_handler.py /opt/sweep_handler.py
+# Artifact 4's worker side: its package (imports only harness/, never
+# coldstart/ or autoscale/) and its two handlers, each selected by
+# dockerStartCmd like the sweep's.
+COPY placement_measure /opt/placement_measure
+COPY worker/a4_recon_handler.py /opt/a4_recon_handler.py
+COPY worker/a4_measure_handler.py /opt/a4_measure_handler.py
 COPY worker/lb_serve.py /opt/lb_serve.py
 COPY worker/a2_middleware.py /opt/a2_middleware.py
 
