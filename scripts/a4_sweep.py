@@ -14,7 +14,6 @@ import argparse
 import hashlib
 import json
 import sys
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
 
@@ -23,24 +22,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from autoscale.traffic import saturation_rps
 from placement.crossover import estimate_crossover
 from placement.design import Design
-from placement.evaluate import (
-    GridPoint,
-    Scenario,
-    dump_evaluations,
-    evaluate_point,
-    load_evaluations,
-)
+from placement.evaluate import Scenario, dump_evaluations, load_evaluations
+from placement.grid import evaluate_grid, grid
 from placement.money import Assumptions, monthly_difference
 from placement.resample import EmpiricalDistribution
-from placement.runlength import pilot_window
 from placement.sim import Engines
 from placement.sizing import sized_fleet
-from placement.tails import P99_FLOOR
-from placement.traffic import decile_of, zipf_shares
 
-# The pilot draws from its own seed range, so it never shares a stream with a
-# repetition it is sizing.
-PILOT_SEED_OFFSET = 1_000_003
 CROSSOVER_ITERATIONS = 2000
 # Bumped whenever an evaluation gains a field, so a cache written by older code
 # is never read back with the new fields silently empty.
@@ -67,25 +55,6 @@ def _require_measured(design: Design, engines: Engines, swap_time: EmpiricalDist
             "--allow-unmeasured to check the machinery against them."
         )
     print(f"WARNING: {', '.join(unmeasured)} are placeholders. This is not a result.")
-
-
-def grid(design: Design, scenario: Scenario) -> list[GridPoint]:
-    """One grid point per (regime, skew), each with the window its pilot found."""
-    deciles = decile_of(design.n_models)
-    points = []
-    for regime in design.regimes:
-        for s in design.skews:
-            shares = zipf_shares(design.n_models, s)
-            coldest = min(sum(sh for sh, d in zip(shares, deciles) if d == k) for k in range(10))
-            # Start the pilot at half the break-even window; it only grows.
-            start = 0.5 * P99_FLOOR / (coldest * scenario.total_rate)
-            window = pilot_window(
-                shares, deciles, regime, scenario.total_rate, design.repetitions,
-                design.mean_burst, design.duty, design.pilot_traces,
-                seed=design.seed + PILOT_SEED_OFFSET, start=start,
-            )
-            points.append(GridPoint(s=s, regime=regime, until=design.warmup + window))
-    return points
 
 
 def _cache_key(design, engines, swap_time) -> str:
@@ -119,20 +88,10 @@ def run(
         print(f"reusing {cache} (--refresh to re-run)")
         evaluations = load_evaluations(cache)
     else:
-        points = grid(design, scenario)
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            evaluations = list(
-                pool.map(
-                    evaluate_point,
-                    points,
-                    [scenario] * len(points),
-                    [engines] * len(points),
-                    [swap_time] * len(points),
-                    [design.repetitions] * len(points),
-                    [design.seed] * len(points),
-                    [design.slo_seconds] * len(points),
-                )
-            )
+        evaluations = evaluate_grid(
+            grid(design, scenario), scenario, engines, swap_time, design.repetitions,
+            design.seed, design.slo_seconds, workers,
+        )
         dump_evaluations(cache, evaluations)
         print(f"cached {len(evaluations)} grid points to {cache}")
 
