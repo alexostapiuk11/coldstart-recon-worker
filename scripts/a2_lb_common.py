@@ -13,7 +13,9 @@ import math
 import resource
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from statistics import median
 
@@ -123,6 +125,89 @@ def ensure_thread_headroom(pool: int = POOL_THREADS, limit_fn=macos_thread_limit
             f"replay pool may need {pool} plus about {THREAD_HEADROOM} of the process's own; "
             "the replay would die with \"can't start new thread\" after the workers were "
             "pinned. Lower POOL_THREADS or run the driver elsewhere")
+
+
+# Amendment 2026-10-05 (fourth): each repeat's host is measured at
+# autoscale.validation.CALIBRATION_LEVELS before its replay.
+CALIBRATION_SETTLE_S = 10.0
+CALIBRATION_MEASURE_S = 60.0
+CALIBRATION_MIN_REQUESTS = 500
+
+
+def closed_loop(send, concurrency: int, seconds: float, clock=time.monotonic) -> list[dict]:
+    """`concurrency` senders, each sending back-to-back until `seconds` have passed.
+
+    Closed loop, as the curve was measured: the engine holds about
+    `concurrency` requests at all times. One row per request: its start and end
+    on this call's clock, final status, server-side latency (None without a
+    usable header) and error.
+    """
+    t0 = clock()
+    rows: list[dict] = []
+    lock = threading.Lock()
+
+    def sender() -> None:
+        while clock() - t0 < seconds:
+            start = clock() - t0
+            status, headers, error = None, {}, None
+            try:
+                status, headers = send(-1)
+            except Exception as e:  # noqa: BLE001 -- a failed request is a row, not a crash
+                error = f"{type(e).__name__}: {e}"[:300]
+            raw = headers.get(SERVER_LATENCY)
+            try:
+                server = float(raw) / 1000.0 if raw is not None else None
+            except ValueError:
+                server = None
+            with lock:
+                rows.append({"start": start, "end": clock() - t0, "status": status,
+                             "server_latency_s": server, "error": error})
+
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        for _ in range(concurrency):
+            pool.submit(sender)
+    return rows
+
+
+def calibrate(send, curve, *, levels=None, settle=CALIBRATION_SETTLE_S,
+              measure=CALIBRATION_MEASURE_S, min_requests=CALIBRATION_MIN_REQUESTS,
+              closed_loop_fn=None) -> dict:
+    """The repeat's host speed, as amendment 2026-10-05 (fourth) defines it.
+
+    Per level: hold `level` requests outstanding for `settle + measure`
+    seconds; the measured requests are those started after `settle`. The
+    ratio is their median server-side latency over the committed curve's
+    latency at that level. A level with fewer than `min_requests` measured
+    requests, or any measured request that did not end in 200 with a
+    server-latency header, voids the calibration, and with it the repeat.
+    """
+    from autoscale.validation import CALIBRATION_LEVELS
+    levels = CALIBRATION_LEVELS if levels is None else levels
+    loop = closed_loop if closed_loop_fn is None else closed_loop_fn
+    out: dict = {"settle_s": settle, "measure_s": measure, "levels": {}, "void": []}
+    ratios = []
+    for level in levels:
+        rows = loop(send, int(level), settle + measure)
+        measured = [r for r in rows if r["start"] >= settle]
+        good = [r["server_latency_s"] for r in measured
+                if r["status"] == 200 and r["server_latency_s"] is not None]
+        bad = len(measured) - len(good)
+        med = median(good) if good else None
+        ratio = None if med is None else med / curve.latency_at(level)
+        name = f"{level:g}"
+        if len(measured) < min_requests:
+            out["void"].append(f"calibration level {name}: {len(measured)} measured requests, "
+                               f"fewer than {min_requests}")
+        if bad:
+            out["void"].append(f"calibration level {name}: {bad} measured requests not 200 "
+                               "with a server-latency header")
+        out["levels"][name] = {"measured": len(measured), "settling": len(rows) - len(measured),
+                               "not_200": bad, "median_server_latency_s": med,
+                               "curve_latency_s": curve.latency_at(level), "ratio": ratio,
+                               "rows": rows}
+        ratios.append(ratio)
+    out["ratios"] = None if out["void"] else ratios
+    return out
 
 
 def lb_url(endpoint_id: str) -> str:

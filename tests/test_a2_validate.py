@@ -66,10 +66,16 @@ def _outs(schedule, factor=1.0, *, status=200, workers=("w1", "w2"), drop_header
     return outs
 
 
+# A neutral host calibration (amendment 2026-10-05, fourth): ratio 1 at both levels, so
+# these records judge exactly as they did on the committed curve.
+NEUTRAL_CALIBRATION = {"levels": {}, "ratios": [1.0, 1.0], "void": []}
+
+
 def _record(schedule, outs, k=1, host_ids=("w1", "w2")):
     return v.record_from(outs, repeat=k, schedule=schedule, host_ids=list(host_ids),
                          endpoint_id="ep", template_id="tpl", started_at="2026-10-05T00:00:00Z",
-                         replicas=2, until=UNTIL, seed=1, drain=20.0)
+                         replicas=2, until=UNTIL, seed=1, drain=20.0,
+                         calibration=NEUTRAL_CALIBRATION)
 
 
 def test_a_clean_repeat_is_not_void_and_keeps_both_latencies():
@@ -534,6 +540,8 @@ def rig(monkeypatch, tmp_path):
     monkeypatch.setattr(v, "load_measured_curve", lambda path: type("M", (), {"curve": CURVE})())
     monkeypatch.setattr(v, "ensure_fd_limit", lambda: None)
     monkeypatch.setattr(v, "ensure_thread_headroom", lambda: None)
+    # The real calibration holds the worker for 2 x 70 s; the rig's fake fleet needs none.
+    monkeypatch.setattr(v, "calibrate", lambda send, curve: NEUTRAL_CALIBRATION)
 
     def warm(send, summary_out=None, **kw):
         MainPin.instances[-1].log.append("warm")

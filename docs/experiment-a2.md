@@ -728,6 +728,74 @@ repeat, and the pass rule's thresholds.
 cannot be judged under this rule. They are kept and published as evidence for
 it, with no verdict computed.
 
+## Amendment, 2026-10-05 (fourth): calibrate each repeat's host speed, then validate once more
+
+Made after the engine-arrival gate failed (`data/a2/validation-engine/verdict.json`)
+and after its cause was found (`docs/findings-a2-validation-host-speed.md`).
+Signed off by the owner on 2026-10-05. This is the disclosed "fix and re-validate"
+that spec §10 allows. It is the **second and last** attempt: if it fails, the
+gate's failure is published instead of the frontiers.
+
+**The failure, as recorded.** 34 of 37 judged bins missed, all on the same side:
+the simulator predicted the engine slower than it was. The exploratory
+re-measurement found the cause is the host, not `--max-num-seqs`:
+- on host `daps3haubwrzbn` the engine runs 4–10% faster than the committed
+  curve's host `ozhetwnhompob9`;
+- the gap widens with load: ×0.93–0.96 at concurrency 32, ×0.93–0.94 at 64,
+  ×0.90 at 128.
+
+The simulator models one host's speed. RunPod assigns hosts at random, and they
+differ by at least that much.
+
+**The fix: a calibration on the repeat's own worker, before its replay.**
+
+1. After the warm-up and before the replay, the driver holds the pinned worker at
+   two fixed concurrencies in turn, **64** and **128**, on the same endpoint. It
+   is closed-loop: that many requests outstanding at all times, the same request
+   shape. Each level runs 10 s to settle, then 60 s measured.
+2. For each level, the ratio is the median server-side latency of the measured
+   requests over the committed curve's latency at that level.
+   - A level is usable only if it completed at least **500** measured requests
+     and all of them ended in 200.
+   - Otherwise the repeat is **void** (one re-run, as already signed).
+3. The repeat's prediction uses the committed curve with each level's latency
+   multiplied by a host factor:
+   - the 64 ratio at or below concurrency 64;
+   - the 128 ratio at or above 128;
+   - linear in between.
+
+   This is two numbers per repeat, both measured on traffic the gate never
+   judges. Nothing is fitted to the validation trace.
+4. Everything else is as signed:
+   - the schedule, one replica, and engine-arrival binning;
+   - the per-repeat residual rule and its thresholds (at least 10 judged bins,
+     at most half missing);
+   - the void rules and the 502 retry.
+
+The calibration's requests, medians and ratios go in each repeat's record.
+Records go to `data/a2/validation-calibrated/`. The failed attempt's records stay
+where they are and are published.
+
+**What the post reports, whatever the verdict:**
+- the first attempt's failure, with every miss;
+- its cause;
+- this fix;
+- this verdict.
+
+If this attempt passes, the frontiers and H3 are published with a **host-speed
+sensitivity**: the policy sweep re-run with the curve scaled by the fastest
+calibrated host's factors, beside the committed (slowest measured) curve. Which
+host a deployment lands on is random, so a conclusion that changes between the
+two is reported as host-dependent.
+
+**What this does not fix.** The model still knows nothing of host-to-host
+variation unless it is told the host's speed. The post states that a deployment's
+frontier moves with the host by up to about 10% in service time.
+
+**Cost:** about 2.5 extra worker-minutes per repeat for the calibration. Three
+repeats come to about $0.5–0.6 in all. The probe is not re-run, because the
+endpoint and the load-balancer path are unchanged.
+
 ## Stopping rule
 
 The sweep is exhaustive over the pre-declared threshold grid; there is no

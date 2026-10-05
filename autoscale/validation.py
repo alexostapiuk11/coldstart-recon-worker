@@ -49,6 +49,7 @@ from autoscale.validation_band import (
 __all__ = [
     "BAND_EDGE_TOLERANCE_SECONDS",
     "BIN_SECONDS",
+    "CALIBRATION_LEVELS",
     "MAX_MISS_FRACTION",
     "MAX_SEND_JITTER_SECONDS",
     "MIN_COMPARED_BINS",
@@ -56,6 +57,7 @@ __all__ = [
     "EngineRun",
     "RealRun",
     "engine_trajectories",
+    "host_scaled_curve",
     "predicted_trajectory",
     "tolerance_band",
     "validate",
@@ -275,8 +277,13 @@ class EngineRun:
     replicas: int
     until: float
     host_ids: tuple[str, ...]
+    # The repeat's calibrated (ratio at 64, ratio at 128), amendment 2026-10-05
+    # (fourth); None predicts on the committed curve unscaled.
+    host_ratios: tuple[float, float] | None = None
 
     def __post_init__(self) -> None:
+        if self.host_ratios is not None:
+            object.__setattr__(self, "host_ratios", tuple(self.host_ratios))
         for name in ("sent", "received", "latencies", "host_ids"):
             object.__setattr__(self, name, tuple(getattr(self, name)))
         n = len(self.sent)
@@ -339,6 +346,43 @@ class EngineRun:
         return arrivals, latencies
 
 
+# The two concurrencies each repeat's host is calibrated at (amendment 2026-10-05, fourth).
+CALIBRATION_LEVELS = (64.0, 128.0)
+
+
+def host_scaled_curve(curve: ServiceCurve, ratios) -> ServiceCurve:
+    """The committed curve at one host's measured speed (amendment 2026-10-05, fourth).
+
+    Each level's latency is multiplied by the host factor: the ratio measured
+    at 64 at or below 64, the ratio at 128 at or above 128, linear between them
+    (the committed curve has no level between the two, so in practice its
+    interpolation joins the two scaled endpoints). Throughput is divided by the
+    same factor; GPU utilisation is left alone, since the fixed-capacity replay
+    never reads it. Rejected: one factor for every level, which would leave a
+    slope error in exactly the high-load bins the gate turns on -- the measured
+    host gap widens from about 5% at 32 to 10% at 128.
+    """
+    r_lo, r_hi = (float(r) for r in ratios)
+    for r in (r_lo, r_hi):
+        if not (math.isfinite(r) and r > 0):
+            raise ValueError(
+                f"host ratio {r!r} is not a positive finite number; it multiplies every "
+                "latency the simulator charges, so a zero, negative or infinite ratio makes "
+                "the prediction meaningless")
+    c_lo, c_hi = CALIBRATION_LEVELS
+
+    def factor(c: float) -> float:
+        if c <= c_lo:
+            return r_lo
+        if c >= c_hi:
+            return r_hi
+        return r_lo + (r_hi - r_lo) * (c - c_lo) / (c_hi - c_lo)
+
+    points = [(c, lat * factor(c), tput / factor(c), util)
+              for c, lat, tput, util in curve.points]
+    return ServiceCurve(points=points, measured=curve.measured)
+
+
 def engine_trajectories(run: EngineRun, curve: ServiceCurve) -> tuple[list[Bin], list[Bin]]:
     """(real, predicted) trajectories for one run, both keyed by engine arrival.
 
@@ -348,6 +392,8 @@ def engine_trajectories(run: EngineRun, curve: ServiceCurve) -> tuple[list[Bin],
     """
     arrivals, latencies = run.engine_arrivals()
     real = trajectory(arrivals, latencies, until=run.until, bin_seconds=BIN_SECONDS)
+    if run.host_ratios is not None:
+        curve = host_scaled_curve(curve, run.host_ratios)
     sim = run_fixed_capacity(sorted(arrivals), run.replicas, curve, run.until)
     pairs = sim.completed_requests()
     predicted = trajectory([a for a, _ in pairs] + list(sim.unfinished_arrivals),

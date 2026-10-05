@@ -25,6 +25,12 @@ and acceptance at 210 req/s on every final status 200, send jitter <= 0.25 s, an
 minus server p99 <= 1.0 s. The schedule is 64,784 requests. The sections below keep the
 two-replica text as it was run, for the record.
 
+**Amended 2026-10-05 (fourth): a host calibration before each replay; the second and last attempt.**
+After the warm-up, each repeat holds the worker at 64 and then 128 requests outstanding (10 s
+settle, 60 s measured each) and records the ratios to the committed curve; a level with fewer than
+500 measured requests or any non-200 voids the repeat without a replay. Records go to
+`data/a2/validation-calibrated/`; `--judge` predicts each repeat on its own calibrated curve.
+
 **Amended 2026-10-05 (third amendment of that day): the gate judges the engine's own arrivals.**
 The worker image must carry the middleware that stamps `x-a2-server-received` (rebuild after
 pushing; update template `4p46s4hcar` to the new digest). Repeats now go to

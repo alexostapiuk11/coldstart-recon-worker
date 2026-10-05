@@ -68,6 +68,7 @@ from a2_lb_common import (
     RETRY_MARK,
     SERVER_RECEIVED,
     WORKER,
+    calibrate,
     ensure_fd_limit,
     ensure_thread_headroom,
     sender,
@@ -100,9 +101,10 @@ from harness.open_loop import max_jitter, replay
 from harness.runpod.pinning import ReleaseFailed, WorkerPin, unwind_on_hangup_and_term
 from harness.runpod.preflight import assert_endpoint_matches, fetch_endpoint
 
-OUT = Path("data/a2/validation-engine")
+OUT = Path("data/a2/validation-calibrated")
 # 2: records carry the engine's arrival stamps (amendment 2026-10-05, third).
-SCHEMA_VERSION = 2
+# 3: and the repeat's host calibration (amendment 2026-10-05, fourth).
+SCHEMA_VERSION = 3
 # More than this share of requests never reaching the engine voids a repeat.
 MAX_NEVER_REACHED_FRACTION = 0.01
 # The peak is ~201 req/s on 1 worker, and client latency adds the WAN and the
@@ -159,7 +161,7 @@ def _received_seconds(outcome) -> float | None:
 
 def record_from(outcomes, *, repeat, schedule, host_ids, endpoint_id, template_id, started_at,
                 replicas, until, seed=VALIDATION_SEED, drain=VALIDATION_DRAIN_SECONDS,
-                warmup=None) -> dict:
+                warmup=None, calibration=None) -> dict:
     if len(outcomes) != len(schedule):
         # Not a void reason: the amendment's list is fixed, and `harness.open_loop.replay`
         # returns one outcome per scheduled request. Raising here, inside run_repeat's
@@ -213,6 +215,7 @@ def record_from(outcomes, *, repeat, schedule, host_ids, endpoint_id, template_i
         # reaching the engine is in `never_reached` (amendment 2026-10-05, third).
         "lb_502_retried": [i for i, o in enumerate(outcomes) if RETRY_MARK in o.headers],
         "release": "ok", "post_run_error": None, "warmup": dict(warmup or {}),
+        "calibration": calibration,
         "max_jitter_s": max_jitter(outcomes),
         "schedule": list(schedule),
         "sent": [o.sent for o in outcomes],
@@ -298,9 +301,23 @@ def prepare_slot(out: Path, k: int) -> Path:
     return path
 
 
+def _calibration_void_record(*, k, host_ids, endpoint_id, template_id, started_at, replicas,
+                             until, seed, drain, warmup, calibration) -> dict:
+    """A void repeat whose calibration failed: no replay was run (amendment 2026-10-05,
+    fourth). Written, not skipped, because the signed rule makes it a void repeat
+    with its one re-run; replaying anyway was rejected as paying for a trace that
+    could only be void."""
+    return {"schema_version": SCHEMA_VERSION, "repeat": k, "started_at": started_at,
+            "endpoint_id": endpoint_id, "template_id": template_id, "replicas": replicas,
+            "until": until, "drain": drain, "seed": seed, "latency_source": LATENCY_SOURCE,
+            "host_ids": list(host_ids or []), "void": list(calibration["void"]),
+            "release": "ok", "post_run_error": None, "warmup": dict(warmup or {}),
+            "calibration": calibration}
+
+
 def run_repeat(*, k, schedule, pin, send, warm_fn, replay_fn, endpoint_id, template_id,
                replicas, until, now, path, seed=VALIDATION_SEED,
-               drain=VALIDATION_DRAIN_SECONDS, prepare=None) -> dict:
+               drain=VALIDATION_DRAIN_SECONDS, prepare=None, calibrate_fn=None) -> dict:
     """Pin, warm up, replay, release; write the record to `path` once the replay is complete.
 
     The record is written in a `finally` that runs after the pin's release, so a
@@ -320,25 +337,39 @@ def run_repeat(*, k, schedule, pin, send, warm_fn, replay_fn, endpoint_id, templ
     propagating as itself, with the fallback path printed.
     """
     warmup: dict = {}
-    host_ids = started_at = outcomes = None
+    host_ids = started_at = outcomes = calibration = None
     escaped: BaseException | None = None
     try:
         with pin:
             host_ids = warm_fn(send, warmup)
+            if calibrate_fn is not None:
+                calibration = calibrate_fn(send)
             if prepare is not None:
                 prepare()
             started_at = now()
-            outcomes = replay_fn(schedule, send)
+            if calibration is None or not calibration["void"]:
+                outcomes = replay_fn(schedule, send)
     except BaseException as e:
         escaped = e
         raise
     finally:
+        if outcomes is None and calibration is not None and calibration["void"] and started_at:
+            record = _calibration_void_record(
+                k=k, host_ids=host_ids, endpoint_id=endpoint_id, template_id=template_id,
+                started_at=started_at, replicas=replicas, until=until, seed=seed, drain=drain,
+                warmup=warmup, calibration=calibration)
+            if escaped is not None:
+                record["post_run_error"] = f"{type(escaped).__name__}: {escaped}"[:300]
+                if isinstance(escaped, ReleaseFailed):
+                    record["release"] = "FAILED"
+            write_record(path, record)
         if outcomes is not None:
             try:
                 record = record_from(outcomes, repeat=k, schedule=schedule, host_ids=host_ids,
                                      endpoint_id=endpoint_id, template_id=template_id,
                                      started_at=started_at, replicas=replicas, until=until,
-                                     seed=seed, drain=drain, warmup=warmup)
+                                     seed=seed, drain=drain, warmup=warmup,
+                                     calibration=calibration)
                 if escaped is not None:
                     record["post_run_error"] = f"{type(escaped).__name__}: {escaped}"[:300]
                     if isinstance(escaped, ReleaseFailed):
@@ -388,6 +419,12 @@ def _valid_records(out: Path) -> list[dict]:
                 "third): it has no engine arrival stamps, so it cannot be judged by it")
         if rec["void"]:
             raise SystemExit(f"repeat {k} is void ({rec['void']}); run it once more or stop")
+        if not (rec.get("calibration") or {}).get("ratios"):
+            raise SystemExit(
+                f"repeat {k} ({path}) has no host calibration (amendment 2026-10-05, fourth); "
+                "judging it on the uncalibrated curve would repeat the first attempt")
+        if rec["void"]:
+            raise SystemExit(f"repeat {k} is void ({rec['void']}); run it once more or stop")
         records.append(rec)
     return records
 
@@ -403,7 +440,8 @@ def _engine_runs(records: list[dict]) -> list[EngineRun]:
                      for lat, st in zip(r["server_latency_s"], r["status"], strict=True)]
         runs.append(EngineRun(sent=r["sent"], received=received, latencies=latencies,
                               replicas=r["replicas"], until=r["until"],
-                              host_ids=tuple(r["host_ids"])))
+                              host_ids=tuple(r["host_ids"]),
+                              host_ratios=tuple(r["calibration"]["ratios"])))
     return runs
 
 
@@ -446,6 +484,7 @@ def judge(out: Path, curve) -> dict:
                            "server_p50_s": median(server), "client_p50_s": median(client),
                            "max_jitter_s": r["max_jitter_s"], "release": r.get("release"),
                            "never_reached": len(r["never_reached"]),
+                           "host_ratios": r["calibration"]["ratios"],
                            "lb_502_retried": len(r["lb_502_retried"]),
                            "post_run_error": r.get("post_run_error")})
     bins = []
@@ -538,6 +577,7 @@ def main(argv=None) -> None:
                 s, workers=VALIDATION_REPLICAS, rps=WARMUP_RPS, min_clean=WARMUP_MIN_SECONDS,
                 max_seconds=WARMUP_MAX_SECONDS, summary_out=summary),
             replay_fn=lambda sch, s: replay(sch, s, max_in_flight=REPLAY_MAX_IN_FLIGHT),
+            calibrate_fn=lambda s: calibrate(s, curve),
             endpoint_id=endpoint, template_id=args.template_id, replicas=VALIDATION_REPLICAS,
             until=VALIDATION_UNTIL, now=lambda: datetime.now(UTC).isoformat(timespec="seconds"),
             path=path, prepare=prepare)

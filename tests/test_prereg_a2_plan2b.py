@@ -184,3 +184,22 @@ def test_the_engine_arrival_amendment_matches_the_code():
     assert f"at least {gate.MIN_COMPARED_BINS} judged bins" in s
     assert "at most half of them missing" in s and gate.MAX_MISS_FRACTION == 0.5
     assert "all above +1 ms or all below −1 ms" in s and gate.BAND_EDGE_TOLERANCE_SECONDS == 0.001
+
+
+SIXTH = DOC.split("## Amendment, 2026-10-05 (fourth): calibrate each repeat's host speed", 1)
+
+
+def test_the_host_calibration_amendment_matches_the_code():
+    import a2_lb_common as common
+    import a2_validate as v
+
+    from autoscale import validation as gate
+    assert len(SIXTH) == 2, "the 2026-10-05 (fourth) amendment is missing"
+    s = " ".join(SIXTH[1].split("\n## ", 1)[0].split())
+    assert "Signed off by the owner on 2026-10-05" in s
+    lo, hi = gate.CALIBRATION_LEVELS
+    assert f"**{lo:g}** and **{hi:g}**" in s
+    assert f"{common.CALIBRATION_SETTLE_S:g} s to settle, then {common.CALIBRATION_MEASURE_S:g} s" in s
+    assert f"at least **{common.CALIBRATION_MIN_REQUESTS}**" in s
+    assert f"`{v.OUT.as_posix()}/`" in s
+    assert "**second and last** attempt" in s
