@@ -16,7 +16,7 @@ from placement_measure.engine import EngineSpec
 
 __all__ = [
     "CANDIDATES", "FALLBACK", "GO_NO_GO_MIN_REQUESTS", "MAX_MODEL_LEN", "MAX_NUM_SEQS",
-    "PRIMARY", "SLEEP_GMU", "SOLO_GMU", "SPLIT_GMU", "T_MAX", "engine",
+    "PRIMARY", "SLEEP_GMU", "SOLO_GMU", "SPLIT_GMU", "SPLIT_KV_BYTES", "T_MAX", "engine",
 ]
 
 # Checkpoint -> revision. All Qwen3ForCausalLM; the four 4B ones share every
@@ -49,6 +49,14 @@ MAX_NUM_SEQS = 256
 # (CacheConfig.gpu_memory_utilization, v0.27.1), so two at 0.45 is its
 # documented way to share a card, leaving 10% for both CUDA contexts.
 SPLIT_GMU = 0.45
+# The campaigns' co-located pair also pin each engine's KV memory to the amount
+# that holds the registered split capacity of 55,104 tokens (3,444 blocks of 16;
+# Qwen3-1.7B takes 114,688 bytes of KV per token). Amendment 2026-10-05
+# (docs/experiment-a4.md): without it, an engine that hits the compile cache is
+# given about 64,900 tokens of KV, and two such engines do not fit at SPLIT_GMU
+# (CUDA out of memory in the second one's CUDA-graph capture). Reconnaissance's
+# go/no-go ran at SPLIT_GMU alone and is not re-run.
+SPLIT_KV_BYTES = 6_319_767_552
 # A lone engine: artifact 1's measured budget (21.64 GiB at 0.92, fixtures/README.md).
 SOLO_GMU = 0.92
 # The sleep probe's two engines start one while the other sleeps; each at 0.80

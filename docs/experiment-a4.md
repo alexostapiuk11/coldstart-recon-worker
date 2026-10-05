@@ -204,3 +204,65 @@ Committed 2026-10-05. Every value below is the rules of part 1 applied to
 - **Swap campaign:** Qwen/Qwen3-1.7B to Qwen/Qwen3-1.7B; `16` repeats per pair and state.
 - **Screen's choice:** offered load `1.0` GPUs of saturation; SLO `2.0` times the simulated swap's median.
 - **GPU hourly rate:** `1.1095` dollars, derived from RunPod's billing API for endpoint nnypnh9drkq5ux (GET /v1/billing/endpoints: $0.2443519 for 792.879 s billed, $0.000308 per second), read 2026-10-05. Artifact 5 reads the same rate from here.
+
+## Amendment, 2026-10-05: the co-located pair's KV memory is pinned
+
+Drafted after the first cell runs failed and before any valid co-located
+measurement exists. **It binds only once the owner has signed it off**, and the
+cell campaign resumes only after that.
+
+**Changed:** for the co-located pair in the cell campaign, both engines now also
+run with `--kv-cache-memory-bytes` set to `6,319,767,552` (`placement_measure.prereg.SPLIT_KV_BYTES`).
+Nothing else about the pair changes: `--gpu-memory-utilization 0.45` for each
+engine, the other flags, and solo engines (`0.92`, no pin) are as registered.
+
+**Why.** Two of the three co-located runs the campaign made failed with the same
+error, and the third succeeded only because its measured engine compiled:
+
+| Run | Condition | Measured engine | Neighbour engine | Result |
+|---|---|---|---|---|
+| 0 | `pair:o16:n32` | compiled (S4b 20.21 s), KV 55,104 | cache hit (0.38 s), KV 64,880 | ok |
+| 1 | `pair:o32:n0` | cache hit (0.11 s), KV 64,880 | cache hit (0.12 s) | neighbour: CUDA out of memory |
+| 3 | `pair:o2:n16` | cache hit (0.12 s), KV 64,976 | cache hit (0.11 s) | neighbour: CUDA out of memory |
+
+In both failures the first engine held 11.84 GiB, the second reached 11.16 GiB
+with 0.5 GiB belonging to the worker, and the card (23.52 GiB) had 15 MiB free
+when the second engine's CUDA-graph capture asked for 20 MiB more. An engine
+that hits the compile cache is given about 64,900 tokens of KV where one that
+compiles is given 55,104; two engines at `0.45` fit when one compiles and do not
+when both hit. Reconnaissance's fallback pair fit for the same reason (engine A
+compiled, 25.1 s, KV 55,104; engine B hit, 0.15 s, KV 64,976;
+`fixtures/a4/recon/coresidency-fallback.json`).
+
+Step 2 requires a valid run's measured engine to read the compile cache (`S4b`
+at most 5 s), so a valid co-located run needs both engines warm, which is the
+case that does not fit. Left as registered, nearly every co-located cell would
+fail or be invalid.
+
+**What stays the same.** The registered split KV of `55,104` tokens (ceiling 26,
+request shape 1,792 + 256) is the compiled engine's reading, and the pin is the
+amount of KV memory that holds exactly that, `3,444` blocks of `16` tokens at
+`114,688` bytes of KV per token for Qwen3-1.7B (28 layers, 8 KV heads, head
+dimension 128, two bytes, K and V). No registered value in "Step 2, part 2"
+changes. The compile-cache validity rule is unchanged. Reconnaissance's go/no-go
+ran at `0.45` without the pin and is not re-run.
+
+**Confirmation before the campaign resumes.** `data/a4/kvpin-probe.jsonl` holds
+three repeats of `pair:o2:n16` run with the pin (design
+`data/a4/designs/kvpin-probe.json`, seed 4199). It confirms the amendment if, in
+every run where both engines read the compile cache (`S4b` at most 5 s, at least
+two runs), the run is ok, both engines are healthy, and each logs a KV capacity
+of exactly `55,104` tokens. If the engines log a different capacity, the byte
+value is changed to the one that logs `55,104` and this section is amended
+before the campaign resumes. The first run on a fresh worker compiles and is not
+counted.
+
+**Probe result (2026-10-05).** All three repeats were ok, on host `lmhp8rvl4z1boc`.
+In every run both engines were healthy and logged `55,104` tokens of KV. Runs 1
+and 2 are the counted ones (both engines read the compile cache: `S4b` 0.13 and
+0.10 s, then 0.11 and 0.12 s): the case that failed twice without the pin. Run 0
+compiled its measured engine (17.18 s) and is not counted, but it also logged
+`55,104` on both engines. Each run completed all 100 measured requests with none
+failed, the neighbour held its level of 16 (median 16 running), and the median
+end-to-end latency was 3.1 s in all three. The criterion is met; the byte value
+stands.

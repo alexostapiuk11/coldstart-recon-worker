@@ -27,6 +27,7 @@ from placement_measure.prereg import (
     SLEEP_GMU,
     SOLO_GMU,
     SPLIT_GMU,
+    SPLIT_KV_BYTES,
     engine,
 )
 
@@ -37,6 +38,9 @@ __all__ = ["REPLAY_CONDITION", "CellDesign", "ReplayDesign", "SleepDesign", "Swa
 REPLAY_CONDITION = "replay"
 
 SLEEP_FLAGS = ("--enable-sleep-mode",)
+# Both engines of a co-located pair, so their KV memory does not depend on the
+# compile state each one started in (amendment 2026-10-05).
+SPLIT_FLAGS = (f"--kv-cache-memory-bytes={SPLIT_KV_BYTES}",)
 
 
 def swap_condition(a: str, b: str, cold: bool) -> str:
@@ -139,11 +143,12 @@ class CellDesign:
         num_prompts = num_prompts_for(own, waves=self.waves, minimum=self.min_prompts)
         neighbour_prompts = 0 if not neighbour else self.neighbour_overrun * neighbour * (
             num_prompts // own + 1)
-        gmu = SOLO_GMU if neighbour is None else SPLIT_GMU
+        gmu, flags = (SOLO_GMU, ()) if neighbour is None else (SPLIT_GMU, SPLIT_FLAGS)
         return {
             "kind": "cell", "run_id": run_id, "job_budget_s": JOB_BUDGET_S,
-            "a": engine(self.measured_model, gmu).to_dict(),
-            "b": None if neighbour is None else engine(self.neighbour_model, SPLIT_GMU).to_dict(),
+            "a": engine(self.measured_model, gmu, flags).to_dict(),
+            "b": None if neighbour is None
+            else engine(self.neighbour_model, SPLIT_GMU, SPLIT_FLAGS).to_dict(),
             "cell": {"own": own, "neighbour": neighbour, "input_len": self.input_len,
                      "output_len": self.output_len, "num_prompts": num_prompts,
                      "warmup_prompts": self.warmup_waves * own,
