@@ -58,6 +58,12 @@ def test_the_sweep_is_unmeasured_only_on_the_placeholder(monkeypatch):
     render._sweep("x", shape, LagDistribution([60.0]), "A", SERVICE_CURVE_PLACEHOLDER,
                   signals=("utilization_throughput",))
     assert seen["signals"] == ("utilization_throughput",)
+    # The other half: a hard-coded allow_unmeasured=True would pass everything
+    # above, and would switch off the sweep's own guard on the measured path.
+    from autoscale.measured_curve import DEFAULT_PATH, select_curve
+    measured_curve = select_curve(DEFAULT_PATH, placeholder=False)[0]
+    render._sweep("x", shape, LagDistribution([60.0]), "A", measured_curve)
+    assert seen["allow"] is False and seen["curve"] is measured_curve
 
 
 @pytest.mark.parametrize("module", [render, noise, probe])

@@ -211,11 +211,14 @@ def _run_everything(store: str, curve):
     # H2's sensitivity arm (amendment 2026-10-04): the same four sweeps with
     # utilisation defined as the throughput fraction, swapped in for the
     # nvidia-smi utilisation signal and nothing else. Printed beside the
-    # headline gap, never substituted for it, and a failure here is printed,
-    # not raised: the arm is disclosed context, and losing it must not cost
-    # the headline run 25 minutes of CPU. The sweep seeds on (seed, up, down,
-    # rep) and not on the signal, so these traces are the headline's own and
-    # the swap changes only what the controller reads.
+    # headline gap, never substituted for it. Only the gap computation's
+    # refusals (a ValueError from `iso_cost_budget` or `gap_at_iso_cost`, such
+    # as an empty or unaffordable frontier) are printed rather than raised, so
+    # a sensitivity arm with no gap does not cost the headline run its 25
+    # minutes of CPU. A failure inside the sensitivity sweeps themselves still
+    # propagates. The sweep seeds on (seed, up, down, rep) and not on the
+    # signal, so these traces are the headline's own and the swap changes only
+    # what the controller reads.
     sensitivity_signals = tuple(
         "utilization_throughput" if s == "utilization" else s for s in SIGNAL_ORDER
     )
