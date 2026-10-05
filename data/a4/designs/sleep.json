@@ -1,0 +1,6 @@
+{
+ "a": "Qwen/Qwen3-1.7B",
+ "b": "Qwen/Qwen3-1.7B",
+ "repeats": 8,
+ "seed": 4103
+}

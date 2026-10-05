@@ -97,7 +97,9 @@ def render_doc(v: dict, date: str) -> str:
         (f"- **Co-located grid:** own levels `{v['OWN_LEVELS']}`, neighbour levels "
          f"`{v['NEIGHBOUR_LEVELS']}`; held-out cells `{v['HELD_OUT']}`."),
         f"- **Solo grid:** `{v['SOLO_LEVELS']}`.",
-        f"- **Compile cache shared across the 4B checkpoints:** `{v['COMPILE_SHARED']}`.",
+        (f"- **Every swap-in in reconnaissance hit the compile cache:** `{v['COMPILE_SHARED']}`. "
+         "This covers only the swaps reconnaissance ran; for the fallback class that is the "
+         "one checkpoint swapped to itself, so it says nothing about other checkpoints."),
         f"- **Page-cache eviction works:** `{v['EVICTION_WORKS']}`; swaps measured {states}.",
         f"- **Sleep-mode arm measured:** `{v['SLEEP_MEASURED']}`.",
         f"- **Validation set:** `{v['VALIDATION_SET']}`.",

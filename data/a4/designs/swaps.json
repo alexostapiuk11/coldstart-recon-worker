@@ -1,0 +1,13 @@
+{
+ "pairs": [
+  [
+   "Qwen/Qwen3-1.7B",
+   "Qwen/Qwen3-1.7B"
+  ]
+ ],
+ "cold_states": [
+  false
+ ],
+ "repeats": 16,
+ "seed": 4102
+}

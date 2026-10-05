@@ -184,3 +184,23 @@ remains one rule, applied identically to all three strategies.
 - **Interference check:** each held-out cell passes if the surface's
   prediction lies inside its repeats' range or within `0.1` of their median.
   A failure is reported against the co-locate strategy, not hidden.
+
+## Step 2, part 2 — values, fixed before the first measurement run
+
+Committed 2026-10-05. Every value below is the rules of part 1 applied to
+`fixtures/a4/recon-report.json` and `data/a4/screen.json`;
+`placement/registered.py` holds them as code, and
+`tests/test_placement_registered.py` re-derives them.
+
+- **Model class:** `Qwen/Qwen3-1.7B`.
+- **Request shape:** `1792` input and `256` output tokens.
+- **KV capacity:** split `55,104` tokens, ceiling `26` requests; solo `168,464` tokens, ceiling `82`.
+- **Co-located grid:** own levels `(1, 2, 4, 8, 16, 32, 64)`, neighbour levels `(0, 16, 32, 64)`; held-out cells `('pair:o24:n48', 'pair:o48:n24')`.
+- **Solo grid:** `(1, 2, 4, 8, 16, 32, 64, 128)`.
+- **Every swap-in in reconnaissance hit the compile cache:** `True`. This covers only the swaps reconnaissance ran; for the fallback class that is the one checkpoint swapped to itself, so it says nothing about other checkpoints.
+- **Page-cache eviction works:** `False`; swaps measured warm.
+- **Sleep-mode arm measured:** `True`.
+- **Validation set:** `('Qwen/Qwen3-1.7B', 'Qwen/Qwen3-1.7B', 'Qwen/Qwen3-1.7B')`.
+- **Swap campaign:** Qwen/Qwen3-1.7B to Qwen/Qwen3-1.7B; `16` repeats per pair and state.
+- **Screen's choice:** offered load `1.0` GPUs of saturation; SLO `2.0` times the simulated swap's median.
+- **GPU hourly rate:** `1.1095` dollars, derived from RunPod's billing API for endpoint nnypnh9drkq5ux (GET /v1/billing/endpoints: $0.2443519 for 792.879 s billed, $0.000308 per second), read 2026-10-05. Artifact 5 reads the same rate from here.
