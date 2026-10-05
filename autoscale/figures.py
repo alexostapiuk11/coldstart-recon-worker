@@ -566,7 +566,8 @@ f"{_span(measured_p99)}",
 
 
 def frontiers(
-    by_signal, path, return_figure=False, context="", allow_missing_intervals=False
+    by_signal, path, return_figure=False, context="", allow_missing_intervals=False,
+    curve_measured=None,
 ):
     """Figure 2. All three signals, or it refuses to draw.
 
@@ -579,6 +580,9 @@ def frontiers(
     sweep, not a publication. Opt-in and named after `run_sweep`'s
     `allow_unmeasured` for the same reason: the default has to be the one that
     refuses, so an under-powered sweep cannot reach a figure by accident.
+
+    `curve_measured` adds which service curve the frontiers ran on to the note;
+    a reader who sees only this figure cannot otherwise tell.
     """
     missing = [s for s in SIGNAL_ORDER if s not in by_signal]
     if missing:
@@ -621,6 +625,8 @@ def frontiers(
     note = f"n={total} frontier points across {len(SIGNAL_ORDER)} signals"
     if context:
         note = f"{note} — {context}"
+    if curve_measured is not None:
+        note = f"{note} · {'measured curve' if curve_measured else 'PLACEHOLDER curve (invented)'}"
     all_points = [p for v in by_signal.values() for p in v]
     _note(
         axis,
@@ -693,7 +699,7 @@ def _figure_banner(fig, left: float, right: float, word: str, subtitle: str, col
              fontsize=_pt(PX_SUBTITLE), color=color)
 
 
-def service_curve(curve, path, return_figure=False):
+def service_curve(curve, path, return_figure=False, measured=None):
     """Figure 4. Latency, throughput and GPU utilization against concurrency,
     with the region where utilization is censored shaded on all three.
 
@@ -709,26 +715,54 @@ def service_curve(curve, path, return_figure=False):
     but no threshold on the pre-registered grid sits in that range, so further
     load cannot change what any utilization policy does.
 
-    No interval band yet: `ServiceCurve` carries one value per level. Plan 2b
-    adds per-level dispersion when the sweep format is fixed.
+    `measured`, a `MeasuredCurve` for this same curve, adds what only a real
+    sweep has: min-max bars per level from its repeats, the idle point drawn
+    apart (hollow, dashed: the one point not taken under load), the runs behind
+    each point, and the levels the engine could not serve. Without it the
+    figure is drawn exactly as before, which is what keeps the placeholder
+    draft's pixels unchanged.
     """
     left, right = 0.13, 0.985
     fig, axes = plt.subplots(3, 1, sharex=True, figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN))
     fig.subplots_adjust(left=left, right=right, top=0.86, bottom=0.20, hspace=0.22)
-    concurrency = [c for c, _, _, _ in curve.points]
+    if measured is not None and measured.curve is not curve:
+        raise ValueError(
+            "measured= must carry the same curve being drawn; otherwise the bars and notes "
+            "would describe a different measurement than the points they sit on"
+        )
+    drawn = list(measured.measured_points) if measured is not None else list(curve.points)
+    concurrency = [c for c, _, _, _ in drawn]
     # A little past the last point, and the shading runs to the same edge: a
     # band that stopped at the last measured point would read as censoring
     # that ENDS there, and an axis ending exactly on it would clip the marker.
     x_right = max(concurrency) * 1.04
     onset = censoring_onset(curve)
     background = MEASURED_BG if curve.measured else MODELED_BG
-    for axis, index, label in (
-        (axes[0], 1, "latency\n(s)"),
-        (axes[1], 2, "throughput\n(tok/s)"),
-        (axes[2], 3, "GPU\nutilization"),
+    for axis, index, label, key in (
+        (axes[0], 1, "latency\n(s)", "latency_s_range"),
+        (axes[1], 2, "throughput\n(tok/s)", "throughput_tps_range"),
+        (axes[2], 3, "GPU\nutilization", "gpu_util_range"),
     ):
-        axis.plot(concurrency, [p[index] for p in curve.points], "o-",
-                  markersize=5, linewidth=2, color=CURVE_COLOR)
+        ys = [p[index] for p in drawn]
+        axis.plot(concurrency, ys, "o-", markersize=5, linewidth=2, color=CURVE_COLOR)
+        if measured is not None:
+            lo = [y - i[key][0] for y, i in zip(ys, measured.intervals, strict=True)]
+            hi = [i[key][1] - y for y, i in zip(ys, measured.intervals, strict=True)]
+            bars = axis.errorbar(concurrency, ys, yerr=[lo, hi], fmt="none", ecolor=CURVE_COLOR,
+                                 elinewidth=1.2, capsize=3)
+            # The gid goes on the bar collection itself, not through errorbar's
+            # kwargs, which matplotlib copies onto the caps as well.
+            for collection in bars.lines[2]:
+                collection.set_gid("interval")
+            if index in (2, 3):
+                idle_y = curve.points[0][index]
+                axis.plot([curve.points[0][0], concurrency[0]], [idle_y, ys[0]], linestyle="--",
+                          linewidth=1.2, color=CURVE_COLOR)
+                # clip_on=False: the idle point sits ON the axes' left edge, and
+                # clipped it draws as a half-circle against the spine.
+                axis.plot([curve.points[0][0]], [idle_y], "o", markersize=6,
+                          markerfacecolor="white", markeredgecolor=CURVE_COLOR, gid="idle",
+                          clip_on=False, zorder=4)
         _tidy(axis, "", label, background)
         axis.set_xlim(0, x_right)
         if onset is not None:
@@ -738,18 +772,33 @@ def service_curve(curve, path, return_figure=False):
     axes[2].axhline(UTILIZATION_CENSOR_AT, color=CENSOR_COLOR, linewidth=1, linestyle=":")
     axes[2].set_xlabel("concurrency per replica", fontsize=_pt(PX_AXIS_LABEL))
     if curve.measured:
-        _figure_banner(fig, left, right, "MEASURED", "one replica, concurrency swept",
-                       MEASURED_BANNER)
+        subtitle = "one replica, concurrency swept"
+        if measured is not None and measured.runs_per_level:
+            subtitle = f"{subtitle}, {min(measured.runs_per_level)} runs per level"
+        _figure_banner(fig, left, right, "MEASURED", subtitle, MEASURED_BANNER)
     else:
         _figure_banner(fig, left, right, "NOT MEASURED", "placeholder curve: invented points",
                        MODELED_BANNER)
     # Two lines, each short: at the phone floor a note line wider than ~75
     # characters runs past 375 px, and the off-canvas test fails on it.
-    shading = (
-        f"shaded: utilization ≥ {UTILIZATION_CENSOR_AT:g} (from {onset:.1f}), "
-        "above every utilization threshold"
-        if onset is not None
-        else f"utilization ≥ {UTILIZATION_CENSOR_AT:g} never reached in the measured range"
-    )
-    _note(axes[2], f"n={len(curve.points)} concurrency levels\n{shading}", y=-0.42)
+    if measured is None:
+        shading = (
+            f"shaded: utilization ≥ {UTILIZATION_CENSOR_AT:g} (from {onset:.1f}), "
+            "above every utilization threshold"
+            if onset is not None
+            else f"utilization ≥ {UTILIZATION_CENSOR_AT:g} never reached in the measured range"
+        )
+        first = f"n={len(curve.points)} concurrency levels"
+    else:
+        shading = (
+            f"shaded: utilization ≥ {UTILIZATION_CENSOR_AT:g} (from {onset:.2f}), "
+            "above every utilization threshold"
+            if onset is not None
+            else f"utilization ≥ {UTILIZATION_CENSOR_AT:g} never reached in the measured range"
+        )
+        runs = min(measured.runs_per_level) if measured.runs_per_level else "?"
+        first = f"n={len(drawn)} levels × {runs} runs, bars min–max"
+        for e in measured.excluded_levels:
+            first += f"; {e['concurrency']:g} not servable ({e['n_failed']}/{e['n_runs']} runs)"
+    _note(axes[2], f"{first}\n{shading}", y=-0.42)
     return _finish(fig, path, return_figure)

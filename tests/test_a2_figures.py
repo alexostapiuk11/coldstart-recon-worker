@@ -923,3 +923,71 @@ def test_the_threshold_grid_has_one_home_and_sweep_re_exports_it():
     import autoscale.thresholds
 
     assert autoscale.sweep.THRESHOLDS is autoscale.thresholds.THRESHOLDS
+
+
+# --- Task 7: figure 4 on the measured curve, figure 2 names its curve --------
+
+from autoscale.measured_curve import DEFAULT_PATH as _MEASURED_PATH
+from autoscale.measured_curve import load_measured_curve
+
+MEASURED = load_measured_curve(REPO / _MEASURED_PATH)
+
+
+def _draw_measured(tmp_path):
+    return service_curve(MEASURED.curve, tmp_path / "m.png", return_figure=True, measured=MEASURED)
+
+
+def test_measured_figure_4_draws_an_interval_bar_set_on_every_panel(tmp_path):
+    fig = _draw_measured(tmp_path)
+    bars = [a for a in fig.findobj() if getattr(a, "get_gid", lambda: None)() == "interval"]
+    assert len(bars) == 3
+
+
+def test_measured_figure_4_marks_the_idle_point_apart(tmp_path):
+    fig = _draw_measured(tmp_path)
+    idle = [a for a in fig.findobj() if getattr(a, "get_gid", lambda: None)() == "idle"]
+    assert len(idle) == 2  # utilisation and throughput panels
+
+
+def test_measured_figure_4_states_runs_levels_and_the_unservable_level(tmp_path):
+    text = " ".join(_texts(_draw_measured(tmp_path)))
+    assert "n=8 levels × 3 runs" in text
+    assert "256 not servable" in text
+    assert "from 0.95" in text
+    assert "MEASURED" in text and "NOT MEASURED" not in text
+
+
+def test_measured_figure_4_clears_the_phone_floor_and_stays_on_canvas(tmp_path):
+    fig = _draw_measured(tmp_path)
+    width_in = fig.get_size_inches()[0]
+    for t in fig.findobj(match=matplotlib.text.Text):
+        if t.get_text().strip():
+            assert t.get_fontsize() * 375 / (72 * width_in) >= MIN_PHONE_TEXT_PX, t.get_text()
+    w, h = fig.canvas.get_width_height()
+    for text, box in _rendered(fig):
+        assert box.x0 >= -1 and box.y0 >= -1 and box.x1 <= w + 1 and box.y1 <= h + 1, text
+
+
+def test_the_interval_bars_change_the_saved_pixels(tmp_path):
+    from PIL import ImageChops
+    with_bars = service_curve(MEASURED.curve, tmp_path / "a.png", measured=MEASURED)
+    without = service_curve(MEASURED.curve, tmp_path / "b.png")
+    diff = ImageChops.difference(Image.open(with_bars).convert("RGB"),
+                                 Image.open(without).convert("RGB"))
+    assert diff.getbbox() is not None
+
+
+def test_measured_requires_the_matching_curve(tmp_path):
+    with pytest.raises(ValueError, match="same curve"):
+        service_curve(SERVICE_CURVE_PLACEHOLDER, tmp_path / "x.png", measured=MEASURED)
+
+
+def test_figure_2_names_its_curve_only_when_told(tmp_path):
+    base = " ".join(_texts(frontiers(ALL_THREE, tmp_path / "f.png", return_figure=True)))
+    assert "measured curve" not in base and "PLACEHOLDER curve" not in base
+    meas = " ".join(_texts(frontiers(ALL_THREE, tmp_path / "g.png", return_figure=True,
+                                     curve_measured=True)))
+    assert "measured curve" in meas
+    ph = " ".join(_texts(frontiers(ALL_THREE, tmp_path / "h.png", return_figure=True,
+                                   curve_measured=False)))
+    assert "PLACEHOLDER curve (invented)" in ph

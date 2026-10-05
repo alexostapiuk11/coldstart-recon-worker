@@ -323,7 +323,7 @@ def main(argv=None) -> None:
 
     args = parse_args(argv)
     path = None if args.placeholder else (args.curve or DEFAULT_PATH)
-    curve, _measured = select_curve(path, placeholder=args.placeholder)
+    curve, measured = select_curve(path, placeholder=args.placeholder)
     label = curve_label(path)
 
     out = Path(args.out)
@@ -337,8 +337,7 @@ def main(argv=None) -> None:
         print(f"service curve: {label} (measured; idle point added)")
     # Figure 4 needs no sweep -- only the curve -- so it renders first and
     # renders even when a figure guard later refuses to draw the others.
-    # Task 7 adds `measured=` to `service_curve`; until then it draws the bare curve.
-    print(service_curve(curve, out / "service_curve.png"))
+    print(service_curve(curve, out / "service_curve.png", measured=measured))
 
     cache = out / "sweep-cache.json"
     if cache.exists() and not args.refresh:
@@ -363,7 +362,8 @@ def main(argv=None) -> None:
             )
         )
     else:
-        print(frontiers(_by_signal(sources[complete]), out / "frontiers.png", context=complete))
+        print(frontiers(_by_signal(sources[complete]), out / "frontiers.png", context=complete,
+                        curve_measured=curve.measured))
 
     arm_a, arm_c = _by_signal(sources["arm A"]), _by_signal(sources["arm C"])
     try:
