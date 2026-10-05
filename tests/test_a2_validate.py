@@ -16,7 +16,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 import a2_lb_common as common
 import a2_validate as v
-from a2_lb_common import SERVER_LATENCY, WORKER
+from a2_lb_common import SERVER_LATENCY, SERVER_RECEIVED, WORKER
 
 from autoscale.service import ServiceCurve
 from autoscale.sim import run_fixed_capacity
@@ -54,7 +54,8 @@ def _outs(schedule, factor=1.0, *, status=200, workers=("w1", "w2"), drop_header
     lat = _model_latencies(schedule)
     outs = []
     for i, (t, lt) in enumerate(zip(schedule, lat, strict=True)):
-        headers = {WORKER: workers[i % len(workers)], SERVER_LATENCY: f"{lt * factor * 1000:.3f}"}
+        headers = {WORKER: workers[i % len(workers)], SERVER_LATENCY: f"{lt * factor * 1000:.3f}",
+                   SERVER_RECEIVED: f"{1000.0 + t:.6f}"}
         if i == drop_header_at:
             headers.pop(SERVER_LATENCY)
         if i == bad_header_at:
@@ -89,12 +90,37 @@ def test_void_reasons_non_200_novel_worker_and_missing_header():
     assert "usable server-latency header (absent or unparseable)" in missing
 
 
-def test_a_transport_error_row_is_a_non_200_void_reason():
+def test_a_request_that_never_reached_the_engine_is_counted_not_voided():
+    """Amendment 2026-10-05 (third): a final non-200 without the worker header
+    never produced an engine response. Up to 1% are counted and left out."""
     s = _schedule()
     outs = _outs(s)
     outs[5] = Outcome(5, s[5], s[5], None, None, {}, "ConnectionError: reset")
+    outs[9] = Outcome(9, s[9], s[9], 9.3, 400, {})
+    rec = _record(s, outs)
+    assert rec["void"] == [] and rec["never_reached"] == [5, 9]
+
+
+def test_more_than_one_percent_never_reaching_the_engine_voids():
+    s = _schedule()
+    outs = _outs(s)
+    over = int(v.MAX_NEVER_REACHED_FRACTION * len(s)) + 1
+    for i in range(over):
+        outs[i] = Outcome(i, s[i], s[i], 0.2, 502, {})
     void = " ".join(_record(s, outs)["void"])
-    assert "1 requests without a 200 (1 of them transport errors)" in void
+    assert f"{over} requests without a 200 never reached the engine" in void
+    at_limit = _outs(s)
+    for i in range(over - 1):
+        at_limit[i] = Outcome(i, s[i], s[i], 0.2, 502, {})
+    assert _record(s, at_limit)["void"] == []
+
+
+def test_a_200_without_the_received_header_is_void():
+    s = _schedule()
+    outs = _outs(s)
+    outs[3] = Outcome(3, s[3], s[3], 0.5, 200,
+                      {k: x for k, x in outs[3].headers.items() if k != SERVER_RECEIVED})
+    assert "received-time header" in " ".join(_record(s, outs)["void"])
 
 
 def test_an_unparseable_server_latency_header_is_void_not_a_crash():
@@ -380,9 +406,9 @@ def test_judge_passes_a_model_inside_realitys_spread(tmp_path):
 
 def test_figure_inputs_come_from_the_records_the_gate_judged(tmp_path):
     _three(tmp_path, (0.97, 1.0, 1.03))
-    predicted, band_bins, result, repeats, n = v.figure_inputs(tmp_path, CURVE)
-    assert len(repeats) == 3 and n == len(_schedule())
-    assert len(predicted) == len(band_bins) == len(repeats[0])
+    pairs, result, n = v.figure_inputs(tmp_path, CURVE)
+    assert len(pairs) == 3 and n == len(_schedule())
+    assert all(len(real) == len(pred) for real, pred in pairs)
     assert result.outcome == v.judge(tmp_path, CURVE)["outcome"] == "passed"
 
 
@@ -437,14 +463,29 @@ def test_judge_names_a_void_attempt_when_the_repeat_is_missing(tmp_path):
         v.judge(tmp_path, CURVE)
 
 
-def test_judge_names_a_repeat_the_gate_refuses_for_jitter(tmp_path):
+def test_judge_records_send_jitter_and_does_not_judge_it(tmp_path):
+    """Amendment 2026-10-05 (third): the prediction comes from the engine's own
+    arrivals, so a late send is recorded, not refused."""
     s = _schedule()
     for k in (1, 2, 3):
         outs = _outs(s)
         if k == 2:
             outs[10] = Outcome(10, s[10], s[10] + 2.0, 0.5, 200, outs[10].headers)
         v.write_record(v.prepare_slot(tmp_path, k), _record(s, outs, k=k))
-    with pytest.raises(SystemExit, match="gate refused the repeats.*jitter"):
+    verdict = v.judge(tmp_path, CURVE)
+    assert verdict["per_repeat"][1]["max_jitter_s"] == pytest.approx(2.0)
+    assert verdict["gate"].startswith("engine_arrivals")
+
+
+def test_judge_refuses_a_record_from_before_the_engine_arrival_amendment(tmp_path):
+    s = _schedule()
+    for k in (1, 2, 3):
+        rec = _record(s, _outs(s), k=k)
+        if k == 2:
+            rec["schema_version"] = 1
+            del rec["server_received_s"]
+        v.write_record(v.prepare_slot(tmp_path, k), rec)
+    with pytest.raises(SystemExit, match="repeat 2.*predates the engine-arrival amendment"):
         v.judge(tmp_path, CURVE)
 
 
@@ -603,8 +644,8 @@ def test_main_judge_writes_a_verdict(rig, capsys):
     verdict = json.loads((rig["out"] / "verdict.json").read_text())
     out = capsys.readouterr().out
     assert verdict["outcome"] == "passed" and "[judge] passed" in out
-    assert (rig["out"] / "validation_overlay.png").stat().st_size > 0
-    assert "validation_overlay.png" in out
+    assert (rig["out"] / "validation_residuals.png").stat().st_size > 0
+    assert "validation_residuals.png" in out
 
 
 def test_main_refuses_an_unwritable_out_before_any_pin(rig, tmp_path):

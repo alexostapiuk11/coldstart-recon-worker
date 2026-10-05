@@ -165,3 +165,22 @@ def test_the_one_replica_probe_matches_the_probe():
     assert f"jitter is at or below {probe.MAX_JITTER_S:g} s" in s
     assert f"client p99 minus server p99 is at or below {probe.MAX_CLIENT_TAIL_S:.1f} s" in s
     assert "every request's final status is 200" in s
+
+
+FIFTH = DOC.split("## Amendment, 2026-10-05 (third): the gate judges the arrivals the engine received", 1)
+
+
+def test_the_engine_arrival_amendment_matches_the_code():
+    import a2_lb_common as common
+    import a2_validate as v
+
+    from autoscale import validation as gate
+    assert len(FIFTH) == 2, "the 2026-10-05 (third) amendment is missing"
+    s = " ".join(FIFTH[1].split("\n## ", 1)[0].split())
+    assert "Signed off by the owner on 2026-10-05" in s
+    assert f"`{common.SERVER_RECEIVED}`" in s
+    assert f"more than **{v.MAX_NEVER_REACHED_FRACTION:.0%}** of its requests never reached" in s
+    assert f"{gate.BIN_SECONDS:g} s bins" in s
+    assert f"at least {gate.MIN_COMPARED_BINS} judged bins" in s
+    assert "at most half of them missing" in s and gate.MAX_MISS_FRACTION == 0.5
+    assert "all above +1 ms or all below −1 ms" in s and gate.BAND_EDGE_TOLERANCE_SECONDS == 0.001

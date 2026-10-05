@@ -23,6 +23,7 @@ from autoscale.figures import (
     frontiers,
     service_curve,
     validation_overlay,
+    validation_residuals,
 )
 from autoscale.frontier import PolicyPoint
 from autoscale.service import SERVICE_CURVE_PLACEHOLDER, ServiceCurve
@@ -1215,3 +1216,107 @@ def test_a_two_row_legend_with_both_miss_kinds_stays_on_canvas_and_off_the_note(
     legend = fig.axes[0].get_legend().get_window_extent()
     note = next(b for t, b in boxes if t.startswith("n="))
     assert legend.y0 >= note.y1 - 1  # the legend ends above where the note starts
+
+
+# --- figure 3 on engine arrivals (amendment 2026-10-05, third) -----------------------------
+
+
+def _residual_inputs(factors=(0.97, 1.0, 1.03)):
+    from autoscale.sim import run_fixed_capacity
+    from autoscale.validation import EngineRun, engine_trajectories, validate_engine_arrivals
+    until = 200.0
+    s = _build_schedule(_OV_CURVE, replicas=2, kind="step", until=until, drain=20.0, seed=1)
+    by_arrival = dict(run_fixed_capacity(list(s), 2, _OV_CURVE, until).completed_requests())
+    runs = [EngineRun(sent=s, received=[t + 1000.0 for t in s],
+                      latencies=[by_arrival[t] * f for t in s], replicas=2, until=until,
+                      host_ids=("w1", "w2")) for f in factors]
+    pairs = [engine_trajectories(r, _OV_CURVE) for r in runs]
+    return pairs, validate_engine_arrivals(runs, _OV_CURVE), len(s)
+
+
+def _draw_residuals(tmp_path, factors=(0.97, 1.0, 1.03), verdict=None):
+    pairs, result, n = _residual_inputs(factors)
+    return validation_residuals(pairs, verdict or result, tmp_path / "r.png", replicas=1,
+                                requests_per_run=n, latency_source="server", return_figure=True)
+
+
+def test_residuals_draw_the_range_each_run_and_the_zero_line(tmp_path):
+    fig = _draw_residuals(tmp_path)
+    gids = [a.get_gid() for a in fig.findobj() if hasattr(a, "get_gid")]
+    assert gids.count("residual_band") == 1 and gids.count("repeat") == 3
+    assert gids.count("zero") == 1
+
+
+def test_residuals_mark_every_judged_miss(tmp_path):
+    fig = _draw_residuals(tmp_path, factors=(1.4, 1.45, 1.5))
+    _, verdict, _ = _residual_inputs((1.4, 1.45, 1.5))
+    (misses,), (backlog,) = _gid(fig, "miss"), _gid(fig, "miss_backlog")
+    assert len(misses.get_xdata()) + len(backlog.get_xdata()) == verdict.misses > 0
+    # an outside miss sits on the residual nearest zero, which is above it here
+    assert all(y > 0 for y in misses.get_ydata())
+
+
+def test_a_censoring_miss_sits_on_the_top_edge(tmp_path):
+    pairs, result, n = _residual_inputs()
+    bins = list(result.bins)
+    bins[5] = BinVerdict(bins[5].start, bins[5].end, "censoring_disagreement", math.inf)
+    judged = [b for b in bins if b.verdict in ("inside", "outside", "censoring_disagreement")]
+    fake = Validation(tuple(bins), len(judged),
+                      sum(1 for b in judged if b.verdict == "inside"), result.outcome, "", 0.0)
+    fig = validation_residuals(pairs, fake, tmp_path / "c.png", replicas=1, requests_per_run=n,
+                               latency_source="server", return_figure=True)
+    (backlog,) = _gid(fig, "miss_backlog")
+    assert list(backlog.get_ydata()) == [1.0] and not backlog.get_clip_on()
+    assert "miss (backlog disagreement)" in _texts(fig)
+
+
+def test_residual_hatching_covers_exactly_the_bins_not_judged(tmp_path):
+    fig = _draw_residuals(tmp_path)
+    _, verdict, _ = _residual_inputs()
+    hatched = sorted(r.get_x() for r in _gid(fig, "not_judged"))
+    expected = sorted(b.start for b in verdict.bins
+                      if b.verdict not in ("inside", "outside", "censoring_disagreement"))
+    assert hatched == expected and expected
+
+
+def test_residuals_state_n_outcome_source_and_banner(tmp_path):
+    text = " ".join(_texts(_draw_residuals(tmp_path)))
+    assert "MEASURED" in text and "1 replica pinned" in text and "its own prediction" in text
+    assert "requests per run" in text and "passed" in text and "server-side latency" in text
+    assert "engine arrival time (s)" in text
+
+
+def test_residual_text_is_legible_and_on_canvas_and_zero_is_centred(tmp_path):
+    for factors in ((0.97, 1.0, 1.03), (1.4, 1.45, 1.5)):
+        fig = _draw_residuals(tmp_path, factors)
+        lo, hi = fig.axes[0].get_ylim()
+        assert lo < 0 < hi and lo == pytest.approx(-hi)
+        width_in = fig.get_size_inches()[0]
+        for t in fig.findobj(match=matplotlib.text.Text):
+            if t.get_text().strip():
+                assert t.get_fontsize() * 375 / (72 * width_in) >= MIN_PHONE_TEXT_PX, t.get_text()
+        w, h = fig.canvas.get_width_height()
+        for text, box in _rendered(fig):
+            assert box.x0 >= -1 and box.y0 >= -1 and box.x1 <= w + 1 and box.y1 <= h + 1, text
+
+
+def test_residuals_refuse_a_count_of_repeats_other_than_three(tmp_path):
+    pairs, result, n = _residual_inputs()
+    with pytest.raises(ValueError, match="3 repeats"):
+        validation_residuals(pairs[:2], result, tmp_path / "x.png", replicas=1,
+                             requests_per_run=n, latency_source="server")
+
+
+def test_a_residual_legend_with_both_miss_kinds_stays_on_canvas(tmp_path):
+    pairs, result, n = _residual_inputs((1.4, 1.45, 1.5))
+    bins = list(result.bins)
+    bins[5] = BinVerdict(bins[5].start, bins[5].end, "censoring_disagreement", math.inf)
+    judged = [b for b in bins if b.verdict in ("inside", "outside", "censoring_disagreement")]
+    fake = Validation(tuple(bins), len(judged),
+                      sum(1 for b in judged if b.verdict == "inside"), result.outcome, "", 0.0)
+    fig = validation_residuals(pairs, fake, tmp_path / "t.png", replicas=1, requests_per_run=n,
+                               latency_source="server", return_figure=True)
+    assert "miss" in _texts(fig) and "miss (backlog disagreement)" in _texts(fig)
+    w, h = fig.canvas.get_width_height()
+    for text, box in _rendered(fig):
+        assert box.x0 >= -1 and box.y0 >= -1 and box.x1 <= w + 1 and box.y1 <= h + 1, text

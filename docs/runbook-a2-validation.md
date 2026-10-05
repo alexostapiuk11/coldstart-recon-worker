@@ -25,6 +25,14 @@ and acceptance at 210 req/s on every final status 200, send jitter <= 0.25 s, an
 minus server p99 <= 1.0 s. The schedule is 64,784 requests. The sections below keep the
 two-replica text as it was run, for the record.
 
+**Amended 2026-10-05 (third amendment of that day): the gate judges the engine's own arrivals.**
+The worker image must carry the middleware that stamps `x-a2-server-received` (rebuild after
+pushing; update template `4p46s4hcar` to the new digest). Repeats now go to
+`data/a2/validation-engine/`; the three earlier one-replica repeats in `data/a2/validation/`
+have no arrival stamps and are kept as evidence only. Send jitter is recorded, not judged.
+A repeat is void if a request that reached the engine did not end in 200, or if more than 1%
+never reached it. `--judge` draws `validation_residuals.png`.
+
 **A. Image.**
 - Push this plan's commits (the owner's call). `worker/**` changed, so CI (`build-worker.yml`)
   rebuilds the image; read the new `ghcr.io/...@sha256:` digest from its summary.

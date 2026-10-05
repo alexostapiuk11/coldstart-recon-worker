@@ -10,7 +10,7 @@ import a2_lb_common as common
 
 from harness.open_loop import Outcome
 
-W = {common.WORKER: "w1", common.SERVER_LATENCY: "300"}
+W = {common.WORKER: "w1", common.SERVER_LATENCY: "300", common.SERVER_RECEIVED: "1000.0"}
 
 
 def _scripted(*responses):

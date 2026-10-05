@@ -55,6 +55,7 @@ Refusals rather than best-effort drawing, in five places:
   the utilization policy can still respond to.
 """
 
+import math
 from itertools import pairwise
 from pathlib import Path
 
@@ -910,5 +911,103 @@ def validation_overlay(predicted, band_bins, verdict, repeats, path, *, replicas
     source = "server-side latency" if latency_source == "server" else "client latency"
     _note(axis, f"n={requests_per_run} requests per run · judged {verdict.compared} bins, "
                 f"{verdict.misses} misses · {verdict.outcome}\n{source}; hatched: not judged",
+          y=-(120.5 + extra_px) / axes_px)
+    return _finish(fig, path, return_figure)
+
+
+def validation_residuals(pairs, verdict, path, *, replicas: int, requests_per_run: int,
+                         latency_source: str, return_figure=False):
+    """Figure 3 under the engine-arrival gate (amendment 2026-10-05, third).
+
+    Each repeat is held to its own prediction, so there is no single predicted
+    curve to draw against a band. What the gate judges is the residual per bin
+    -- the repeat's real p50 minus its own predicted p50, both binned by the
+    engine's arrival time -- and a bin misses when all three residuals sit on
+    the same side of zero. So the figure draws exactly that: zero (the model)
+    as the reference line, each repeat's residuals, and their min-max range
+    shaded. Rejected: overlaying three predicted curves on three real ones,
+    which is six lines whose comparison the reader has to do in their head.
+
+    Misses are marked on the residual nearest zero, the distance the gate
+    reports; a censoring disagreement has no residual, so it is a red triangle
+    on the top edge. The range is cut, not bridged, at bins without a residual
+    in every repeat. Bins the gate did not judge are hatched. The y axis is
+    symmetric about zero, so above and below read as equally far.
+
+    `pairs` is one `(real, predicted)` trajectory pair per repeat
+    (`autoscale.validation.engine_trajectories`), so this module still never
+    imports the simulator.
+    """
+    if len(pairs) != 3:
+        raise ValueError(
+            f"{len(pairs)} repeats; the gate and this figure take exactly 3 repeats, and "
+            "a residual range from another count is not the range that was judged")
+    fig, axis = plt.subplots(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN))
+    # Wider than figure 3's 0.095: signed tick labels ("−0.030") are wider than unsigned.
+    left, right = 0.12, 0.965
+    fig.subplots_adjust(left=left, right=right, top=0.86, bottom=0.245)
+    bins0 = pairs[0][0]
+    centre = [(b.start + b.end) / 2 for b in bins0]
+    x_right = max(b.end for b in bins0)
+    nan = float("nan")
+    residuals = [[r.p50 - q.p50 if r.p50 is not None and q.p50 is not None else nan
+                  for r, q in zip(real, pred, strict=True)] for real, pred in pairs]
+    columns = list(zip(*residuals, strict=True))
+    has_range = [all(not math.isnan(x) for x in col) for col in columns]
+    lo = [min(col) if ok else nan for col, ok in zip(columns, has_range, strict=True)]
+    hi = [max(col) if ok else nan for col, ok in zip(columns, has_range, strict=True)]
+    axis.fill_between(centre, lo, hi, where=has_range, interpolate=False,
+                      color=MEASURED_BANNER, alpha=BAND_ALPHA, linewidth=0, gid="residual_band",
+                      label="residual range (min–max)")
+    for k, series in enumerate(residuals):
+        axis.plot(centre, series, color=REPEAT_LINE_COLOR, linewidth=0.9, marker="o",
+                  markersize=2.5, gid="repeat", label="each real run" if k == 0 else None)
+    axis.axhline(0.0, color=CURVE_COLOR, linewidth=2, gid="zero", label="simulator (zero)")
+
+    by_start = {v.start: v for v in verdict.bins}
+    miss_x, miss_y, backlog_x = [], [], []
+    for i, b in enumerate(bins0):
+        v = by_start.get(b.start)
+        if v is None:
+            continue
+        if v.verdict == "outside" and has_range[i]:
+            miss_x.append(centre[i])
+            miss_y.append(lo[i] if lo[i] > 0 else hi[i])
+        elif v.verdict in ("outside", "censoring_disagreement"):
+            backlog_x.append(centre[i])
+        elif v.verdict != "inside":
+            axis.axvspan(b.start, b.end, facecolor="none", edgecolor=HATCH_COLOR, hatch="///",
+                         linewidth=0, gid="not_judged")
+    axis.plot(miss_x, miss_y, "x", color=CENSOR_COLOR, markersize=8, markeredgewidth=2,
+              gid="miss", label="miss" if miss_x else None)
+    axis.plot(backlog_x, [1.0] * len(backlog_x), "^", color=CENSOR_COLOR, markersize=8,
+              transform=axis.get_xaxis_transform(), clip_on=False, gid="miss_backlog",
+              label="miss (backlog disagreement)" if backlog_x else None)
+
+    _tidy(axis, "engine arrival time (s)", "real − predicted p50 (s)",
+          MEASURED_BG)
+    finite = [abs(x) for x in (*lo, *hi) if not math.isnan(x)]
+    half = max(max(finite, default=0.0) * 1.25, 0.02)
+    axis.set_ylim(-half, half)
+    axis.set_xlim(0, x_right)
+    labels = axis.get_legend_handles_labels()[1]
+    # Three columns: these labels are longer than figure 3's, and a fourth entry in one
+    # row runs off the canvas. With the long backlog entry, two columns: three ran it
+    # off the right edge.
+    ncol = 2 if "miss (backlog disagreement)" in labels else 3
+    rows = -(-len(labels) // ncol)
+    extra_px = LEGEND_ROW_PX * (rows - 1)
+    fig.subplots_adjust(bottom=(196 + extra_px) / (FIG_HEIGHT_IN * 100))
+    axes_px = (0.86 - (196 + extra_px) / (FIG_HEIGHT_IN * 100)) * FIG_HEIGHT_IN * 100
+    axis.legend(loc="upper center", bbox_to_anchor=(0.5, -61.5 / axes_px), ncol=ncol,
+                fontsize=_pt(PX_LEGEND), frameon=False, handlelength=1.6, columnspacing=1.2)
+    noun = "replica" if replicas == 1 else "replicas"
+    _figure_banner(fig, left, right, "MEASURED",
+                   f"{replicas} {noun} pinned, 3 real runs, each against its own prediction",
+                   MEASURED_BANNER)
+    source = "server-side latency" if latency_source == "server" else "client latency"
+    _note(axis, f"n={requests_per_run} requests per run · judged {verdict.compared} bins, "
+                f"{verdict.misses} misses · {verdict.outcome}\n{source}, binned by engine "
+                "arrival; hatched: not judged",
           y=-(120.5 + extra_px) / axes_px)
     return _finish(fig, path, return_figure)

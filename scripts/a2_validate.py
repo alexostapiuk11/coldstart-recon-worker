@@ -11,11 +11,18 @@ check the slot (and that the out dir is writable and the open-files limit holds
 the replay's sockets) and build the schedule, all before any pin; then pin, warm up until
 all N workers answer cleanly (their ids are the run's host_ids), replay the ONE
 pre-registered schedule open-loop, release on any exit, and write every request
-to data/a2/validation/repeat-K.json.gz. `--judge` builds RealRuns from the
-pre-registered latency source and calls autoscale.validation.validate.
+to data/a2/validation-engine/repeat-K.json.gz. `--judge` builds EngineRuns from
+the engine's own arrival stamps and latencies and calls
+autoscale.validation.validate_engine_arrivals (amendment 2026-10-05, third).
+The three one-replica repeats run before that amendment carry no arrival
+stamps; they stay in data/a2/validation/ as its evidence and are not judged.
 
-Void rules (amendment 2026-10-04): any non-200, a response from a worker
-outside the pinned set, or a 200 without the server-latency header. A void repeat is kept, moved aside, and may be run once more;
+Void rules (amendments 2026-10-04 and 2026-10-05, third): a request that reached
+the engine and did not end in 200; more than 1% of requests never reaching the
+engine (a final non-200 without the worker header, which are otherwise counted
+and left out of both sides); a response from a worker outside the pinned set;
+a 200 without a usable server-latency or received-time header. Send jitter is
+recorded, not judged. A void repeat is kept, moved aside, and may be run once more;
 a valid repeat is never overwritten, because re-running until the band fits
 is the failure the fixed repeat count exists to prevent.
 
@@ -59,6 +66,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from a2_lb_common import (
     POOL_THREADS,
     RETRY_MARK,
+    SERVER_RECEIVED,
     WORKER,
     ensure_fd_limit,
     ensure_thread_headroom,
@@ -67,18 +75,15 @@ from a2_lb_common import (
     warm_up,
 )
 
-from autoscale.figures import validation_overlay
+from autoscale.figures import validation_residuals
 from autoscale.measured_curve import DEFAULT_PATH, load_measured_curve
 from autoscale.validation import (
-    BIN_SECONDS,
     MAX_SEND_JITTER_SECONDS,
     REPEATS,
-    RealRun,
-    predicted_trajectory,
-    tolerance_band,
-    validate,
+    EngineRun,
+    engine_trajectories,
+    validate_engine_arrivals,
 )
-from autoscale.validation_band import trajectory
 from autoscale.validation_schedule import (
     LATENCY_SOURCE,
     VALIDATION_DRAIN_SECONDS,
@@ -95,15 +100,18 @@ from harness.open_loop import max_jitter, replay
 from harness.runpod.pinning import ReleaseFailed, WorkerPin, unwind_on_hangup_and_term
 from harness.runpod.preflight import assert_endpoint_matches, fetch_endpoint
 
-OUT = Path("data/a2/validation")
-SCHEMA_VERSION = 1
+OUT = Path("data/a2/validation-engine")
+# 2: records carry the engine's arrival stamps (amendment 2026-10-05, third).
+SCHEMA_VERSION = 2
+# More than this share of requests never reaching the engine voids a repeat.
+MAX_NEVER_REACHED_FRACTION = 0.01
 # The peak is ~201 req/s on 1 worker, and client latency adds the WAN and the
 # load balancer to the engine's ~0.6 s. The shared pool (3500 threads; see
 # a2_lb_common.POOL_THREADS for why not 4096) holds about 17 s of latency at 201
 # req/s before the driver's own pool, not the endpoint, causes send jitter. A
-# pool that is too small does not fail: the requests queue and leave late,
-# which RealRun refuses above 0.5 s of jitter, so the paid run would be spent
-# on a refusal.
+# pool that is too small does not fail: the requests queue and leave late. The
+# gate predicts from the engine's own arrivals, so lateness is not judged, but a
+# pool that holds the load keeps the engine seeing the schedule's traffic.
 REPLAY_MAX_IN_FLIGHT = POOL_THREADS
 
 
@@ -129,7 +137,7 @@ def _server_seconds(outcome) -> float | None:
 
     `server_latency_s` raises on a header that is not a number, and "nan" parses
     to NaN. Either would crash the record after the replay was paid for, or
-    write a NaN that RealRun refuses at judge time. An unusable header is the
+    write a NaN that EngineRun refuses at judge time. An unusable header is the
     same fault as a missing one, so both become the void reason.
     """
     try:
@@ -137,6 +145,16 @@ def _server_seconds(outcome) -> float | None:
     except ValueError:
         return None
     return s if s is not None and math.isfinite(s) and s >= 0 else None
+
+
+def _received_seconds(outcome) -> float | None:
+    """The engine's arrival stamp as a float, or None if absent or unusable."""
+    raw = outcome.headers.get(SERVER_RECEIVED)
+    try:
+        t = float(raw) if raw is not None else None
+    except ValueError:
+        return None
+    return t if t is not None and math.isfinite(t) else None
 
 
 def record_from(outcomes, *, repeat, schedule, host_ids, endpoint_id, template_id, started_at,
@@ -152,11 +170,20 @@ def record_from(outcomes, *, repeat, schedule, host_ids, endpoint_id, template_i
             "cannot be trusted and no record is written from it")
     workers = [o.headers.get(WORKER) for o in outcomes]
     server = [_server_seconds(o) for o in outcomes]
+    received = [_received_seconds(o) for o in outcomes]
     void = []
-    failed = [o for o in outcomes if o.status != 200]
-    if failed:
-        errors = sum(1 for o in failed if o.error)
-        void.append(f"{len(failed)} requests without a 200 ({errors} of them transport errors)")
+    # A final non-200 without the worker header never produced an engine
+    # response: counted and left out of both sides (amendment 2026-10-05, third).
+    never = [i for i, (o, w) in enumerate(zip(outcomes, workers, strict=True))
+             if o.status != 200 and not w]
+    reached_failed = [o for o, w in zip(outcomes, workers, strict=True) if o.status != 200 and w]
+    if reached_failed:
+        void.append(f"{len(reached_failed)} requests reached the engine without a 200")
+    if len(never) > MAX_NEVER_REACHED_FRACTION * len(outcomes):
+        errors = sum(1 for i in never if outcomes[i].error)
+        void.append(f"{len(never)} requests without a 200 never reached the engine "
+                    f"({len(never) / len(outcomes):.2%}, over {MAX_NEVER_REACHED_FRACTION:.0%}; "
+                    f"{errors} of them transport errors)")
     novel = sorted({w for w in workers if w} - set(host_ids))
     if novel:
         void.append(f"responses from workers outside the pinned set: {novel}")
@@ -169,21 +196,28 @@ def record_from(outcomes, *, repeat, schedule, host_ids, endpoint_id, template_i
     if no_latency:
         void.append(f"{no_latency} 200 responses without a usable server-latency header "
                     "(absent or unparseable)")
+    no_received = sum(1 for o, r in zip(outcomes, received, strict=True)
+                      if o.status == 200 and r is None)
+    if no_received:
+        void.append(f"{no_received} 200 responses without a usable received-time header "
+                    "(absent or unparseable)")
     return {
         "schema_version": SCHEMA_VERSION, "repeat": repeat, "started_at": started_at,
         "endpoint_id": endpoint_id, "template_id": template_id, "replicas": replicas,
         "until": until, "drain": drain, "seed": seed, "latency_source": LATENCY_SOURCE,
         "host_ids": list(host_ids), "novel_workers": novel, "void": void,
         "headerless_worker_200": no_worker,
+        "never_reached": never,
         # Which requests the driver retried after a load-balancer 502 (amendment
-        # 2026-10-05). Disclosed, not a void reason: a retry that failed again is
-        # already voided by its final status above.
+        # 2026-10-05). Disclosed, not a void reason. A retry that failed again without
+        # reaching the engine is in `never_reached` (amendment 2026-10-05, third).
         "lb_502_retried": [i for i, o in enumerate(outcomes) if RETRY_MARK in o.headers],
         "release": "ok", "post_run_error": None, "warmup": dict(warmup or {}),
         "max_jitter_s": max_jitter(outcomes),
         "schedule": list(schedule),
         "sent": [o.sent for o in outcomes],
         "server_latency_s": server,
+        "server_received_s": received,
         "client_latency_s": [o.latency for o in outcomes],
         "status": [o.status for o in outcomes],
         "worker": workers,
@@ -348,46 +382,52 @@ def _valid_records(out: Path) -> list[dict]:
             raise SystemExit(
                 f"repeat {k} is missing ({path}){aside}; the gate needs all {REPEATS}")
         rec = read_record(path)
+        if rec.get("schema_version", 1) < 2 or "server_received_s" not in rec:
+            raise SystemExit(
+                f"repeat {k} ({path}) predates the engine-arrival amendment (2026-10-05, "
+                "third): it has no engine arrival stamps, so it cannot be judged by it")
         if rec["void"]:
             raise SystemExit(f"repeat {k} is void ({rec['void']}); run it once more or stop")
         records.append(rec)
     return records
 
 
-def _real_runs(records: list[dict]) -> list[RealRun]:
-    key = "server_latency_s" if LATENCY_SOURCE == "server" else "client_latency_s"
-    return [RealRun(schedule=r["schedule"], sent=r["sent"], latencies=r[key],
-                    replicas=r["replicas"], until=r["until"], host_ids=tuple(r["host_ids"]))
-            for r in records]
+def _engine_runs(records: list[dict]) -> list[EngineRun]:
+    """EngineRuns from the records: the engine's arrival stamps and latencies,
+    with requests that never reached the engine as None on both."""
+    runs = []
+    for r in records:
+        received = [t if st == 200 else None
+                    for t, st in zip(r["server_received_s"], r["status"], strict=True)]
+        latencies = [lat if st == 200 else None
+                     for lat, st in zip(r["server_latency_s"], r["status"], strict=True)]
+        runs.append(EngineRun(sent=r["sent"], received=received, latencies=latencies,
+                              replicas=r["replicas"], until=r["until"],
+                              host_ids=tuple(r["host_ids"])))
+    return runs
 
 
 def figure_inputs(out: Path, curve):
     """The figure-3 inputs for the three valid repeats, from the same records the gate judged.
 
-    Returns (predicted, band_bins, validation, repeat trajectories, requests per run).
-    Bins are the gate's (`BIN_SECONDS`), so the picture and the verdict are one comparison.
+    Returns (per-repeat (real, predicted) trajectories, validation, requests per run).
     """
     records = _valid_records(out)
     try:
-        runs = _real_runs(records)
-        first = runs[0]
-        predicted = predicted_trajectory(first.schedule, first.replicas, curve, first.until)
-        band_bins = tolerance_band(runs)
-        result = validate(runs, curve)
+        runs = _engine_runs(records)
+        pairs = [engine_trajectories(r, curve) for r in runs]
+        result = validate_engine_arrivals(runs, curve)
     except ValueError as e:
         raise SystemExit(
             f"the gate refused the repeats: {e}. No figure is drawn from runs the gate "
             "rejects, because it would show a trace that was never judged") from e
-    repeats = [trajectory(r.schedule, r.windowed_latencies(), until=r.until,
-                          bin_seconds=BIN_SECONDS)
-               for r in runs]
-    return predicted, band_bins, result, repeats, len(first.schedule)
+    return pairs, result, len(records[0]["schedule"])
 
 
 def judge(out: Path, curve) -> dict:
     records = _valid_records(out)
     try:
-        result = validate(_real_runs(records), curve)
+        result = validate_engine_arrivals(_engine_runs(records), curve)
     except ValueError as e:
         raise SystemExit(
             f"the gate refused the repeats: {e}. They are not judged, because judging a run "
@@ -405,6 +445,8 @@ def judge(out: Path, curve) -> dict:
         per_repeat.append({"repeat": r["repeat"], "host_ids": r["host_ids"],
                            "server_p50_s": median(server), "client_p50_s": median(client),
                            "max_jitter_s": r["max_jitter_s"], "release": r.get("release"),
+                           "never_reached": len(r["never_reached"]),
+                           "lb_502_retried": len(r["lb_502_retried"]),
                            "post_run_error": r.get("post_run_error")})
     bins = []
     for b in result.bins:
@@ -420,6 +462,7 @@ def judge(out: Path, curve) -> dict:
         else result.max_miss_seconds,
         "max_miss_is_censoring": math.isinf(result.max_miss_seconds),
         "bins": bins, "host_novelty": novelty, "latency_source": LATENCY_SOURCE,
+        "gate": "engine_arrivals (amendment 2026-10-05, third)",
         "per_repeat": per_repeat,
     }
 
@@ -456,10 +499,10 @@ def main(argv=None) -> None:
                 print(f"[judge] WARNING: repeat {r['repeat']} recorded an error after its "
                       f"replay ({r['post_run_error']}); the verdict stands, the owner decides "
                       "what it means", file=sys.stderr)
-        predicted, band_bins, result, repeats, n = figure_inputs(out, curve)
-        print(validation_overlay(predicted, band_bins, result, repeats,
-                                 out / "validation_overlay.png", replicas=VALIDATION_REPLICAS,
-                                 requests_per_run=n, latency_source=LATENCY_SOURCE))
+        pairs, result, n = figure_inputs(out, curve)
+        print(validation_residuals(pairs, result, out / "validation_residuals.png",
+                                   replicas=VALIDATION_REPLICAS, requests_per_run=n,
+                                   latency_source=LATENCY_SOURCE))
         return
     if not args.template_id:
         ap.error("--preflight-only and --repeat need --template-id")
@@ -517,13 +560,15 @@ def main(argv=None) -> None:
         raise
     jitter = record["max_jitter_s"]
     print(f"[repeat {args.repeat}] {len(schedule)} requests, host_ids {record['host_ids']}, "
-          f"max jitter {jitter:.3f} s, {record['headerless_worker_200']} 200s without the "
-          "worker header, "
+          f"max jitter {jitter:.3f} s, {len(record['never_reached'])} never reached the "
+          f"engine, {len(record['lb_502_retried'])} load-balancer 502s retried, "
+          f"{record['headerless_worker_200']} 200s without the worker header, "
           + ("VOID: " + "; ".join(record["void"]) if record["void"] else "valid"))
     if jitter > MAX_SEND_JITTER_SECONDS:
-        print(f"[repeat {args.repeat}] WARNING: send jitter {jitter:.3f} s exceeds "
-              f"{MAX_SEND_JITTER_SECONDS} s; --judge will refuse this repeat. Not a void rule "
-              "in the amendment: the owner decides what to do", file=sys.stderr)
+        print(f"[repeat {args.repeat}] note: send jitter {jitter:.3f} s is over the "
+              f"{MAX_SEND_JITTER_SECONDS} s the first gate judged. Recorded, not judged: the "
+              "gate predicts from the engine's own arrivals (amendment 2026-10-05, third)",
+              file=sys.stderr)
 
 
 if __name__ == "__main__":
