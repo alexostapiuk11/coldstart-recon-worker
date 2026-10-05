@@ -19,6 +19,7 @@ ADAPTER_ROOT = "/tmp/a5-adapters"
 # plan 2 adds once reconnaissance has captured that text.
 SPECIALIZE_FLAG = "--specialize-active-lora"
 ENGINE_FLAGS = (
+    "--gpu-memory-utilization",
     "--enable-lora",
     "--max-loras",
     "--max-cpu-loras",
@@ -51,17 +52,29 @@ def serve_args(
     lora_modules: dict[str, str],
     specialize_active_lora: bool,
     disable_log_stats: bool,
+    gpu_memory_utilization: float,
 ) -> list[str]:
     """`vllm serve` flags for one instance (amendment §3a, §3g, §4).
 
     `max_loras = max_cpu_loras = n_slots`, so every registered adapter is
     resident and the resident-versus-swapped path never runs. Prefix caching is
-    off so a phase cannot inherit another phase's cached prefixes."""
+    off so a phase cannot inherit another phase's cached prefixes.
+
+    The memory budget is required, never left to the engine's default. vLLM
+    sizes the KV cache to fill `gpu_memory_utilization` of the card, but the
+    CUDA-graph memory it captures afterwards is not part of that sizing. On the
+    RTX 4090 with LoRA enabled, the 0.92 default left 146 MiB free after graph
+    capture and the first reconnaissance OOMed in sampler warm-up. The value is
+    fixed in the endpoint environment (amendment §4) so it is the same for
+    every condition. The budget is passed rather than a fixed KV size because
+    KV capacity at each slot count is one of the things the experiment
+    measures."""
     if len(lora_modules) != n_slots:
         raise ValueError(f"{len(lora_modules)} adapters registered for {n_slots} slots")
     args = [
         "--revision", revision,
         "--max-model-len", str(max_model_len),
+        "--gpu-memory-utilization", repr(float(gpu_memory_utilization)),
         "--enable-lora",
         "--max-loras", str(n_slots),
         "--max-cpu-loras", str(n_slots),

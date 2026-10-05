@@ -27,9 +27,13 @@ COPY coldstart /opt/coldstart
 # move rather than with it. tests/test_harness_boundary.py asserts these COPY
 # lines cover everything the image actually imports.
 COPY harness /opt/harness
+# artifact 5's package: worker/a5_handler.py and worker/a5_recon_handler.py import it.
+COPY multilora /opt/multilora
 COPY worker/recon_handler.py /opt/recon_handler.py
 COPY worker/probe.py /opt/probe.py
 COPY worker/handler.py /opt/handler.py
+COPY worker/a5_handler.py /opt/a5_handler.py
+COPY worker/a5_recon_handler.py /opt/a5_recon_handler.py
 # The service-curve sweep's handler (worker/sweep_handler.py), which runs
 # harness/sweep_worker.py inside the container; harness/service_sweep.py is the
 # local side and is not called here. Imports only harness/, never coldstart/.

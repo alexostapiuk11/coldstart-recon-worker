@@ -92,6 +92,7 @@ def run_instance(
     target_modules,
     env: dict,
     deps: Deps,
+    gpu_memory_utilization: float,
     after_ready: Callable | None = None,
 ) -> dict:
     t0 = deps.clock()
@@ -107,6 +108,7 @@ def run_instance(
         lora_modules={name: adapter_path(name) for name in payload["registered"]},
         specialize_active_lora=payload["specialize_active_lora"],
         disable_log_stats=payload["disable_log_stats"],
+        gpu_memory_utilization=gpu_memory_utilization,
     )
     common = {
         "served_cmd": ["vllm", "serve", model, *args],

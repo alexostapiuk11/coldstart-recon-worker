@@ -41,7 +41,7 @@ def _deps():
 
 
 KW = {"model": "m", "revision": "r", "max_model_len": 8192, "rank": 2,
-      "target_modules": ("q_proj",), "env": {}}
+      "target_modules": ("q_proj",), "env": {}, "gpu_memory_utilization": 0.85}
 
 
 def test_the_probe_list_covers_each_point_twice_and_the_two_switches():
@@ -71,6 +71,8 @@ def test_a_lora_probe_answers_every_adapter_and_scrapes_the_gauge():
     assert out["a1_prompt_tokens"] == 13
     assert "lora_requests_info" in out["metrics_idle"]
     assert len(out["phases"]) == 1 and out["phases"][0]["regime"] == "spread"
+    cmd = out["served_cmd"]
+    assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.85"
 
 
 def test_the_help_probe_records_failures_as_answers():
