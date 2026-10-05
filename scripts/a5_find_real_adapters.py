@@ -18,7 +18,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from multilora.adapters import select_real_adapters
+from multilora.adapters import reselect_from_evidence, select_real_adapters
 
 HUB = "https://huggingface.co"
 OUT = Path(__file__).resolve().parents[1] / "fixtures" / "a5" / "real_adapter_candidates.json"
@@ -47,13 +47,25 @@ def main() -> int:
     ap.add_argument("--modules", required=True)
     ap.add_argument("--count", type=int, required=True)
     ap.add_argument("--limit", type=int, default=100)
+    ap.add_argument("--reselect", action="store_true",
+                    help="no network: re-derive the selection from OUT's saved `seen`")
     args = ap.parse_args()
+    if args.reselect:
+        out = reselect_from_evidence(
+            json.loads(OUT.read_text()), rank=args.rank,
+            target_modules=args.modules.split(","), count=args.count, base_model=args.base,
+        )
+        OUT.write_text(json.dumps(out, indent=1, sort_keys=True))
+        print(f"{len(out['seen'])} seen, {len(out['selected'])} selected, "
+              f"enough={out['enough']}: {OUT} (reselected offline)")
+        return 0 if out["enough"] else 1
     seen = candidates(args.base, args.limit)
     result = select_real_adapters(
-        seen, rank=args.rank, target_modules=args.modules.split(","), count=args.count
+        seen, rank=args.rank, target_modules=args.modules.split(","), count=args.count,
+        base_model=args.base,
     )
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps({"query": vars(args), "seen": seen, **result}, indent=1, sort_keys=True))
+    OUT.write_text(json.dumps({"query": vars(args), "seen": seen, "rule": "strict-v2", **result}, indent=1, sort_keys=True))
     print(f"{len(seen)} seen, {len(result['selected'])} selected, enough={result['enough']}: {OUT}")
     return 0 if result["enough"] else 1
 

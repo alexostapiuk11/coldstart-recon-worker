@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -88,29 +89,167 @@ def test_unsupported_modules_are_refused(tmp_path):
         )
 
 
-def test_a_real_adapter_qualifies_only_within_rank_and_modules():
+BASE = "Qwen/Qwen3-4B"
+EVIDENCE = Path(__file__).resolve().parents[1] / "fixtures" / "a5" / "real_adapter_candidates.json"
+# A real adapter the gate can use: same rank, same modules, plain LoRA, causal LM,
+# trained on exactly the pinned base. Each mutation below breaks one rule item.
+VALID = {
+    "peft_type": "LORA",
+    "r": 16,
+    "lora_alpha": 32,
+    "target_modules": list(ALL),
+    "task_type": "CAUSAL_LM",
+    "base_model_name_or_path": BASE,
+    "bias": "none",
+    "modules_to_save": None,
+    "use_dora": False,
+    "use_rslora": False,
+    "rank_pattern": {},
+    "alpha_pattern": {},
+    "lora_bias": False,
+    "fan_in_fan_out": False,
+}
+
+
+def _without(key):
+    return {k: v for k, v in VALID.items() if k != key}
+
+
+def test_a_fully_matching_adapter_qualifies_whatever_its_alpha():
     from multilora.adapters import real_adapter_qualifies
 
-    ok = {"peft_type": "LORA", "r": 8, "target_modules": ["q_proj", "v_proj"]}
-    assert real_adapter_qualifies(ok, rank=16, target_modules=ALL) == (True, "qualifies")
-    too_big = {**ok, "r": 32}
-    assert real_adapter_qualifies(too_big, rank=16, target_modules=ALL)[0] is False
-    outside = {**ok, "target_modules": ["q_proj", "lm_head"]}
-    assert "lm_head" in real_adapter_qualifies(outside, rank=16, target_modules=ALL)[1]
-    pattern = {**ok, "target_modules": "all-linear"}
-    assert real_adapter_qualifies(pattern, rank=16, target_modules=ALL)[0] is False
+    kw = {"rank": 16, "target_modules": ALL, "base_model": BASE}
+    assert real_adapter_qualifies(VALID, **kw) == (True, "qualifies")
+    # lora_alpha only scales the delta; it does not change the kernel's work
+    assert real_adapter_qualifies({**VALID, "lora_alpha": 7}, **kw) == (True, "qualifies")
+    # module order is irrelevant; a missing bias key means "none"; fan_in_fan_out may be None
+    assert real_adapter_qualifies({**VALID, "target_modules": sorted(ALL)}, **kw)[0] is True
+    assert real_adapter_qualifies(_without("bias"), **kw)[0] is True
+    assert real_adapter_qualifies({**VALID, "fan_in_fan_out": None}, **kw)[0] is True
+
+
+@pytest.mark.parametrize(
+    "config, keyword",
+    [
+        ({**VALID, "peft_type": "IA3"}, "peft_type"),
+        ({**VALID, "r": 8}, "rank 8 is not the gate's rank 16"),
+        ({**VALID, "r": 32}, "rank 32 is not the gate's rank 16"),
+        ({**VALID, "r": True}, "rank True"),
+        ({**VALID, "r": "16"}, "rank '16'"),
+        (_without("r"), "rank None"),
+        ({**VALID, "target_modules": "all-linear"}, "pattern"),
+        ({**VALID, "target_modules": list(ALL[:-1])}, "does not target: ['down_proj']"),
+        ({**VALID, "target_modules": [*ALL, "lm_head"]}, "outside the fixed set: ['lm_head']"),
+        ({**VALID, "task_type": "SEQ_CLS"}, "task_type is 'SEQ_CLS'"),
+        ({**VALID, "task_type": None}, "task_type is None"),
+        (_without("task_type"), "task_type is None"),
+        ({**VALID, "modules_to_save": ["score"]}, "modules_to_save is ['score']"),
+        ({**VALID, "use_dora": True}, "use_dora"),
+        ({**VALID, "use_rslora": True}, "use_rslora"),
+        ({**VALID, "rank_pattern": {"q_proj": 8}}, "rank_pattern"),
+        ({**VALID, "alpha_pattern": {"q_proj": 8}}, "alpha_pattern"),
+        ({**VALID, "lora_bias": True}, "lora_bias"),
+        ({**VALID, "fan_in_fan_out": True}, "fan_in_fan_out"),
+        ({**VALID, "bias": "all"}, "bias is 'all'"),
+        ({**VALID, "base_model_name_or_path": "Qwen/Qwen3-4B-Base"}, "'Qwen/Qwen3-4B-Base'"),
+        (_without("base_model_name_or_path"), "base_model_name_or_path is None"),
+    ],
+    ids=[
+        "not-lora", "rank-8", "rank-32", "rank-bool", "rank-str", "rank-missing",
+        "modules-pattern", "module-missing", "module-extra", "seq-cls", "task-none",
+        "task-missing", "modules-to-save", "dora", "rslora", "rank-pattern",
+        "alpha-pattern", "lora-bias", "fan-in-fan-out", "bias-all", "wrong-base",
+        "base-missing",
+    ],
+)
+def test_each_rule_rejects_with_a_reason_naming_it(config, keyword):
+    from multilora.adapters import real_adapter_qualifies
+
+    ok, reason = real_adapter_qualifies(config, rank=16, target_modules=ALL, base_model=BASE)
+    assert ok is False
+    assert keyword in reason
+
+
+def test_the_first_failing_rule_is_the_reason_given():
+    from multilora.adapters import real_adapter_qualifies
+
+    both = {**VALID, "r": 8, "task_type": "SEQ_CLS", "base_model_name_or_path": "x"}
+    reason = real_adapter_qualifies(both, rank=16, target_modules=ALL, base_model=BASE)[1]
+    assert reason == "rank 8 is not the gate's rank 16"
+
+
+def test_the_base_model_cannot_be_left_out():
+    from multilora.adapters import real_adapter_qualifies, select_real_adapters
+
+    with pytest.raises(TypeError):
+        real_adapter_qualifies(VALID, rank=16, target_modules=ALL)
+    with pytest.raises(TypeError):
+        select_real_adapters([], rank=16, target_modules=ALL, count=1)
 
 
 def test_selection_is_deterministic_and_keeps_every_rejection_reason():
     from multilora.adapters import select_real_adapters
 
-    good = {"peft_type": "LORA", "r": 16, "target_modules": ["q_proj"]}
     cands = [
-        {"id": "z/one", "sha": "1", "config": good},
-        {"id": "a/two", "sha": "2", "config": good},
-        {"id": "m/big", "sha": "3", "config": {**good, "r": 64}},
+        {"id": "z/one", "sha": "1", "config": VALID},
+        {"id": "a/two", "sha": "2", "config": VALID},
+        {"id": "m/small", "sha": "3", "config": {**VALID, "r": 8}},
+        {"id": "b/head", "sha": "4", "config": {**VALID, "task_type": "SEQ_CLS"}},
+        {"id": "y/three", "sha": "5", "config": VALID},
     ]
-    res = select_real_adapters(cands, rank=16, target_modules=ALL, count=2)
-    assert res["selected"] == [("a/two", "2"), ("z/one", "1")]
-    assert set(res["rejected"]) == {"m/big"} and res["enough"]
-    assert select_real_adapters(cands, rank=16, target_modules=ALL, count=3)["enough"] is False
+    kw = {"rank": 16, "target_modules": ALL, "base_model": BASE}
+    res = select_real_adapters(cands, count=2, **kw)
+    assert res["selected"] == [("a/two", "2"), ("y/three", "5")]
+    assert res["rejected"] == {
+        "b/head": "task_type is 'SEQ_CLS', not CAUSAL_LM",
+        "m/small": "rank 8 is not the gate's rank 16",
+    }
+    assert res["enough"] is True
+    assert select_real_adapters(list(reversed(cands)), count=2, **kw) == res
+    short = select_real_adapters(cands, count=4, **kw)
+    assert short["selected"] == [("a/two", "2"), ("y/three", "5"), ("z/one", "1")]
+    assert short["enough"] is False
+
+
+def test_reselection_rederives_the_choice_and_keeps_the_evidence():
+    from multilora.adapters import reselect_from_evidence
+
+    evidence = {
+        "query": {"base": BASE, "rank": 16, "count": 1, "limit": 100},
+        "seen": [
+            {"id": "b/ok", "sha": "2", "base": BASE, "config": VALID},
+            {"id": "a/rank8", "sha": "1", "base": BASE, "config": {**VALID, "r": 8}},
+        ],
+        "selected": [["a/rank8", "1"]],
+        "rejected": {},
+        "enough": True,
+    }
+    before = json.loads(json.dumps(evidence))
+    out = reselect_from_evidence(
+        evidence, rank=16, target_modules=ALL, count=1, base_model=BASE
+    )
+    assert evidence == before  # input untouched
+    assert out["seen"] == before["seen"] and out["query"] == before["query"]
+    assert out["selected"] == [["b/ok", "2"]]
+    assert out["rejected"] == {"a/rank8": "rank 8 is not the gate's rank 16"}
+    assert out["enough"] is True
+    assert out["rule"] == "strict-v2"
+    assert out["reselect"] == {
+        "rank": 16, "target_modules": list(ALL), "count": 1, "base_model": BASE,
+    }
+    assert json.loads(json.dumps(out)) == out
+
+
+def test_the_committed_selection_is_what_the_rule_picks_from_the_committed_evidence():
+    """Offline: the pinned adapters follow from the committed Hub snapshot and
+    this rule, so neither can change without the other."""
+    from multilora.adapters import reselect_from_evidence
+
+    evidence = json.loads(EVIDENCE.read_text())
+    out = reselect_from_evidence(
+        evidence, rank=16, target_modules=ALL, count=4, base_model=BASE
+    )
+    assert out["selected"] == evidence["selected"]
+    assert out["rejected"] == evidence["rejected"]
+    assert out["enough"] is True and evidence["enough"] is True
+    assert evidence["rule"] == "strict-v2"
