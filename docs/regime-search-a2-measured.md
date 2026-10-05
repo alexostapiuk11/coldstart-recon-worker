@@ -119,4 +119,56 @@ sign-off. The exclusion rules are not touched either way.
 
 ## Results
 
-(Appended after the search runs.)
+Run 2026-10-04 with `scripts/a2_regime_search.py` at commit 63894dd (4 worker
+processes, CPU only). Output and per-candidate sweep checkpoints are in
+`build/a2-regime-search/`. The search is deterministic and re-runs from the
+same command.
+
+**Stage 1, all 20 screens** (arm A step, `queue_depth` only, 30 repetitions,
+seed 17). A candidate clears exactly when the spike's peak exceeds one replica's
+capacity:
+
+| b | a | peak / one replica | `queue_depth` policies kept | frontier repetitions | discards | screen |
+|---|---|---|---|---|---|---|
+| 0.70 | 0.25 | 0.95 | 18 | 3, 4, 3 | 430 never served, 21 no scaling | fails |
+| 0.70 | 0.5 | 1.20 | 19 | 30 | 0 | clears |
+| 0.70 | 1 | 1.70 | 19 | 30, 30 | 0 | clears |
+| 0.70 | 2 | 2.70 | 19 | 30 | 0 | clears |
+| 0.70 | 3 | 3.70 | 19 | 30 | 0 | clears |
+| 0.40 | 0.25 | 0.65 | 0 | none | 570 no scaling | fails |
+| 0.40 | 0.5 | 0.90 | 1 | 1 | 197 never served, 372 no scaling | fails |
+| 0.40 | 1 | 1.40 | 19 | 30 | 0 | clears |
+| 0.40 | 2 | 2.40 | 19 | 30 | 0 | clears |
+| 0.40 | 3 | 3.40 | 19 | 30 | 0 | clears |
+| 0.20 | 0.25 | 0.45 | 0 | none | 570 no scaling | fails |
+| 0.20 | 0.5 | 0.70 | 0 | none | 570 no scaling | fails |
+| 0.20 | 1 | 1.20 | 19 | 30 | 0 | clears |
+| 0.20 | 2 | 2.20 | 19 | 30 | 0 | clears |
+| 0.20 | 3 | 3.20 | 19 | 30 | 0 | clears |
+| 0.10 | 0.25 | 0.35 | 0 | none | 570 no scaling | fails |
+| 0.10 | 0.5 | 0.60 | 0 | none | 570 no scaling | fails |
+| 0.10 | 1 | 1.10 | 19 | 30 | 0 | clears |
+| 0.10 | 2 | 2.10 | 19 | 30 | 0 | clears |
+| 0.10 | 3 | 3.10 | 19 | 30 | 0 | clears |
+
+The control (0.70 / 0.25) reproduces `scripts/a2_discard_diagnostic.py`
+exactly (430 never served, frontier 3 / 4 / 3), so the search ran the same
+sweep the refused figure run did.
+
+Not a criterion, recorded for the post: in 12 of the 13 clearing candidates,
+`queue_depth`'s frontier is a single point (one policy is at least as cheap and
+as fast as the other 18); 0.70 / 1 has two.
+
+**Stage 2.** 0.70 / 0.5, the first clearing candidate in preference order, was
+verified with the four full sweeps:
+
+| sweep | P1 (`gap_interval` completes) | P2 (distinct median p99 at 1 ms) |
+|---|---|---|
+| arm A step | yes | 46 |
+| arm C step | yes | 53 |
+| arm A ramp | yes | 53 |
+| arm C ramp | yes | 30 |
+
+**0.70 / 0.5 passes.** The search stopped there, as the selection rule says. No
+gap value was recorded or printed. Proposed for the owner's sign-off: b stays at
+0.70, and a moves from 0.25 to 0.5 (peak 1.20× one replica's saturation).
