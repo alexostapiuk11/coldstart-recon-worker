@@ -209,7 +209,8 @@ Committed 2026-10-05. Every value below is the rules of part 1 applied to
 
 Drafted after the first cell runs failed and before any valid co-located
 measurement exists. **It binds only once the owner has signed it off**, and the
-cell campaign resumes only after that.
+cell campaign resumes only after that. Signed off by the owner on 2026-10-05,
+after the probe result below.
 
 **Changed:** for the co-located pair in the cell campaign, both engines now also
 run with `--kv-cache-memory-bytes` set to `6,319,767,552` (`placement_measure.prereg.SPLIT_KV_BYTES`).
