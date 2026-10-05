@@ -56,7 +56,7 @@ from statistics import median
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from a2_lb_common import WORKER, ensure_fd_limit, sender, server_latency_s, warm_up
+from a2_lb_common import RETRY_MARK, WORKER, ensure_fd_limit, sender, server_latency_s, warm_up
 
 from autoscale.figures import validation_overlay
 from autoscale.measured_curve import DEFAULT_PATH, load_measured_curve
@@ -165,6 +165,10 @@ def record_from(outcomes, *, repeat, schedule, host_ids, endpoint_id, template_i
         "until": until, "drain": drain, "seed": seed, "latency_source": LATENCY_SOURCE,
         "host_ids": list(host_ids), "novel_workers": novel, "void": void,
         "headerless_worker_200": no_worker,
+        # Which requests the driver retried after a load-balancer 502 (amendment
+        # 2026-10-05). Disclosed, not a void reason: a retry that failed again is
+        # already voided by its final status above.
+        "lb_502_retried": [i for i, o in enumerate(outcomes) if RETRY_MARK in o.headers],
         "release": "ok", "post_run_error": None, "warmup": dict(warmup or {}),
         "max_jitter_s": max_jitter(outcomes),
         "schedule": list(schedule),
