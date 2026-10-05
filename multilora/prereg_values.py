@@ -24,9 +24,12 @@ PREREG = Preregistration(
     slo_ttft_p95_s=1.0,  # author, signed off
     requests_per_tenant_month=100_000.0,  # author, signed off
     peak_to_average=3.0,  # author, signed off
-    # Artifact 1's published illustrative $1.00/GPU-hour (docs/post.md).
-    # Artifact 4 has not committed a gpu_hourly_rate, so there is none to take.
-    gpu_hourly_rate=1.0,
+    # Amendment 2 (2026-10-05, docs/experiment-a5.md): artifact 4's registered
+    # rate, GPU_HOURLY_RATE in placement/registered.py (commit b17c8ac), derived
+    # from RunPod's billing API for endpoint nnypnh9drkq5ux. It replaces the
+    # illustrative $1.00/GPU-hour carried over from artifact 1 (docs/post.md),
+    # so the economics use one rate across both artifacts.
+    gpu_hourly_rate=1.1095,
     schedule_seed=20261001,
     # Cut by the owner on 2026-10-05: lora-N64-specialize ran out of memory at
     # both the 0.85 and 0.80 budgets (docs/recon-a5.md, "The diagnostic is cut").

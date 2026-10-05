@@ -305,3 +305,153 @@ resolution check.
 | `gate_instances` | `144` |
 | `equivalence_margin` (derived) | `0.05` |
 | `requests_per_phase` (derived) | `640` |
+
+## Amendment 2 — the GPU hourly rate, a base-model disclosure and an endpoint constraint (2026-10-05)
+
+This amendment was written while the larger gate of Amendment 1 was running. It
+records three decisions the owner made in chat on 2026-10-05. None of its three
+parts changes what is measured, or how the gate or the campaign is analysed.
+Nothing above this section has been edited: the text and the tables above remain
+the record of what was pre-registered and of Amendment 1.
+
+### The GPU hourly rate
+
+`gpu_hourly_rate` changes from $1.00 per GPU-hour (illustrative, carried over
+from artifact 1) to $1.1095 per GPU-hour, artifact 4's registered rate. "Rules
+fixed now" said that if artifact 4 fixed a different rate before publication,
+that would be an amendment to this document, not a silent change; this is that
+amendment.
+
+The rate is `GPU_HOURLY_RATE = 1.1095` in artifact 4's `placement/registered.py`
+(commit b17c8ac), and its provenance there reads:
+
+> derived from RunPod's billing API for endpoint nnypnh9drkq5ux (GET
+> /v1/billing/endpoints: $0.2443519 for 792.879 s billed, $0.000308 per
+> second), read 2026-10-05
+
+Arithmetic check: $0.2443519 / 792.879 s = $0.000308 per second, and × 3600 =
+$1.1095 per hour. It is one billing sample from another endpoint
+(`nnypnh9drkq5ux`, artifact 4's), so it is an estimate of the platform's price
+for this GPU class, not a quoted price, and it stays a stated assumption in the
+post. Artifact 4's reconnaissance record (`docs/recon-a4.md`, section 1, on
+`main`, not on this branch) later read the same billing record in full, $0.4988
+for 1,623.2 s billed, an implied $1.106 per hour, and kept $1.1095 as
+registered; the 0.3% difference does not matter here either. Commit b17c8ac is
+on the remote: `git branch -r --contains b17c8ac` lists `origin/main` (as of
+the local repository's last fetch).
+
+The rate affects only the economics: the cost per tenant, the three-way table
+with artifact 4 and the budget estimate. It never enters a measurement. The
+economics must use one rate across both artifacts, and
+`multilora/economics.py` refuses a three-way table whose artifact 4 rate
+differs from this pre-registration's.
+
+Amendment 1's "Budget, revised" total at the new rate: 6.98 + 9.30 + 0.55 +
+1.16 = 17.99 GPU-hours, and 17.99 × $1.1095 = $19.96. That is just under the $20
+cap, with no margin to speak of ($0.04). The design amendment's §6 cut order
+(the gauge control first) remains the rule if the campaign estimate exceeds the
+cap, and that decision is the owner's. `scripts/a5_budget.py`, which uses
+reconnaissance's per-instance timing model that Amendment 1 found to be roughly
+three times too low, now prints 5.64 GPU-hours and $6.25 for the gate of 144
+and the campaign; the measured-time total above is the one compared with the
+cap.
+
+### The base model
+
+Artifact 5's base model stays `Qwen/Qwen3-4B` at
+`1cfa9a7208912126459214e8b04321603b3df60c` (the owner's decision). The
+configuration held fixed above does not change.
+
+Artifact 4's reconnaissance changed its own model class to `Qwen/Qwen3-1.7B` at
+`70d244cc86ccca08cf5af4e1e306ecf908b1ad5e`. Its primary pair (Qwen3-4B and
+Qwen3-4B-Base, two engines at 0.45 of GPU memory each) failed its
+pre-registered go/no-go on 2026-10-05, with KV capacities of 9,456 and 9,520
+tokens against the 16,384 required, while the fallback pair (Qwen3-1.7B twice)
+passed with 55,104 and 64,976 tokens (`docs/recon-a4.md`, section 2, on `main`).
+That record also says artifact 5's base model changes with artifact 4's class
+(section 8); the owner decided otherwise, which is why this is disclosed here.
+The design amendment's prerequisite 2 ("Artifact 4 fixes the base model, GPU
+class and vLLM image") is met for the GPU class and the vLLM image, but not for
+the base model.
+
+Consequence for the post: "Adapters versus swapping models" sets artifact 5's
+adapter-serving results on Qwen3-4B against artifact 4's model-swap costs
+measured on Qwen3-1.7B. The post must say plainly that the two sides use
+different model sizes, and must not present the comparison as like-for-like.
+Artifact 4's reference point is expected to be `{"regime": "bursty", "s": 1.0}`.
+
+`docs/experiment-a4.md`, step 1, says Qwen3-4B "is also artifact 5's base
+model". For artifact 4, that sentence is superseded by its own fallback
+decision; for artifact 5 it still holds.
+
+### An endpoint constraint
+
+At 19:28:40 UTC on 2026-10-05, `allowedCudaVersions` was set to `["13.0"]` on
+the measurement endpoint `2ilkjkm9ob4qvo`. That was immediately after the gate
+record with run index 28 landed (19:28:39 UTC), while the larger gate was
+running; at 19:34 UTC it had 31 of 144 records, all `ok`.
+
+Why: artifact 4 reported that the vLLM 0.27.1 base image needs a host driver
+that supports CUDA 13.0, and that one host failed with CUDA `Error 804` (forward
+compatibility attempted on unsupported hardware), so its endpoint was restricted
+the same way (`docs/recon-a4.md`, sections 1 and 9). Ours had no restriction.
+
+`allowedCudaVersions` is not one of the five pinned fields (`flashboot`,
+`gpuTypeIds`, `networkVolumeId`, `templateId`, `workersMin`). The controller
+re-read the endpoint after the update: all five pinned fields, and
+`workersMax`, `idleTimeout`, `executionTimeoutMs`, `gpuCount`, `scalerType` and
+`scalerValue`, were unchanged, and the live preflight against
+`multilora/pins.py` is expected to still match.
+
+The hosts in the stores so far (read while the gate was running, at 31
+records):
+
+| Store | Records | `host_id` | `driver_version` | `failure_class` |
+|---|---|---|---|---|
+| `data/a5/priming.jsonl` | 14 | `py4ehqx9v51fj4` | `595.91.07` | none in 14 |
+| `data/a5/gate-pilot.jsonl` | 24 | `py4ehqx9v51fj4` | `595.91.07` | none in 24 |
+| `data/a5/gate.jsonl`, run index 0 to 28 (before) | 29 | `vw53rwt15gpiab` | `580.178.04` | none in 29 |
+| `data/a5/gate.jsonl`, run index 29 and 30 (after) | 2 | `vw53rwt15gpiab` | `580.178.04` | none in 2 |
+
+Every record's outcome is `ok` and its `failure_class` is empty, and no record
+contains a CUDA error. Each store ran on one host; the pilot and the larger gate
+ran on different hosts with different drivers. Records with run index 28 or
+below ran before the constraint and the rest after it. The host is not
+randomized: it is whatever the platform assigns, before and after the
+constraint, and the records name it. The pilot is not pooled with the larger
+gate (Amendment 1), so the host change between them does not enter the
+verdict. The post's Method names the constraint.
+
+### Parameters as amended (2)
+
+The earlier tables stay as the record. This is the table the code now runs on:
+
+| parameter | value |
+|---|---|
+| `concurrency` | `64` |
+| `rank` | `16` |
+| `target_modules` | `('q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj')` |
+| `gate_adapters` | `4` |
+| `warmup_requests_per_adapter` | `2` |
+| `scrape_interval_s` | `1.0` |
+| `knee_threshold` | `0.1` |
+| `request_tokens` | `29` |
+| `context_length_tokens` | `8192` |
+| `slo_ttft_p95_s` | `1.0` |
+| `requests_per_tenant_month` | `100000.0` |
+| `peak_to_average` | `3.0` |
+| `gpu_hourly_rate` | `1.1095` |
+| `schedule_seed` | `20261001` |
+| `include_diagnostic` | `False` |
+| `include_control` | `True` |
+| `bench_dataset_args` | `('--dataset-name', 'random', '--random-input-len', '13', '--random-output-len', '16')` |
+| `real_adapters` | `(('AIsakawaii/task_b_method2_qwen4b', '8ba6625bbb5f5a8770109f003ae55fcaef4fb117'), ('davemaxuellkr/KIRD-project_QLoRa-Qwen3-4B_en-ko', 'f7eb9b54171b1212347ebb0e3bb26008d81e92db'), ('hanghang1024/Qwen3-4b-Qlora-Fin', '47d3fc76a0d748497e726134ee5092e68bb0cacf'), ('jacobcd52/qwen3_4b_hacker', '89cb5e72a31c2f2ce53e9c4f9aee9ee38b7c26e2'))` |
+| `sweep` | `(1, 2, 4, 8, 16, 32, 64)` |
+| `concentrated_k` | `1` |
+| `instances_per_condition` | `24` |
+| `phases_per_regime` | `2` |
+| `diagnostic_points` | `(1, 16, 64)` |
+| `control_point` | `64` |
+| `gate_instances` | `144` |
+| `equivalence_margin` (derived) | `0.05` |
+| `requests_per_phase` (derived) | `640` |
