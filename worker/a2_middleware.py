@@ -24,6 +24,13 @@ import time
 
 WORKER_HEADER = b"x-a2-worker"
 SERVER_LATENCY_HEADER = b"x-a2-server-latency-ms"
+# The engine's wall-clock time, in seconds, when the request reached this layer
+# (amendment 2026-10-05, third). The gate bins each repeat by when the ENGINE
+# received a request: RunPod's load balancer stalls and releases requests in
+# bursts, so the driver's send times are not the engine's arrivals. Wall clock,
+# not perf_counter: vLLM may serve from more than one API process, and only the
+# wall clock is shared between them; over a 400 s run its drift is negligible.
+SERVER_RECEIVED_HEADER = b"x-a2-server-received"
 
 
 class WorkerHeaders:
@@ -40,9 +47,10 @@ class WorkerHeaders:
     and the driver would count one worker where two answered.
     """
 
-    def __init__(self, app, *, clock=time.perf_counter, worker_id=None):
+    def __init__(self, app, *, clock=time.perf_counter, wall_clock=time.time, worker_id=None):
         self.app = app
         self._clock = clock
+        self._wall_clock = wall_clock
         self.worker_id = (worker_id or os.environ.get("RUNPOD_POD_ID")
                           or os.environ.get("HOSTNAME"))
         if not self.worker_id:
@@ -57,12 +65,14 @@ class WorkerHeaders:
             await self.app(scope, receive, send)
             return
         t0 = self._clock()
+        received = f"{self._wall_clock():.6f}".encode()
 
         async def stamped(message):
             if message.get("type") == "http.response.start":
                 ms = (self._clock() - t0) * 1000.0
                 headers = [*message.get("headers", []), (WORKER_HEADER, self._worker),
-                           (SERVER_LATENCY_HEADER, f"{ms:.3f}".encode())]
+                           (SERVER_LATENCY_HEADER, f"{ms:.3f}".encode()),
+                           (SERVER_RECEIVED_HEADER, received)]
                 message = {**message, "headers": headers}
             await send(message)
 

@@ -637,6 +637,97 @@ verdict, with the fill-first routing above as a finding about this platform.
 **Cost:** one worker instead of two. About $0.15 for the probe, about $0.55
 for three repeats.
 
+## Amendment, 2026-10-05 (third): the gate judges the arrivals the engine received
+
+Made after the first three one-replica repeats, and before any verdict was
+computed on them or on anything else. Signed off by the owner on 2026-10-05.
+
+**Why.** All three one-replica repeats were shaped by the load balancer, not by
+the engine:
+
+| Repeat | Requests delayed over 2 s client-side | Load-balancer 502s retried | As signed |
+|---|---|---|---|
+| 1 | 16,868 (26%) | 50 | void: 2 load-balancer 400s at about 9.3 s, no worker header |
+| 2 | 22,385 (35%) | 23 | refused: send jitter 0.591 s |
+| 3 | 13,620 (21%) | 22 | refused: send jitter 0.806 s |
+
+The load balancer stalls: it holds requests for seconds, then releases them
+together. The engine therefore did not receive the schedule the driver sent.
+The send-jitter overruns are the driver catching up after such a release.
+Judged by scheduled arrival, the gate would score the platform's stalls as
+simulator misses. The gate exists to test the simulator's model of the engine,
+and the load balancer is not part of that model.
+
+**Changed:**
+
+1. **Engine arrival times are recorded.** `worker/a2_middleware.py` also
+   stamps `x-a2-server-received`, the engine's wall-clock time when the request
+   reached it.
+   - A repeat runs on one worker, so one clock stamps every request.
+   - The stamps are put on the run's timeline by subtracting the smallest
+     (received − sent) in the run. That aligns the least-delayed request with
+     its send time, and every other request arrives at or after its own.
+2. **Each repeat is predicted from its own engine arrivals.**
+   `run_fixed_capacity` replays the requests in the order and at the times the
+   engine received them, at one replica, over the same 400 s window.
+   - Real and predicted latencies are binned by that engine arrival time, 10 s
+     bins as before.
+   - A real request that finishes after the window counts as unfinished, as
+     before.
+3. **A bin misses when all three repeats land on the same side of their own
+   predictions.**
+   - For each repeat, the bin's residual is its real p50 minus its predicted
+     p50. The bin misses if the three residuals are all above +1 ms or all
+     below −1 ms.
+   - When the three repeats received identical arrivals, this is exactly the
+     signed rule ("the prediction is outside the min-max of the real p50s").
+     The signed miss-rate argument holds unchanged: a perfect model misses a
+     bin with probability 1/4.
+   - Censoring:
+     - **Unstable** (excluded, reported): reality backlogged in some repeats
+       and not others.
+     - **Miss:** reality backlogged in every repeat and the model did not in
+       some repeat, or the reverse.
+     - **Agree, not judged:** both backlogged in every repeat.
+     - **Excluded, reported:** any repeat's bin is thin or empty on either side.
+   - The thresholds are unchanged: at least 10 judged bins, and at most half of
+     them missing.
+4. **Requests that never reached the engine** (a final non-200 without the
+   worker header) are left out of both the real and the predicted side, since
+   the engine never saw them. They are counted and published.
+   - A repeat is **void** if more than **1%** of its requests never reached the
+     engine.
+   - A request that reached the engine and did not end in 200 still voids, as
+     signed.
+   - A 200 without the received-time header voids, like one without the
+     latency header.
+5. **Send jitter is recorded, not judged.** That rule guaranteed the
+   prediction replayed the trace the system actually received. Predicting from
+   engine arrivals now guarantees that directly. Jitter is published with each
+   repeat.
+6. **Figure 3** shows, per bin, the three repeats' residuals around zero, and
+   marks the misses.
+
+**What does not change:** one replica, the schedule the driver sends (64,784
+requests, seed 20261004), the warm-up, the retry of the load balancer's own
+502s, the host-novelty disclosure, three repeats with one re-run of a void
+repeat, and the pass rule's thresholds.
+
+**What it costs, disclosed:**
+- The predictions can no longer be computed before the run. They come from
+  each run's observed arrivals.
+- The simulator still fits nothing to the run: arrivals go in, latencies come
+  out, and no parameter is estimated from the repeats.
+- The pre-registered schedule's predictions (p50 0.543 s, p99 0.702 s) stay on
+  record, published beside the engine-arrival results.
+- Bursts released by load-balancer stalls are now input to the model, so the
+  gate tests the service model under burstier traffic than the schedule
+  intended.
+
+**The first three one-replica repeats** carry no engine arrival times and
+cannot be judged under this rule. They are kept and published as evidence for
+it, with no verdict computed.
+
 ## Stopping rule
 
 The sweep is exhaustive over the pre-declared threshold grid; there is no

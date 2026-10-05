@@ -8,7 +8,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "worker"))
 
-from a2_middleware import SERVER_LATENCY_HEADER, WORKER_HEADER, WorkerHeaders
+from a2_middleware import (
+    SERVER_LATENCY_HEADER,
+    SERVER_RECEIVED_HEADER,
+    WORKER_HEADER,
+    WorkerHeaders,
+)
 
 
 class Clock:
@@ -85,3 +90,17 @@ def test_no_worker_id_is_an_error_not_a_shared_placeholder(monkeypatch):
 
 def test_starlette_style_construction_with_app_keyword_works():
     assert WorkerHeaders(app=_app, worker_id="w").app is _app
+
+
+def test_the_received_header_is_pinned_lowercase():
+    assert SERVER_RECEIVED_HEADER == b"x-a2-server-received"
+
+
+def test_the_engine_stamps_when_the_request_reached_it():
+    """Amendment 2026-10-05 (third): the gate bins by the engine's arrival time,
+    taken when the request reached this layer, not when the response started."""
+    mw = WorkerHeaders(_app, clock=Clock(10.0, 10.25), wall_clock=Clock(1759600000.123456),
+                       worker_id="pod-abc")
+    headers = dict(_run(mw, {"type": "http"})[0]["headers"])
+    assert headers[SERVER_RECEIVED_HEADER] == b"1759600000.123456"
+    assert headers[SERVER_LATENCY_HEADER] == b"250.000"

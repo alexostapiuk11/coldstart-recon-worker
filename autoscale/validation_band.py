@@ -49,7 +49,8 @@ from dataclasses import dataclass
 
 from autoscale.stats import MIN_SAMPLES, percentiles
 
-__all__ = ["BandBin", "Bin", "BinVerdict", "Validation", "band", "compare", "trajectory"]
+__all__ = ["BandBin", "Bin", "BinVerdict", "Validation", "band", "compare", "compare_per_repeat",
+           "trajectory"]
 
 
 @dataclass(frozen=True)
@@ -279,24 +280,7 @@ def compare(predicted: Sequence[Bin], band_bins: Sequence[BandBin], *,
     All three thresholds are required, not defaulted: they decide when the
     evidence counts, and that is a pre-registered choice per artifact.
     """
-    if min_compared_bins < 1:
-        raise ValueError(
-            f"min_compared_bins={min_compared_bins}; a gate that requires no "
-            "comparable bins passes on no evidence at all"
-        )
-    if not (math.isfinite(max_miss_fraction) and 0 <= max_miss_fraction < 1):
-        raise ValueError(
-            f"max_miss_fraction={max_miss_fraction!r} must be finite and in [0, 1); "
-            "at 1 or above every bin may miss and the gate passes any model, and a "
-            "NaN compares False against the miss count, which passes any model too"
-        )
-    if not (math.isfinite(edge_tolerance_seconds) and edge_tolerance_seconds >= 0):
-        raise ValueError(
-            f"edge_tolerance_seconds={edge_tolerance_seconds!r} must be finite and "
-            "non-negative; a negative one narrows the band below what the repeats "
-            "showed, an infinite one widens it to everything, and a NaN makes "
-            "every comparison False so every bin misses"
-        )
+    _check_thresholds(min_compared_bins, max_miss_fraction, edge_tolerance_seconds)
     predicted, band_bins = list(predicted), list(band_bins)
     if len(predicted) != len(band_bins) or any(
         (p.start, p.end) != (b.start, b.end) for p, b in zip(predicted, band_bins, strict=False)
@@ -330,6 +314,34 @@ def compare(predicted: Sequence[Bin], band_bins: Sequence[BandBin], *,
             miss = b.lo - p.p50 if p.p50 < b.lo else p.p50 - b.hi
             verdicts.append(BinVerdict(b.start, b.end, "outside", miss))
 
+    return _outcome(verdicts, min_compared_bins=min_compared_bins,
+                    max_miss_fraction=max_miss_fraction)
+
+
+def _check_thresholds(min_compared_bins: int, max_miss_fraction: float,
+                      edge_tolerance_seconds: float) -> None:
+    if min_compared_bins < 1:
+        raise ValueError(
+            f"min_compared_bins={min_compared_bins}; a gate that requires no "
+            "comparable bins passes on no evidence at all"
+        )
+    if not (math.isfinite(max_miss_fraction) and 0 <= max_miss_fraction < 1):
+        raise ValueError(
+            f"max_miss_fraction={max_miss_fraction!r} must be finite and in [0, 1); "
+            "at 1 or above every bin may miss and the gate passes any model, and a "
+            "NaN compares False against the miss count, which passes any model too"
+        )
+    if not (math.isfinite(edge_tolerance_seconds) and edge_tolerance_seconds >= 0):
+        raise ValueError(
+            f"edge_tolerance_seconds={edge_tolerance_seconds!r} must be finite and "
+            "non-negative; a negative one narrows the band below what the repeats "
+            "showed, an infinite one widens it to everything, and a NaN makes "
+            "every comparison False so every bin misses"
+        )
+
+
+def _outcome(verdicts: list[BinVerdict], *, min_compared_bins: int,
+             max_miss_fraction: float) -> Validation:
     judged = [v for v in verdicts if v.verdict in ("inside", "outside", "censoring_disagreement")]
     agreeing = sum(1 for v in judged if v.verdict == "inside")
     misses = len(judged) - agreeing
@@ -356,3 +368,85 @@ def compare(predicted: Sequence[Bin], band_bins: Sequence[BandBin], *,
     detail += (f"; {excluded} excluded ({unstable} unstable); "
                f"{both} both censored (agreement, not judged)")
     return Validation(tuple(verdicts), len(judged), agreeing, outcome, detail, max_miss)
+
+
+def compare_per_repeat(pairs, *, min_repeats: int, min_compared_bins: int,
+                       max_miss_fraction: float, edge_tolerance_seconds: float) -> Validation:
+    """Each repeat held to ITS OWN prediction, then the same verdict as `compare`.
+
+    `pairs` is one `(real, predicted)` trajectory pair per repeat, binned
+    identically. Used when the repeats did not deliver one trace to the system
+    (artifact 2's amendment of 2026-10-05, third: RunPod's load balancer
+    released requests in bursts, so each repeat's engine saw different
+    arrivals), and the model is replayed on each repeat's own arrivals.
+
+    Per bin, the residual of a repeat is its real p50 minus its predicted p50.
+    The bin is inside iff `min - tol <= 0 <= max + tol` over the repeats'
+    residuals: it misses only when every repeat lands on the same side of its
+    own prediction. With one shared prediction this IS `compare` against
+    `band`: `lo <= p <= hi` is `lo - p <= 0 <= hi - p`, and the censoring
+    rules below are `compare`'s, read per repeat (the test suite checks the
+    reduction on randomized trajectories). The miss rate argument carries over
+    unchanged: a perfect model's residuals fall on either side at random, so a
+    bin misses with probability 2 x (1/2)^3.
+
+    Censoring, per bin, in this order:
+    - reality backlogged in some repeats and not others: "excluded_unstable";
+    - reality backlogged in every repeat: "agree_censored" if the model
+      backlogged in every repeat too, else "censoring_disagreement";
+    - reality kept up in every repeat and the model backlogged in any:
+      "censoring_disagreement" (rejected: calling a model that disagrees with
+      itself across traces "unstable", which would excuse it for a backlog
+      reality never showed);
+    - any side thin or empty in any repeat: "excluded_insufficient";
+    - otherwise the residual test above. An outside miss's magnitude is the
+      distance from zero to the nearer unwidened residual edge.
+    """
+    _check_thresholds(min_compared_bins, max_miss_fraction, edge_tolerance_seconds)
+    pairs = [(list(r), list(p)) for r, p in pairs]
+    if len(pairs) < min_repeats:
+        raise ValueError(
+            f"{len(pairs)} repeats; the comparison needs at least {min_repeats}. Fewer "
+            "makes the residuals' spread the spread of too few numbers"
+        )
+    edges = [(b.start, b.end) for b in pairs[0][0]]
+    for real, pred in pairs:
+        if [(b.start, b.end) for b in real] != edges or [(b.start, b.end) for b in pred] != edges:
+            raise ValueError(
+                "repeats or predictions were binned differently; their bin edges "
+                "disagree, so a bin's residuals would come from different stretches of time"
+            )
+    tol = edge_tolerance_seconds
+    verdicts = []
+    for i, (start, end) in enumerate(edges):
+        reals = [real[i] for real, _ in pairs]
+        preds = [pred[i] for _, pred in pairs]
+        real_c = {r.status == "censored" for r in reals}
+        pred_c = [p.status == "censored" for p in preds]
+        if len(real_c) > 1:
+            verdicts.append(BinVerdict(start, end, "excluded_unstable", 0.0))
+        elif real_c == {True}:
+            verdict = "agree_censored" if all(pred_c) else "censoring_disagreement"
+            verdicts.append(BinVerdict(start, end, verdict,
+                                       0.0 if verdict == "agree_censored" else math.inf))
+        elif any(pred_c):
+            verdicts.append(BinVerdict(start, end, "censoring_disagreement", math.inf))
+        elif any(b.status != "ok" for b in (*reals, *preds)):
+            verdicts.append(BinVerdict(start, end, "excluded_insufficient", 0.0))
+        else:
+            # Written in `compare`'s own arithmetic -- `real - tol > pred`, not
+            # `(real - pred) - tol > 0` -- because the two round differently at the
+            # tolerance edge, and the reduction to `compare` must hold to the bit.
+            # Rounding is monotonic, so "every repeat's real - tol is above its
+            # prediction" is `compare`'s `lo - tol > p` when the prediction is shared.
+            pairs_ = list(zip(reals, preds, strict=True))
+            if all(r.p50 - tol > p.p50 for r, p in pairs_):
+                verdicts.append(BinVerdict(start, end, "outside",
+                                           min(r.p50 - p.p50 for r, p in pairs_)))
+            elif all(r.p50 + tol < p.p50 for r, p in pairs_):
+                verdicts.append(BinVerdict(start, end, "outside",
+                                           min(p.p50 - r.p50 for r, p in pairs_)))
+            else:
+                verdicts.append(BinVerdict(start, end, "inside", 0.0))
+    return _outcome(verdicts, min_compared_bins=min_compared_bins,
+                    max_miss_fraction=max_miss_fraction)

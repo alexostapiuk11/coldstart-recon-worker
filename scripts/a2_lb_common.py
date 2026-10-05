@@ -23,6 +23,7 @@ from harness.open_loop import http_sender, max_jitter, replay
 
 WORKER = "x-a2-worker"
 SERVER_LATENCY = "x-a2-server-latency-ms"
+SERVER_RECEIVED = "x-a2-server-received"
 # Added by the driver, never by a server, to a request it retried (below). Its
 # value is "<first status>:<seconds the first attempt took>".
 RETRY_MARK = "a2-driver-lb-retry"
@@ -137,7 +138,7 @@ def sender(endpoint_id: str, api_key: str):
     return retry_lb_502(http_sender(lb_url(endpoint_id), payload=payload(),
                                     headers={"Authorization": f"Bearer {api_key}"},
                                     timeout=REQUEST_TIMEOUT_S,
-                                    keep_headers=(WORKER, SERVER_LATENCY)))
+                                    keep_headers=(WORKER, SERVER_LATENCY, SERVER_RECEIVED)))
 
 
 def constant_rate(rate: float, seconds: float) -> tuple[float, ...]:

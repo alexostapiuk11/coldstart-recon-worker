@@ -14,7 +14,7 @@ sys.path.insert(0, str(REPO / "worker"))
 sys.path.insert(0, str(REPO / "scripts"))
 
 import a2_lb_common
-from a2_middleware import SERVER_LATENCY_HEADER, WORKER_HEADER
+from a2_middleware import SERVER_LATENCY_HEADER, SERVER_RECEIVED_HEADER, WORKER_HEADER
 
 
 def test_the_worker_header_is_the_one_the_driver_reads():
@@ -23,3 +23,7 @@ def test_the_worker_header_is_the_one_the_driver_reads():
 
 def test_the_server_latency_header_is_the_one_the_driver_reads():
     assert SERVER_LATENCY_HEADER.decode() == a2_lb_common.SERVER_LATENCY
+
+
+def test_the_received_header_is_the_one_the_driver_reads():
+    assert SERVER_RECEIVED_HEADER.decode() == a2_lb_common.SERVER_RECEIVED
