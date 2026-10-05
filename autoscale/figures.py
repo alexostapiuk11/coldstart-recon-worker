@@ -625,12 +625,20 @@ def frontiers(
     note = f"n={total} frontier points across {len(SIGNAL_ORDER)} signals"
     if context:
         note = f"{note} — {context}"
+    # The curve phrase opens the SECOND line. The first already carries the N
+    # statement, the context and the repetition count, and with a long context
+    # ("ramp arm A") the phrase pushed it past the canvas. A third line was
+    # tried and rejected: it falls below the canvas under this figure's fixed
+    # bottom margin. "(invented)" is dropped from the placeholder wording because
+    # "PLACEHOLDER" in capitals already says it, and with it the second line
+    # was still 21 px wider than the canvas.
+    curve_text = ""
     if curve_measured is not None:
-        note = f"{note} · {'measured curve' if curve_measured else 'PLACEHOLDER curve (invented)'}"
+        curve_text = "measured curve · " if curve_measured else "PLACEHOLDER curve · "
     all_points = [p for v in by_signal.values() for p in v]
     _note(
         axis,
-        f"{note} · {_reps_text(all_points)}\n{_span(drawn_p99)} · "
+        f"{note} · {_reps_text(all_points)}\n{curve_text}{_span(drawn_p99)} · "
         "shaded: 95% bootstrap interval",
         y=-0.245,
     )

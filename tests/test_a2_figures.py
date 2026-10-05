@@ -937,16 +937,21 @@ def _draw_measured(tmp_path):
     return service_curve(MEASURED.curve, tmp_path / "m.png", return_figure=True, measured=MEASURED)
 
 
+def _gid_count(axis, gid):
+    return sum(1 for a in axis.findobj() if getattr(a, "get_gid", lambda: None)() == gid)
+
+
 def test_measured_figure_4_draws_an_interval_bar_set_on_every_panel(tmp_path):
     fig = _draw_measured(tmp_path)
-    bars = [a for a in fig.findobj() if getattr(a, "get_gid", lambda: None)() == "interval"]
-    assert len(bars) == 3
+    assert len(fig.axes) == 3
+    for axis in fig.axes:
+        assert _gid_count(axis, "interval") == 1
 
 
 def test_measured_figure_4_marks_the_idle_point_apart(tmp_path):
     fig = _draw_measured(tmp_path)
-    idle = [a for a in fig.findobj() if getattr(a, "get_gid", lambda: None)() == "idle"]
-    assert len(idle) == 2  # utilisation and throughput panels
+    # Throughput and utilisation only: latency has no idle reading to show.
+    assert [_gid_count(axis, "idle") for axis in fig.axes] == [0, 1, 1]
 
 
 def test_measured_figure_4_states_runs_levels_and_the_unservable_level(tmp_path):
@@ -969,12 +974,36 @@ def test_measured_figure_4_clears_the_phone_floor_and_stays_on_canvas(tmp_path):
 
 
 def test_the_interval_bars_change_the_saved_pixels(tmp_path):
+    """The same MeasuredCurve drawn twice, once with its intervals collapsed to
+    zero width, compared over the first panel's window only. Against a bare
+    `service_curve(curve)` the diff would also include the idle-point segment
+    and the note and subtitle text, and would pass with the bars deleted."""
+    import dataclasses
+
     from PIL import ImageChops
-    with_bars = service_curve(MEASURED.curve, tmp_path / "a.png", measured=MEASURED)
-    without = service_curve(MEASURED.curve, tmp_path / "b.png")
-    diff = ImageChops.difference(Image.open(with_bars).convert("RGB"),
-                                 Image.open(without).convert("RGB"))
-    assert diff.getbbox() is not None
+
+    def panel(figure, name):
+        figure.canvas.draw()
+        box = figure.axes[0].get_window_extent()
+        h = figure.canvas.get_width_height()[1]
+        crop = (round(box.x0), round(h - box.y1), round(box.x1), round(h - box.y0))
+        path = tmp_path / name
+        figure.savefig(path)
+        return Image.open(path).convert("RGB").crop(crop)
+
+    flat = dataclasses.replace(
+        MEASURED,
+        intervals=tuple(
+            {**i, **{k: [v, v] for k, v in zip(
+                ("latency_s_range", "throughput_tps_range", "gpu_util_range"),
+                (p[1], p[2], p[3]), strict=True)}}
+            for i, p in zip(MEASURED.intervals, MEASURED.measured_points, strict=True)
+        ),
+    )
+    with_bars = panel(_draw_measured(tmp_path), "a.png")
+    without = panel(service_curve(MEASURED.curve, tmp_path / "b0.png", return_figure=True,
+                                  measured=flat), "b.png")
+    assert ImageChops.difference(with_bars, without).getbbox() is not None
 
 
 def test_measured_requires_the_matching_curve(tmp_path):
@@ -990,4 +1019,18 @@ def test_figure_2_names_its_curve_only_when_told(tmp_path):
     assert "measured curve" in meas
     ph = " ".join(_texts(frontiers(ALL_THREE, tmp_path / "h.png", return_figure=True,
                                    curve_measured=False)))
-    assert "PLACEHOLDER curve (invented)" in ph
+    assert "PLACEHOLDER curve" in ph
+
+
+@pytest.mark.parametrize("curve_measured", [True, False])
+@pytest.mark.parametrize("context", ["arm A", "ramp arm A"])
+def test_figure_2_note_stays_on_canvas_with_its_curve_label(tmp_path, curve_measured, context):
+    fig = frontiers(WIDE_A, tmp_path / "f.png", return_figure=True, context=context,
+                    curve_measured=curve_measured)
+    width_in = fig.get_size_inches()[0]
+    w, h = fig.canvas.get_width_height()
+    for t in fig.findobj(match=matplotlib.text.Text):
+        if t.get_text().strip():
+            assert t.get_fontsize() * 375 / (72 * width_in) >= MIN_PHONE_TEXT_PX, t.get_text()
+    for text, box in _rendered(fig):
+        assert box.x0 >= -1 and box.y0 >= -1 and box.x1 <= w + 1 and box.y1 <= h + 1, text
