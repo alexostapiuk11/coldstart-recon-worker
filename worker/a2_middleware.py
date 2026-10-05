@@ -27,6 +27,15 @@ SERVER_LATENCY_HEADER = b"x-a2-server-latency-ms"
 
 
 class WorkerHeaders:
+    """Add the worker id and server latency headers to every HTTP response.
+
+    The latency is the time to the response start, so for a streaming
+    response it is time to first byte, not the whole generation. A request
+    whose app raises before responding carries no headers at all; the
+    driver treats a response without them as a failed request, which voids
+    the run rather than letting an unattributed request count.
+    """
+
     def __init__(self, app, *, clock=time.perf_counter, worker_id=None):
         self.app = app
         self._clock = clock

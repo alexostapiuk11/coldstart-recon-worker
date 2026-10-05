@@ -9,6 +9,10 @@ the endpoint's HEALTH_CHECK_PATH is set to vLLM's own /health.
 
 `exec`, not a subprocess: the platform's signals then reach vLLM directly,
 and no Python parent sits between the load balancer and the engine.
+
+All four variables are required, with no defaults. The rejected alternative
+is a default (or dropping the flag when a variable is unset): it would start
+a different engine than the one measured, and start it without error.
 """
 
 import os
@@ -17,17 +21,32 @@ MIDDLEWARE = "a2_middleware.WorkerHeaders"
 # The service curve's flags (served_cmd), held fixed.
 CURVE_FLAGS = ("--max-num-seqs", "256", "--no-enable-prefix-caching")
 
+# Each required variable, with what a missing one would silently cost.
+REQUIRED = {
+    "MODEL_ID": "there is no model to serve",
+    "MODEL_REVISION": "without --revision the weights are unpinned, so the engine is not the measured one",
+    "MAX_MODEL_LEN": "without --max-model-len the KV capacity, and so the engine, differs from the measured curve",
+    "PORT": "without PORT the engine listens where the load balancer is not routing",
+}
+
 
 def command(env) -> list[str]:
-    cmd = ["vllm", "serve", env["MODEL_ID"], "--port", env.get("PORT", "8000")]
-    if env.get("MODEL_REVISION"):
-        cmd += ["--revision", env["MODEL_REVISION"]]
-    if env.get("MAX_MODEL_LEN"):
-        cmd += ["--max-model-len", env["MAX_MODEL_LEN"]]
-    return [*cmd, *CURVE_FLAGS, "--middleware", MIDDLEWARE]
+    """The `vllm serve` argv: the curve's served_cmd plus the middleware.
+
+    Raises KeyError naming the variable and the consequence if a required
+    one is unset; see the module docstring for the rejected alternative.
+    """
+    for name, consequence in REQUIRED.items():
+        if not env.get(name):
+            raise KeyError(f"{name} is not set: {consequence}")
+    return ["vllm", "serve", env["MODEL_ID"], "--port", env["PORT"],
+            "--revision", env["MODEL_REVISION"],
+            "--max-model-len", env["MAX_MODEL_LEN"],
+            *CURVE_FLAGS, "--middleware", MIDDLEWARE]
 
 
 def main() -> None:
+    """Replace this process with vLLM, so no Python parent stays in between."""
     os.execvp("vllm", command(os.environ))
 
 

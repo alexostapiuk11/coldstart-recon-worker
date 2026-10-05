@@ -25,9 +25,10 @@ def test_the_port_comes_from_the_platform():
     assert cmd[cmd.index("--port") + 1] == "9001"
 
 
-def test_a_missing_model_is_refused():
-    with pytest.raises(KeyError):
-        lb_serve.command({k: v for k, v in ENV.items() if k != "MODEL_ID"})
+@pytest.mark.parametrize("name", ["MODEL_ID", "MODEL_REVISION", "MAX_MODEL_LEN", "PORT"])
+def test_a_missing_variable_is_refused_by_name(name):
+    with pytest.raises(KeyError, match=name):
+        lb_serve.command({k: v for k, v in ENV.items() if k != name})
 
 
 def test_the_dockerfile_copies_both_files():

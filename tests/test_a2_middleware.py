@@ -36,6 +36,11 @@ async def _app(scope, receive, send):
     await send({"type": "http.response.body", "body": b"{}"})
 
 
+def test_the_wire_names_are_pinned_lowercase():
+    assert WORKER_HEADER == b"x-a2-worker"
+    assert SERVER_LATENCY_HEADER == b"x-a2-server-latency-ms"
+
+
 def test_http_responses_carry_the_worker_and_the_server_latency():
     mw = WorkerHeaders(_app, clock=Clock(10.0, 10.25), worker_id="pod-abc")
     start = _run(mw, {"type": "http"})[0]
