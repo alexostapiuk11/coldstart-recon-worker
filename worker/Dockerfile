@@ -34,6 +34,8 @@ COPY worker/handler.py /opt/handler.py
 # harness/sweep_worker.py inside the container; harness/service_sweep.py is the
 # local side and is not called here. Imports only harness/, never coldstart/.
 COPY worker/sweep_handler.py /opt/sweep_handler.py
+COPY worker/lb_serve.py /opt/lb_serve.py
+COPY worker/a2_middleware.py /opt/a2_middleware.py
 
 ENTRYPOINT []
 # The measurement handler. recon_handler.py and sweep_handler.py stay in the
