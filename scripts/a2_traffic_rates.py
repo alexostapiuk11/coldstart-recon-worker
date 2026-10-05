@@ -1,6 +1,9 @@
 """Print the absolute traffic rates and the validation schedule's facts.
 
-The amendment of 2026-10-04 quotes these numbers. Spec §8's ordering rule
+The amendments of 2026-10-04 quote these numbers. The one-replica rates are
+the policy sweep's (`traffic.spike_shape` at the pre-registered constants);
+the validation rows use the validation schedule's own pinned spike, which the
+second amendment kept at 0.25 additional replicas. Spec §8's ordering rule
 requires the absolute rates to be computed from the service curve and
 committed BEFORE any policy sweep runs on it; this script is how they are
 computed, so the amendment can be checked by re-running it.
@@ -14,8 +17,9 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 from autoscale.measured_curve import DEFAULT_PATH, load_measured_curve
-from autoscale.traffic import saturation_rps, spike_shape
+from autoscale.traffic import ADDITIONAL_REPLICAS_AT_PEAK, saturation_rps, spike_shape
 from autoscale.validation_schedule import (
+    VALIDATION_ADDITIONAL_REPLICAS,
     VALIDATION_DRAIN_SECONDS,
     VALIDATION_KIND,
     VALIDATION_REPLICAS,
@@ -44,7 +48,9 @@ def main(argv=None) -> None:
         "baseline_rps_one_replica": one.baseline_rate,
         "peak_rps_one_replica": one.baseline_rate * one.k,
         "k": one.k,
+        "additional_replicas_at_peak": ADDITIONAL_REPLICAS_AT_PEAK,
         "validation_replicas": VALIDATION_REPLICAS,
+        "validation_additional_replicas": VALIDATION_ADDITIONAL_REPLICAS,
         "validation_baseline_rps": val.baseline_rate,
         "validation_peak_rps": val.baseline_rate * val.k,
         "validation_requests": facts["requests"],

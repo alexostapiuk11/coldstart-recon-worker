@@ -16,8 +16,19 @@ ENV = {"MODEL_ID": "Qwen/Qwen3-8B", "MODEL_REVISION": "b968826d9c46dd6066d109eab
        "MAX_MODEL_LEN": "8192", "PORT": "8000"}
 
 
-def test_the_command_is_the_curves_served_cmd_plus_the_middleware():
-    assert lb_serve.command(ENV) == [*CURVE["served_cmd"], "--middleware", lb_serve.MIDDLEWARE]
+def test_the_command_is_the_curves_served_cmd_capped_at_128_plus_the_middleware():
+    """One deliberate change from the curve's engine, and only one: the
+    admission cap matches the simulator's 128 (amendment 2026-10-04, second)."""
+    served = list(CURVE["served_cmd"])
+    at = served.index("--max-num-seqs") + 1
+    assert served[at] == "256"  # what the curve was measured with
+    capped = [*served[:at], "128", *served[at + 1:]]
+    assert lb_serve.command(ENV) == [*capped, "--middleware", lb_serve.MIDDLEWARE]
+
+
+def test_the_cap_is_the_curves_top_level():
+    top = max(level for level, *_ in CURVE["points"])
+    assert lb_serve.MAX_NUM_SEQS == str(int(top)) == "128"
 
 
 def test_the_port_comes_from_the_platform():

@@ -21,7 +21,10 @@ from autoscale.traffic import spike_shape
 @pytest.fixture
 def short_sweep(monkeypatch):
     monkeypatch.setattr(sweep, "REPETITIONS", 3)
-    shape = spike_shape(SERVICE_CURVE_PLACEHOLDER, "step")
+    # 0.25 additional replicas, the regime this was tuned at: the parity check
+    # needs both kept and discarded runs, and the amended default (0.5) keeps
+    # every run of this short sweep.
+    shape = spike_shape(SERVICE_CURVE_PLACEHOLDER, "step", additional_replicas=0.25)
     return shape, LagDistribution([45.0, 90.0, 200.0])
 
 

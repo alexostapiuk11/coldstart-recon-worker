@@ -52,8 +52,12 @@ RAMP_SECONDS = SUSTAIN_SECONDS / 2
 # Both amended 2026-09-17 from 40% and 3. As first registered they put the peak
 # at 3.4x one replica's saturation and every policy delivered an identical p99;
 # docs/experiment-a2.md states the old values, the evidence and the search.
+# ADDITIONAL_REPLICAS_AT_PEAK amended again 2026-10-04 (second), 0.25 -> 0.5:
+# on the measured curve a 0.95x peak never holds a queue, and queue_depth's
+# runs were discarded (docs/regime-search-a2-measured.md). The validation gate
+# keeps the 0.25 spike; see autoscale/validation_schedule.py.
 BASELINE_FRACTION_OF_SATURATION = 0.70
-ADDITIONAL_REPLICAS_AT_PEAK = 0.25
+ADDITIONAL_REPLICAS_AT_PEAK = 0.5
 
 
 def saturation_rps(curve: ServiceCurve) -> float:

@@ -4,10 +4,11 @@ import pytest
 
 from autoscale.measured_curve import DEFAULT_PATH, load_measured_curve
 from autoscale.service import ServiceCurve
-from autoscale.traffic import spike_shape
+from autoscale.traffic import ADDITIONAL_REPLICAS_AT_PEAK, spike_shape
 from autoscale.validation import RealRun
 from autoscale.validation_schedule import (
     LATENCY_SOURCE,
+    VALIDATION_ADDITIONAL_REPLICAS,
     VALIDATION_DRAIN_SECONDS,
     VALIDATION_KIND,
     VALIDATION_REPLICAS,
@@ -28,10 +29,22 @@ def test_the_constants_are_the_proposed_operating_point():
 
 
 def test_the_shape_scales_the_baseline_by_the_replica_count_and_nothing_else():
-    one = spike_shape(CURVE, "step")
+    one = spike_shape(CURVE, "step", additional_replicas=VALIDATION_ADDITIONAL_REPLICAS)
     two = validation_shape(CURVE, replicas=2, kind="step")
     assert two.baseline_rate == pytest.approx(2 * one.baseline_rate)
     assert (two.k, two.ramp, two.sustain, two.kind) == (one.k, one.ramp, one.sustain, "step")
+
+
+def test_the_validation_spike_is_pinned_and_does_not_follow_the_sweep():
+    """The 2026-10-04 (second) amendment moved the sweep to 0.5 and kept the
+    gate at the signed 0.25: a traffic amendment must not silently move a
+    paid run's operating point."""
+    assert VALIDATION_ADDITIONAL_REPLICAS == 0.25
+    assert ADDITIONAL_REPLICAS_AT_PEAK != VALIDATION_ADDITIONAL_REPLICAS
+    sweep = spike_shape(CURVE, "step")
+    two = validation_shape(CURVE, replicas=2, kind="step")
+    assert two.k != sweep.k
+    assert two.k == spike_shape(CURVE, "step", additional_replicas=0.25).k
 
 
 def test_no_arrival_falls_in_the_drain_tail():

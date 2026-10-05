@@ -28,13 +28,15 @@ signal matters?
   varies exactly one thing.
 - `R` ramp = `D`/2 = **95 s**.
 - baseline = **70%** of measured saturation.
-- `k` = magnitude requiring **0.25 additional replicas** at the measured
+- `k` = magnitude requiring **0.5 additional replicas** at the measured
   service rate.
 
   *Both amended 2026-09-17, from 40% and 3 additional replicas. As
   originally registered they made the experiment unanswerable — see the
   amendment immediately below, which states the old values, the evidence,
-  and how the replacements were chosen.*
+  and how the replacements were chosen. `k` amended again 2026-10-04, from
+  0.25 to 0.5, on the measured curve — see "Amendment, 2026-10-04 (second)"
+  near the end of this document.*
 
 The two absolute rates are computed from the service curve and committed
 **before any policy sweep runs**.
@@ -408,6 +410,104 @@ if, at its 450 req/s step:
 
 Otherwise the owner decides what changes, and this amendment is amended before
 any repeat.
+
+## Amendment, 2026-10-04 (second): the traffic model on the measured curve
+
+Made after the first full policy sweep on the measured curve was refused, and
+before any of the four headline gaps on the measured curve has been computed.
+Signed off by the owner on 2026-10-04.
+
+**Changed:** `k` from **0.25 → 0.5** additional replicas at peak. Baseline stays
+at **70%** of measured saturation. Peak load moves from 0.95× to **1.20×** one
+replica's saturation. The validation operating point does **not** change (below).
+
+**Why.** On the measured curve the 2026-09-17 regime starves `queue_depth`. The
+figure run's guard refused the H3 gap: on arm A's step, all three `queue_depth`
+frontier points kept 3 or 4 of 30 repetitions, against the bootstrap floor of
+20. `scripts/a2_discard_diagnostic.py` shows the mechanism:
+- A peak of 0.95× saturation is about 115 requests in flight on one replica,
+  below its cap of 128, so a queue forms only in brief bursts. In the median
+  run the queue was at or above the scale-up threshold in about 5% of
+  evaluations.
+- `queue_depth` scales up on a burst; the burst clears; the next evaluation
+  after the 30 s cooldown reads an empty queue. Scale-down then removes the
+  newest replica while it is still starting (arm A's median cold start is
+  81.1 s). In all 430 discarded runs, scale-downs at least equal scale-ups.
+
+The 2026-09-17 regime was chosen on the placeholder curve, and it did not carry
+over. The placeholder probe already showed `queue_depth` starving nearby (40% /
+0.5 kept 2.7 of 19 policies).
+
+**How the replacement was chosen.** The pass criteria, candidate order and
+selection rule were committed in `docs/regime-search-a2-measured.md` (80ccac2)
+before the search code existed. The search, `scripts/a2_regime_search.py`
+(63894dd), is pinned to that document by tests.
+- **The space:** the placeholder probe's own 4 × 5 grid of baseline and `k`.
+  Nothing else could change.
+- **The criteria,** required in all four headline sweeps:
+  - P1: `gap_interval` completes;
+  - P2: at least 2 distinct median p99s at 1 ms.
+- **The rule:** the first candidate in a fixed order (keep the baseline at 70%
+  if any `k` works, smallest `k` first) is the one proposed.
+- **What the search records:** only whether each gap is computable. It never
+  records or prints a gap.
+
+Result: a candidate clears exactly when its peak exceeds one replica's
+capacity (13 of 20 do). 70% / 0.5 is first in order and passes all four sweeps
+(distinct median p99s 46, 53, 53, 30). Full table:
+`docs/regime-search-a2-measured.md`.
+
+**What was seen before choosing.** The diagnostic printed per-policy p99s on arm
+A's step under the old regime:
+- `queue_depth` about 0.72 s, on its few kept runs;
+- `in_flight_concurrency` about 0.66 s;
+- `utilization` 0.674 s.
+
+The refused figure run also printed the modeled-lag sensitivity gaps under the
+old regime: 0.0848 s [0.0727, 0.1042] at a 20 s lag, then 0.0666, 0.0500, 0.0425
+and 0.0106 s at 40, 60, 80 and 120 s, the last four without intervals. That is
+the explicitly unmeasured synthetic-lag panel. None of the four headline gaps
+(arms A and C, step and ramp), their intervals or the H3 verdict has been
+computed on the measured curve. The rule above is what chose 0.5, and it cannot
+express a preference for any signal.
+
+**Absolute rates (spec §8 ordering rule), from `scripts/a2_traffic_rates.py`,
+for the policy sweep and one replica:**
+- saturation **211.2 req/s** (unchanged);
+- baseline **147.8 req/s** (unchanged);
+- peak **253.4 req/s** (baseline + 0.5 × saturation; was 200.6).
+
+Step and ramp share these rates.
+
+**Validation operating point: unchanged, now pinned.** Before this amendment,
+the validation schedule followed the sweep's spike automatically. At 0.5, two
+pinned replicas would be overloaded: predicted p99 about 39 s, and up to about
+16,500 requests outstanding, beyond the driver's in-flight cap of 4,096 and
+untested against the platform's load balancer.
+- The validation schedule is therefore pinned to the spike the 2026-10-04
+  amendment signed: baseline + **0.25** × saturation, scaled to **2
+  replicas**. That is baseline 295.7 req/s, peak 401.3 req/s, 129,876
+  requests, with the predictions, warm-up, void rules and probe acceptance as
+  signed.
+- **What this gate does not check.** It validates the simulator's latency curve
+  up to saturation. It does not validate the queueing the new spike produces,
+  which `queue_depth` now reads. The post says so beside the gate's verdict.
+
+**Validation engine cap: 128.** The simulator admits at most 128 requests per
+replica (the curve's top level) and queues the rest. The validation worker
+started vLLM with `--max-num-seqs 256`, so above 128 the real engine would run
+requests the simulator queues, in a range the curve never measured: level 256
+died of CUDA out of memory. Even at the signed point, short bursts exceed 128
+per replica.
+- `worker/lb_serve.py` now starts the engine with **`--max-num-seqs 128`**.
+  Every other flag stays the curve's `served_cmd`.
+- The curve itself is unaffected: no measured level exceeded 128, so the
+  256 setting never bound during the sweep.
+- The worker image is rebuilt before the feasibility probe.
+
+**What re-runs.** The full figure sweep, on the amended traffic, with the same
+grids, controller, exclusions, 30 repetitions and seed 17. Nothing else in this
+document changes.
 
 ## Stopping rule
 

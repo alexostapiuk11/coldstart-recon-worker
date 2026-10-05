@@ -74,7 +74,7 @@ def test_the_step_follows_the_preregistered_rule():
     shape = spike_shape(SERVICE_CURVE_PLACEHOLDER, "step")
     assert shape.kind == "step"
     assert shape.baseline_rate == pytest.approx(0.70 * sat, rel=1e-15)
-    assert shape.k == pytest.approx((0.70 + 0.25) / 0.70, rel=1e-12)
+    assert shape.k == pytest.approx((0.70 + 0.5) / 0.70, rel=1e-12)
     assert shape.ramp == 0.0
     assert shape.sustain == 190.0
 
@@ -140,8 +140,8 @@ def test_the_constants_are_the_ones_the_preregistration_states():
     prereg = (REPO / "docs" / "experiment-a2.md").read_text()
     assert BASELINE_FRACTION_OF_SATURATION == 0.70
     assert "baseline = **70%** of measured saturation" in prereg
-    assert ADDITIONAL_REPLICAS_AT_PEAK == 0.25
-    assert "**0.25 additional replicas**" in prereg
+    assert ADDITIONAL_REPLICAS_AT_PEAK == 0.5
+    assert "**0.5 additional replicas**" in prereg
     assert SUSTAIN_SECONDS == 190.0
     assert "rounded to **190 s**" in prereg
     assert RAMP_SECONDS == 95.0
@@ -174,9 +174,16 @@ def test_the_bits_are_pinned_not_just_the_algebra():
     sat = saturation_rps(SERVICE_CURVE_PLACEHOLDER)
     assert sat == float.fromhex("0x1.0d79435e50d79p+5")
 
-    step = spike_shape(SERVICE_CURVE_PLACEHOLDER, "step")
+    # The 0.25 step, the default the baseline file recorded (amended to 0.5 on
+    # 2026-10-04, second; the validation gate still runs this spike), passed
+    # explicitly so the recorded bits stay checked.
+    step = spike_shape(SERVICE_CURVE_PLACEHOLDER, "step", additional_replicas=0.25)
     assert step.baseline_rate == float.fromhex("0x1.79435e50d7943p+4")
     assert step.k == float.fromhex("0x1.5b6db6db6db6ep+0")
+    # The current default, pinned from this module's own order of operations.
+    now = spike_shape(SERVICE_CURVE_PLACEHOLDER, "step")
+    assert now.baseline_rate == float.fromhex("0x1.79435e50d7943p+4")
+    assert now.k == float.fromhex("0x1.b6db6db6db6dbp+0")
 
     # baseline_fraction=0.10, additional_replicas=1 -- one of the candidates
     # the regime probe screens. `k = 1 + additional_replicas / baseline_fraction`

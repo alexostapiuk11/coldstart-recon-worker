@@ -92,3 +92,38 @@ def test_the_three_void_rules_are_stated_and_no_others():
     assert "a response from a worker outside the pinned set" in s
     assert "a 200 without the server-latency header" in s
     assert "outcome list" not in s
+
+
+SECOND = DOC.split("## Amendment, 2026-10-04 (second): the traffic model on the measured curve", 1)
+
+
+def _second() -> str:
+    assert len(SECOND) == 2, "the second 2026-10-04 amendment is missing"
+    return " ".join(SECOND[1].split("\n## ", 1)[0].split())
+
+
+def test_the_second_amendment_states_the_traffic_constants():
+    from autoscale.traffic import ADDITIONAL_REPLICAS_AT_PEAK, BASELINE_FRACTION_OF_SATURATION
+    s = _second()
+    assert "Signed off by the owner on 2026-10-04" in s
+    assert f"from **0.25 → {ADDITIONAL_REPLICAS_AT_PEAK:g}** additional replicas" in s
+    assert f"**{BASELINE_FRACTION_OF_SATURATION:.0%}** of measured saturation" in s
+
+
+def test_the_second_amendment_states_the_sweep_rates_the_code_computes():
+    from autoscale.traffic import saturation_rps, spike_shape
+    curve = load_measured_curve(DEFAULT_PATH).curve
+    one = spike_shape(curve, "step")
+    s = _second()
+    assert f"saturation **{saturation_rps(curve):.1f} req/s**" in s
+    assert f"baseline **{one.baseline_rate:.1f} req/s**" in s
+    assert f"peak **{one.baseline_rate * one.k:.1f} req/s**" in s
+
+
+def test_the_second_amendment_pins_the_validation_spike_and_the_engine_cap():
+    sys.path.insert(0, str(REPO / "worker"))
+    import lb_serve
+    s = _second()
+    assert f"baseline + **{vs.VALIDATION_ADDITIONAL_REPLICAS:g}** × saturation" in s
+    assert f"**{vs.VALIDATION_REPLICAS} replicas**" in s
+    assert f"**`--max-num-seqs {lb_serve.MAX_NUM_SEQS}`**" in s

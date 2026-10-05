@@ -5,11 +5,22 @@ is run: how many replicas, which spike, how the schedule ends. These constants
 are that choice, pre-registered in docs/experiment-a2.md (amendment
 2026-10-04) and pinned to it by tests/test_prereg_a2_plan2b.py.
 
-The shape is the frontiers' own step, `traffic.spike_shape`, with the
-baseline multiplied by the replica count. The pre-registered rates are ONE
-replica's, so unscaled, two pinned replicas would run at half the per-replica
-load the frontiers are computed at, and the gate would validate a regime the
-results never use. Scaling keeps `k`, the sustain and the ramp unchanged.
+The shape is `traffic.spike_shape`'s step at the baseline the frontiers use,
+with the baseline multiplied by the replica count. The pre-registered rates
+are ONE replica's, so unscaled, two pinned replicas would run at half the
+per-replica load the frontiers are computed at. Scaling keeps `k`, the
+sustain and the ramp unchanged.
+
+Its `k` is PINNED to `VALIDATION_ADDITIONAL_REPLICAS` (0.25), not read from
+the sweep's `traffic.ADDITIONAL_REPLICAS_AT_PEAK`. The amendment of 2026-10-04
+(second) moved the sweep to 0.5. Followed here, that spike overloads the two
+pinned replicas: predicted p99 about 39 s and about 16,500 requests outstanding,
+past the driver's in-flight cap and untested against the load balancer. The
+owner kept the signed validation point instead. Rejected: following the sweep
+automatically, as this module did before, so that a traffic amendment would
+silently move a paid run's operating point. The cost is stated in the
+amendment: this gate checks the latency curve up to saturation, not the
+queueing the sweep's spike produces.
 
 The schedule ends in a drain tail: no arrival in the last
 `VALIDATION_DRAIN_SECONDS` before `until`, so the final requests finish inside
@@ -32,12 +43,15 @@ from autoscale.stats import percentiles
 from autoscale.traffic import spike_shape
 
 __all__ = [
-    "LATENCY_SOURCE", "VALIDATION_DRAIN_SECONDS", "VALIDATION_KIND", "VALIDATION_REPLICAS",
+    "LATENCY_SOURCE", "VALIDATION_ADDITIONAL_REPLICAS", "VALIDATION_DRAIN_SECONDS",
+    "VALIDATION_KIND", "VALIDATION_REPLICAS",
     "VALIDATION_SEED", "VALIDATION_UNTIL", "WARMUP_MAX_SECONDS", "WARMUP_MIN_SECONDS",
     "WARMUP_RPS", "build_schedule", "schedule_facts", "validation_shape",
 ]
 
 VALIDATION_REPLICAS = 2
+# The spike the 2026-10-04 amendment signed, kept when the sweep moved to 0.5.
+VALIDATION_ADDITIONAL_REPLICAS = 0.25
 VALIDATION_KIND = "step"
 VALIDATION_UNTIL = 400.0
 VALIDATION_DRAIN_SECONDS = 30.0
@@ -58,7 +72,7 @@ def validation_shape(curve: ServiceCurve, *, replicas: int, kind: str) -> SpikeS
             f"replicas is {replicas!r}; the pinned fleet is a positive int, and a scaled rate "
             "for a fractional fleet is a load no endpoint can be pinned to"
         )
-    one = spike_shape(curve, kind)
+    one = spike_shape(curve, kind, additional_replicas=VALIDATION_ADDITIONAL_REPLICAS)
     return SpikeShape(kind=one.kind, baseline_rate=one.baseline_rate * replicas, k=one.k,
                       ramp=one.ramp, sustain=one.sustain)
 

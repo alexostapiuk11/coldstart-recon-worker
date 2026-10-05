@@ -4,7 +4,14 @@ The engine must be the one the service curve measured, or the gate compares
 the simulator against a different system. So the command is the curve's
 `served_cmd` (data/a2/service-curve.json; tests/test_lb_serve.py compares
 them), with one addition: the middleware that stamps worker id and server
-latency (a2_middleware.py). The port comes from the platform's PORT variable;
+latency (a2_middleware.py).
+
+And one deliberate change: `--max-num-seqs 128`, not the curve's 256
+(amendment 2026-10-04, second). The simulator admits at most 128 requests per
+replica, the curve's top level, and queues the rest. At 256 the engine would
+run requests the simulator queues, in a range the curve never measured (level
+256 died of CUDA out of memory). No measured level exceeded 128, so the curve
+never ran into its 256 limit and still describes this engine. The port comes from the platform's PORT variable;
 the endpoint's HEALTH_CHECK_PATH is set to vLLM's own /health.
 
 `exec`, not a subprocess: the platform's signals then reach vLLM directly,
@@ -18,8 +25,10 @@ a different engine than the one measured, and start it without error.
 import os
 
 MIDDLEWARE = "a2_middleware.WorkerHeaders"
-# The service curve's flags (served_cmd), held fixed.
-CURVE_FLAGS = ("--max-num-seqs", "256", "--no-enable-prefix-caching")
+# The service curve's flags (served_cmd), held fixed except the admission cap,
+# which matches the simulator's 128 (see the module docstring).
+MAX_NUM_SEQS = "128"
+CURVE_FLAGS = ("--max-num-seqs", MAX_NUM_SEQS, "--no-enable-prefix-caching")
 
 # Each required variable, with what a missing one would silently cost.
 REQUIRED = {
@@ -31,7 +40,8 @@ REQUIRED = {
 
 
 def command(env) -> list[str]:
-    """The `vllm serve` argv: the curve's served_cmd plus the middleware.
+    """The `vllm serve` argv: the curve's served_cmd, its admission cap at 128,
+    plus the middleware.
 
     Raises KeyError naming the variable and the consequence if a required
     one is unset; see the module docstring for the rejected alternative.
