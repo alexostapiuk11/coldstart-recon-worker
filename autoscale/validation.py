@@ -36,7 +36,15 @@ from dataclasses import dataclass
 
 from autoscale.service import ServiceCurve
 from autoscale.sim import run_fixed_capacity
-from autoscale.validation_band import BandBin, Bin, Validation, band, compare, trajectory
+from autoscale.validation_band import (
+    BandBin,
+    Bin,
+    Validation,
+    band,
+    compare,
+    compare_per_repeat,
+    trajectory,
+)
 
 __all__ = [
     "BAND_EDGE_TOLERANCE_SECONDS",
@@ -45,10 +53,13 @@ __all__ = [
     "MAX_SEND_JITTER_SECONDS",
     "MIN_COMPARED_BINS",
     "REPEATS",
+    "EngineRun",
     "RealRun",
+    "engine_trajectories",
     "predicted_trajectory",
     "tolerance_band",
     "validate",
+    "validate_engine_arrivals",
 ]
 
 REPEATS = 3  # exactly; spec §10: "Three real repeats; their spread sets the tolerance band"
@@ -238,3 +249,133 @@ def validate(runs: Sequence[RealRun], curve: ServiceCurve) -> Validation:
     return compare(predicted, tolerance, min_compared_bins=MIN_COMPARED_BINS,
                    max_miss_fraction=MAX_MISS_FRACTION,
                    edge_tolerance_seconds=BAND_EDGE_TOLERANCE_SECONDS)
+
+
+@dataclass(frozen=True)
+class EngineRun:
+    """One real run as the ENGINE received it (amendment 2026-10-05, third).
+
+    `received[i]` is the engine's wall-clock time when request i reached it
+    (the middleware's `x-a2-server-received`), or None if it never did -- a
+    load-balancer failure the driver saw as a non-200 without the worker
+    header. `latencies[i]` is the engine's own latency, or None if the request
+    did not complete. `sent` is the driver's send time, on the run's timeline;
+    it is used only to put the engine's clock on that timeline.
+
+    Why this exists beside `RealRun`: RunPod's load balancer held requests for
+    seconds and released them in bursts, so the engine did not receive the
+    schedule. `RealRun` bins by the schedule and would score those stalls as
+    simulator misses; this bins by what the engine actually received, and the
+    prediction is made from the same arrivals.
+    """
+
+    sent: tuple[float, ...]
+    received: tuple[float | None, ...]
+    latencies: tuple[float | None, ...]
+    replicas: int
+    until: float
+    host_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        for name in ("sent", "received", "latencies", "host_ids"):
+            object.__setattr__(self, name, tuple(getattr(self, name)))
+        n = len(self.sent)
+        if n == 0 or len(self.received) != n or len(self.latencies) != n:
+            raise ValueError(
+                f"sent, received and latencies must be one entry per request and non-empty; "
+                f"got {n}, {len(self.received)}, {len(self.latencies)}. Misaligned lists "
+                "attribute arrivals and latencies to the wrong requests"
+            )
+        if type(self.replicas) is not int or self.replicas < 1:
+            raise ValueError(f"replicas must be a positive int, got {self.replicas!r}")
+        if not math.isfinite(self.until) or self.until <= 0:
+            raise ValueError(f"until must be finite and positive, got {self.until!r}")
+        if len(self.host_ids) != self.replicas or not all(
+                isinstance(h, str) and h for h in self.host_ids):
+            raise ValueError(
+                f"host_ids {self.host_ids!r} must hold one non-blank id per replica "
+                f"({self.replicas}); spec §10 requires the host of every replica"
+            )
+        if not all(math.isfinite(x) for x in self.sent) or not all(
+                r is None or math.isfinite(r) for r in self.received):
+            raise ValueError("a send or receive time is not finite; it cannot be placed in time")
+        if all(r is None for r in self.received):
+            raise ValueError("no request reached the engine; there is nothing to judge")
+        for i, (r, lat) in enumerate(zip(self.received, self.latencies, strict=True)):
+            if lat is not None and (r is None or not math.isfinite(lat) or lat < 0):
+                raise ValueError(
+                    f"request {i} has latency {lat!r} but received {r!r}; a latency needs an "
+                    "engine arrival and must be a finite non-negative duration"
+                )
+
+    def never_reached(self) -> tuple[int, ...]:
+        return tuple(i for i, r in enumerate(self.received) if r is None)
+
+    def engine_arrivals(self) -> tuple[list[float], tuple[float | None, ...]]:
+        """(arrival, window-cut latency) for every request that reached the engine.
+
+        The engine's clock is put on the run's timeline by subtracting the
+        smallest `received - sent` in the run: the least-delayed request
+        arrives at its send time, every other at or after its own. Rejected:
+        the median offset, which would put half the requests before they were
+        sent. An arrival outside [0, until] is refused, not clamped.
+        A request finishing after `until` counts as unfinished, as in
+        `RealRun.windowed_latencies` (strict `>`, matching the simulator).
+        """
+        reached = [i for i, r in enumerate(self.received) if r is not None]
+        offset = min(self.received[i] - self.sent[i] for i in reached)
+        arrivals = [self.received[i] - offset for i in reached]
+        for t in arrivals:
+            if not (0.0 <= t <= self.until):
+                raise ValueError(
+                    f"an engine arrival lands at {t!r}, outside the window [0, {self.until!r}]; "
+                    "the load balancer held a request past the window's end, and binning it "
+                    "anyway would put it in a bin it did not arrive in"
+                )
+        latencies = tuple(
+            None if (lat := self.latencies[i]) is None or t + lat > self.until else lat
+            for i, t in zip(reached, arrivals, strict=True)
+        )
+        return arrivals, latencies
+
+
+def engine_trajectories(run: EngineRun, curve: ServiceCurve) -> tuple[list[Bin], list[Bin]]:
+    """(real, predicted) trajectories for one run, both keyed by engine arrival.
+
+    The prediction replays this run's own engine arrivals into
+    `run_fixed_capacity`, so the model sees the bursts the engine saw. Nothing
+    is fitted to the run: arrivals go in, latencies come out.
+    """
+    arrivals, latencies = run.engine_arrivals()
+    real = trajectory(arrivals, latencies, until=run.until, bin_seconds=BIN_SECONDS)
+    sim = run_fixed_capacity(sorted(arrivals), run.replicas, curve, run.until)
+    pairs = sim.completed_requests()
+    predicted = trajectory([a for a, _ in pairs] + list(sim.unfinished_arrivals),
+                           [lat for _, lat in pairs] + [None] * len(sim.unfinished_arrivals),
+                           until=run.until, bin_seconds=BIN_SECONDS)
+    return real, predicted
+
+
+def validate_engine_arrivals(runs: Sequence[EngineRun], curve: ServiceCurve) -> Validation:
+    """The gate of amendment 2026-10-05 (third): each repeat held to its own
+    prediction, at the signed thresholds. Send jitter is not checked here: it
+    guarded that the prediction replayed the trace the system received, which
+    predicting from engine arrivals now guarantees directly. The schedule the
+    driver sent is not checked either, for the same reason; the driver records
+    it."""
+    if len(runs) != REPEATS:
+        raise ValueError(
+            f"{len(runs)} real runs; the gate needs exactly {REPEATS}. Fewer is too little "
+            "spread to mean anything, and a fourth widens the residual range for free"
+        )
+    first = runs[0]
+    for run in runs[1:]:
+        if (run.replicas, run.until) != (first.replicas, first.until):
+            raise ValueError(
+                "repeats differ in replicas or window; the residual range must compare "
+                "the same fleet over the same window"
+            )
+    return compare_per_repeat([engine_trajectories(r, curve) for r in runs],
+                              min_repeats=REPEATS, min_compared_bins=MIN_COMPARED_BINS,
+                              max_miss_fraction=MAX_MISS_FRACTION,
+                              edge_tolerance_seconds=BAND_EDGE_TOLERANCE_SECONDS)
