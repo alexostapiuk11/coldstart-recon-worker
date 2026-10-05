@@ -1,0 +1,94 @@
+{
+ "label": "stage",
+ "probe": "stage",
+ "submitted": {
+  "job_budget_s": 1800,
+  "label": "stage",
+  "probe": "stage",
+  "models": [
+   {
+    "model": "Qwen/Qwen3-4B",
+    "revision": "1cfa9a7208912126459214e8b04321603b3df60c"
+   },
+   {
+    "model": "Qwen/Qwen3-4B-Base",
+    "revision": "906bfd4b4dc7f14ee4320094d8b41684abff8539"
+   },
+   {
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "revision": "cdbee75f17c01a7cc42f958dc650907174af0554"
+   },
+   {
+    "model": "Qwen/Qwen3-4B-Thinking-2507",
+    "revision": "768f209d9ea81521153ed38c47d515654e938aea"
+   },
+   {
+    "model": "Qwen/Qwen3-1.7B",
+    "revision": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e"
+   }
+  ]
+ },
+ "outcome": {
+  "clock_A": {
+   "t_submit": 219232.4586585,
+   "t_result": 219279.305980583
+  },
+  "payload": {
+   "elapsed_s": 45.42401481792331,
+   "healthy": true,
+   "label": "stage",
+   "probe": "stage",
+   "result": {
+    "complete": false,
+    "staged": [
+     {
+      "error": null,
+      "model": "Qwen/Qwen3-4B",
+      "path": "/runpod-volume/hf/hub/models--Qwen--Qwen3-4B/snapshots/1cfa9a7208912126459214e8b04321603b3df60c",
+      "revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+      "seconds": 0.4043998848646879
+     },
+     {
+      "error": null,
+      "model": "Qwen/Qwen3-4B-Base",
+      "path": "/runpod-volume/hf/hub/models--Qwen--Qwen3-4B-Base/snapshots/906bfd4b4dc7f14ee4320094d8b41684abff8539",
+      "revision": "906bfd4b4dc7f14ee4320094d8b41684abff8539",
+      "seconds": 11.041020693257451
+     },
+     {
+      "error": null,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "path": "/runpod-volume/hf/hub/models--Qwen--Qwen3-4B-Instruct-2507/snapshots/cdbee75f17c01a7cc42f958dc650907174af0554",
+      "revision": "cdbee75f17c01a7cc42f958dc650907174af0554",
+      "seconds": 7.9596910905092955
+     },
+     {
+      "error": "RuntimeError('Task error: File reconstruction error: IO Error: Disk quota exceeded (os error 122)')",
+      "model": "Qwen/Qwen3-4B-Thinking-2507",
+      "path": null,
+      "revision": "768f209d9ea81521153ed38c47d515654e938aea",
+      "seconds": 19.987502982839942
+     },
+     {
+      "error": "RuntimeError('Task error: File reconstruction error: IO Error: Disk quota exceeded (os error 122)')",
+      "model": "Qwen/Qwen3-1.7B",
+      "path": null,
+      "revision": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+      "seconds": 6.031357521191239
+     }
+    ]
+   },
+   "clock_C": {
+    "delay_ms": 154,
+    "execution_ms": 45672
+   },
+   "host": {
+    "container_host_id": null,
+    "host_id": "6vj93wgksg0tiz",
+    "job_id": "f20ee599-ad4d-49a2-8bd3-22c6e007d984-u1"
+   }
+  },
+  "error": null,
+  "diagnostics": null
+ }
+}

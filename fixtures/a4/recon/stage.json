@@ -1,0 +1,94 @@
+{
+ "label": "stage",
+ "probe": "stage",
+ "submitted": {
+  "job_budget_s": 1800,
+  "label": "stage",
+  "probe": "stage",
+  "models": [
+   {
+    "model": "Qwen/Qwen3-4B",
+    "revision": "1cfa9a7208912126459214e8b04321603b3df60c"
+   },
+   {
+    "model": "Qwen/Qwen3-4B-Base",
+    "revision": "906bfd4b4dc7f14ee4320094d8b41684abff8539"
+   },
+   {
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "revision": "cdbee75f17c01a7cc42f958dc650907174af0554"
+   },
+   {
+    "model": "Qwen/Qwen3-4B-Thinking-2507",
+    "revision": "768f209d9ea81521153ed38c47d515654e938aea"
+   },
+   {
+    "model": "Qwen/Qwen3-1.7B",
+    "revision": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e"
+   }
+  ]
+ },
+ "outcome": {
+  "clock_A": {
+   "t_submit": 219641.775987208,
+   "t_result": 219735.125617666
+  },
+  "payload": {
+   "elapsed_s": 31.555344007909298,
+   "healthy": true,
+   "label": "stage",
+   "probe": "stage",
+   "result": {
+    "complete": true,
+    "staged": [
+     {
+      "error": null,
+      "model": "Qwen/Qwen3-4B",
+      "path": "/runpod-volume/hf/hub/models--Qwen--Qwen3-4B/snapshots/1cfa9a7208912126459214e8b04321603b3df60c",
+      "revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+      "seconds": 0.05492786131799221
+     },
+     {
+      "error": null,
+      "model": "Qwen/Qwen3-4B-Base",
+      "path": "/runpod-volume/hf/hub/models--Qwen--Qwen3-4B-Base/snapshots/906bfd4b4dc7f14ee4320094d8b41684abff8539",
+      "revision": "906bfd4b4dc7f14ee4320094d8b41684abff8539",
+      "seconds": 0.024074019864201546
+     },
+     {
+      "error": null,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "path": "/runpod-volume/hf/hub/models--Qwen--Qwen3-4B-Instruct-2507/snapshots/cdbee75f17c01a7cc42f958dc650907174af0554",
+      "revision": "cdbee75f17c01a7cc42f958dc650907174af0554",
+      "seconds": 0.021414024755358696
+     },
+     {
+      "error": null,
+      "model": "Qwen/Qwen3-4B-Thinking-2507",
+      "path": "/runpod-volume/hf/hub/models--Qwen--Qwen3-4B-Thinking-2507/snapshots/768f209d9ea81521153ed38c47d515654e938aea",
+      "revision": "768f209d9ea81521153ed38c47d515654e938aea",
+      "seconds": 20.7549897339195
+     },
+     {
+      "error": null,
+      "model": "Qwen/Qwen3-1.7B",
+      "path": "/runpod-volume/hf/hub/models--Qwen--Qwen3-1.7B/snapshots/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+      "revision": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+      "seconds": 10.699896205216646
+     }
+    ]
+   },
+   "clock_C": {
+    "delay_ms": 56924,
+    "execution_ms": 32379
+   },
+   "host": {
+    "container_host_id": null,
+    "host_id": "6vj93wgksg0tiz",
+    "job_id": "95192b70-7aac-4ec4-949c-77d591fed88f-u1"
+   }
+  },
+  "error": null,
+  "diagnostics": null
+ }
+}

@@ -1,0 +1,44 @@
+{
+ "label": "help",
+ "probe": "help",
+ "submitted": {
+  "job_budget_s": 1800,
+  "label": "help",
+  "probe": "help"
+ },
+ "outcome": {
+  "clock_A": {
+   "t_submit": 219103.032216125,
+   "t_result": 219232.458306875
+  },
+  "payload": {
+   "elapsed_s": 28.350701278075576,
+   "healthy": true,
+   "label": "help",
+   "probe": "help",
+   "result": {
+    "bench": {
+     "error": null,
+     "missing": [],
+     "returncode": 0
+    },
+    "serve": {
+     "error": null,
+     "missing": [],
+     "returncode": 0
+    }
+   },
+   "clock_C": {
+    "delay_ms": 99144,
+    "execution_ms": 29153
+   },
+   "host": {
+    "container_host_id": null,
+    "host_id": "6vj93wgksg0tiz",
+    "job_id": "09a75a3a-2949-4af5-9d69-5e2cd4808c96-u2"
+   }
+  },
+  "error": null,
+  "diagnostics": null
+ }
+}
