@@ -52,6 +52,15 @@ STEP_SECONDS = 30.0
 MIN_WORKER_SHARE = 0.35
 MAX_JITTER_S = 0.25
 EARLY_STOP_FAILURE_FRACTION = 0.5
+# The first real probe (2026-10-05): every response 200 and server p50 0.31 s,
+# but client p50 21.7 s at 50 req/s and 52 s at 100 -- requests queued in front
+# of the workers, the path delivered ~17 req/s whatever was offered, and the
+# ladder ran on, billing, until the driver could not start another thread.
+# Uncontended, client p50 was ~0.7 s. A step over this is stopped on like a
+# failing one. Operational only: it ends the ladder, so the acceptance at the
+# top step reads "not evaluable"; it judges nothing. Rejected: adding latency
+# to the acceptance, which is pre-registered and would need an amendment.
+EARLY_STOP_CLIENT_P50_S = 5.0
 # 450 req/s over 2 workers is above one replica's 211 req/s saturation, so
 # latency climbs through the step. 4096 threads hold about 9 s of latency
 # (4096 / 450) before the driver's pool, not the load balancer, causes send
@@ -126,11 +135,19 @@ def main(argv=None) -> None:
                 _write_summary(out, state)
                 print(f"[{rate:>5g} req/s] {json.dumps(rows[rate])}", flush=True)
                 frac = _failure_fraction(rows[rate])
-                if frac > EARLY_STOP_FAILURE_FRACTION and i + 1 < len(RATES):
+                client_p50 = rows[rate].get("client_p50_s")
+                stop = None
+                if frac > EARLY_STOP_FAILURE_FRACTION:
+                    stop = (f"{frac:.0%} of the {rate:g} req/s step's requests failed "
+                            f"(over {EARLY_STOP_FAILURE_FRACTION:.0%})")
+                elif client_p50 is not None and client_p50 > EARLY_STOP_CLIENT_P50_S:
+                    stop = (f"client p50 {client_p50:.1f} s at the {rate:g} req/s step "
+                            f"(over {EARLY_STOP_CLIENT_P50_S:g} s): requests are queuing "
+                            "in front of the workers")
+                if stop and i + 1 < len(RATES):
                     state["status"] = (
-                        f"stopped: {frac:.0%} of the {rate:g} req/s step's requests failed "
-                        f"(over {EARLY_STOP_FAILURE_FRACTION:.0%}); later steps cannot change "
-                        "the acceptance verdict, so the ladder stopped to stop billing")
+                        f"stopped: {stop}; later steps cannot change the acceptance "
+                        "verdict, so the ladder stopped to stop billing")
                     print(f"[stop] {state['status']}", flush=True)
                     break
             else:

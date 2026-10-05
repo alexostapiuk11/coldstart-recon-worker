@@ -346,6 +346,40 @@ def test_a_majority_failing_step_stops_the_ladder_and_acceptance_is_not_evaluabl
     assert "[accept] not evaluable" in out and "[accept] PASS" not in out
 
 
+def test_a_step_queued_in_front_of_the_workers_stops_the_ladder(rig, capsys):
+    """The first real probe: every response 200, server p50 0.31 s, client p50
+    21.7 s at 50 req/s, and the ladder ran on until the driver ran out of
+    threads. A step whose client p50 is over the limit is stopped on, like a
+    failing one."""
+    slow = probe.EARLY_STOP_CLIENT_P50_S + 1.0
+
+    def queued_second(n, schedule):
+        if n == 2:
+            return [Outcome(i, t, t, slow, 200, {common.WORKER: "w1" if i % 2 else "w2",
+                                                 common.SERVER_LATENCY: "300"})
+                    for i, t in enumerate(schedule)]
+        return rig["good"](n, schedule)
+
+    rig["set_replay"](queued_second)
+    probe.main(["--out", str(rig["out"])])
+    s = _summary(rig["out"])
+    assert len(rig["calls"]) == 2 and list(s["steps"]) == ["10", "20"]
+    assert s["status"].startswith("stopped: client p50") and "20 req/s" in s["status"]
+    out = capsys.readouterr().out
+    assert "[accept] not evaluable" in out and "[accept] PASS" not in out
+
+
+def test_a_client_p50_at_the_limit_does_not_stop_the_ladder(rig):
+    at = probe.EARLY_STOP_CLIENT_P50_S
+
+    rig["set_replay"](lambda n, schedule: [
+        Outcome(i, t, t, at, 200, {common.WORKER: "w1" if i % 2 else "w2",
+                                   common.SERVER_LATENCY: "300"})
+        for i, t in enumerate(schedule)])
+    probe.main(["--out", str(rig["out"])])
+    assert _summary(rig["out"])["status"] == "complete"
+
+
 def test_the_top_step_failing_is_evaluated_not_skipped(rig, capsys):
     def breaks_last(n, schedule):
         if n == 3:
