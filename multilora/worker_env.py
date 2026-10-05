@@ -6,6 +6,7 @@ second thing that can differ between conditions. Missing values fail loudly
 at job start, before any GPU time is spent on a misconfigured engine.
 """
 
+import math
 import os
 
 VOLUME_ROOT = "/runpod-volume"
@@ -15,7 +16,27 @@ VOLUME_ENV = {
     "HF_HOME": f"{VOLUME_ROOT}/hf",
     "VLLM_CACHE_ROOT": f"{VOLUME_ROOT}/a5/vllm-cache",
 }
-REQUIRED = ("MODEL_ID", "MODEL_REVISION", "MAX_MODEL_LEN", "A5_MAX_LORA_RANK", "A5_TARGET_MODULES")
+REQUIRED = (
+    "MODEL_ID",
+    "MODEL_REVISION",
+    "MAX_MODEL_LEN",
+    "A5_MAX_LORA_RANK",
+    "A5_TARGET_MODULES",
+    "A5_GPU_MEMORY_UTILIZATION",
+)
+
+
+def _memory_budget(raw: str) -> float:
+    """The engine's GPU memory fraction, in (0, 1]. Fixed in the endpoint
+    environment because vLLM's own default overshoots on this card with LoRA
+    enabled (see `multilora.serving.serve_args`)."""
+    try:
+        value = float(raw)
+    except ValueError:
+        value = math.nan
+    if not (math.isfinite(value) and 0 < value <= 1):
+        raise RuntimeError(f"A5_GPU_MEMORY_UTILIZATION={raw!r} must be a number in (0, 1]")
+    return value
 
 
 def instance_kwargs(environ=None) -> dict:
@@ -34,6 +55,7 @@ def instance_kwargs(environ=None) -> dict:
         "max_model_len": int(environ["MAX_MODEL_LEN"]),
         "rank": int(environ["A5_MAX_LORA_RANK"]),
         "target_modules": tuple(environ["A5_TARGET_MODULES"].split(",")),
+        "gpu_memory_utilization": _memory_budget(environ["A5_GPU_MEMORY_UTILIZATION"]),
     }
 
 

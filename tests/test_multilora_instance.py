@@ -74,7 +74,7 @@ def adapter_root(tmp_path, monkeypatch):
 def _run(payload, deps):
     return run_instance(
         payload, model="Qwen/Qwen3-4B", revision="rev", max_model_len=8192, rank=2,
-        target_modules=MODULES, env={"HF_HOME": "/h"}, deps=deps,
+        target_modules=MODULES, env={"HF_HOME": "/h"}, deps=deps, gpu_memory_utilization=0.85,
     )
 
 
@@ -93,6 +93,25 @@ def test_an_instance_warms_every_adapter_then_runs_the_phases_in_order(prereg):
     assert [p["phase_index"] for p in out["phases"]] == [0, 1, 2, 3]
     args = served_calls[0]["args"]
     assert args[args.index("--max-loras") + 1] == "4"
+
+
+def test_the_memory_budget_reaches_the_engine_and_the_recorded_command(prereg):
+    payload = job_payload(ScheduledRun(3, 0, "sweep-N2"), "run-1", prereg)
+    served_calls = []
+    out = _run(payload, _deps(served_calls, []))
+    cmd = out["served_cmd"]
+    assert cmd.count("--gpu-memory-utilization") == 1
+    assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.85"
+    assert cmd[3:] == served_calls[0]["args"]
+
+
+def test_an_instance_without_a_memory_budget_is_refused(prereg):
+    payload = job_payload(ScheduledRun(3, 0, "sweep-N2"), "run-1", prereg)
+    with pytest.raises(TypeError, match="gpu_memory_utilization"):
+        run_instance(
+            payload, model="Qwen/Qwen3-4B", revision="rev", max_model_len=8192, rank=2,
+            target_modules=MODULES, env={}, deps=_deps([], []),
+        )
 
 
 def test_the_output_becomes_a_well_formed_record(prereg):

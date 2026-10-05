@@ -1,6 +1,7 @@
 import pytest
 
 from multilora.serving import (
+    ENGINE_FLAGS,
     SPECIALIZE_FLAG,
     run_phase,
     serve,
@@ -17,6 +18,7 @@ def _args(**kw):
         "lora_modules": {"a00": "/tmp/a5-adapters/a00", "a01": "/tmp/a5-adapters/a01"},
         "specialize_active_lora": False,
         "disable_log_stats": False,
+        "gpu_memory_utilization": 0.85,
     }
     base.update(kw)
     return serve_args(**base)
@@ -37,6 +39,27 @@ def test_the_per_job_switches_add_their_flags():
     assert "--disable-log-stats" in _args(disable_log_stats=True)
     plain = _args()
     assert SPECIALIZE_FLAG not in plain and "--disable-log-stats" not in plain
+
+
+@pytest.mark.parametrize("value, text", [(0.85, "0.85"), (0.9, "0.9"), (1.0, "1.0"), (1, "1.0")])
+def test_the_memory_budget_is_passed_once_as_its_own_argument(value, text):
+    args = _args(gpu_memory_utilization=value)
+    assert args.count("--gpu-memory-utilization") == 1
+    assert args[args.index("--gpu-memory-utilization") + 1] == text
+    assert not any(a.startswith("--gpu-memory-utilization=") for a in args)
+
+
+def test_the_memory_budget_is_required_not_defaulted():
+    base = {
+        "revision": "abc123", "max_model_len": 8192, "n_slots": 1, "rank": 16,
+        "lora_modules": {"a00": "/x"}, "specialize_active_lora": False, "disable_log_stats": False,
+    }
+    with pytest.raises(TypeError, match="gpu_memory_utilization"):
+        serve_args(**base)
+
+
+def test_the_memory_budget_flag_is_checked_against_the_engines_help():
+    assert "--gpu-memory-utilization" in ENGINE_FLAGS
 
 
 def test_slot_count_must_match_the_adapters_registered():
