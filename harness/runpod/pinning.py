@@ -78,20 +78,32 @@ def _is_int(value, expected: int) -> bool:
 
 
 @contextlib.contextmanager
-def _term_and_hangup_ignored():
-    """Ignore SIGTERM and SIGHUP for the duration, restoring what was there.
+def _term_and_hangup_deferred():
+    """Record SIGTERM and SIGHUP for the duration instead of acting on them.
+
+    Yields a list that holds the first signal number received, if any; the
+    caller raises it once its critical section is done and the previous
+    handlers are back. Swallowing the signal (SIG_IGN) was rejected: a caller
+    looping over several paid repeats would see a normal return after an
+    explicit kill and start the next pin.
 
     Only on the main thread: `signal.signal` raises anywhere else, and a
     handler can only fire on the main thread anyway.
     """
+    received: list[int] = []
     if threading.current_thread() is not threading.main_thread():
-        yield
+        yield received
         return
+
+    def record(signum, frame):
+        if not received:
+            received.append(signum)
+
     previous = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGHUP)}
     for signum in previous:
-        signal.signal(signum, signal.SIG_IGN)
+        signal.signal(signum, record)
     try:
-        yield
+        yield received
     finally:
         for signum, handler in previous.items():
             # getsignal() is None for a handler not installed from Python.
@@ -253,17 +265,23 @@ class WorkerPin:
         4xx) fails at once. The deadline bounds the waiting, not each HTTP
         call's own 30 s timeout, so the worst case is a little over it.
 
-        It cannot be cut short from outside. SIGTERM and SIGHUP are ignored
-        while it runs (main thread only), because a first one raising
+        It is hard to cut short from outside. SIGTERM and SIGHUP are recorded,
+        not acted on, while it runs (main thread only): a first one raising
         SystemExit from `unwind_on_hangup_and_term()`'s handler in the middle
-        of a 409 sleep would abandon the release with workers still pinned. A
-        KeyboardInterrupt is remembered, the release finishes, and it is then
-        re-raised. Only SIGKILL gets through: release by hand.
+        of a 409 sleep would abandon the release with workers still pinned.
+        Once the release is confirmed and the handlers are restored, the
+        recorded signal is raised as `SystemExit(128 + signum)`, so a caller
+        looping over repeats stops after an explicit kill instead of
+        starting the next pin. A KeyboardInterrupt is remembered the same
+        way and re-raised after, unless a signal was also recorded. A release
+        error is raised in preference to either, with the signal noted in
+        its message. Small windows remain just before the handlers are
+        swapped in, and SIGKILL always gets through: release by hand.
         """
         deadline = self._clock() + RELEASE_DEADLINE_SECONDS
         interrupted = None
         failure = None
-        with _term_and_hangup_ignored():
+        with _term_and_hangup_deferred() as received:
             for attempt in itertools.count():
                 try:
                     ep = self._release_once()
@@ -288,29 +306,58 @@ class WorkerPin:
             # Raised outside the handler so the exception already unwinding
             # through __exit__ (the run's own failure) stays its __context__,
             # not the last retryable noise.
-            raise ReleaseFailed(self._manual(failure))
+            raise ReleaseFailed(self._manual(failure) + self._signal_note(received))
         if self._workers_max is not None and ep.get("workersMax") != self._workers_max:
-            raise RuntimeError(
+            changed = RuntimeError(
                 f"workersMax is {ep.get('workersMax')!r} after the run but was "
                 f"{self._workers_max!r} at preflight. workersMin is back to 0, but this code "
                 "never writes workersMax, so something else changed the cost ceiling during "
                 "the run: treat its evidence as collected under a ceiling nobody checked"
-            ) from interrupted
+                + self._signal_note(received))
+            if interrupted is not None:
+                raise changed from interrupted
+            raise changed
+        if received:
+            raise SystemExit(128 + received[0])
         if interrupted is not None:
             raise interrupted
         return ep
+
+    @staticmethod
+    def _signal_note(received: list) -> str:
+        if not received:
+            return ""
+        return (f" (signal {received[0]} also arrived during the release and is "
+                "reported by this error instead of an exit)")
+
+    def _release_while_unwinding(self, original: BaseException | None) -> None:
+        """Release during an unwind; the exit a signal already started keeps its code.
+
+        A signal recorded during the release becomes a SystemExit, which
+        would replace the body's SystemExit and change the exit status the
+        first signal chose. Any other unwinding exception is superseded: an
+        explicit kill outranks it.
+        """
+        try:
+            self.release()
+        except SystemExit:
+            if not isinstance(original, SystemExit):
+                raise
 
     def __enter__(self):
         self.preflight()
         try:
             self.pin()
-        except BaseException:
-            self.release()
+        except BaseException as e:
+            self._release_while_unwinding(e)
             raise
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        self.release()
+        if exc is None:
+            self.release()
+        else:
+            self._release_while_unwinding(exc)
         return False
 
 

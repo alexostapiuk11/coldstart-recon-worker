@@ -345,7 +345,7 @@ def test_a_release_failure_keeps_the_bodys_exception_as_context():
 
 # --- signals --------------------------------------------------------------
 
-def test_a_first_signal_during_release_does_not_abort_it():
+def test_a_signal_during_release_lets_it_finish_then_exits_with_the_signals_code():
     unwind_on_hangup_and_term()
     handler = signal.getsignal(signal.SIGTERM)
     fired = []
@@ -357,14 +357,25 @@ def test_a_first_signal_during_release_does_not_abort_it():
             os.kill(os.getpid(), signal.SIGHUP)
 
     s = FakeSession(post_script=[409], on_post=on_post)
-    with _pin(s):
+    with pytest.raises(SystemExit) as err, _pin(s):
         pass
     assert fired
+    assert err.value.code == 128 + signal.SIGTERM == 143
     assert s.endpoint["workersMin"] == 0
     assert signal.getsignal(signal.SIGTERM) is handler
 
 
-def test_the_first_signal_unwinds_and_a_second_during_release_is_ignored():
+def test_a_signal_during_release_supersedes_an_ordinary_body_exception():
+    unwind_on_hangup_and_term()
+    s = FakeSession(on_post=lambda body: body == RELEASE and os.kill(os.getpid(), signal.SIGTERM))
+    with pytest.raises(SystemExit) as err, _pin(s):
+        raise RuntimeError("the measurement broke")
+    assert err.value.code == 143
+    assert isinstance(err.value.__context__, RuntimeError)
+    assert s.endpoint["workersMin"] == 0
+
+
+def test_the_first_signal_unwinds_and_a_second_during_release_keeps_its_code():
     unwind_on_hangup_and_term()
     s = FakeSession()
     state = {"released_posts": 0}
@@ -384,6 +395,26 @@ def test_the_first_signal_unwinds_and_a_second_during_release_is_ignored():
     # The first signal's handler left both ignored, and release() restored that.
     assert signal.getsignal(signal.SIGTERM) == signal.SIG_IGN
     assert signal.getsignal(signal.SIGHUP) == signal.SIG_IGN
+
+
+def test_a_signal_outranks_a_keyboard_interrupt_during_release():
+    unwind_on_hangup_and_term()
+    s = FakeSession(on_post=lambda body: body == RELEASE and os.kill(os.getpid(), signal.SIGHUP))
+    p = _pinned(s)
+    s.post_script = [KeyboardInterrupt()]
+    with pytest.raises(SystemExit) as err:
+        p.release()
+    assert err.value.code == 128 + signal.SIGHUP
+    assert s.endpoint["workersMin"] == 0
+
+
+def test_a_release_error_is_raised_in_preference_to_a_deferred_signal_and_notes_it():
+    unwind_on_hangup_and_term()
+    s = FakeSession(ignore_release=True,
+                    on_post=lambda body: body == RELEASE and os.kill(os.getpid(), signal.SIGTERM))
+    p = _pinned(s)
+    with pytest.raises(ReleaseFailed, match="signal 15 also arrived"):
+        p.release()
 
 
 def test_release_restores_the_previous_handlers_even_when_it_fails():
@@ -436,3 +467,13 @@ def test_release_works_off_the_main_thread_without_touching_signals():
     t.start()
     t.join()
     assert out[0]["workersMin"] == 0
+
+
+def test_a_changed_workers_max_keeps_the_bodys_exception_as_visible_context():
+    s = FakeSession()
+    with pytest.raises(RuntimeError, match="workersMax is 5") as err, _pin(s):
+        s.endpoint["workersMax"] = 5
+        raise RuntimeError("the measurement broke")
+    assert err.value.__suppress_context__ is False
+    assert str(err.value.__context__) == "the measurement broke"
+    assert s.endpoint["workersMin"] == 0
