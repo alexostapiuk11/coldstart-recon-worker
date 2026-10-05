@@ -1,6 +1,7 @@
 # Runbook: artifact 2's LB probe and the three validation repeats
 
 For the owner; not a plan step. Do not run any of this without the owner's say-so.
+Run every command from the repository root.
 Nothing here is run by the plan that built it: the probe, the driver, the pin and the
 open-loop sender were proven offline, against fakes and a local HTTP server, and have
 never touched RunPod.
@@ -134,14 +135,18 @@ any repeat.
 
 ```bash
 ulimit -n 8192   # the driver also raises the soft limit itself, or refuses before the pin
+set -o pipefail   # without it, tee's exit status hides a failed repeat from the loop
 for k in 1 2 3; do
-  PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/a2_validate.py --repeat $k --template-id <id> 2>&1 | tee -a build/a2-validation.log
+  PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/a2_validate.py --repeat $k --template-id <id> 2>&1 | tee -a build/a2-validation.log || break
 done
 ```
 
-The `for` loop is safe to leave: an explicit kill ends the driver with exit 128 + the signal, and the
-shell then continues to the next `k`. If you stop it deliberately, stop the loop, not only the
-current run.
+A failed or killed repeat now stops the loop: `set -o pipefail` makes the pipeline carry the
+driver's exit status (an explicit kill ends the driver with exit 128 + the signal), and `|| break`
+leaves the loop on it, so a later repeat is not paid for after an earlier one failed. A void repeat
+is not a failure (the driver exits normally and prints `VOID`), so the loop goes on to the next `k`;
+read the void reasons afterwards. Running the repeats one at a time is the conservative
+alternative.
 
 What the driver does, in order:
 1. **Before any pin:** it checks the slot, and **refuses an unwritable `--out`** (it creates the
@@ -159,9 +164,9 @@ What the driver does, in order:
 
 Reading the result line (`[repeat K] ...`):
 - It ends with `valid` or `VOID: <reasons>`. A repeat is void if, and only if, any request had no
-  200 (including transport errors), a response came from a worker outside the pinned set, a 200
-  lacked a usable server-latency header, or the outcome list was short. This is the amendment's
-  list. **A latency header that is absent or unparseable (not a number, NaN, negative) counts as
+  200 (including transport errors), a response came from a worker outside the pinned set, or a 200
+  lacked a usable server-latency header (absent or unparseable). This is the amendment's three
+  rules. **A latency header that is absent or unparseable (not a number, NaN, negative) counts as
   absent**, so it voids. A 200 without the worker header is counted and printed (`N 200s without
   the worker header`) but is not itself a void reason; the latency header rule covers the practical
   case, because the middleware stamps both together.

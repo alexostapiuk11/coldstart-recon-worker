@@ -34,13 +34,22 @@ class WorkerHeaders:
     whose app raises before responding carries no headers at all; the
     driver treats a response without them as a failed request, which voids
     the run rather than letting an unattributed request count.
+
+    Construction raises when no worker id can be found, rather than falling
+    back to a shared placeholder: every worker would then report the same id,
+    and the driver would count one worker where two answered.
     """
 
     def __init__(self, app, *, clock=time.perf_counter, worker_id=None):
         self.app = app
         self._clock = clock
         self.worker_id = (worker_id or os.environ.get("RUNPOD_POD_ID")
-                          or os.environ.get("HOSTNAME") or "unknown")
+                          or os.environ.get("HOSTNAME"))
+        if not self.worker_id:
+            raise RuntimeError(
+                "neither RUNPOD_POD_ID nor HOSTNAME is set, so this worker has no id: two "
+                "workers would share one id, and the warm-up could never see the pinned "
+                "fleet. Set one of them in the worker's environment")
         self._worker = self.worker_id.encode()
 
     async def __call__(self, scope, receive, send):

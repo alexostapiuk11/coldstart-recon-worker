@@ -9,7 +9,7 @@ arrivals and confounds the two.
 One dispatcher thread sleeps until each scheduled time and hands the request
 to a pool. Each worker thread stamps `sent` immediately before the request
 leaves, so if the pool is exhausted, the delay shows as send jitter, which the
-caller checks (`max_jitter`; artifact 2's gate refuses a run above 0.5 s). It
+caller checks (`max_jitter`; artifact 2's gate refuses a run above 0.5 s; the LB probe's own acceptance bar is 0.25 s). It
 is not hidden inside a latency. Every request yields an `Outcome`: a failure
 is an outcome with an error, never a missing row, because a dropped row
 would shrink exactly the bins where the server was struggling.

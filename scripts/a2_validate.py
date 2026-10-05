@@ -15,8 +15,7 @@ to data/a2/validation/repeat-K.json.gz. `--judge` builds RealRuns from the
 pre-registered latency source and calls autoscale.validation.validate.
 
 Void rules (amendment 2026-10-04): any non-200, a response from a worker
-outside the pinned set, a 200 without the server-latency header, or a short
-outcome list. A void repeat is kept, moved aside, and may be run once more;
+outside the pinned set, or a 200 without the server-latency header. A void repeat is kept, moved aside, and may be run once more;
 a valid repeat is never overwritten, because re-running until the band fits
 is the failure the fixed repeat count exists to prevent.
 
@@ -133,11 +132,17 @@ def _server_seconds(outcome) -> float | None:
 def record_from(outcomes, *, repeat, schedule, host_ids, endpoint_id, template_id, started_at,
                 replicas, until, seed=VALIDATION_SEED, drain=VALIDATION_DRAIN_SECONDS,
                 warmup=None) -> dict:
+    if len(outcomes) != len(schedule):
+        # Not a void reason: the amendment's list is fixed, and `harness.open_loop.replay`
+        # returns one outcome per scheduled request. Raising here, inside run_repeat's
+        # record-build guard, keeps the raw outcomes in the fallback dump.
+        raise RuntimeError(
+            f"the replay returned {len(outcomes)} outcomes for {len(schedule)} scheduled "
+            "requests; harness.open_loop.replay guarantees this cannot happen, so the data "
+            "cannot be trusted and no record is written from it")
     workers = [o.headers.get(WORKER) for o in outcomes]
     server = [_server_seconds(o) for o in outcomes]
     void = []
-    if len(outcomes) != len(schedule):
-        void.append(f"{len(outcomes)} outcomes for {len(schedule)} scheduled requests")
     failed = [o for o in outcomes if o.status != 200]
     if failed:
         errors = sum(1 for o in failed if o.error)

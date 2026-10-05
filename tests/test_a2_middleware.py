@@ -4,6 +4,8 @@ import asyncio
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "worker"))
 
 from a2_middleware import SERVER_LATENCY_HEADER, WORKER_HEADER, WorkerHeaders
@@ -71,6 +73,14 @@ def test_the_worker_id_falls_back_to_the_pod_then_the_host(monkeypatch):
     monkeypatch.delenv("RUNPOD_POD_ID")
     monkeypatch.setenv("HOSTNAME", "host-9")
     assert WorkerHeaders(_app).worker_id == "host-9"
+
+
+def test_no_worker_id_is_an_error_not_a_shared_placeholder(monkeypatch):
+    monkeypatch.delenv("RUNPOD_POD_ID", raising=False)
+    monkeypatch.delenv("HOSTNAME", raising=False)
+    with pytest.raises(RuntimeError, match="two workers would share one id"):
+        WorkerHeaders(_app)
+    assert WorkerHeaders(_app, worker_id="explicit").worker_id == "explicit"
 
 
 def test_starlette_style_construction_with_app_keyword_works():

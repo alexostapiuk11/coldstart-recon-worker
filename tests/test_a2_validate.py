@@ -110,9 +110,25 @@ def test_a_200_without_the_worker_header_is_counted_not_voided():
     assert _record(s, _outs(s))["headerless_worker_200"] == 0
 
 
-def test_a_short_outcome_list_is_void():
+def test_a_short_outcome_list_is_an_error_not_a_void_reason():
     s = _schedule()
-    assert "outcomes for" in " ".join(_record(s, _outs(s)[:-1])["void"])
+    with pytest.raises(RuntimeError, match="cannot happen.*cannot be trusted"):
+        _record(s, _outs(s)[:-1])
+
+
+def test_a_short_replay_falls_back_with_the_raw_outcomes(tmp_path, monkeypatch):
+    d = _fallback_dir(tmp_path, monkeypatch)
+    s = _schedule()
+
+    def short(sch, send):
+        return _outs(s)[:-1]
+
+    with pytest.raises(v.RecordLost, match="cannot be trusted") as info:
+        _run(tmp_path, FakePin(), replay_fn=short)
+    fallback = info.value.fallback
+    assert fallback is not None and fallback.parent == d
+    assert len(json.loads(fallback.read_text())["outcomes"]) == len(s) - 1
+    assert not (tmp_path / "repeat-1.json.gz").exists()
 
 
 def test_slots_never_overwrite_a_valid_repeat_and_allow_one_void_rerun(tmp_path):
