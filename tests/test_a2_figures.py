@@ -20,10 +20,16 @@ from autoscale.figures import (
     convergence,
     frontiers,
     service_curve,
+    validation_overlay,
 )
 from autoscale.frontier import PolicyPoint
 from autoscale.service import SERVICE_CURVE_PLACEHOLDER, ServiceCurve
 from autoscale.thresholds import THRESHOLDS
+from autoscale.validation import RealRun, predicted_trajectory, tolerance_band
+from autoscale.validation import validate as _validate
+from autoscale.validation_band import BandBin
+from autoscale.validation_band import trajectory as _trajectory
+from autoscale.validation_schedule import build_schedule as _build_schedule
 
 # `harness.figure_guards` does not exist yet -- the harness extraction that owns
 # it has not run. `coldstart.analysis.figures` is where the constant currently
@@ -1034,3 +1040,81 @@ def test_figure_2_note_stays_on_canvas_with_its_curve_label(tmp_path, curve_meas
             assert t.get_fontsize() * 375 / (72 * width_in) >= MIN_PHONE_TEXT_PX, t.get_text()
     for text, box in _rendered(fig):
         assert box.x0 >= -1 and box.y0 >= -1 and box.x1 <= w + 1 and box.y1 <= h + 1, text
+
+
+_OV_CURVE = ServiceCurve(points=[(0, 0.2, 0.0, 0.0), (1, 0.2, 50.0, 1.0), (8, 0.3, 300.0, 1.0)],
+                         measured=True)
+
+
+def _overlay_inputs(factors=(0.97, 1.0, 1.03)):
+    from autoscale.sim import run_fixed_capacity
+    until = 200.0
+    s = _build_schedule(_OV_CURVE, replicas=2, kind="step", until=until, drain=20.0, seed=1)
+    by_arrival = dict(run_fixed_capacity(list(s), 2, _OV_CURVE, until).completed_requests())
+    runs = [RealRun(schedule=s, sent=s, latencies=[by_arrival[t] * f for t in s], replicas=2,
+                    until=until, host_ids=("w1", "w2")) for f in factors]
+    predicted = predicted_trajectory(s, 2, _OV_CURVE, until)
+    band_bins = tolerance_band(runs)
+    repeats = [_trajectory(r.schedule, r.windowed_latencies(), until=until, bin_seconds=10.0)
+               for r in runs]
+    return predicted, band_bins, _validate(runs, _OV_CURVE), repeats, len(s)
+
+
+def _draw_overlay(tmp_path, factors=(0.97, 1.0, 1.03)):
+    predicted, band_bins, verdict, repeats, n = _overlay_inputs(factors)
+    return validation_overlay(predicted, band_bins, verdict, repeats, tmp_path / "v.png",
+                              replicas=2, requests_per_run=n, latency_source="server",
+                              return_figure=True)
+
+
+def test_overlay_draws_band_prediction_and_repeats(tmp_path):
+    fig = _draw_overlay(tmp_path)
+    gids = [a.get_gid() for a in fig.findobj() if hasattr(a, "get_gid")]
+    assert gids.count("band") == 1 and gids.count("predicted") == 1 and gids.count("repeat") == 3
+
+
+def test_overlay_marks_every_judged_miss(tmp_path):
+    fig = _draw_overlay(tmp_path, factors=(1.4, 1.45, 1.5))
+    _, _, verdict, _, _ = _overlay_inputs((1.4, 1.45, 1.5))
+    misses = [a for a in fig.findobj() if getattr(a, "get_gid", lambda: None)() == "miss"]
+    assert len(misses) == 1
+    assert len(misses[0].get_xdata()) == verdict.misses
+
+
+def test_overlay_states_n_outcome_source_and_banner(tmp_path):
+    text = " ".join(_texts(_draw_overlay(tmp_path)))
+    assert "MEASURED" in text and "2 replicas pinned, 3 real runs of one schedule" in text
+    assert "requests per run" in text and "passed" in text and "server-side latency" in text
+
+
+def test_overlay_axes_start_at_zero_and_text_is_legible_and_on_canvas(tmp_path):
+    fig = _draw_overlay(tmp_path)
+    axis = fig.axes[0]
+    assert axis.get_ylim()[0] == 0 and axis.get_xlim()[0] == 0
+    width_in = fig.get_size_inches()[0]
+    for t in fig.findobj(match=matplotlib.text.Text):
+        if t.get_text().strip():
+            assert t.get_fontsize() * 375 / (72 * width_in) >= MIN_PHONE_TEXT_PX, t.get_text()
+    w, h = fig.canvas.get_width_height()
+    for text, box in _rendered(fig):
+        assert box.x0 >= -1 and box.y0 >= -1 and box.x1 <= w + 1 and box.y1 <= h + 1, text
+
+
+def test_the_band_changes_the_saved_pixels(tmp_path):
+    """The same overlay drawn with and without the band's ranges: a band that was
+    computed but never reached the canvas would leave the two PNGs identical."""
+    predicted, band_bins, verdict, repeats, n = _overlay_inputs()
+    kw = {"replicas": 2, "requests_per_run": n, "latency_source": "server"}
+    with_band = validation_overlay(predicted, band_bins, verdict, repeats, tmp_path / "a.png", **kw)
+    bare = [BandBin(b.start, b.end, None, None, "insufficient") for b in band_bins]
+    without = validation_overlay(predicted, bare, verdict, repeats, tmp_path / "b.png", **kw)
+    a, b = (Image.open(p).convert("RGB") for p in (with_band, without))
+    differing = sum(1 for x, y in zip(a.tobytes(), b.tobytes(), strict=True) if x != y)
+    assert differing > 5000
+
+
+def test_overlay_refuses_a_count_of_repeats_other_than_three(tmp_path):
+    predicted, band_bins, verdict, repeats, n = _overlay_inputs()
+    with pytest.raises(ValueError, match="3 repeats"):
+        validation_overlay(predicted, band_bins, verdict, repeats[:2], tmp_path / "x.png",
+                           replicas=2, requests_per_run=n, latency_source="server")

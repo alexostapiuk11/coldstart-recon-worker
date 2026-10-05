@@ -401,6 +401,24 @@ def test_judge_passes_a_model_inside_realitys_spread(tmp_path):
     json.dumps(verdict, allow_nan=False)  # strict JSON: no Infinity or NaN
 
 
+def test_figure_inputs_come_from_the_records_the_gate_judged(tmp_path):
+    _three(tmp_path, (0.97, 1.0, 1.03))
+    predicted, band_bins, result, repeats, n = v.figure_inputs(tmp_path, CURVE)
+    assert len(repeats) == 3 and n == len(_schedule())
+    assert len(predicted) == len(band_bins) == len(repeats[0])
+    assert result.outcome == v.judge(tmp_path, CURVE)["outcome"] == "passed"
+
+
+def test_figure_inputs_refuse_a_missing_or_void_repeat_like_judge(tmp_path):
+    s = _schedule()
+    v.write_record(v.prepare_slot(tmp_path, 1), _record(s, _outs(s)))
+    with pytest.raises(SystemExit, match="repeat 2 is missing"):
+        v.figure_inputs(tmp_path, CURVE)
+    v.write_record(v.prepare_slot(tmp_path, 2), _record(s, _outs(s, status=503), k=2))
+    with pytest.raises(SystemExit, match="repeat 2 is void"):
+        v.figure_inputs(tmp_path, CURVE)
+
+
 def test_judge_fails_a_model_outside_it(tmp_path):
     _three(tmp_path, (1.4, 1.45, 1.5))
     assert v.judge(tmp_path, CURVE)["outcome"] == "failed"
@@ -605,7 +623,10 @@ def test_main_judge_writes_a_verdict(rig, capsys):
         v.write_record(v.prepare_slot(rig["out"], k), _record(s, _outs(s, f), k=k))
     v.main(["--judge", "--out", str(rig["out"])])
     verdict = json.loads((rig["out"] / "verdict.json").read_text())
-    assert verdict["outcome"] == "passed" and "[judge] passed" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert verdict["outcome"] == "passed" and "[judge] passed" in out
+    assert (rig["out"] / "validation_overlay.png").stat().st_size > 0
+    assert "validation_overlay.png" in out
 
 
 def test_main_refuses_an_unwritable_out_before_any_pin(rig, tmp_path):

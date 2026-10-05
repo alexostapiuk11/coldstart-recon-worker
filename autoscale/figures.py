@@ -77,6 +77,7 @@ __all__ = [
     "convergence",
     "frontiers",
     "service_curve",
+    "validation_overlay",
 ]
 
 SIGNAL_ORDER = ("queue_depth", "in_flight_concurrency", "utilization")
@@ -809,4 +810,74 @@ def service_curve(curve, path, return_figure=False, measured=None):
         for e in measured.excluded_levels:
             first += f"; {e['concurrency']:g} not servable ({e['n_failed']}/{e['n_runs']} runs)"
     _note(axes[2], f"{first}\n{shading}", y=-0.42)
+    return _finish(fig, path, return_figure)
+
+
+def validation_overlay(predicted, band_bins, verdict, repeats, path, *, replicas: int,
+                       requests_per_run: int, latency_source: str, return_figure=False):
+    """Figure 3. The simulator's predicted latency trajectory against three real runs.
+
+    One panel, p50 per gate bin against SCHEDULED arrival time, the binning
+    the gate judges (`autoscale.validation`), so the picture and the verdict
+    are the same comparison. The band is the three repeats' min-max: the
+    system's own spread, which spec §10 makes the tolerance. Each repeat is
+    drawn too, thin, because a band hides whether one run is an outlier.
+    Misses are marked where the prediction sits; bins the gate did not judge
+    (censored, unstable or thin) are hatched, so "passed" cannot be read as
+    "every bin agreed".
+
+    Inputs are `validation_band` objects (Bin, BandBin, Validation), so this
+    module still never imports the simulator (see the boundary test).
+    """
+    if len(repeats) != 3:
+        raise ValueError(
+            f"{len(repeats)} repeats; the gate and this figure take exactly 3 repeats, and "
+            "a band drawn from another count is not the band that was judged")
+    fig, axis = plt.subplots(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN))
+    # right=0.965 leaves room for the last x tick label, centred on the axes' edge.
+    left, right = 0.095, 0.965
+    fig.subplots_adjust(left=left, right=right, top=0.86, bottom=0.245)
+    centre = [(b.start + b.end) / 2 for b in predicted]
+    x_right = max(b.end for b in predicted)
+
+    ok = [(c, bb.lo, bb.hi) for c, bb in zip(centre, band_bins, strict=True)
+          if bb.lo is not None and bb.hi is not None]
+    if ok:
+        axis.fill_between([c for c, _, _ in ok], [lo for _, lo, _ in ok],
+                          [hi for _, _, hi in ok], color=MEASURED_BANNER, alpha=BAND_ALPHA,
+                          linewidth=0, gid="band", label="reality band (min–max)")
+    for k, rep in enumerate(repeats):
+        axis.plot(centre, [b.p50 if b.p50 is not None else float("nan") for b in rep],
+                  color="#8a8a8a", linewidth=0.9, gid="repeat",
+                  label="each real run" if k == 0 else None)
+    axis.plot(centre, [b.p50 if b.p50 is not None else float("nan") for b in predicted],
+              color=CURVE_COLOR, linewidth=2, gid="predicted", label="simulator")
+
+    by_start = {v.start: v for v in verdict.bins}
+    miss_x, miss_y = [], []
+    for c, b in zip(centre, predicted, strict=True):
+        v = by_start.get(b.start)
+        if v is None:
+            continue
+        if v.verdict in ("outside", "censoring_disagreement"):
+            miss_x.append(c)
+            miss_y.append(b.p50 if b.p50 is not None else 0.0)
+        elif v.verdict not in ("inside",):
+            axis.axvspan(b.start, b.end, facecolor="none", edgecolor="#b0b0b0", hatch="///",
+                         linewidth=0, gid="not_judged")
+    axis.plot(miss_x, miss_y, "x", color=CENSOR_COLOR, markersize=8, markeredgewidth=2,
+              gid="miss", label="miss")
+
+    _tidy(axis, "scheduled arrival time (s)", "p50 latency per 10 s bin (s)", MEASURED_BG)
+    axis.set_xlim(0, x_right)
+    # Tight handles and column gaps: four entries at the legend floor are as wide as
+    # the canvas, and the default spacing pushed "miss" against its right edge.
+    axis.legend(loc="upper center", bbox_to_anchor=(0.5, -0.125), ncol=4,
+                fontsize=_pt(PX_LEGEND), frameon=False, handlelength=1.6, columnspacing=1.2)
+    _figure_banner(fig, left, right, "MEASURED",
+                   f"{replicas} replicas pinned, 3 real runs of one schedule", MEASURED_BANNER)
+    source = "server-side latency" if latency_source == "server" else "client latency"
+    _note(axis, f"n={requests_per_run} requests per run · judged {verdict.compared} bins, "
+                f"{verdict.misses} outside · {verdict.outcome}\n{source}; hatched: not judged",
+          y=-0.245)
     return _finish(fig, path, return_figure)

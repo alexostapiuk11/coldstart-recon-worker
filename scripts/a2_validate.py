@@ -60,8 +60,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from a2_lb_common import WORKER, sender, server_latency_s, warm_up
 
+from autoscale.figures import validation_overlay
 from autoscale.measured_curve import DEFAULT_PATH, load_measured_curve
-from autoscale.validation import MAX_SEND_JITTER_SECONDS, REPEATS, RealRun, validate
+from autoscale.validation import (
+    BIN_SECONDS,
+    MAX_SEND_JITTER_SECONDS,
+    REPEATS,
+    RealRun,
+    predicted_trajectory,
+    tolerance_band,
+    validate,
+)
+from autoscale.validation_band import trajectory
 from autoscale.validation_schedule import (
     LATENCY_SOURCE,
     VALIDATION_DRAIN_SECONDS,
@@ -329,7 +339,14 @@ def run_repeat(*, k, schedule, pin, send, warm_fn, replay_fn, endpoint_id, templ
     return record
 
 
-def judge(out: Path, curve) -> dict:
+def _valid_records(out: Path) -> list[dict]:
+    """The three repeats' records, or a refusal naming the missing or void one.
+
+    Shared by `judge` and `figure_inputs`, so the figure is drawn from exactly
+    the records the verdict was judged on. A second copy of the refusals was
+    rejected: a figure drawn from a repeat the gate would refuse is a picture
+    of a run that was never judged.
+    """
     records = []
     for k in range(1, REPEATS + 1):
         path = out / f"repeat-{k}.json.gz"
@@ -343,12 +360,43 @@ def judge(out: Path, curve) -> dict:
         if rec["void"]:
             raise SystemExit(f"repeat {k} is void ({rec['void']}); run it once more or stop")
         records.append(rec)
+    return records
+
+
+def _real_runs(records: list[dict]) -> list[RealRun]:
     key = "server_latency_s" if LATENCY_SOURCE == "server" else "client_latency_s"
+    return [RealRun(schedule=r["schedule"], sent=r["sent"], latencies=r[key],
+                    replicas=r["replicas"], until=r["until"], host_ids=tuple(r["host_ids"]))
+            for r in records]
+
+
+def figure_inputs(out: Path, curve):
+    """The figure-3 inputs for the three valid repeats, from the same records the gate judged.
+
+    Returns (predicted, band_bins, validation, repeat trajectories, requests per run).
+    Bins are the gate's (`BIN_SECONDS`), so the picture and the verdict are one comparison.
+    """
+    records = _valid_records(out)
     try:
-        runs = [RealRun(schedule=r["schedule"], sent=r["sent"], latencies=r[key],
-                        replicas=r["replicas"], until=r["until"], host_ids=tuple(r["host_ids"]))
-                for r in records]
+        runs = _real_runs(records)
+        first = runs[0]
+        predicted = predicted_trajectory(first.schedule, first.replicas, curve, first.until)
+        band_bins = tolerance_band(runs)
         result = validate(runs, curve)
+    except ValueError as e:
+        raise SystemExit(
+            f"the gate refused the repeats: {e}. No figure is drawn from runs the gate "
+            "rejects, because it would show a trace that was never judged") from e
+    repeats = [trajectory(r.schedule, r.windowed_latencies(), until=r.until,
+                          bin_seconds=BIN_SECONDS)
+               for r in runs]
+    return predicted, band_bins, result, repeats, len(first.schedule)
+
+
+def judge(out: Path, curve) -> dict:
+    records = _valid_records(out)
+    try:
+        result = validate(_real_runs(records), curve)
     except ValueError as e:
         raise SystemExit(
             f"the gate refused the repeats: {e}. They are not judged, because judging a run "
@@ -417,6 +465,10 @@ def main(argv=None) -> None:
                 print(f"[judge] WARNING: repeat {r['repeat']} recorded an error after its "
                       f"replay ({r['post_run_error']}); the verdict stands, the owner decides "
                       "what it means", file=sys.stderr)
+        predicted, band_bins, result, repeats, n = figure_inputs(out, curve)
+        print(validation_overlay(predicted, band_bins, result, repeats,
+                                 out / "validation_overlay.png", replicas=VALIDATION_REPLICAS,
+                                 requests_per_run=n, latency_source=LATENCY_SOURCE))
         return
     if not args.template_id:
         ap.error("--preflight-only and --repeat need --template-id")
