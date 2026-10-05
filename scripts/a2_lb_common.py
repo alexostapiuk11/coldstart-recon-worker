@@ -10,6 +10,7 @@ generation_config).
 """
 
 import sys
+import time
 from pathlib import Path
 from statistics import median
 
@@ -50,7 +51,8 @@ def server_latency_s(outcome) -> float | None:
 
 
 def warm_up(send, *, workers: int, rps: float, min_clean: float, max_seconds: float,
-            chunk_seconds: float = 5.0, replay_fn=replay) -> list[str]:
+            chunk_seconds: float = 5.0, replay_fn=replay, clock=time.monotonic,
+            summary_out: dict | None = None) -> list[str]:
     """Light load until all `workers` pinned workers have answered, cleanly, for `min_clean` s.
 
     Returns their ids: the run's host_ids. Refuses more distinct workers than
@@ -59,26 +61,61 @@ def warm_up(send, *, workers: int, rps: float, min_clean: float, max_seconds: fl
     is set the moment the API says so, but a worker serves only after it has
     started and loaded the engine, and a run begun before that measures a
     cold start rather than the fleet.
+
+    The deadline is wall-clock (`clock`), checked before and after every
+    chunk. Adding `chunk_seconds` per chunk was rejected: a chunk against a
+    hung endpoint takes up to the request timeout, not `chunk_seconds`, so the
+    nominal total could run for hours while two pinned GPUs bill. The clean
+    streak, by contrast, counts chunks (`chunk_seconds` each): measured time
+    would credit a chunk that dragged on for minutes as one clean stretch.
+
+    Fails at once, not at the deadline, when responses have been 200 for
+    `min_clean` s yet none carried the worker header: the fleet is up and the
+    middleware is not loaded, or the load balancer strips headers (plan 2b
+    P5), and waiting longer cannot produce a worker id.
+
+    `summary_out`, if given, is refilled with the last chunk's summary after
+    every chunk, so the caller can record what the fleet looked like even
+    when this raises. An out-parameter keeps the return value a plain list of
+    ids; returning a tuple was rejected as a needless break for the callers.
     """
     seen: set[str] = set()
     clean = 0.0
-    elapsed = 0.0
+    start = clock()
+
+    def expired() -> bool:
+        return clock() - start >= max_seconds
+
+    def give_up() -> TimeoutError:
+        return TimeoutError(
+            f"after {clock() - start:g} s, {len(seen)} of {workers} pinned workers answered "
+            f"(clean streak {clean:g} s); not starting a run on a fleet that is not up")
+
     while True:
+        if expired():
+            raise give_up()
         outs = replay_fn(constant_rate(rps, chunk_seconds), send, max_in_flight=64,
                          start_delay=0.1)
-        elapsed += chunk_seconds
+        last = summarize(outs)
+        if summary_out is not None:
+            summary_out.clear()
+            summary_out.update(last)
         seen |= {o.headers[WORKER] for o in outs if WORKER in o.headers}
         if len(seen) > workers:
             raise RuntimeError(
                 f"{len(seen)} distinct workers answered ({sorted(seen)}) with {workers} pinned; "
                 "the endpoint is not the fleet the run would measure. Check workersMax")
         clean = clean + chunk_seconds if all(o.status == 200 for o in outs) else 0.0
+        if clean >= min_clean and not seen:
+            raise RuntimeError(
+                f"every response has been 200 for {clean:g} s but none carried {WORKER}: the "
+                "worker middleware is not loaded or the load balancer strips response headers "
+                "(plan 2b P5). Without worker ids a run cannot be attributed to a fleet, so "
+                "waiting for them would only bill")
         if len(seen) == workers and clean >= min_clean:
             return sorted(seen)
-        if elapsed >= max_seconds:
-            raise TimeoutError(
-                f"after {elapsed:g} s, {len(seen)} of {workers} pinned workers answered "
-                f"(clean streak {clean:g} s); not starting a run on a fleet that is not up")
+        if expired():
+            raise give_up()
 
 
 def summarize(outcomes) -> dict:
@@ -93,6 +130,7 @@ def summarize(outcomes) -> dict:
         "requests": len(outcomes),
         "non_200": sum(1 for o in outcomes if o.status is not None and o.status != 200),
         "errors": sum(1 for o in outcomes if o.error),
+        "headerless_200": sum(1 for o in ok if not o.headers.get(WORKER)),
         "worker_share": share,
         "client_p50_s": c50,
         "server_p50_s": s50,
