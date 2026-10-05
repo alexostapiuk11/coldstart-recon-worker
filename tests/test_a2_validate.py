@@ -100,9 +100,11 @@ def test_an_unparseable_server_latency_header_is_void_not_a_crash():
     assert rec["server_latency_s"][4] is None
 
 
-def test_a_200_without_the_worker_header_is_void():
+def test_a_200_without_the_worker_header_is_counted_not_voided():
     s = _schedule()
-    assert "without the worker header" in " ".join(_record(s, _outs(s, drop_worker_at=2))["void"])
+    rec = _record(s, _outs(s, drop_worker_at=2))
+    assert rec["headerless_worker_200"] == 1 and rec["void"] == []
+    assert _record(s, _outs(s))["headerless_worker_200"] == 0
 
 
 def test_a_short_outcome_list_is_void():

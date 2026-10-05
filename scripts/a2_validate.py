@@ -115,10 +115,10 @@ def record_from(outcomes, *, repeat, schedule, host_ids, endpoint_id, template_i
     novel = sorted({w for w in workers if w} - set(host_ids))
     if novel:
         void.append(f"responses from workers outside the pinned set: {novel}")
+    # Disclosure only, not a void rule: the amendment's void list is fixed, and the
+    # latency-header rule below already voids the practical case (the middleware emits
+    # both headers together).
     no_worker = sum(1 for o, w in zip(outcomes, workers, strict=True) if o.status == 200 and not w)
-    if no_worker:
-        void.append(f"{no_worker} 200 responses without the worker header, so they cannot be "
-                    "attributed to the pinned set")
     no_latency = sum(1 for o, s in zip(outcomes, server, strict=True)
                      if o.status == 200 and s is None)
     if no_latency:
@@ -128,6 +128,7 @@ def record_from(outcomes, *, repeat, schedule, host_ids, endpoint_id, template_i
         "endpoint_id": endpoint_id, "template_id": template_id, "replicas": replicas,
         "until": until, "drain": drain, "seed": seed, "latency_source": LATENCY_SOURCE,
         "host_ids": list(host_ids), "novel_workers": novel, "void": void,
+        "headerless_worker_200": no_worker,
         "release": "ok", "post_run_error": None, "warmup": dict(warmup or {}),
         "max_jitter_s": max_jitter(outcomes),
         "schedule": list(schedule),
@@ -334,7 +335,8 @@ def main(argv=None) -> None:
         raise
     jitter = record["max_jitter_s"]
     print(f"[repeat {args.repeat}] {len(schedule)} requests, host_ids {record['host_ids']}, "
-          f"max jitter {jitter:.3f} s, "
+          f"max jitter {jitter:.3f} s, {record['headerless_worker_200']} 200s without the "
+          "worker header, "
           + ("VOID: " + "; ".join(record["void"]) if record["void"] else "valid"))
     if jitter > MAX_SEND_JITTER_SECONDS:
         print(f"[repeat {args.repeat}] WARNING: send jitter {jitter:.3f} s exceeds "
