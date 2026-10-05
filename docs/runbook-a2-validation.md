@@ -17,6 +17,14 @@ No commit hash is quoted: it would be stale at the next commit.
 `workersMax` set by hand to 2 and `workersMin` written only by the driver; nvidia-smi stays the
 headline utilisation signal; the gate judges server-side latency; a void repeat runs once more.
 
+**Amended 2026-10-05 (second amendment of that day in `docs/experiment-a2.md`): one replica.**
+RunPod's load balancer fills one worker up to the endpoint's scaler value before the next, so the
+gate now validates **1 replica**. Where this runbook says 2 workers, `workersMax` 2, 450 req/s or
+a 35% split, read: **1 worker, `workersMax` 1, scaler value 512, a ladder of 25-210 req/s**,
+and acceptance at 210 req/s on every final status 200, send jitter <= 0.25 s, and client p99
+minus server p99 <= 1.0 s. The schedule is 64,784 requests. The sections below keep the
+two-replica text as it was run, for the record.
+
 **A. Image.**
 - Push this plan's commits (the owner's call). `worker/**` changed, so CI (`build-worker.yml`)
   rebuilds the image; read the new `ghcr.io/...@sha256:` digest from its summary.
