@@ -6,20 +6,34 @@ as before, and says so on stdout. A sweep cache records which curve it came
 from, and a cache from the other curve is refused rather than drawn under the
 wrong label.
 
-The sweep behind these figures is ~25 minutes of CPU (30 repetitions of every
-threshold combination, for each of seven lag distributions), so its output is
-cached to JSON and re-used: iterating on a figure's layout must not cost half
-an hour per look, or the looking does not happen. `--refresh` re-runs it.
+The sweep behind these figures is minutes of CPU on the placeholder curve and
+hours on the measured one (30 repetitions of every threshold combination, for
+thirteen sweeps), so its output is cached to JSON and re-used: iterating on a
+figure's layout must not cost hours per look, or the looking does not happen.
+`--refresh` re-runs it.
+
+Each sweep is also CHECKPOINTED as it finishes (`sweep-checkpoint.json` beside
+the cache), and every sweep runs before any gap is computed. The cache alone is
+written only after the gaps, and the gaps are where the pre-registered guards
+refuse: the first measured run swept for four hours, was refused at the H3 gap,
+and kept nothing. A re-run without `--refresh` resumes from the checkpoint, so
+a refusal costs seconds to reproduce and a crash costs only the sweep it
+interrupted. The checkpoint records what its sweeps depend on (curve, store,
+seed, window, grids, controller constants) and is refused if any differ. It
+cannot see a change to the simulator's code: after one, use `--refresh`, as
+with the cache.
 """
 
 import argparse
 import json
+import os
 import sys
 from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from autoscale import sweep as sweep_module
 from autoscale.arrivals import SpikeShape
 from autoscale.coldstart_ecdf import LagDistribution, load_measured_lags
 from autoscale.figures import SIGNAL_ORDER, convergence, frontiers, service_curve
@@ -33,6 +47,7 @@ from autoscale.frontier import (
 )
 from autoscale.measured_curve import DEFAULT_PATH, select_curve
 from autoscale.sweep import SweepConfig, run_sweep
+from autoscale.thresholds import SENSITIVITY_THRESHOLDS, THRESHOLDS
 from autoscale.traffic import (
     RAMP_SECONDS,  # noqa: F401 -- tests/test_a2_end_to_end.py reads render.RAMP_SECONDS
     spike_shape,
@@ -101,6 +116,100 @@ def check_cache_curve(raw: dict, label: str) -> None:
         )
 
 
+def sweep_identity(label: str, store: str) -> dict:
+    """What a checkpointed sweep depends on, as written into the checkpoint.
+
+    Not a hash: a refusal that names WHICH input changed tells the owner
+    whether `--refresh` is needed or the wrong `--out` was given, and a digest
+    mismatch says neither.
+    """
+    return {
+        "curve": label,
+        "store": str(store),
+        "seed": SEED,
+        "until": UNTIL,
+        "repetitions": sweep_module.REPETITIONS,
+        "cooldown": sweep_module.COOLDOWN_SECONDS,
+        "evaluate_every": sweep_module.EVALUATE_EVERY_SECONDS,
+        "max_replicas": sweep_module.MAX_REPLICAS,
+        "thresholds": {
+            s: [list(up), list(down)]
+            for s, (up, down) in sorted({**THRESHOLDS, **SENSITIVITY_THRESHOLDS}.items())
+        },
+        "swept_lags": list(SWEPT_LAGS),
+    }
+
+
+def _rows(points):
+    return [
+        [list(p.cost_samples), list(p.p99_samples), p.signal, p.scale_up_at, p.scale_down_at,
+         list(p.rep_indices)]
+        for p in points
+    ]
+
+
+def _points(rows):
+    return [
+        PolicyPoint(cost_samples=tuple(c), p99_samples=tuple(p), signal=s, scale_up_at=u,
+                    scale_down_at=d, rep_indices=tuple(r))
+        for c, p, s, u, d, r in rows
+    ]
+
+
+class SweepCheckpoint:
+    """Finished sweeps, written to disk one at a time as they finish.
+
+    `path=None` keeps them in memory only, so `_run_everything` has one code
+    path whether or not a caller asked for a file. Each `put` rewrites the
+    whole file through a temporary and `os.replace`, so a crash mid-write
+    leaves the previous checkpoint, never half of one. Rejected: appending one
+    JSON line per sweep, which is cheaper but leaves a torn last line for the
+    loader to guess about.
+    """
+
+    def __init__(self, path: Path | None, identity: dict):
+        self.path = path
+        self.identity = identity
+        self._sweeps: dict[str, dict] = {}
+        if path is not None and path.exists():
+            raw = json.loads(path.read_text())
+            got = raw.get("identity", {})
+            changed = sorted(k for k in {*got, *identity} if got.get(k) != identity.get(k))
+            if changed:
+                raise SystemExit(
+                    f"the sweep checkpoint at {path} was made with different {changed} "
+                    f"(checkpoint {[got.get(k) for k in changed]!r}, this run "
+                    f"{[identity.get(k) for k in changed]!r}); resuming it would mix sweeps "
+                    "from two configurations in one figure. Use --refresh or another --out"
+                )
+            self._sweeps = raw["sweeps"]
+
+    @property
+    def tags(self) -> list[str]:
+        return list(self._sweeps)
+
+    def get(self, tag: str):
+        got = self._sweeps.get(tag)
+        return None if got is None else (_points(got["points"]), list(got["discards"]))
+
+    def put(self, tag: str, points, discards) -> None:
+        self._sweeps[tag] = {"points": _rows(points), "discards": list(discards)}
+        if self.path is None:
+            return
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        tmp.write_text(json.dumps({"identity": self.identity, "sweeps": self._sweeps}))
+        os.replace(tmp, self.path)
+
+
+def open_checkpoint(out: Path, identity: dict, *, refresh: bool) -> SweepCheckpoint:
+    """The checkpoint in `out`; `--refresh` discards it first."""
+    path = out / "sweep-checkpoint.json"
+    if refresh and path.exists():
+        path.unlink()
+        print(f"--refresh: discarded the sweep checkpoint at {path}")
+    return SweepCheckpoint(path, identity)
+
+
 def parse_args(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--store", default="data/campaign.jsonl")
@@ -115,39 +224,91 @@ def parse_args(argv=None):
 
 
 def _sweep(label: str, shape: SpikeShape, lags: LagDistribution, arm: str, curve,
-           signals=None):
-    points, discards = run_sweep(
-        SweepConfig(shape=shape, lags=lags, curve=curve, arm=arm, until=UNTIL),
-        seed=SEED,
-        # Only the placeholder needs the opt-in; a measured curve passes the
-        # sweep's own guard.
-        allow_unmeasured=not curve.measured,
-        signals=signals,
-    )
+           signals=None, checkpoint: SweepCheckpoint | None = None):
+    cached = checkpoint.get(label) if checkpoint is not None else None
+    if cached is not None:
+        points, discards = cached
+        print(f"{label}: from the checkpoint")
+    else:
+        points, discards = run_sweep(
+            SweepConfig(shape=shape, lags=lags, curve=curve, arm=arm, until=UNTIL),
+            seed=SEED,
+            # Only the placeholder needs the opt-in; a measured curve passes the
+            # sweep's own guard.
+            allow_unmeasured=not curve.measured,
+            signals=signals,
+        )
+        if checkpoint is not None:
+            checkpoint.put(label, points, discards)
     print(f"{label}: {len(points)} policy points over signals {list(_by_signal(points))}")
     _report_discards(label, discards)
     return points
 
 
-def _run_everything(store: str, curve):
-    """Every sweep the two figures need, as plain data ready to cache."""
+def _run_everything(store: str, curve, checkpoint: SweepCheckpoint | None = None):
+    """Every sweep the two figures need, as plain data ready to cache.
+
+    All thirteen sweeps run, and are checkpointed, before any gap is computed:
+    the gaps are where the pre-registered guards refuse, and a refusal must
+    not cost the sweeps behind it (see the module docstring).
+    """
+    if checkpoint is None:
+        checkpoint = SweepCheckpoint(None, {})
     shape = spike_shape(curve, kind="step")
     print(
         f"step spike: baseline={shape.baseline_rate:.1f} rps, k={shape.k:.1f} "
         f"(peak {shape.baseline_rate * shape.k:.1f} rps), sustain={shape.sustain:g}s"
     )
+    # H3 is evaluated under BOTH shapes or not at all -- the pre-registration
+    # fixes that, because H4 already predicts the ramp's margins shrink, so a
+    # ramp-only halving is both the easier outcome and the less interesting
+    # one. Until this existed the script swept only the step, and `h3_verdict`
+    # was reachable from tests and from nowhere else: running the artifact
+    # could not evaluate its own headline hypothesis.
+    ramp_shape = spike_shape(curve, kind="ramp")
+    print(
+        f"ramp spike: baseline={ramp_shape.baseline_rate:.1f} rps, k={ramp_shape.k:.1f}, "
+        f"ramp={ramp_shape.ramp:g}s, sustain={ramp_shape.sustain:g}s"
+    )
     lags = load_measured_lags(store)
+    if checkpoint.tags:
+        print(f"resuming: {len(checkpoint.tags)} sweeps already in {checkpoint.path}")
 
     sources: dict[str, list[PolicyPoint]] = {}
     for arm in ("A", "C"):
-        sources[f"arm {arm}"] = _sweep(f"arm {arm}", shape, lags[arm], arm, curve)
+        sources[f"arm {arm}"] = _sweep(f"arm {arm}", shape, lags[arm], arm, curve,
+                                       checkpoint=checkpoint)
+    for lag in SWEPT_LAGS:
+        label = f"modeled lag {lag:g}s"
+        sources[label] = _sweep(label, shape, LagDistribution(samples=[lag]),
+                                f"synthetic-{lag}", curve, checkpoint=checkpoint)
+    for arm in ("A", "C"):
+        sources[f"ramp arm {arm}"] = _sweep(
+            f"ramp arm {arm}", ramp_shape, lags[arm], f"ramp-{arm}", curve,
+            checkpoint=checkpoint,
+        )
+    # H2's sensitivity arm (amendment 2026-10-04): the same four sweeps with
+    # utilisation defined as the throughput fraction, swapped in for the
+    # nvidia-smi utilisation signal and nothing else. The sweep seeds on
+    # (seed, up, down, rep) and not on the signal, so these traces are the
+    # headline's own and the swap changes only what the controller reads.
+    sensitivity_runs = (("arm A", shape, "A"), ("arm C", shape, "C"),
+                        ("ramp arm A", ramp_shape, "ramp-A"),
+                        ("ramp arm C", ramp_shape, "ramp-C"))
+    for label, sh, arm in sensitivity_runs:
+        tag = f"sensitivity {label}"
+        sources[tag] = _sweep(tag, sh, lags[arm[-1]], f"sens-{arm}", curve,
+                              signals=("utilization_throughput",), checkpoint=checkpoint)
+    if checkpoint.path is not None:
+        print(
+            f"all {len(sources)} sweeps are checkpointed in {checkpoint.path}; a gap "
+            "refused below re-runs from it in seconds (without --refresh)"
+        )
 
     swept: dict[float, dict] = {}
     for lag in SWEPT_LAGS:
         label = f"modeled lag {lag:g}s"
-        points = _sweep(label, shape, LagDistribution(samples=[lag]), f"synthetic-{lag}", curve)
-        sources[label] = points
-        per_signal = {s: pareto_frontier(ps) for s, ps in _by_signal(points).items()}
+        per_signal = {s: pareto_frontier(ps) for s, ps in _by_signal(sources[label]).items()}
         # `iso_cost_budget`, not `min(cost) * 2`: the latter was written here,
         # pre-registered nowhere, and left every frontier fully affordable, so
         # the "iso-cost slice" constrained nothing. Any signal whose frontier
@@ -180,22 +341,6 @@ def _run_everything(store: str, curve):
                 f"NO INTERVAL ({exc.args[0].split(';')[0]})"
             )
 
-    # H3 is evaluated under BOTH shapes or not at all -- the pre-registration
-    # fixes that, because H4 already predicts the ramp's margins shrink, so a
-    # ramp-only halving is both the easier outcome and the less interesting
-    # one. Until this existed the script swept only the step, and `h3_verdict`
-    # was reachable from tests and from nowhere else: running the artifact
-    # could not evaluate its own headline hypothesis.
-    ramp_shape = spike_shape(curve, kind="ramp")
-    print(
-        f"ramp spike: baseline={ramp_shape.baseline_rate:.1f} rps, k={ramp_shape.k:.1f}, "
-        f"ramp={ramp_shape.ramp:g}s, sustain={ramp_shape.sustain:g}s"
-    )
-    for arm in ("A", "C"):
-        sources[f"ramp arm {arm}"] = _sweep(
-            f"ramp arm {arm}", ramp_shape, lags[arm], f"ramp-{arm}", curve
-        )
-
     gaps: dict[str, dict] = {}
     for label in ("arm A", "arm C", "ramp arm A", "ramp arm C"):
         per_signal = {s: pareto_frontier(ps) for s, ps in _by_signal(sources[label]).items()}
@@ -208,26 +353,16 @@ def _run_everything(store: str, curve):
             f"({got['paired_repetitions']} paired repetitions; per-signal {reps})"
         )
 
-    # H2's sensitivity arm (amendment 2026-10-04): the same four sweeps with
-    # utilisation defined as the throughput fraction, swapped in for the
-    # nvidia-smi utilisation signal and nothing else. Printed beside the
-    # headline gap, never substituted for it. Only the gap computation's
-    # refusals (a ValueError from `iso_cost_budget` or `gap_at_iso_cost`, such
-    # as an empty or unaffordable frontier) are printed rather than raised, so
-    # a sensitivity arm with no gap does not cost the headline run its 25
-    # minutes of CPU. A failure inside the sensitivity sweeps themselves still
-    # propagates. The sweep seeds on (seed, up, down, rep) and not on the
-    # signal, so these traces are the headline's own and the swap changes only
-    # what the controller reads.
+    # The sensitivity gaps are printed beside the headline gap, never
+    # substituted for it. Only the gap computation's refusals (a ValueError
+    # from `iso_cost_budget` or `gap_at_iso_cost`, such as an empty or
+    # unaffordable frontier) are printed rather than raised, so a sensitivity
+    # arm with no gap does not stop the figures being drawn.
     sensitivity_signals = tuple(
         "utilization_throughput" if s == "utilization" else s for s in SIGNAL_ORDER
     )
-    for label, sh, arm in (("arm A", shape, "A"), ("arm C", shape, "C"),
-                           ("ramp arm A", ramp_shape, "ramp-A"),
-                           ("ramp arm C", ramp_shape, "ramp-C")):
+    for label, _, _ in sensitivity_runs:
         tag = f"sensitivity {label}"
-        sources[tag] = _sweep(tag, sh, lags[arm[-1]], f"sens-{arm}", curve,
-                              signals=("utilization_throughput",))
         swapped = [p for p in sources[label] if p.signal != "utilization"] + sources[tag]
         per_signal = {s: pareto_frontier(ps) for s, ps in _by_signal(swapped).items()}
         try:
@@ -268,16 +403,7 @@ def _dump(path: Path, sources, swept, gaps, label: str) -> None:
         json.dumps(
             {
                 "curve": label,
-                "sources": {
-                    label: [
-                        [
-                            list(p.cost_samples), list(p.p99_samples), p.signal,
-                            p.scale_up_at, p.scale_down_at, list(p.rep_indices),
-                        ]
-                        for p in points
-                    ]
-                    for label, points in sources.items()
-                },
+                "sources": {label: _rows(points) for label, points in sources.items()},
                 "swept": {str(k): v for k, v in swept.items()},
                 "gaps": gaps,
             },
@@ -288,16 +414,7 @@ def _dump(path: Path, sources, swept, gaps, label: str) -> None:
 
 def _load(path: Path):
     raw = json.loads(path.read_text())
-    sources = {
-        label: [
-            PolicyPoint(
-                cost_samples=tuple(c), p99_samples=tuple(p), signal=s,
-                scale_up_at=u, scale_down_at=d, rep_indices=tuple(r),
-            )
-            for c, p, s, u, d, r in rows
-        ]
-        for label, rows in raw["sources"].items()
-    }
+    sources = {label: _points(rows) for label, rows in raw["sources"].items()}
     return sources, {float(k): v for k, v in raw["swept"].items()}, raw.get("gaps", {}), raw
 
 
@@ -345,7 +462,9 @@ def main(argv=None) -> None:
         sources, swept, gaps, raw = _load(cache)
         check_cache_curve(raw, label)
     else:
-        sources, swept, gaps = _run_everything(args.store, curve)
+        checkpoint = open_checkpoint(out, sweep_identity(label, args.store),
+                                     refresh=args.refresh)
+        sources, swept, gaps = _run_everything(args.store, curve, checkpoint)
         _dump(cache, sources, swept, gaps, label)
         print(f"cached the sweep to {cache}")
 
