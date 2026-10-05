@@ -43,7 +43,7 @@ This plan is the part of plan 2a's "carried to plan 2b" list that the open-loop 
 ## Owner decisions this plan implements (2026-10-04, binding)
 
 1. **Utilisation signal: both, with nvidia-smi primary.**
-   - Add a measured idle point: 0 load reads 0% GPU. Evidence: every successful sweep run's samples outside the measured span read 0.
+   - Add a measured idle point: 0 load reads 0% GPU. Evidence: in every successful sweep run, at least 80% of the samples outside the measured span read 0.
    - Keep nvidia-smi as the headline "GPU utilisation". It saturates at one request, and that is what DCGM- or KEDA-style autoscalers see.
    - Add a throughput-fraction signal, `throughput_at(c) / max throughput`, derived from the curve with no GPU spend. It is a disclosed sensitivity arm, so H2 is not won against a straw man.
 2. **Load path: a RunPod load-balancing endpoint.** A worker runs a resident vLLM server, and a paid feasibility probe (~$0.50) comes before the validation runs.
@@ -101,7 +101,7 @@ Verified while writing this plan:
 |---|---|
 | `autoscale/measured_curve.py` | **Create (Task 2).** Load `data/a2/service-curve.json` into `MeasuredCurve`: a `ServiceCurve` with the idle point, plus intervals, excluded levels and engine facts. Refuses anything not measured or not windowed. |
 | `autoscale/signals.py` | **Modify (Task 3).** Add `utilization_throughput` and `SENSITIVITY_SIGNALS` / `ALL_SIGNALS`; `SIGNALS` stays the three headline signals. |
-| `autoscale/thresholds.py` | **Modify (Task 3).** Add the sensitivity signal's grid, equal to utilisation's. |
+| `autoscale/thresholds.py` | **Modify (Task 3).** Add `SENSITIVITY_THRESHOLDS`, the sensitivity signal's grid, equal to utilisation's. `THRESHOLDS` stays the three pre-registered grids. |
 | `autoscale/sim.py` | **Modify (Task 3).** `run_with_policy` resolves the signal in `ALL_SIGNALS`. |
 | `autoscale/sweep.py` | **Modify (Task 3).** `run_sweep(..., signals=None)`; the default is the three headline signals. |
 | `scripts/a2_traffic_rates.py` | **Create (Task 4).** Print the absolute rates and the validation schedule's facts from the measured curve, for the amendment. |
@@ -186,7 +186,7 @@ for s in a2_render_figures a2_gap_noise_floor a2_regime_probe; do PYTHONDONTWRIT
 ls build/a2-figures-final/ 2>/dev/null && cp build/a2-figures-final/sweep-cache.json build/a2-plan2b-baseline/placeholder-sweep-cache.json
 ```
 
-Expected: a sha256 for the placeholder figure 4, saturation `≈ 30.48` req/s (the placeholder's `64/2.10`), three help files, and, if `build/a2-figures-final/` exists, a copy of its placeholder sweep cache. Paste the printed facts into the inventory under "Baseline".
+Expected: a sha256 for the placeholder figure 4, saturation `≈ 33.68` req/s (the placeholder's `32/0.95`, the max of `c/latency` over its points), three help files, and, if `build/a2-figures-final/` exists, a copy of its placeholder sweep cache. Paste the printed facts into the inventory under "Baseline".
 
 - [ ] **Step 4: Commit the inventory (the baseline stays in `build/`, which is gitignored)**
 
@@ -203,7 +203,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 `scripts/a2_service_curve.py::load_service_curve` exists, but `scripts/` is not a package and `autoscale/` must not import it. Nor does it add the idle point. This task puts the loader where the simulator lives.
 
-Why the idle point is a measurement, not an assumption: every successful run in `data/a2/service-sweep.jsonl` sampled nvidia-smi before and after its measured span, while the engine sat idle. Those samples read `0` (for example 33 zeros against 33 out-of-span samples at level 2, and 35 against 34 at level 128). Without the point, `ServiceCurve.utilization_at(0)` clamps to the first point's 1.0, so an idle replica reads 100% busy and no scale-down threshold can ever fire.
+Why the idle point is a measurement, not an assumption: every successful run in `data/a2/service-sweep.jsonl` sampled nvidia-smi before and after its measured span, while the engine sat idle. At least 80% of those samples read `0` in every run (for example 33 zeros against 33 out-of-span samples at level 2, and 30 against 33 at level 32, where the first samples and the span's edges catch the warm-up and the prompt probe). The 80% rule is the owner's decision of 2026-10-04. Without the point, `ServiceCurve.utilization_at(0)` clamps to the first point's 1.0, so an idle replica reads 100% busy and no scale-down threshold can ever fire.
 
 **Files:**
 - Create: `autoscale/measured_curve.py`
@@ -348,7 +348,8 @@ def test_the_store_shows_an_idle_gpu_reads_zero():
         samples = [s["util_pct"] for s in r["summary"]["gpu"]["samples"]
                    if s.get("util_pct") is not None]
         zeros = sum(1 for v in samples if v == 0)
-        assert zeros >= r["summary"]["gpu_util_n_outside_span"] - 2, r["run_id"]
+        outside = r["summary"]["gpu_util_n_outside_span"]
+        assert outside > 0 and zeros >= 0.8 * outside, (r["run_id"], zeros, outside)
 
 
 def test_select_curve_defaults_to_the_measured_one(tmp_path):
@@ -570,7 +571,9 @@ def test_the_headline_registry_is_unchanged_and_the_sensitivity_one_is_separate(
 
 
 def test_the_sensitivity_signal_uses_utilizations_grid():
-    assert _THRESHOLDS["utilization_throughput"] == _THRESHOLDS["utilization"]
+    from autoscale.thresholds import SENSITIVITY_THRESHOLDS
+    assert SENSITIVITY_THRESHOLDS["utilization_throughput"] == _THRESHOLDS["utilization"]
+    assert "utilization_throughput" not in _THRESHOLDS
 ```
 
 (`tests/test_signals.py` already imports `pytest`, `FleetState`, `SIGNALS` and `utilization`; check the file's import block and add only what is missing.)
@@ -713,14 +716,18 @@ ALL_SIGNALS: Mapping[str, Callable[[FleetState, ServiceCurve], float]] = Mapping
 )
 ```
 
-In `autoscale/thresholds.py`, add to `THRESHOLDS` after `"utilization"`:
+In `autoscale/thresholds.py`, add below `THRESHOLDS` (not inside it: `THRESHOLDS` is the pre-registered grids, pinned by `tests/test_frontier.py` and `tests/test_a2_end_to_end.py`, and `run_sweep`'s default iterates it):
 
 ```python
-    # Sensitivity arm (owner decision 2026-10-04): the same fraction scale as
-    # utilization, so the same grid. A grid of its own would add a second
-    # difference between the two utilisation definitions.
-    "utilization_throughput": ((0.50, 0.65, 0.80, 0.90, 0.95), (0.05, 0.15, 0.30, 0.50)),
+# Sensitivity arms (owner decision 2026-10-04), kept OUT of THRESHOLDS: that
+# dict is the pre-registered grids, pinned by tests/test_frontier.py, and
+# `run_sweep`'s default iterates it. Utilisation's grid, unchanged: the same
+# fraction scale, so a grid of its own would add a second difference between
+# the two utilisation definitions.
+SENSITIVITY_THRESHOLDS = {"utilization_throughput": THRESHOLDS["utilization"]}
 ```
+
+In `run_sweep`, grids are looked up from `grids = {**THRESHOLDS, **SENSITIVITY_THRESHOLDS}`, built inside the function so a test that reassigns `sweep.THRESHOLDS` still takes effect, and `up_grid, down_grid = grids[signal]`.
 
 In `autoscale/sim.py`, change the import of `SIGNALS` to `ALL_SIGNALS`, and line 476 `signal_fn = SIGNALS[signal]` to `signal_fn = ALL_SIGNALS[signal]`. Grep for any other `SIGNALS` use in `sim.py` (a docstring or error text naming the registry) and update it to say `ALL_SIGNALS`.
 
@@ -746,7 +753,8 @@ Replace `for signal in sorted(SIGNALS):` with:
 
 ```python
     names = tuple(sorted(SIGNALS)) if signals is None else tuple(signals)
-    unknown = [s for s in names if s not in ALL_SIGNALS or s not in THRESHOLDS]
+    grids = {**THRESHOLDS, **SENSITIVITY_THRESHOLDS}
+    unknown = [s for s in names if s not in ALL_SIGNALS or s not in grids]
     if unknown:
         raise KeyError(
             f"unknown signals {unknown}; known: {sorted(ALL_SIGNALS)}. A typo here would "
@@ -1120,7 +1128,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_validation_sched
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/a2_traffic_rates.py | tee build/a2-plan2b-rates.txt
 ```
 
-Expected: tests pass. The script prints `saturation_rps 211.19…`, `baseline_rps_one_replica 147.83…`, `peak_rps_one_replica 200.63…`, `validation_baseline_rps 295.67…`, `validation_peak_rps 401.27…`, `validation_predicted_unfinished 0`, and a request count near 120,000. Keep the output; Task 5 quotes it.
+Expected: tests pass. The script prints `saturation_rps 211.19…`, `baseline_rps_one_replica 147.83…`, `peak_rps_one_replica 200.63…`, `validation_baseline_rps 295.67…`, `validation_peak_rps 401.27…`, `validation_predicted_unfinished 0`, and `validation_requests 129876`. Keep the output; Task 5 quotes it.
 
 - [ ] **Step 6: Full suite, lint, commit**
 
@@ -1153,7 +1161,7 @@ from pathlib import Path
 
 from autoscale import validation_schedule as vs
 from autoscale.measured_curve import IDLE_CONCURRENCY
-from autoscale.thresholds import THRESHOLDS
+from autoscale.thresholds import SENSITIVITY_THRESHOLDS
 
 DOC = (Path(__file__).resolve().parents[1] / "docs" / "experiment-a2.md").read_text()
 SECTION = DOC.split("## Amendment, 2026-10-04: the measured curve and the validation operating point", 1)
@@ -1184,7 +1192,7 @@ def test_the_idle_point_and_the_sensitivity_signal_are_stated():
     s = _section()
     assert f"concurrency {IDLE_CONCURRENCY:g}" in s and "0%" in s
     assert "`utilization_throughput`" in s
-    up, down = THRESHOLDS["utilization_throughput"]
+    up, down = SENSITIVITY_THRESHOLDS["utilization_throughput"]
     assert ", ".join(f"{v:g}" for v in up) in s
 
 
@@ -1219,8 +1227,9 @@ at its first step in 3 of 3 runs. The per-replica cap is therefore 128.
 **An idle point at concurrency 0 reads 0% GPU.** nvidia-smi reads 100% at every
 measured level, one request included. Without a point at 0 the curve clamps, an
 idle replica reads 100% busy, and no utilisation scale-down threshold can fire.
-The 0% is measured: every successful sweep run's samples outside its measured
-span, with the engine idle, read 0.
+The 0% is measured: in every successful sweep run, at least 80% of the samples
+outside its measured span, with the engine idle, read 0; the rest sit at the
+span's edges, next to the warm-up and the prompt probe.
 
 **H2 under a saturating signal.** The headline utilisation signal stays
 nvidia-smi's, because it is what GPU-utilisation autoscalers act on, and it
@@ -1250,8 +1259,8 @@ saturation); peak **<peak> req/s** (baseline + 0.25 × saturation), for one repl
 - **The simulator's prediction for this schedule:** p50 <p50> s, p99 <p99> s, 0 requests
   unfinished at 400 s.
 
-**Void runs.** A repeat with any non-200 response, or with a response from a
-worker outside the pinned set, is void. It is recorded, not judged, and run
+**Void runs.** A repeat with any non-200 response, a response from a worker
+outside the pinned set, or a 200 without the server-latency header is void. It is recorded, not judged, and run
 again once. A second void at the same repeat ends the gate as "not evaluable",
 with the cause published. A host-novelty event (a pinned worker id never seen in
 an earlier repeat) is recorded and disclosed, not voided (spec §10).
