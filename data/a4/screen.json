@@ -1,0 +1,1185 @@
+{
+ "swap_median_s": 28.97883974481374,
+ "candidates": [
+  {
+   "offered_gpus": 4.0,
+   "slo_swap_multiple": 1.0,
+   "slo_seconds": 28.97883974481374,
+   "score": 18,
+   "evaluable": 12,
+   "points": [
+    {
+     "regime": "spread",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 21,
+      "swap": 21,
+      "colocate": 12
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 21,
+      "swap": 21,
+      "colocate": 12
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 22,
+      "swap": 22,
+      "colocate": 13
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 22,
+      "swap": 22,
+      "colocate": 13
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 23,
+      "swap": 23,
+      "colocate": 14
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "bursty",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 37,
+      "swap": 36,
+      "colocate": 33
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 38,
+      "swap": 37,
+      "colocate": 33
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 36,
+      "swap": 34,
+      "colocate": 30
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 39,
+      "swap": 38,
+      "colocate": 32
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 41,
+      "swap": 39,
+      "colocate": 34
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 43,
+      "swap": 40,
+      "colocate": 35
+     },
+     "told_apart": 2
+    }
+   ]
+  },
+  {
+   "offered_gpus": 4.0,
+   "slo_swap_multiple": 2.0,
+   "slo_seconds": 57.95767948962748,
+   "score": 17,
+   "evaluable": 12,
+   "points": [
+    {
+     "regime": "spread",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 21,
+      "swap": 21,
+      "colocate": 12
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 21,
+      "swap": 21,
+      "colocate": 12
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 22,
+      "swap": 22,
+      "colocate": 13
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 22,
+      "swap": 22,
+      "colocate": 13
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 23,
+      "swap": 23,
+      "colocate": 14
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "bursty",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 37,
+      "swap": 34,
+      "colocate": 33
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 38,
+      "swap": 34,
+      "colocate": 33
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 36,
+      "swap": 29,
+      "colocate": 30
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 39,
+      "swap": 32,
+      "colocate": 32
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "bursty",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 41,
+      "swap": 33,
+      "colocate": 34
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 43,
+      "swap": 34,
+      "colocate": 35
+     },
+     "told_apart": 2
+    }
+   ]
+  },
+  {
+   "offered_gpus": 4.0,
+   "slo_swap_multiple": 4.0,
+   "slo_seconds": 115.91535897925496,
+   "score": 17,
+   "evaluable": 12,
+   "points": [
+    {
+     "regime": "spread",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 21,
+      "swap": 21,
+      "colocate": 12
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 21,
+      "swap": 21,
+      "colocate": 12
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 22,
+      "swap": 22,
+      "colocate": 13
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 22,
+      "swap": 22,
+      "colocate": 13
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 23,
+      "swap": 23,
+      "colocate": 14
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "bursty",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 37,
+      "swap": 34,
+      "colocate": 33
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 38,
+      "swap": 34,
+      "colocate": 33
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 36,
+      "swap": 29,
+      "colocate": 30
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 39,
+      "swap": 32,
+      "colocate": 32
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "bursty",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 41,
+      "swap": 33,
+      "colocate": 34
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 43,
+      "swap": 33,
+      "colocate": 35
+     },
+     "told_apart": 2
+    }
+   ]
+  },
+  {
+   "offered_gpus": 2.0,
+   "slo_swap_multiple": 1.0,
+   "slo_seconds": 28.97883974481374,
+   "score": 18,
+   "evaluable": 12,
+   "points": [
+    {
+     "regime": "spread",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 21,
+      "swap": 21,
+      "colocate": 12
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 21,
+      "swap": 21,
+      "colocate": 12
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 21,
+      "swap": 21,
+      "colocate": 12
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "bursty",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 24,
+      "swap": 23,
+      "colocate": 16
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 26,
+      "swap": 25,
+      "colocate": 18
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 25,
+      "swap": 23,
+      "colocate": 17
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 28,
+      "swap": 27,
+      "colocate": 20
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 29,
+      "swap": 27,
+      "colocate": 21
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 30,
+      "swap": 27,
+      "colocate": 21
+     },
+     "told_apart": 2
+    }
+   ]
+  },
+  {
+   "offered_gpus": 2.0,
+   "slo_swap_multiple": 2.0,
+   "slo_seconds": 57.95767948962748,
+   "score": 19,
+   "evaluable": 12,
+   "points": [
+    {
+     "regime": "spread",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 21,
+      "swap": 21,
+      "colocate": 12
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 21,
+      "swap": 21,
+      "colocate": 12
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 21,
+      "swap": 20,
+      "colocate": 12
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 24,
+      "swap": 15,
+      "colocate": 16
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 26,
+      "swap": 17,
+      "colocate": 18
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 25,
+      "swap": 16,
+      "colocate": 17
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 28,
+      "swap": 18,
+      "colocate": 20
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 29,
+      "swap": 20,
+      "colocate": 21
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 30,
+      "swap": 20,
+      "colocate": 21
+     },
+     "told_apart": 2
+    }
+   ]
+  },
+  {
+   "offered_gpus": 2.0,
+   "slo_swap_multiple": 4.0,
+   "slo_seconds": 115.91535897925496,
+   "score": 19,
+   "evaluable": 12,
+   "points": [
+    {
+     "regime": "spread",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 21,
+      "swap": 21,
+      "colocate": 12
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 21,
+      "swap": 21,
+      "colocate": 12
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 21,
+      "swap": 20,
+      "colocate": 12
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 24,
+      "swap": 15,
+      "colocate": 16
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 26,
+      "swap": 17,
+      "colocate": 18
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 25,
+      "swap": 16,
+      "colocate": 17
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 28,
+      "swap": 18,
+      "colocate": 20
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 29,
+      "swap": 19,
+      "colocate": 21
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 30,
+      "swap": 20,
+      "colocate": 21
+     },
+     "told_apart": 2
+    }
+   ]
+  },
+  {
+   "offered_gpus": 1.0,
+   "slo_swap_multiple": 1.0,
+   "slo_seconds": 28.97883974481374,
+   "score": 18,
+   "evaluable": 12,
+   "points": [
+    {
+     "regime": "spread",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "bursty",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 21,
+      "swap": 18,
+      "colocate": 12
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 21,
+      "swap": 18,
+      "colocate": 12
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 21,
+      "swap": 20,
+      "colocate": 12
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 23,
+      "swap": 19,
+      "colocate": 14
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 24,
+      "swap": 19,
+      "colocate": 15
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 25,
+      "swap": 24,
+      "colocate": 16
+     },
+     "told_apart": 2
+    }
+   ]
+  },
+  {
+   "offered_gpus": 1.0,
+   "slo_swap_multiple": 2.0,
+   "slo_seconds": 57.95767948962748,
+   "score": 20,
+   "evaluable": 12,
+   "points": [
+    {
+     "regime": "spread",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 20,
+      "swap": 19,
+      "colocate": 10
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "spread",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 20,
+      "swap": 18,
+      "colocate": 10
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 21,
+      "swap": 9,
+      "colocate": 12
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 21,
+      "swap": 10,
+      "colocate": 12
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 21,
+      "swap": 11,
+      "colocate": 12
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 23,
+      "swap": 13,
+      "colocate": 14
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 24,
+      "swap": 14,
+      "colocate": 15
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 25,
+      "swap": 15,
+      "colocate": 16
+     },
+     "told_apart": 2
+    }
+   ]
+  },
+  {
+   "offered_gpus": 1.0,
+   "slo_swap_multiple": 4.0,
+   "slo_seconds": 115.91535897925496,
+   "score": 20,
+   "evaluable": 12,
+   "points": [
+    {
+     "regime": "spread",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 20,
+      "swap": 20,
+      "colocate": 10
+     },
+     "told_apart": 1
+    },
+    {
+     "regime": "spread",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 20,
+      "swap": 19,
+      "colocate": 10
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "spread",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 20,
+      "swap": 18,
+      "colocate": 10
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 0.6,
+     "sized": {
+      "dedicate": 21,
+      "swap": 9,
+      "colocate": 12
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 0.8,
+     "sized": {
+      "dedicate": 21,
+      "swap": 10,
+      "colocate": 12
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.0,
+     "sized": {
+      "dedicate": 21,
+      "swap": 10,
+      "colocate": 12
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.25,
+     "sized": {
+      "dedicate": 23,
+      "swap": 12,
+      "colocate": 14
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 1.5,
+     "sized": {
+      "dedicate": 24,
+      "swap": 14,
+      "colocate": 15
+     },
+     "told_apart": 2
+    },
+    {
+     "regime": "bursty",
+     "s": 2.0,
+     "sized": {
+      "dedicate": 25,
+      "swap": 14,
+      "colocate": 16
+     },
+     "told_apart": 2
+    }
+   ]
+  }
+ ],
+ "chosen": {
+  "offered_gpus": 1.0,
+  "slo_swap_multiple": 2.0
+ },
+ "provisional_inputs": {
+  "engines": "placement.placeholders.PLACEHOLDER_ENGINES (invented; the screen only)",
+  "swap_samples": [
+   33.28982939757407,
+   28.980028707534075,
+   35.06706274859607,
+   28.729517532512546,
+   28.977650782093406,
+   28.722794361412525
+  ],
+  "simulated_swap": {
+   "cold": false,
+   "compiled": false
+  }
+ }
+}
