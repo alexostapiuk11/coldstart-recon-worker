@@ -38,6 +38,11 @@ headline utilisation signal; the gate judges server-side latency; a void repeat 
     repository checks them. Per RunPod's documentation the health path defaults to `/ping`, which
     vLLM does not serve; a missing `HEALTH_CHECK_PATH` would show as P1 failing.
 - Container disk as the sweep template.
+- Exposed HTTP port `8000/http`. RunPod's load-balancing docs: a custom `PORT` must also be
+  exposed in the container configuration ("Expose HTTP Ports"). Missing, it would show as P1
+  failing, with nothing in this repository to say why.
+- Created 2026-10-05 as template `4p46s4hcar` (`a2-lb-validation`), pinned to the image built
+  from the commit that set `--max-num-seqs 128`.
 
 **C. Endpoint (new; type: load balancing; owner via the console).**
 - GPU `NVIDIA GeForce RTX 4090`, network volume `9c7ut2slrd` (P7: if the console refuses a
