@@ -74,6 +74,12 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/a4_recon_capture.py --templat
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/a4_recon_report.py
 ```
 
+Added after the 2026-10-05 run, where the primary pair failed and the fallback
+passed: `--model-class fallback` rebuilds those four jobs for Qwen3-1.7B (each
+runs it against itself, with the primary plan's cache states) and leaves the
+first four unchanged. Add it to every batch-three command, and check with
+`--list --model-class fallback` before spending.
+
 **F2. If a job fails.** Added after review; not part of the plan's text.
 `a4_recon_capture.py` saves a failed job's outcome like any other and then
 goes on to the next job in the same `--only` batch, so a failure does not stop
