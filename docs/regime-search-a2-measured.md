@@ -172,3 +172,12 @@ verified with the four full sweeps:
 **0.70 / 0.5 passes.** The search stopped there, as the selection rule says. No
 gap value was recorded or printed. Proposed for the owner's sign-off: b stays at
 0.70, and a moves from 0.25 to 0.5 (peak 1.20× one replica's saturation).
+
+**Correction to "What we have already seen" (added after the search).** That
+section left something out. Before it stopped, the refused figure run also
+printed the modeled-lag sensitivity gaps on the measured curve, under the old
+regime: 0.0848 s [0.0727, 0.1042] at 20 s, then 0.0666 s, 0.0500 s, 0.0425 s and
+0.0106 s at 40, 60, 80 and 120 s. The last four had no interval (thin frontiers).
+These are the explicitly unmeasured synthetic-lag panel, not a headline gap.
+They were seen before the criteria were written, and the amendment discloses
+them.
