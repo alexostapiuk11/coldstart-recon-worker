@@ -52,6 +52,29 @@ the pre-registered order (scope amendment §9): the interference grid's
 resolution first.** That is an amendment to step 2, committed before the cut
 campaign runs, never a quiet edit to a design file.
 
+*Added after review; not part of the plan's text.* The scope amendment's
+order (§9, and decision 10) has three steps, not one: the interference grid's
+resolution first, then validation repeats down to three, then the sleep-mode
+arm. The first is what the paragraph above names; the other two follow only
+if the budget still binds, each as its own committed amendment.
+
+*Added after review.* To price a campaign before spending on it, count its
+jobs from the design file. `a4_measure.py` prints the count only after its
+preflight and then submits at once. This submits nothing and needs no
+credentials (`--kind` is `cell`, `swap`, `sleep` or `replay`):
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -c "
+import sys; sys.path.insert(0, 'scripts')
+from a4_measure import load_design
+print(len(load_design('cell', 'data/a4/designs/cells.json').schedule()))"
+```
+
+The cells row above is the product of its two columns, 140 jobs at 2-6 min,
+which is 4.7-14 h; the 7-11 h in the last column is the plan's own estimate.
+Take the count from the design and the per-job time from the first jobs
+actually run.
+
 **E. Cells.** The longest campaign. It resumes where it stopped, so it can run
 over several sessions.
 
@@ -86,6 +109,30 @@ stores (`--cells` twice).
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/a4_measure.py --kind swap --design data/a4/designs/swaps.json --template-id <id> --store data/a4/swaps.jsonl
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/a4_measure.py --kind sleep --design data/a4/designs/sleep.json --template-id <id> --store data/a4/sleep.jsonl
 ```
+
+**F2. Stop points, failures and the spend bound.** *Added after review; not
+part of the plan's text.* `a4_measure.py` records every job as it lands, a
+failed one included, and never retries in place. It does not stop on a
+failure: a wrong `dockerStartCmd` or a bad template would run every job in the
+design, each up to the endpoint's `executionTimeoutMs` of 30 minutes, so the
+worst case is the job count times half an hour (about 70 h for 140 cell jobs).
+What bounds it is you:
+- Watch the first lines it prints, `[run N] <condition>: <outcome>`. If the
+  first few are not `ok`, stop it (Ctrl-C). The runs already written stay in
+  the store; the cause is fixed before anything resumes.
+- `--resume` skips every run already in the store, **failed ones included**: a
+  failed run is done, not pending. It also refuses a store whose records
+  disagree with the rebuilt schedule, so resume with exactly the original
+  design file.
+- Cells: a failed run leaves its cell short of valid repeats, and the check in
+  E lists it; the top-up in E is the way to fill it.
+- Swaps and sleep mode have no top-up in the tooling. Their analysis refuses to
+  run when a (cache state, target) combination has no ok swap, or when no
+  sleep switch is ok, and that refusal is the signal. Whether to run a further
+  campaign into its own store is the owner's decision, as a disclosed
+  amendment; do not edit the stores.
+- Compare the console's spend with the job count times the per-job time after
+  the first session, before the second.
 
 **G. The validation trace, then its replays.** The trace's load is a fraction
 of the measured solo saturation, and the pre-registered draw is the first whose
