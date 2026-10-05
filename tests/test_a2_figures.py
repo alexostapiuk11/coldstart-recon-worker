@@ -1,3 +1,5 @@
+import dataclasses
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -27,7 +29,7 @@ from autoscale.service import SERVICE_CURVE_PLACEHOLDER, ServiceCurve
 from autoscale.thresholds import THRESHOLDS
 from autoscale.validation import RealRun, predicted_trajectory, tolerance_band
 from autoscale.validation import validate as _validate
-from autoscale.validation_band import BandBin
+from autoscale.validation_band import BandBin, BinVerdict, Validation
 from autoscale.validation_band import trajectory as _trajectory
 from autoscale.validation_schedule import build_schedule as _build_schedule
 
@@ -1073,12 +1075,89 @@ def test_overlay_draws_band_prediction_and_repeats(tmp_path):
     assert gids.count("band") == 1 and gids.count("predicted") == 1 and gids.count("repeat") == 3
 
 
+def _gid(fig, gid):
+    return [a for a in fig.findobj() if getattr(a, "get_gid", lambda: None)() == gid]
+
+
 def test_overlay_marks_every_judged_miss(tmp_path):
     fig = _draw_overlay(tmp_path, factors=(1.4, 1.45, 1.5))
     _, _, verdict, _, _ = _overlay_inputs((1.4, 1.45, 1.5))
-    misses = [a for a in fig.findobj() if getattr(a, "get_gid", lambda: None)() == "miss"]
-    assert len(misses) == 1
-    assert len(misses[0].get_xdata()) == verdict.misses
+    (misses,), (backlog,) = _gid(fig, "miss"), _gid(fig, "miss_backlog")
+    assert len(misses.get_xdata()) + len(backlog.get_xdata()) == verdict.misses > 0
+
+
+def _with_verdicts(verdicts, predicted, band_bins=None, base=None):
+    """The synthetic pass inputs with `verdicts` ({bin index: verdict}) overriding the verdict
+    list, so a case the gate would produce is built without a real run that produces it."""
+    pred, band, verdict, repeats, n = base or _overlay_inputs()
+    bins = [BinVerdict(v.start, v.end, verdicts.get(i, v.verdict), math.inf
+                       if verdicts.get(i) == "censoring_disagreement" else v.miss_seconds)
+            for i, v in enumerate(verdict.bins)]
+    judged = [b for b in bins if b.verdict in ("inside", "outside", "censoring_disagreement")]
+    agreeing = sum(1 for b in judged if b.verdict == "inside")
+    fake = Validation(tuple(bins), len(judged), agreeing, verdict.outcome, "", 0.0)
+    return predicted or pred, band_bins or band, fake, repeats, n
+
+
+def test_a_model_backlog_miss_sits_on_the_top_edge_not_at_zero(tmp_path):
+    pred, band, _, repeats, n = _overlay_inputs()
+    gap = 5
+    pred = list(pred)
+    pred[gap] = dataclasses.replace(pred[gap], p50=None, status="censored")
+    _, _, fake, _, _ = _with_verdicts({gap: "censoring_disagreement"}, pred)
+    fig = validation_overlay(pred, band, fake, repeats, tmp_path / "b.png", replicas=2,
+                             requests_per_run=n, latency_source="server", return_figure=True)
+    (backlog,) = _gid(fig, "miss_backlog")
+    axis = fig.axes[0]
+    assert list(backlog.get_ydata()) == [1.0] and not backlog.get_clip_on()
+    fig.canvas.draw()
+    _, y_px = backlog.get_transform().transform((backlog.get_xdata()[0], 1.0))
+    assert y_px == pytest.approx(axis.bbox.y1)  # y is in axes coordinates: the top edge
+    (plain,) = _gid(fig, "miss")
+    assert 0 not in list(plain.get_ydata()) and len(plain.get_xdata()) == 0
+    assert len(plain.get_xdata()) + len(backlog.get_xdata()) == fake.misses == 1
+    assert "miss (model backlogged)" in _texts(fig)
+    assert "1 misses" in " ".join(_texts(fig))
+
+
+def test_the_miss_legend_entries_appear_only_when_there_is_a_miss(tmp_path):
+    texts = _texts(_draw_overlay(tmp_path))
+    assert "miss" not in texts and "miss (model backlogged)" not in texts
+    fail = _texts(_draw_overlay(tmp_path, factors=(1.4, 1.45, 1.5)))
+    assert "miss" in fail and "miss (model backlogged)" not in fail
+
+
+def test_the_band_does_not_bridge_excluded_bins(tmp_path):
+    pred, band, _, repeats, n = _overlay_inputs()
+    gap = (6, 7, 8)
+    band = [BandBin(b.start, b.end, None, None, "insufficient") if i in gap else b
+            for i, b in enumerate(band)]
+    _, _, fake, _, _ = _with_verdicts({i: "excluded_insufficient" for i in gap}, pred, band)
+    fig = validation_overlay(pred, band, fake, repeats, tmp_path / "g.png", replicas=2,
+                             requests_per_run=n, latency_source="server", return_figure=True)
+    (collection,) = _gid(fig, "band")
+    centres = [(b.start + b.end) / 2 for b in pred]
+    inside_gap = (centres[gap[0] - 1], centres[gap[-1] + 1])
+    xs = [x for path in collection.get_paths() for x in path.vertices[:, 0]]
+    assert xs and not any(inside_gap[0] < x < inside_gap[1] for x in xs)
+    # A bridge has no vertex inside the gap (a straight edge joins its two ends), so also
+    # require that no single polygon spans from one side of the gap to the other.
+    for path in collection.get_paths():
+        assert not (path.vertices[:, 0].min() <= inside_gap[0]
+                    and path.vertices[:, 0].max() >= inside_gap[1])
+    assert min(xs) <= centres[0] and max(xs) >= centres[17]  # the judged bins are still drawn
+
+
+def test_hatching_covers_exactly_the_bins_that_were_not_judged(tmp_path):
+    pred, band, _, repeats, n = _overlay_inputs()
+    _, _, fake, _, _ = _with_verdicts({3: "agree_censored", 4: "excluded_unstable",
+                                       5: "excluded_insufficient"}, pred)
+    fig = validation_overlay(pred, band, fake, repeats, tmp_path / "h.png", replicas=2,
+                             requests_per_run=n, latency_source="server", return_figure=True)
+    hatched = sorted(r.get_x() for r in _gid(fig, "not_judged"))
+    expected = sorted(b.start for b in fake.bins
+                      if b.verdict not in ("inside", "outside", "censoring_disagreement"))
+    assert hatched == expected and len(expected) >= 5  # the three above plus the drain tail
 
 
 def test_overlay_states_n_outcome_source_and_banner(tmp_path):
@@ -1118,3 +1197,21 @@ def test_overlay_refuses_a_count_of_repeats_other_than_three(tmp_path):
     with pytest.raises(ValueError, match="3 repeats"):
         validation_overlay(predicted, band_bins, verdict, repeats[:2], tmp_path / "x.png",
                            replicas=2, requests_per_run=n, latency_source="server")
+
+
+def test_a_two_row_legend_with_both_miss_kinds_stays_on_canvas_and_off_the_note(tmp_path):
+    pred, band, _, repeats, n = _overlay_inputs()
+    pred = list(pred)
+    pred[12] = dataclasses.replace(pred[12], p50=None, status="censored")
+    pred[14] = dataclasses.replace(pred[14], p50=pred[14].p50 * 1.6)
+    _, _, fake, _, _ = _with_verdicts({12: "censoring_disagreement", 14: "outside"}, pred)
+    fig = validation_overlay(pred, band, fake, repeats, tmp_path / "t.png", replicas=2,
+                             requests_per_run=n, latency_source="server", return_figure=True)
+    assert "miss" in _texts(fig) and "miss (model backlogged)" in _texts(fig)
+    w, h = fig.canvas.get_width_height()
+    boxes = [(t.get_text(), box) for t, box in _rendered(fig)]
+    for text, box in boxes:
+        assert box.x0 >= -1 and box.y0 >= -1 and box.x1 <= w + 1 and box.y1 <= h + 1, text
+    legend = fig.axes[0].get_legend().get_window_extent()
+    note = next(b for t, b in boxes if t.startswith("n="))
+    assert legend.y0 >= note.y1 - 1  # the legend ends above where the note starts

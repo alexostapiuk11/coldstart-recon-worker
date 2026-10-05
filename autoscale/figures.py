@@ -121,6 +121,11 @@ NOTE_COLOR = "#3f3f3f"
 UTILIZATION_CENSOR_AT = max(THRESHOLDS["utilization"][0])
 CENSOR_COLOR = "#c0392b"
 CURVE_COLOR = "#333333"
+# Figure 3: the three real repeats are drawn thin and grey so they read as context for
+# the prediction, and bins the gate did not judge are hatched in a lighter grey still.
+REPEAT_LINE_COLOR = "#8a8a8a"
+HATCH_COLOR = "#b0b0b0"
+LEGEND_ROW_PX = 36  # one extra legend row at PX_LEGEND, with its line spacing, on the 100 dpi canvas
 
 # Figure-x of the measured panel's centre, given the `subplots_adjust` below.
 # matplotlib sizes each column as (right - left) / (ncols + wspace).
@@ -822,7 +827,10 @@ def validation_overlay(predicted, band_bins, verdict, repeats, path, *, replicas
     are the same comparison. The band is the three repeats' min-max: the
     system's own spread, which spec §10 makes the tolerance. Each repeat is
     drawn too, thin, because a band hides whether one run is an outlier.
-    Misses are marked where the prediction sits; bins the gate did not judge
+    Misses are marked where the prediction sits, as a red x; a miss where the
+    MODEL was backlogged has no median to sit on, so it is a red triangle on
+    the top edge (at zero it would read as "predicted no latency"). The band is
+    cut at bins without a range rather than bridged across them. Bins the gate did not judge
     (censored, unstable or thin) are hatched, so "passed" cannot be read as
     "every bin agreed".
 
@@ -840,44 +848,67 @@ def validation_overlay(predicted, band_bins, verdict, repeats, path, *, replicas
     centre = [(b.start + b.end) / 2 for b in predicted]
     x_right = max(b.end for b in predicted)
 
-    ok = [(c, bb.lo, bb.hi) for c, bb in zip(centre, band_bins, strict=True)
-          if bb.lo is not None and bb.hi is not None]
-    if ok:
-        axis.fill_between([c for c, _, _ in ok], [lo for _, lo, _ in ok],
-                          [hi for _, _, hi in ok], color=MEASURED_BANNER, alpha=BAND_ALPHA,
-                          linewidth=0, gid="band", label="reality band (min–max)")
+    # The band is built over ALL bins, NaN where the band has no range, and `where` cuts
+    # it there. Passing only the bins that have a range was rejected: fill_between then
+    # joins the two sides of a run of excluded bins with one straight trapezoid, drawn
+    # across the hatched region as if reality had a range there. An isolated judged bin
+    # between two excluded ones has no neighbour to join and so draws no area.
+    nan = float("nan")
+    has_range = [bb.lo is not None and bb.hi is not None for bb in band_bins]
+    lo = [bb.lo if ok else nan for bb, ok in zip(band_bins, has_range, strict=True)]
+    hi = [bb.hi if ok else nan for bb, ok in zip(band_bins, has_range, strict=True)]
+    axis.fill_between(centre, lo, hi, where=has_range, interpolate=False,
+                      color=MEASURED_BANNER, alpha=BAND_ALPHA, linewidth=0, gid="band",
+                      label="reality band (min–max)" if any(has_range) else None)
     for k, rep in enumerate(repeats):
         axis.plot(centre, [b.p50 if b.p50 is not None else float("nan") for b in rep],
-                  color="#8a8a8a", linewidth=0.9, gid="repeat",
+                  color=REPEAT_LINE_COLOR, linewidth=0.9, gid="repeat",
                   label="each real run" if k == 0 else None)
     axis.plot(centre, [b.p50 if b.p50 is not None else float("nan") for b in predicted],
               color=CURVE_COLOR, linewidth=2, gid="predicted", label="simulator")
 
     by_start = {v.start: v for v in verdict.bins}
-    miss_x, miss_y = [], []
+    miss_x, miss_y, backlog_x = [], [], []
     for c, b in zip(centre, predicted, strict=True):
         v = by_start.get(b.start)
         if v is None:
             continue
         if v.verdict in ("outside", "censoring_disagreement"):
-            miss_x.append(c)
-            miss_y.append(b.p50 if b.p50 is not None else 0.0)
-        elif v.verdict not in ("inside",):
-            axis.axvspan(b.start, b.end, facecolor="none", edgecolor="#b0b0b0", hatch="///",
+            if b.p50 is None:
+                # The model was backlogged here, so it has no median to sit on. At zero it
+                # would read as "predicted no latency"; it goes on the top edge instead.
+                backlog_x.append(c)
+            else:
+                miss_x.append(c)
+                miss_y.append(b.p50)
+        elif v.verdict != "inside":
+            axis.axvspan(b.start, b.end, facecolor="none", edgecolor=HATCH_COLOR, hatch="///",
                          linewidth=0, gid="not_judged")
     axis.plot(miss_x, miss_y, "x", color=CENSOR_COLOR, markersize=8, markeredgewidth=2,
-              gid="miss", label="miss")
+              gid="miss", label="miss" if miss_x else None)
+    axis.plot(backlog_x, [1.0] * len(backlog_x), "^", color=CENSOR_COLOR, markersize=8,
+              transform=axis.get_xaxis_transform(), clip_on=False, gid="miss_backlog",
+              label="miss (model backlogged)" if backlog_x else None)
 
     _tidy(axis, "scheduled arrival time (s)", "p50 latency per 10 s bin (s)", MEASURED_BG)
     axis.set_xlim(0, x_right)
+    # "miss (model backlogged)" is as wide as two ordinary entries: with it in the legend a
+    # single row runs off the canvas, so the legend takes two rows and the axes give up the
+    # height. The pixel offsets below reproduce the one-row layout exactly (-0.125, -0.245).
+    labels = axis.get_legend_handles_labels()[1]
+    ncol = 3 if "miss (model backlogged)" in labels else 4
+    rows = -(-len(labels) // ncol)
+    extra_px = LEGEND_ROW_PX * (rows - 1)
+    fig.subplots_adjust(bottom=(196 + extra_px) / (FIG_HEIGHT_IN * 100))
+    axes_px = (0.86 - (196 + extra_px) / (FIG_HEIGHT_IN * 100)) * FIG_HEIGHT_IN * 100
     # Tight handles and column gaps: four entries at the legend floor are as wide as
     # the canvas, and the default spacing pushed "miss" against its right edge.
-    axis.legend(loc="upper center", bbox_to_anchor=(0.5, -0.125), ncol=4,
+    axis.legend(loc="upper center", bbox_to_anchor=(0.5, -61.5 / axes_px), ncol=ncol,
                 fontsize=_pt(PX_LEGEND), frameon=False, handlelength=1.6, columnspacing=1.2)
     _figure_banner(fig, left, right, "MEASURED",
                    f"{replicas} replicas pinned, 3 real runs of one schedule", MEASURED_BANNER)
     source = "server-side latency" if latency_source == "server" else "client latency"
     _note(axis, f"n={requests_per_run} requests per run · judged {verdict.compared} bins, "
-                f"{verdict.misses} outside · {verdict.outcome}\n{source}; hatched: not judged",
-          y=-0.245)
+                f"{verdict.misses} misses · {verdict.outcome}\n{source}; hatched: not judged",
+          y=-(120.5 + extra_px) / axes_px)
     return _finish(fig, path, return_figure)
