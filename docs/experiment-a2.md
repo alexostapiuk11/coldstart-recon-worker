@@ -346,6 +346,69 @@ Fixed 2026-10-03, before any real validation run exists. Implemented in
 - **Disclosure:** every miss is published with its magnitude, as spec §10 already
   requires.
 
+## Amendment, 2026-10-04: the measured curve and the validation operating point
+
+Made after the service sweep (`data/a2/service-curve.json`) and reconnaissance
+(`docs/recon-a2.md`), before any policy sweep has run on the measured curve and
+before any real validation run exists. Signed off by the owner on 2026-10-04.
+
+**The measured curve replaces the placeholder.** Concurrency 1–128, three repeats
+per level, `max_num_seqs` 256, prefix caching off, random 13-token prompts at 16
+output tokens (the exact prompt needs pandas, which the image lacks; recorded per
+run). Level 256 is recorded as unservable: the engine died of CUDA out of memory
+at its first step in 3 of 3 runs. The per-replica cap is therefore 128.
+
+**An idle point at concurrency 0 reads 0% GPU.** nvidia-smi reads 100% at every
+measured level, one request included. Without a point at 0 the curve clamps, an
+idle replica reads 100% busy, and no utilisation scale-down threshold can fire.
+The 0% is measured: in every successful sweep run, at least 80% of the samples
+outside its measured span, with the engine idle, read 0; the rest sit at the
+span's edges, next to the warm-up and the prompt probe.
+
+**H2 under a saturating signal.** The headline utilisation signal stays
+nvidia-smi's, because it is what GPU-utilisation autoscalers act on, and it
+saturates at one request. A **sensitivity arm**, `utilization_throughput`
+(throughput at the current per-replica load over the curve's maximum
+throughput), is swept with utilisation's grid (up 0.5, 0.65, 0.8, 0.9, 0.95;
+down 0.05, 0.15, 0.3, 0.5) and reported beside H2. H2's verdict is stated for
+the headline signal; if the sensitivity arm reverses it, the post says so in the
+body.
+
+**Absolute rates (spec §8 ordering rule), from `scripts/a2_traffic_rates.py`:**
+saturation **211.2 req/s** (128 / 0.606 s); baseline **147.8 req/s** (0.70 ×
+saturation); peak **200.6 req/s** (baseline + 0.25 × saturation), for one replica.
+
+**Validation operating point.**
+- **2 replicas** pinned (`workersMin = workersMax = 2`; `workersMax` set by the
+  owner, `workersMin` by the driver).
+- The step shape with its baseline scaled by the replica count: baseline **295.7 req/s**,
+  peak **401.3 req/s**, sustain 190 s.
+- Window until **400 s**, with a drain **30 s**: no arrival after 370.0 s.
+- One schedule, seed **20261004**, 129,876 requests, replayed by all three repeats.
+- The gate judges **server-side latency**: the engine's own receive-to-response
+  time, stamped by `worker/a2_middleware.py`. That is the quantity the simulator
+  models. Client latency is recorded per request and published beside it.
+- Before t=0 the driver sends **20 req/s** until every pinned worker has answered
+  for 30 s straight, giving up after 900 s; those requests are not part of the run.
+- **The simulator's prediction for this schedule:** p50 0.554 s, p99 0.651 s, 0 requests
+  unfinished at 400 s.
+
+**Void runs.** A repeat with any non-200 response, a response from a worker
+outside the pinned set, or a 200 without the server-latency header is void. It is recorded, not judged, and run
+again once. A second void at the same repeat ends the gate as "not evaluable",
+with the cause published. A host-novelty event (a pinned worker id never seen in
+an earlier repeat) is recorded and disclosed, not voided (spec §10).
+
+**Feasibility probe acceptance (before any validation repeat).** The probe
+(`scripts/a2_lb_probe.py`) answers P1–P8 of plan 2b. The repeats may start only
+if, at its 450 req/s step:
+- every response was 200;
+- each pinned worker served at least 35% of requests;
+- the maximum send jitter stayed at or below 0.25 s.
+
+Otherwise the owner decides what changes, and this amendment is amended before
+any repeat.
+
 ## Stopping rule
 
 The sweep is exhaustive over the pre-declared threshold grid; there is no
