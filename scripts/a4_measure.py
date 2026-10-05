@@ -24,11 +24,12 @@ from harness.campaign import run_campaign
 from harness.runpod.preflight import assert_endpoint_matches, fetch_endpoint
 from harness.runpod.submitter import HttpTransport, RunPodSubmitter
 from harness.store import JsonlStore
-from placement_measure.campaigns import CellDesign, SleepDesign, SwapDesign
+from placement_measure.campaigns import CellDesign, ReplayDesign, SleepDesign, SwapDesign
 from placement_measure.pins import pins
 from placement_measure.records import A4Run, build_record
 
-DESIGNS = {"swap": SwapDesign, "cell": CellDesign, "sleep": SleepDesign}
+DESIGNS = {"swap": SwapDesign, "cell": CellDesign, "sleep": SleepDesign,
+           "replay": ReplayDesign}
 
 
 def load_design(kind: str, path) -> SwapDesign | CellDesign:

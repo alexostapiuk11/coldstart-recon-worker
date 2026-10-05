@@ -1,5 +1,5 @@
-"""One measurement job, chosen by `kind`: a swap, a co-location cell, or a
-sleep-mode switch.
+"""One measurement job, chosen by `kind`: a swap, a co-location cell, a
+sleep-mode switch, or a trace replay.
 
 The worker handler (`worker/a4_measure_handler.py`) is a thin shell around
 `measure_job`, so everything here runs in tests with injected effects. Every
@@ -16,11 +16,12 @@ from collections.abc import Callable
 from placement_measure.colocation import CellDeps, CellSpec, measure_cell
 from placement_measure.engine import EngineSpec
 from placement_measure.recon import ReconDeps, run_probe
+from placement_measure.replay import SWAP_WAIT_S, ReplayDeps, ReplaySpec, replay
 from placement_measure.swap import SwapDeps, measure_swap
 
 __all__ = ["KINDS", "measure_job", "sleep_switch"]
 
-KINDS = ("swap", "cell", "sleep")
+KINDS = ("swap", "cell", "sleep", "replay")
 TEARDOWN_RESERVE_S = 120.0
 SLEEP_STEPS = ("sleep_a", "sleep_b", "wake_a", "smoke_a_after_wake")
 
@@ -57,6 +58,7 @@ def measure_job(
     swap_deps: SwapDeps | None = None,
     cell_deps: CellDeps | None = None,
     recon_deps: ReconDeps | None = None,
+    replay_deps: ReplayDeps | None = None,
     host: Callable[[], dict] = host_info,
     clock: Callable[[], float] = time.monotonic,
 ) -> dict:
@@ -78,6 +80,11 @@ def measure_job(
         probe = run_probe({"probe": "sleep", "job_budget_s": payload["job_budget_s"],
                            "a": payload["a"], "b": payload["b"]}, recon_deps)
         out = {**sleep_switch(probe["result"]), "steps": probe["result"]}
+    elif kind == "replay":
+        # The driver may wait SWAP_WAIT_S for a swap still running at its
+        # deadline, then stop the engine; both must fit inside the budget.
+        deadline = t0 + float(payload["job_budget_s"]) - TEARDOWN_RESERVE_S - SWAP_WAIT_S
+        out = replay(ReplaySpec.from_payload(payload), deadline=deadline, deps=replay_deps)
     else:
         deadline = t0 + float(payload["job_budget_s"]) - TEARDOWN_RESERVE_S
         b = payload.get("b")

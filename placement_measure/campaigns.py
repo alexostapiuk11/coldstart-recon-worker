@@ -8,6 +8,8 @@ confounded with time-varying platform state (artifact 1 spec 5):
 - cells: a condition is a grid cell -- `solo:o8`, or `pair:o8:n16`.
 - sleep: one condition, the sleep-mode switch between two checkpoints
   (amendment §6), measured only if reconnaissance found sleep mode working.
+- replay: one condition, `replay`, repeated: the same trace replayed on one
+  GPU, whose repeats' spread is the validation band (August §9).
 
 The designs are dataclasses whose values the second pre-registration step
 fixes; nothing here chooses a grid, a pair or a request shape.
@@ -28,8 +30,11 @@ from placement_measure.prereg import (
     engine,
 )
 
-__all__ = ["CellDesign", "SleepDesign", "SwapDesign", "cell_condition", "parse_cell",
-           "parse_sleep", "parse_swap", "sleep_condition", "swap_condition"]
+__all__ = ["REPLAY_CONDITION", "CellDesign", "ReplayDesign", "SleepDesign", "SwapDesign",
+           "cell_condition", "parse_cell", "parse_sleep", "parse_swap", "sleep_condition",
+           "swap_condition"]
+
+REPLAY_CONDITION = "replay"
 
 SLEEP_FLAGS = ("--enable-sleep-mode",)
 
@@ -166,3 +171,42 @@ class SleepDesign:
         return {"kind": "sleep", "run_id": run_id, "job_budget_s": JOB_BUDGET_S,
                 "a": engine(a, SLEEP_GMU, SLEEP_FLAGS).to_dict(),
                 "b": engine(b, SLEEP_GMU, SLEEP_FLAGS).to_dict()}
+
+
+@dataclass(frozen=True)
+class ReplayDesign:
+    """Repeats of one trace replayed on one GPU (`placement_measure.replay`).
+
+    Every repeat gets the identical payload apart from its run id: the same
+    tenants, trace, request shape, cap and prompt seed. The band is the real
+    system's spread on ONE trace, and anything that varied between repeats
+    would widen it for free (artifact 2's `autoscale.validation`).
+    """
+
+    tenants: tuple[str, ...]
+    trace: tuple[tuple[float, int], ...]
+    until: float
+    input_len: int
+    output_len: int
+    max_in_flight: int
+    cold: bool
+    repeats: int
+    seed: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "tenants", tuple(self.tenants))
+        object.__setattr__(self, "trace", tuple((float(t), int(m)) for t, m in self.trace))
+
+    def schedule(self) -> list[ScheduledRun]:
+        return build_schedule([REPLAY_CONDITION], self.repeats, self.seed)
+
+    def payload(self, scheduled: ScheduledRun, run_id: str) -> dict:
+        if scheduled.condition != REPLAY_CONDITION:
+            raise ValueError(f"{scheduled.condition!r} is not a replay condition")
+        return {"kind": "replay", "run_id": run_id, "job_budget_s": JOB_BUDGET_S,
+                "tenants": [engine(m, SOLO_GMU).to_dict() for m in self.tenants],
+                "schedule": [[t, m] for t, m in self.trace], "until": self.until,
+                "input_len": self.input_len, "output_len": self.output_len,
+                "max_in_flight": self.max_in_flight, "cold": self.cold, "seed": self.seed,
+                "hf_home": HF_HOME, "release_tolerance_mib": RELEASE_TOLERANCE_MIB,
+                "release_timeout_s": RELEASE_TIMEOUT_S}

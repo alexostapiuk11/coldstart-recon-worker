@@ -100,6 +100,10 @@ def measure_swap(
     release = d.wait_for_release(
         baseline["used_mib"] + release_tolerance_mib, timeout_s=release_timeout_s
     )
+    # Eviction is timed apart from the swap. A fleet does not drop its page
+    # cache before a swap, so `swap_s` excludes it; the replay driver does, so
+    # the validation's prediction adds it back (`placement.validation`).
+    tc = d.clock()
     cache = d.make_cold(d.weight_files(hf_home, b.model, b.revision)) if cold else {"requested": False}
     t1 = d.clock()
     with d.served(b.model, args=b.serve_args(), env=dict(ENGINE_ENV), port=PORT) as sb:
@@ -111,6 +115,7 @@ def measure_swap(
         "healthy": part_b["healthy"],
         "release": release,
         "cache": cache,
+        "cache_s": t1 - tc,
         "b": part_b,
         "swap_s": teardown_s + release["seconds"] + part_b["startup_s"] if ok else None,
         "failure": None if ok else (
