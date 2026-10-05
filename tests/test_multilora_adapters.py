@@ -138,6 +138,12 @@ def test_a_fully_matching_adapter_qualifies_whatever_its_alpha():
         ({**VALID, "r": "16"}, "rank '16'"),
         (_without("r"), "rank None"),
         ({**VALID, "target_modules": "all-linear"}, "pattern"),
+        ({**VALID, "target_modules": tuple(ALL)}, "must be a list of module names"),
+        ({**VALID, "target_modules": set(ALL)}, "must be a list of module names"),
+        ({**VALID, "target_modules": dict.fromkeys(ALL, 1)}, "must be a list of module names"),
+        ({**VALID, "target_modules": [["q_proj"]]}, "must be a list of module names"),
+        ({**VALID, "target_modules": [*ALL, None]}, "must be a list of module names"),
+        ({**VALID, "target_modules": [*ALL, 7]}, "must be a list of module names"),
         ({**VALID, "target_modules": list(ALL[:-1])}, "does not target: ['down_proj']"),
         ({**VALID, "target_modules": [*ALL, "lm_head"]}, "outside the fixed set: ['lm_head']"),
         ({**VALID, "task_type": "SEQ_CLS"}, "task_type is 'SEQ_CLS'"),
@@ -156,7 +162,8 @@ def test_a_fully_matching_adapter_qualifies_whatever_its_alpha():
     ],
     ids=[
         "not-lora", "rank-8", "rank-32", "rank-bool", "rank-str", "rank-missing",
-        "modules-pattern", "module-missing", "module-extra", "seq-cls", "task-none",
+        "modules-pattern", "modules-tuple", "modules-set", "modules-dict",
+        "modules-nested-list", "modules-with-none", "modules-with-int", "module-missing", "module-extra", "seq-cls", "task-none",
         "task-missing", "modules-to-save", "dora", "rslora", "rank-pattern",
         "alpha-pattern", "lora-bias", "fan-in-fan-out", "bias-all", "wrong-base",
         "base-missing",
@@ -168,6 +175,29 @@ def test_each_rule_rejects_with_a_reason_naming_it(config, keyword):
     ok, reason = real_adapter_qualifies(config, rank=16, target_modules=ALL, base_model=BASE)
     assert ok is False
     assert keyword in reason
+
+
+def test_a_repeated_module_name_still_matches_the_fixed_set():
+    from multilora.adapters import real_adapter_qualifies
+
+    doubled = {**VALID, "target_modules": [*ALL, "q_proj"]}
+    kw = {"rank": 16, "target_modules": ALL, "base_model": BASE}
+    assert real_adapter_qualifies(doubled, **kw) == (True, "qualifies")
+
+
+def test_one_malformed_config_is_rejected_without_aborting_the_selection():
+    from multilora.adapters import select_real_adapters
+
+    cands = [
+        {"id": "a/ok", "sha": "1", "config": VALID},
+        {"id": "b/bad", "sha": "2", "config": {**VALID, "target_modules": [["q_proj"]]}},
+        {"id": "c/ok", "sha": "3", "config": VALID},
+    ]
+    res = select_real_adapters(cands, rank=16, target_modules=ALL, count=2, base_model=BASE)
+    assert res["selected"] == [("a/ok", "1"), ("c/ok", "3")]
+    assert list(res["rejected"]) == ["b/bad"]
+    assert "must be a list of module names" in res["rejected"]["b/bad"]
+    assert res["enough"] is True
 
 
 def test_the_first_failing_rule_is_the_reason_given():

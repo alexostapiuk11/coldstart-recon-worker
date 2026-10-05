@@ -156,6 +156,10 @@ def real_adapter_qualifies(
     modules = cfg.get("target_modules") or []
     if isinstance(modules, str):
         return fail(f"target_modules is a pattern {modules!r}, not a list")
+    # Checked before any set(): one malformed Hub config must be a rejection,
+    # not a TypeError that aborts the whole selection.
+    if not isinstance(modules, list) or not all(isinstance(m, str) for m in modules):
+        return fail(f"target_modules is {modules!r}; it must be a list of module names")
     extra = sorted(set(modules) - set(target_modules))
     if extra:
         return fail(f"targets modules outside the fixed set: {extra}")
