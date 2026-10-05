@@ -48,6 +48,13 @@ headline utilisation signal; the gate judges server-side latency; a void repeat 
 - GPU `NVIDIA GeForce RTX 4090`, network volume `9c7ut2slrd` (P7: if the console refuses a
   volume for an LB endpoint, record it and stop; every cold start would then download 16 GB).
 - `workersMin` 0, **`workersMax` 2** (owner decision 3), idle timeout 5 s.
+- **`scalerValue` 128**, not RunPod's default 4. With 4, the load balancer kept only a few
+  requests in flight per worker: the first probe (2026-10-05) delivered ~17 req/s whatever was
+  offered, client p50 rose to 52 s while server p50 stayed 0.31 s, and the 100 req/s step had
+  449 timeouts. With 128 (the engine's `--max-num-seqs`), the second probe ran every step with
+  client p50 under 1 s. Measured on this endpoint only; RunPod does not document the limit.
+- Created 2026-10-05 through the GraphQL API (`saveEndpoint` with `type: "LB"`, undocumented;
+  the REST create has no type field) as `lybvnpnt2m327y`, recorded in `.env`.
 - Record its id in `.env` as `RUNPOD_A2_LB_ENDPOINT_ID`.
 - The queue endpoints `a8261k5opy1ldl` and `7h0aglrmsjovyc` stay as they are.
 
