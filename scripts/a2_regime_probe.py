@@ -58,7 +58,8 @@ from autoscale.arrivals import arrival_times
 from autoscale.coldstart_ecdf import load_measured_lags
 from autoscale.controller import Controller
 from autoscale.frontier import pareto_frontier
-from autoscale.service import SERVICE_CURVE_PLACEHOLDER as CURVE
+from autoscale.measured_curve import DEFAULT_PATH, select_curve
+from autoscale.service import SERVICE_CURVE_PLACEHOLDER
 from autoscale.signals import SIGNALS
 from autoscale.sim import run_with_policy
 from autoscale.sweep import (
@@ -69,6 +70,11 @@ from autoscale.sweep import (
     run_sweep,
 )
 from autoscale.traffic import SUSTAIN_SECONDS, saturation_rps, spike_shape
+
+# Set by `main` from --curve / --placeholder. Module-level, not threaded through
+# `_probe` and `_verify`, so those keep the signatures this script's header
+# documents; the placeholder is only the value before `main` has chosen.
+CURVE = SERVICE_CURVE_PLACEHOLDER
 
 TRACE_SEED = 12345  # one fixed trace per configuration, so policies are paired
 LAG_SEED = 999
@@ -193,7 +199,7 @@ def _verify(baseline_fraction, additional_replicas, lags, sustain, reps, seeds):
         points, _ = run_sweep(
             SweepConfig(shape=shape, lags=lags, curve=CURVE, arm="A", until=UNTIL),
             seed=seed,
-            allow_unmeasured=True,
+            allow_unmeasured=not CURVE.measured,
         )
         by = {}
         for p in points:
@@ -220,8 +226,7 @@ def _verify(baseline_fraction, additional_replicas, lags, sustain, reps, seeds):
     }
 
 
-def main() -> None:
-    sys.stdout.reconfigure(line_buffering=True)
+def parse_args(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--store", default="data/campaign.jsonl")
     ap.add_argument("--arm", default="A")
@@ -233,13 +238,29 @@ def main() -> None:
         help="screen = one trace per configuration; verify = real sweeps of the survivors",
     )
     ap.add_argument("--verify-reps", type=int, default=5)
-    args = ap.parse_args()
+    which = ap.add_mutually_exclusive_group()
+    which.add_argument("--curve", default=None,
+                       help=f"the measured curve (default {DEFAULT_PATH})")
+    which.add_argument("--placeholder", action="store_true",
+                       help="run against the invented placeholder curve")
+    return ap.parse_args(argv)
+
+
+def main(argv=None) -> None:
+    global CURVE
+    sys.stdout.reconfigure(line_buffering=True)
+    args = parse_args(argv)
+    CURVE, _ = select_curve(
+        None if args.placeholder else (args.curve or DEFAULT_PATH),
+        placeholder=args.placeholder,
+    )
 
     lags = load_measured_lags(args.store)[args.arm]
     sustain = SUSTAIN_SECONDS  # pre-registered D, held fixed: measured, 2 x p95 arm A
     saturation = saturation_rps(CURVE)
     print(f"arm {args.arm}: saturation/replica={saturation:.1f} rps, sustain={sustain:g}s")
-    print("PLACEHOLDER service curve. One fixed arrival trace per configuration.\n")
+    which_curve = "PLACEHOLDER service curve." if not CURVE.measured else "Measured service curve."
+    print(f"{which_curve} One fixed arrival trace per configuration.\n")
     print(
         f"{'base%':>6} {'addl':>5} {'cap':>4} {'peak/sat':>9} {'kept':>5} "
         f"{'distinct':>9} {'p99 spread':>11} {'p99 min':>9} {'cost spread':>12} {'capped':>7}"

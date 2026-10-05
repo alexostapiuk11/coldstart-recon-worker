@@ -38,7 +38,7 @@ from a2_render_figures import UNTIL, _by_signal
 import autoscale.sweep as sweep_mod
 from autoscale.coldstart_ecdf import load_measured_lags
 from autoscale.frontier import pareto_frontier
-from autoscale.service import SERVICE_CURVE_PLACEHOLDER
+from autoscale.measured_curve import DEFAULT_PATH, select_curve
 from autoscale.sweep import SweepConfig, run_sweep
 from autoscale.traffic import (
     ADDITIONAL_REPLICAS_AT_PEAK,
@@ -64,8 +64,7 @@ def _p99_at(frontier, cost):
     return min(p.p99 for p in affordable) if affordable else None
 
 
-def main() -> None:
-    sys.stdout.reconfigure(line_buffering=True)
+def parse_args(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", type=int, default=10)
     ap.add_argument("--reps", type=int, default=30)
@@ -79,7 +78,21 @@ def main() -> None:
     # the amendment a disclosure rather than a result-driven edit.
     ap.add_argument("--baseline-fraction", type=float, default=None)
     ap.add_argument("--additional-replicas", type=float, default=None)
-    args = ap.parse_args()
+    which = ap.add_mutually_exclusive_group()
+    which.add_argument("--curve", default=None,
+                       help=f"the measured curve (default {DEFAULT_PATH})")
+    which.add_argument("--placeholder", action="store_true",
+                       help="run against the invented placeholder curve")
+    return ap.parse_args(argv)
+
+
+def main(argv=None) -> None:
+    sys.stdout.reconfigure(line_buffering=True)
+    args = parse_args(argv)
+    curve, _ = select_curve(
+        None if args.placeholder else (args.curve or DEFAULT_PATH),
+        placeholder=args.placeholder,
+    )
 
     # Reaching into the module rather than passing a parameter: REPETITIONS is
     # pre-registered at 30 and `run_sweep` rightly takes no override. Lowering
@@ -100,7 +113,7 @@ def main() -> None:
             else ADDITIONAL_REPLICAS_AT_PEAK
         )
         shape = spike_shape(
-            SERVICE_CURVE_PLACEHOLDER,
+            curve,
             "step",
             baseline_fraction=fraction,
             additional_replicas=additional,
@@ -111,13 +124,13 @@ def main() -> None:
             f"(peak/saturation={fraction + additional:.2f})"
         )
     else:
-        shape = spike_shape(SERVICE_CURVE_PLACEHOLDER, "step")
+        shape = spike_shape(curve, "step")
 
     lags = load_measured_lags(args.store)[args.arm]
     print(
         f"arm {args.arm}: {args.seeds} master seeds x {args.reps} reps, "
         f"baseline={shape.baseline_rate:.1f} rps k={shape.k:.1f} "
-        "-- PLACEHOLDER service curve"
+        + ("-- PLACEHOLDER service curve" if not curve.measured else "-- measured service curve")
     )
 
     rows = []
@@ -127,12 +140,12 @@ def main() -> None:
             SweepConfig(
                 shape=shape,
                 lags=lags,
-                curve=SERVICE_CURVE_PLACEHOLDER,
+                curve=curve,
                 arm=args.arm,
                 until=UNTIL,
             ),
             seed=seed,
-            allow_unmeasured=True,
+            allow_unmeasured=not curve.measured,
         )
         frontiers = {s: pareto_frontier(ps) for s, ps in _by_signal(points).items()}
         budget = min(p.cost for p in points) * 2
