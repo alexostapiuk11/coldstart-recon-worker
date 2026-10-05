@@ -1,5 +1,7 @@
 """replay(): one schedule, sent on its own clock, every outcome kept."""
 
+import os
+import signal
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -195,3 +197,30 @@ def test_http_sender_makes_one_session_per_thread_and_reuses_it():
     for t in threads:
         t.join()
     assert len(made) == 3
+
+
+def test_an_interrupt_during_the_final_drain_also_cancels_the_queued_requests():
+    started = []
+    lock = threading.Lock()
+
+    def send(i):
+        with lock:
+            started.append(i)
+        time.sleep(0.5)
+        return (200, {})
+
+    # Everything dispatches at once, so the dispatcher is done and sits in the final
+    # drain with 18 requests queued behind 2 busy workers when the interrupt lands.
+    # A real SIGINT: `_thread.interrupt_main` only sets a flag and does not wake a main
+    # thread blocked in the pool's join, so it would not reproduce Ctrl-C.
+    timer = threading.Timer(0.3, os.kill, (os.getpid(), signal.SIGINT))
+    began = time.monotonic()
+    timer.start()
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            replay([0.0] * 20, send, max_in_flight=2, start_delay=0.0)
+    finally:
+        timer.cancel()
+    assert time.monotonic() - began < 1.0
+    time.sleep(1.0)  # long enough for any request still queued to start
+    assert len(started) <= 2 + 2

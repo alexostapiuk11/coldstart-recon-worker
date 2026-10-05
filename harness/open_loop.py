@@ -124,10 +124,12 @@ def replay(schedule: Sequence[float], send: Callable[[int], tuple[int, dict]], *
             if wait > 0:
                 sleep(wait)
             pool.submit(one, i, scheduled, clock() - t0)
+        # Inside the try: an interrupt during the final drain (everything dispatched, the
+        # pool still saturated) must cancel the queued requests too, or they keep going out.
+        pool.shutdown(wait=True)
     except BaseException:
         pool.shutdown(wait=False, cancel_futures=True)
         raise
-    pool.shutdown(wait=True)
     missing = sum(r is None for r in results)
     if missing:
         raise RuntimeError(
