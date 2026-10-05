@@ -127,3 +127,17 @@ def test_the_second_amendment_pins_the_validation_spike_and_the_engine_cap():
     assert f"baseline + **{vs.VALIDATION_ADDITIONAL_REPLICAS:g}** × saturation" in s
     assert f"**{vs.VALIDATION_REPLICAS} replicas**" in s
     assert f"**`--max-num-seqs {lb_serve.MAX_NUM_SEQS}`**" in s
+
+
+THIRD = DOC.split("## Amendment, 2026-10-05: the load balancer's own 502s", 1)
+
+
+def test_the_retry_amendment_states_what_the_driver_retries():
+    import a2_lb_common as common
+    assert len(THIRD) == 2, "the 2026-10-05 amendment is missing"
+    s = " ".join(THIRD[1].split("\n## ", 1)[0].split())
+    assert "Signed off by the owner on 2026-10-05" in s
+    assert f"answers **{common.LB_RETRY_STATUS} without the `{common.WORKER}` header**" in s
+    assert "retried **once**" in s
+    assert "`lb_502_retried`" in s
+    assert "scaler value is **128**" in s

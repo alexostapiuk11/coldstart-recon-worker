@@ -509,6 +509,65 @@ per replica.
 grids, controller, exclusions, 30 repetitions and seed 17. Nothing else in this
 document changes.
 
+## Amendment, 2026-10-05: the load balancer's own 502s
+
+Made after three feasibility probes and before any validation repeat. Signed
+off by the owner on 2026-10-05.
+
+**Changed:** a request the load balancer answers **502 without the
+`x-a2-worker` header** is retried **once**, at once, by the driver. The retry's
+outcome is the request's outcome. Both the void rule and the probe acceptance
+read that final outcome:
+- A repeat is void if any request's final status is not 200, or on the other
+  two signed rules, which are unchanged.
+- The probe's "every response was 200" means every request's final status
+  is 200.
+
+Nothing else is retried: not a 502 that carries the worker header (it came from
+the engine), not any other status, and not a second failure.
+
+**Why.** A 502 without the worker header never produced an engine response,
+and the gate is about the engine. In the second probe, 13 of 33,750 requests
+were such 502s, in two bursts: 11 in the first 0.3 s of the 450 req/s step, and
+2 together 24.5 s into the 300 req/s step. Under the signed void rule, any one
+of them voids a repeat. Each repeat steps from 20 req/s of warm-up to
+296 req/s at t=0 and to 401 at the spike, so most repeats would likely have
+been voided for a platform fault. Two voids end the gate as "not evaluable".
+Rejected: retrying until success, which turns the open-loop replay into a
+closed loop around a failing path and hides how often it failed.
+
+**What it costs, disclosed:**
+- A retried request's client latency includes both attempts.
+- Its server latency, the judged quantity, is the retry's own.
+- It reaches the engine later than scheduled by the first attempt's duration.
+- In the third probe, one first attempt failed after 9.34 s, not instantly. A
+  502 that slow may mean the load balancer forwarded the request before
+  failing, so the engine may serve a retried request twice. At most 2 of 13,500
+  requests here.
+- Every retry is marked in the record (`lb_502_retried`, by request index) and
+  published with the verdict.
+
+**Evidence** (endpoint `lybvnpnt2m327y`, 2 workers, the signed ladder up to 450
+req/s):
+
+| Probe | Endpoint scaler value | At 450 req/s | Verdict |
+|---|---|---|---|
+| 1 | 4 (RunPod's default) | not reached. The path delivered about 17 req/s at every rate. Server p50 was 0.31 s, but client p50 was 52 s and there were 449 timeouts at 100 req/s. | not evaluable |
+| 2 | 128 | 11 of 13,500 were load-balancer 502s, all within 0.3 s of the step starting; split 53/47; jitter 0.08 s | FAIL (non-200) |
+| 3 | 128, with this retry | every final status 200; 2 retried; split 49/51; jitter 0.095 s | PASS |
+
+**Operational changes, recorded here because they decide feasibility:**
+- The endpoint's scaler value is **128**, the engine's `--max-num-seqs`. With
+  RunPod's default of 4, the load balancer kept only a few requests in flight
+  per worker. RunPod documents no such limit; it was found by the first two
+  probes.
+- The probe ladder now also stops on a step whose client p50 exceeds 5 s.
+  That only ends the ladder early; it judges nothing.
+
+**What does not change:** the validation operating point, the schedule, the
+predictions, the warm-up, the other two void rules, the probe's 35% split and
+0.25 s jitter conditions, and the pass rule.
+
 ## Stopping rule
 
 The sweep is exhaustive over the pre-declared threshold grid; there is no
