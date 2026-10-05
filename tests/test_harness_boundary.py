@@ -20,7 +20,7 @@ import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-FIRST_PARTY = {"coldstart", "harness", "placement_measure", "worker", "recon"}
+FIRST_PARTY = {"coldstart", "harness", "multilora", "placement_measure", "worker", "recon"}
 
 
 def _imported_top_level(path: Path) -> set[str]:
