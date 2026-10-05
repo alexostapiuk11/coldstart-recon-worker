@@ -455,3 +455,183 @@ The earlier tables stay as the record. This is the table the code now runs on:
 | `gate_instances` | `144` |
 | `equivalence_margin` (derived) | `0.05` |
 | `requests_per_phase` (derived) | `640` |
+
+## Amendment 3 — replacing the instances a host fault cost the larger gate (2026-10-05)
+
+This amendment is post-hoc. It was written after the larger gate (Amendment 1)
+had finished and its result had been seen, and in response to that result. The
+post will say so. Nothing above this section has been edited.
+
+### What happened
+
+The larger gate ran its 144 scheduled instances into `data/a5/gate.jsonl`
+(commit e46e4b2). Recomputed from that store:
+
+- Run indices 0 to 91, 92 records, all `ok`, all on host `vw53rwt15gpiab`,
+  driver `580.178.04`. Four of them (run indices 0, 21, 47 and 91) read their
+  compile cache cold and are excluded by the exclusion rule, which leaves 88
+  usable instances.
+- Run indices 92 to 143, all 52, failed with `failure_class` `health_timeout`.
+  All 52 ran on one pod, `3dwlukmn7oc80p` (host `af4bf9285b23`, driver
+  `570.195.03`). In every one of them the engine log has CUDA `Error 804:
+  forward compatibility was attempted on non supported HW`, and the engine
+  died before it served a request. Each took about 21 s from submission to
+  result (median 21.2 s; the first, run index 92, 114.5 s).
+
+`allowedCudaVersions` `["13.0"]` was in force for all 52 (set at 19:28:40 UTC,
+after run index 28; Amendment 2). A constraint was set, and the scheduler still
+placed the work on a host with driver `570.195.03`. No explanation beyond that
+is claimed here. The runner had no stop on repeated failures, so it kept
+submitting until the schedule was exhausted. The bad worker exited at 22:41:02
+UTC, after the run had ended.
+
+The verdict on the 88 usable instances is **inconclusive**:
+
+- TTFT p50: median relative difference (synthetic minus real, over real)
+  -1.16%, 90% bootstrap interval [-2.54%, +0.75%], inside ±5%. Resolution
+  check (second real phase against the first): +2.24% [-0.11%, +5.81%], not
+  inside ±5%, so TTFT is unresolved.
+- Throughput: +0.22% [-0.35%, +0.54%], inside ±5%, and resolved: the
+  resolution check gave -0.31% [-0.97%, +0.21%].
+
+Because the TTFT resolution check failed, the rule reads inconclusive, not
+fail. This interim verdict was seen before this amendment was written.
+
+### What the failures are, and what they are not
+
+They are an infrastructure fault: one pod, whose driver could not run the
+image, failing before any request was served. They are not related to
+adapters: no phase ran, so neither real nor synthetic adapters were ever
+exercised. The gate is a single condition, and every instance carries both of
+its regimes, so the loss removes no condition or regime selectively; it only
+shortens the gate. The 52 records are failures and are reported as such:
+counted in the failure table, kept in `data/a5/gate.jsonl`, never deleted.
+
+### What changes
+
+Only `gate_instances`, from 144 to 196. It counts scheduled instances, not
+usable ones.
+
+- Runs 0 to 143 are unchanged and stay in `data/a5/gate.jsonl`, the 52 failed
+  ones included.
+- Runs 144 to 195, exactly 52, are the replacements. They run with `--resume`
+  into the same store. The extended schedule's first 144 entries are the stored
+  ones, so resume skips them and appends only the new run indices
+  (`tests/test_multilora_gate_extension.py`). Their phase orders are fresh,
+  drawn from their own run indices by `phase_plan`.
+- Nothing else about the gate changes: the configuration held fixed above, the
+  4 real and 4 synthetic adapters, the statistic, the margin δ = 0.05, the 90%
+  bootstrap interval, the resolution check and the verdict rule.
+
+### The rule for the replacements
+
+Exactly these 52 attempts are made. Any failures among them are recorded,
+counted and not replaced again, and no further instances are added under this
+amendment. The verdict is computed from all usable records in
+`data/a5/gate.jsonl`: the 88 usable instances above plus the usable
+replacements.
+
+The 88-instance verdict was seen before this extension was decided. This is a
+data-dependent extension toward the sample size Amendment 1 fixed in advance
+(144 scheduled, about 139 usable expected). It is justified only because the
+loss was a host fault that ran no measurement, not a property of anything
+measured. The post reports the interim 88-instance verdict alongside the final
+one.
+
+### What to expect
+
+If no further faults occur, and the replacements are excluded for cold compiles
+at the larger gate's rate (4 in 92), about 135 to 138 instances will be usable
+(88 + 52 × 88/92 ≈ 137.7).
+
+The TTFT resolution check's interval had a half-width of about 3.0% at 88
+usable instances ((5.81 + 0.11) / 2 = 2.96%). Scaled by √(88/135), that is
+about 2.4%; with the median at +2.2%, the upper bound would be about 4.6%,
+inside 5% but with little room. The interval is not symmetric, though: its
+upper end was 3.56 points above the median at 88, and that arm scaled the same
+way gives about 2.9 points, an upper bound of about 5.1%, just outside. These
+are estimates. A pass is not guaranteed; the gate may again read inconclusive,
+and then the August fallback applies, as Amendment 1 says.
+
+### The guard
+
+`scripts/a5_run.py` now stops a run after `--max-consecutive-failures`
+(default 3) failed instances in a row, with exit code 3
+(`multilora.cli.ConsecutiveFailureGuard`, `stop_after_consecutive_failures`).
+Each record is appended to the store before the check runs, so a stop keeps
+every record. It prints the run-index range of the failing streak, its failure
+class, and the host and driver of the last failing record.
+
+The operating rule: after a stop, wait at least 30 s so an idle bad worker
+exits, then run again with `--resume`. A stop leaves at most 3 failed records
+per incident. They are among the 52 attempts, count as attempts, and are not
+replaced.
+
+### Cost
+
+From the larger gate's own records (`clock_A`, submission to result), an `ok`
+instance took 166.4 s on average (2.77 minutes), so 52 replacements take about
+52 × 166.4 s = 2.40 hours, about $2.67 at $1.1095 per GPU-hour. This is an
+estimate.
+
+### Budget, revised again
+
+Amendment 2's total was about 17.99 GPU-hours, $19.96. Recomputed from the
+records now available, all times submission to result from `clock_A`:
+
+- Spent: priming 0.55 hours, the pilot 1.16 hours, and the larger gate 4.61
+  hours (all 144 records: 92 `ok` instances 4.25 hours, 52 failed ones 0.36
+  hours). Together 6.32 hours.
+- Planned replacements: 52 × 166.4 s = 2.40 hours.
+- Campaign: 192 instances × 166.4 s (the larger gate's mean over its `ok`
+  records, in place of the pilot's 174.4 s) = 8.88 hours. No campaign instance
+  has been measured; this assumes they take as long as a gate instance.
+- Total: about 17.60 GPU-hours, about $19.53 at $1.1095, under the $20 cap by
+  about $0.47.
+
+These are wall times, not billed times: an idle worker kept alive after its
+last job (the bad worker until 22:41:02 UTC) and any start-up the platform
+bills are not in `clock_A`. The billing record is the authority on spend and
+was not read for this amendment. The design amendment's §6 cut order (the
+gauge control first) remains the rule if the campaign estimate exceeds the cap,
+and that decision is the owner's.
+
+### Decision
+
+Chosen by the owner in chat on 2026-10-05, among replacing the failed
+instances (chosen), applying the August fallback, or changing the decision
+rule.
+
+### Parameters as amended (3)
+
+The earlier tables stay as the record. This is the table the code now runs on:
+
+| parameter | value |
+|---|---|
+| `concurrency` | `64` |
+| `rank` | `16` |
+| `target_modules` | `('q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj')` |
+| `gate_adapters` | `4` |
+| `warmup_requests_per_adapter` | `2` |
+| `scrape_interval_s` | `1.0` |
+| `knee_threshold` | `0.1` |
+| `request_tokens` | `29` |
+| `context_length_tokens` | `8192` |
+| `slo_ttft_p95_s` | `1.0` |
+| `requests_per_tenant_month` | `100000.0` |
+| `peak_to_average` | `3.0` |
+| `gpu_hourly_rate` | `1.1095` |
+| `schedule_seed` | `20261001` |
+| `include_diagnostic` | `False` |
+| `include_control` | `True` |
+| `bench_dataset_args` | `('--dataset-name', 'random', '--random-input-len', '13', '--random-output-len', '16')` |
+| `real_adapters` | `(('AIsakawaii/task_b_method2_qwen4b', '8ba6625bbb5f5a8770109f003ae55fcaef4fb117'), ('davemaxuellkr/KIRD-project_QLoRa-Qwen3-4B_en-ko', 'f7eb9b54171b1212347ebb0e3bb26008d81e92db'), ('hanghang1024/Qwen3-4b-Qlora-Fin', '47d3fc76a0d748497e726134ee5092e68bb0cacf'), ('jacobcd52/qwen3_4b_hacker', '89cb5e72a31c2f2ce53e9c4f9aee9ee38b7c26e2'))` |
+| `sweep` | `(1, 2, 4, 8, 16, 32, 64)` |
+| `concentrated_k` | `1` |
+| `instances_per_condition` | `24` |
+| `phases_per_regime` | `2` |
+| `diagnostic_points` | `(1, 16, 64)` |
+| `control_point` | `64` |
+| `gate_instances` | `196` |
+| `equivalence_margin` (derived) | `0.05` |
+| `requests_per_phase` (derived) | `640` |

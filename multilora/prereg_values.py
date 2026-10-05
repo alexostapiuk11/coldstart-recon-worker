@@ -51,5 +51,6 @@ PREREG = Preregistration(
         ("jacobcd52/qwen3_4b_hacker", "89cb5e72a31c2f2ce53e9c4f9aee9ee38b7c26e2"),
     ),
     # Amendment 1 (2026-10-05, after the first gate was inconclusive): docs/experiment-a5.md
-    gate_instances=144,
+    # Amendment 3 (2026-10-05): 144 + 52 replacements for the instances lost to a host fault; scheduled, not usable
+    gate_instances=196,
 )

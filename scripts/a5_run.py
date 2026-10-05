@@ -7,6 +7,9 @@
     .venv/bin/python scripts/a5_run.py --which topup --conditions sweep-N64 --blocks 3
     .venv/bin/python scripts/a5_run.py --which gate --stub         # GPU-free rehearsal
 
+Stops with exit code 3 after --max-consecutive-failures (default 3) failed
+instances in a row; every record is kept. Wait at least 30 s, then --resume.
+
 Refuses to spend unless the endpoint matches multilora/pins.py. Stores go to
 data/a5/<which>.jsonl, or build/a5-rehearsal/ with --stub.
 """
@@ -22,7 +25,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from harness.store import JsonlStore
 from multilora.analysis import gate_verdict
 from multilora.campaign import run
-from multilora.cli import guard_against_silent_restart, submitter_for
+from multilora.cli import (
+    guard_against_silent_restart,
+    stop_after_consecutive_failures,
+    submitter_for,
+)
 from multilora.conditions import campaign_schedule, gate_schedule, topup_schedule
 from multilora.prereg_values import PREREG
 from multilora.records import InstanceRecord
@@ -39,7 +46,13 @@ def main() -> int:
     ap.add_argument("--force-restart", action="store_true")
     ap.add_argument("--stub", action="store_true")
     ap.add_argument("--store-dir")
+    ap.add_argument(
+        "--max-consecutive-failures", type=int, default=3,
+        help="stop (exit code 3) after this many failed instances in a row; records are kept, "
+        "and --resume continues after waiting at least 30 s (Amendment 3)",
+    )
     args = ap.parse_args()
+    stop_on_streak = stop_after_consecutive_failures(args.max_consecutive_failures)
     store_dir = Path(args.store_dir or (REPO / "build" / "a5-rehearsal" if args.stub else REPO / "data" / "a5"))
     store = JsonlStore(store_dir / f"{args.which}.jsonl", InstanceRecord)
     guard_against_silent_restart(
@@ -68,6 +81,7 @@ def main() -> int:
               f"{record.condition:<11} {record.outcome:<6} {state:<7} "
               f"{record.failure_class or ''} elapsed={(time.monotonic() - started) / 60:.1f}m",
               flush=True)
+        stop_on_streak(record)
 
     run(schedule, submitter_for(stub=args.stub), store, PREREG, resume=args.resume, on_run=progress)
     print(f"[done] {dict(tally)} store={store.path}")
