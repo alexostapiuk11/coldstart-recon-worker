@@ -86,7 +86,7 @@ class Placement:
 
 
 def hot_allocation(
-    shares: Sequence[float], offered_gpus: float, hot_fraction: float
+    shares: Sequence[float], offered_gpus: float, hot_fraction: float, peak_factor: float = 1.0
 ) -> dict[int, int]:
     """Pinned GPUs per hot model.
 
@@ -94,6 +94,13 @@ def hot_allocation(
     saturation. A model whose load exceeds `hot_fraction` of one GPU is hot and
     gets ceil(load / hot_fraction) pinned GPUs, so none of its GPUs is asked to
     run above `hot_fraction` of saturation.
+
+    `peak_factor` scales each model's average load to the load the rule sizes
+    for. It is 1 in the spread regime. In the bursty regime it is 1 / duty: a
+    model receives all its traffic while ON, so its load then is its average
+    divided by duty, and a GPU sized for the average is asked to carry five
+    times that during a burst at duty 0.2 (amendment §14, decided 2026-10-04).
+    The rule is still one rule for all three strategies.
     """
     if not math.isfinite(offered_gpus) or offered_gpus <= 0:
         raise ValueError(f"offered_gpus must be finite and positive, got {offered_gpus!r}")
@@ -102,9 +109,14 @@ def hot_allocation(
             f"hot_fraction must be in (0, 1], got {hot_fraction!r}; above 1 a hot "
             "model's GPU would be planned past saturation"
         )
+    if not math.isfinite(peak_factor) or peak_factor < 1.0:
+        raise ValueError(
+            f"peak_factor must be finite and at least 1, got {peak_factor!r}; below 1 "
+            "the rule would size a model for less than its average load"
+        )
     hot = {}
     for model, share in enumerate(shares):
-        load = share * offered_gpus
+        load = share * offered_gpus * peak_factor
         if load > hot_fraction:
             hot[model] = math.ceil(load / hot_fraction)
     return hot

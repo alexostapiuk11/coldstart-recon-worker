@@ -34,6 +34,7 @@ __all__ = [
     "dump_evaluations",
     "evaluate_point",
     "load_evaluations",
+    "sizing_load_factor",
 ]
 
 REGIMES = ("spread", "bursty")
@@ -107,6 +108,23 @@ class PointEvaluation:
         return all(c >= P99_FLOOR for rep in self.counts for c in rep)
 
 
+def sizing_load_factor(regime: str, duty: float) -> float:
+    """What the hot-model rule multiplies a model's average load by.
+
+    1 in the spread regime; 1 / duty in the bursty one, where a model's load
+    while ON is its average divided by duty (amendment §14, decided
+    2026-10-04). Sizing on the average there left even dedicate missing a p99
+    SLO, so every strategy came out dominated by construction.
+    """
+    if regime not in REGIMES:
+        raise ValueError(f"unknown regime {regime!r}")
+    if regime == "spread":
+        return 1.0
+    if not (0.0 < duty < 1.0):
+        raise ValueError(f"duty must be strictly between 0 and 1, got {duty!r}")
+    return 1.0 / duty
+
+
 def _seed(seed: int, point: GridPoint, rep: int, stream: str) -> int:
     """Stable across processes, unlike `hash()`; see artifact 2's
     `sweep._derive_seed` for why that matters."""
@@ -124,7 +142,10 @@ def evaluate_point(
 ) -> PointEvaluation:
     shares = zipf_shares(scenario.n_models, point.s)
     deciles = decile_of(scenario.n_models)
-    hot = hot_allocation(shares, scenario.offered_gpus, scenario.hot_fraction)
+    hot = hot_allocation(
+        shares, scenario.offered_gpus, scenario.hot_fraction,
+        peak_factor=sizing_load_factor(point.regime, scenario.duty),
+    )
     families = {strategy: family(strategy, shares, hot) for strategy in STRATEGIES}
     per_config: dict[str, list[dict[str, list]]] = {
         strategy: [{"p99s": [], "swaps": [], "extrapolated": []} for _ in configs]
