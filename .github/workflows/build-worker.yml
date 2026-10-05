@@ -20,6 +20,9 @@ on:
       # Same reasoning as coldstart/** above: the image vendors this package
       # too, so a change here changes the image.
       - "harness/**"
+      # Artifact 4's worker package, vendored for worker/a4_*_handler.py --
+      # same reasoning as the two above.
+      - "placement_measure/**"
       - ".github/workflows/build-worker.yml"
   workflow_dispatch:
 
