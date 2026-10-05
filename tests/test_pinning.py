@@ -469,6 +469,50 @@ def test_release_works_off_the_main_thread_without_touching_signals():
     assert out[0]["workersMin"] == 0
 
 
+def test_a_4xx_release_refusal_notes_a_signal_received_during_release():
+    unwind_on_hangup_and_term()
+    handler = signal.getsignal(signal.SIGTERM)
+    s = FakeSession()
+    p = _pinned(s)
+    s.post_script = [403]
+    s.on_post = lambda body: body == RELEASE and os.kill(os.getpid(), signal.SIGTERM)
+    with pytest.raises(ReleaseFailed, match="403") as err:
+        p.release()
+    assert "signal 15 also arrived" in str(err.value)
+    assert "Set it to 0 by hand" in str(err.value)
+    assert signal.getsignal(signal.SIGTERM) is handler
+
+
+def test_a_changed_workers_max_notes_a_signal_received_during_release():
+    unwind_on_hangup_and_term()
+    s = FakeSession()
+    p = _pinned(s)
+    s.endpoint["workersMax"] = 5
+    s.on_post = lambda body: body == RELEASE and os.kill(os.getpid(), signal.SIGHUP)
+    with pytest.raises(RuntimeError, match="workersMax is 5") as err:
+        p.release()
+    assert "signal 1 also arrived" in str(err.value)
+    assert s.endpoint["workersMin"] == 0
+
+
+def test_the_handler_swap_restores_both_signals_if_it_is_interrupted(monkeypatch):
+    marker = signal.getsignal(signal.SIGTERM)
+    real = signal.signal
+    calls = []
+
+    def flaky(signum, handler):
+        calls.append(signum)
+        if len(calls) == 2:  # the second install fails after the first took effect
+            raise OSError("swap interrupted")
+        return real(signum, handler)
+
+    monkeypatch.setattr(pinning.signal, "signal", flaky)
+    with pytest.raises(OSError), pinning._term_and_hangup_deferred():
+        pass
+    monkeypatch.setattr(pinning.signal, "signal", real)
+    assert signal.getsignal(signal.SIGTERM) is marker
+
+
 def test_a_changed_workers_max_keeps_the_bodys_exception_as_visible_context():
     s = FakeSession()
     with pytest.raises(RuntimeError, match="workersMax is 5") as err, _pin(s):

@@ -100,9 +100,10 @@ def _term_and_hangup_deferred():
             received.append(signum)
 
     previous = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGHUP)}
-    for signum in previous:
-        signal.signal(signum, record)
     try:
+        # Inside the try: an exception between the two swaps still restores both.
+        for signum in previous:
+            signal.signal(signum, record)
         yield received
     finally:
         for signum, handler in previous.items():
@@ -281,6 +282,7 @@ class WorkerPin:
         deadline = self._clock() + RELEASE_DEADLINE_SECONDS
         interrupted = None
         failure = None
+        refused = None
         with _term_and_hangup_deferred() as received:
             for attempt in itertools.count():
                 try:
@@ -291,8 +293,9 @@ class WorkerPin:
                     if self._clock() >= deadline:
                         failure = "interrupted until the deadline"
                         break
-                except ReleaseFailed:
-                    raise
+                except ReleaseFailed as e:
+                    refused = e
+                    break
                 except Exception as e:  # noqa: BLE001 - any error must retry; the deadline bounds it
                     wait = _backoff(attempt)
                     if self._clock() + wait > deadline:
@@ -302,6 +305,12 @@ class WorkerPin:
                         self._sleep(wait)
                     except KeyboardInterrupt as ki:
                         interrupted = ki
+        if refused is not None:
+            # Outside the handler for the same reason as below; the message
+            # already says what failed, so only the signal note is added.
+            if not received:
+                raise refused
+            raise ReleaseFailed(str(refused) + self._signal_note(received)) from refused
         if failure is not None:
             # Raised outside the handler so the exception already unwinding
             # through __exit__ (the run's own failure) stays its __context__,
@@ -372,8 +381,9 @@ def unwind_on_hangup_and_term() -> None:
 
     By default both end the process without unwinding, leaving workers pinned
     and billing. Raising SystemExit from a handler turns them into an ordinary
-    unwind; the first one ignores any that follow, and `release()` ignores
-    both while it runs, so a later signal cannot cut the bounded release
+    unwind; the first one ignores any that follow, and `release()` records and
+    defers both while it runs (raising the first as SystemExit once the
+    release is confirmed), so a later signal cannot cut the bounded release
     short. `kill -9` cannot be handled: release by hand.
     """
     for signum in (signal.SIGTERM, signal.SIGHUP):
