@@ -15,6 +15,13 @@ PINNED_BASE = {
     "gpuTypeIds": [GPU_TYPE],
     "networkVolumeId": NETWORK_VOLUME,
     "executionTimeoutMs": JOB_BUDGET_S * 1000,
+    # FlashBoot silently re-enables at creation and measures the platform's
+    # cache instead of the arms (recon/README.md). Artifact 1 pins it the same way.
+    "flashboot": False,
+    # The vLLM base image is CUDA 13.0.2; a host with an older driver fails every
+    # engine start with Error 804 while the job itself still returns ok. Added after
+    # the 2026-10-05 reconnaissance run (docs/recon-a4.md, section 9).
+    "allowedCudaVersions": ["13.0"],
 }
 
 

@@ -24,6 +24,11 @@ image digest, network volume `9c7ut2slrd` and container disk, but
 5 s, `executionTimeoutMs` 1800000. One worker keeps the compile cache warm
 across a campaign, so only the first job on a fresh worker compiles.
 
+Added after the 2026-10-05 reconnaissance: the endpoint also needs `flashboot`
+`false` (ignored at creation; set it by a follow-up update and read it back) and
+`allowedCudaVersions` `["13.0"]`. Both are in `placement_measure/pins.py`, so the
+preflight in C fails if either drifts.
+
 **C. Free preflight.** One GET, no job.
 
 ```bash

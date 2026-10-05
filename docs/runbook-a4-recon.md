@@ -24,6 +24,12 @@ record cites it. The base image, vLLM 0.27.1, is unchanged.
 **C. Endpoint.** GPU `NVIDIA GeForce RTX 4090`; `workersMin` 0; `workersMax` 1;
 `idleTimeout` 5 s; `executionTimeoutMs` 1800000; the template from B.
 
+Added after the 2026-10-05 run, not part of the plan's text: also `flashboot`
+`false` and `allowedCudaVersions` `["13.0"]`, both now in the pin set. FlashBoot
+is ignored at creation and has to be set by a follow-up update and read back;
+the image needs a CUDA 13.0 host driver, and a host without one failed every
+engine start with Error 804 while the capture still printed `ok`.
+
 **D. Free preflight.** One GET, no job.
 
 ```bash
