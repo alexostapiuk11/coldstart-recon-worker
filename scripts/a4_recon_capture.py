@@ -4,6 +4,7 @@
     set -a; . ./.env; set +a
     .venv/bin/python scripts/a4_recon_capture.py --preflight-only --template-id <id>
     .venv/bin/python scripts/a4_recon_capture.py --template-id <id> [--only help,stage]
+    .venv/bin/python scripts/a4_recon_capture.py --template-id <id> --model-class fallback --only swaps-compile
 
 Reads RUNPOD_API_KEY and RUNPOD_A4_ENDPOINT_ID. The endpoint's template must
 run `python3 -u /opt/a4_recon_handler.py`. `--list` prints every job and
@@ -26,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from harness.runpod.preflight import assert_endpoint_matches, fetch_endpoint
 from harness.runpod.submitter import HttpTransport, RunPodSubmitter
 from placement_measure.pins import pins
+from placement_measure.prereg import FALLBACK, PRIMARY
 from placement_measure.recon_plan import recon_jobs
 
 OUT = Path("fixtures/a4/recon")
@@ -55,8 +57,11 @@ def main(argv=None) -> None:
     ap.add_argument("--template-id")
     ap.add_argument("--only", default="")
     ap.add_argument("--out", default=str(OUT))
+    ap.add_argument("--model-class", choices=("primary", "fallback"), default="primary",
+                    help="the class the go/no-go chose; it changes the swap, early-start and "
+                         "sleep jobs only")
     args = ap.parse_args(argv)
-    jobs = recon_jobs()
+    jobs = recon_jobs(PRIMARY if args.model_class == "primary" else FALLBACK)
     if args.only:
         wanted = args.only.split(",")
         unknown = sorted(set(wanted) - {j["label"] for j in jobs})

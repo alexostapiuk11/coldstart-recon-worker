@@ -35,3 +35,17 @@ def test_the_capture_script_lists_jobs_without_spending(capsys):
     _script("a4_recon_capture").main(["--list"])
     out = capsys.readouterr().out
     assert "coresidency-primary" in out and "sleep" in out
+
+
+def test_the_model_class_flag_reaches_the_plan(monkeypatch):
+    module = _script("a4_recon_capture")
+    seen = []
+
+    def spy(model_class):
+        seen.append(model_class)
+        return [{"label": "help", "probe": "help"}]
+
+    monkeypatch.setattr(module, "recon_jobs", spy)
+    module.main(["--list"])
+    module.main(["--list", "--model-class", "fallback"])
+    assert seen == ["Qwen/Qwen3-4B", "Qwen/Qwen3-1.7B"]
