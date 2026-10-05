@@ -66,6 +66,34 @@ def _cache_key(design, engines, swap_time) -> str:
     return hashlib.sha256(material.encode()).hexdigest()[:16]
 
 
+def scenario_for(design: Design, engines: Engines) -> Scenario:
+    return Scenario(
+        n_models=design.n_models, offered_gpus=design.offered_gpus,
+        saturation_rps=saturation_rps(engines.solo), hot_fraction=design.hot_fraction,
+        warmup=design.warmup, mean_burst=design.mean_burst, duty=design.duty,
+    )
+
+
+def evaluations_for(design: Design, engines: Engines, swap_time: EmpiricalDistribution,
+                    out: Path, workers: int, refresh: bool = False) -> list:
+    """The grid's evaluations, from the cache when every input matches.
+    `scripts/a4_analyse.py` reads the sweep through here, so the analysis and
+    the summary are computed from the same evaluations."""
+    out.mkdir(parents=True, exist_ok=True)
+    scenario = scenario_for(design, engines)
+    cache = out / f"evaluations-{_cache_key(design, engines, swap_time)}.json"
+    if cache.exists() and not refresh:
+        print(f"reusing {cache} (--refresh to re-run)")
+        return load_evaluations(cache)
+    evaluations = evaluate_grid(
+        grid(design, scenario), scenario, engines, swap_time, design.repetitions,
+        design.seed, design.slo_seconds, workers,
+    )
+    dump_evaluations(cache, evaluations)
+    print(f"cached {len(evaluations)} grid points to {cache}")
+    return evaluations
+
+
 def run(
     design: Design,
     engines: Engines,
@@ -77,23 +105,7 @@ def run(
     refresh: bool = False,
 ) -> dict:
     _require_measured(design, engines, swap_time, allow_unmeasured)
-    out.mkdir(parents=True, exist_ok=True)
-    scenario = Scenario(
-        n_models=design.n_models, offered_gpus=design.offered_gpus,
-        saturation_rps=saturation_rps(engines.solo), hot_fraction=design.hot_fraction,
-        warmup=design.warmup, mean_burst=design.mean_burst, duty=design.duty,
-    )
-    cache = out / f"evaluations-{_cache_key(design, engines, swap_time)}.json"
-    if cache.exists() and not refresh:
-        print(f"reusing {cache} (--refresh to re-run)")
-        evaluations = load_evaluations(cache)
-    else:
-        evaluations = evaluate_grid(
-            grid(design, scenario), scenario, engines, swap_time, design.repetitions,
-            design.seed, design.slo_seconds, workers,
-        )
-        dump_evaluations(cache, evaluations)
-        print(f"cached {len(evaluations)} grid points to {cache}")
+    evaluations = evaluations_for(design, engines, swap_time, out, workers, refresh)
 
     everything = list(range(design.repetitions))
     summary: dict = {"design": asdict(design), "rate": asdict(rate), "regimes": {}}
