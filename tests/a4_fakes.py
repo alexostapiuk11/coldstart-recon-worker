@@ -10,6 +10,11 @@ import subprocess
 from sweep_fakes import KV_LINE, NON_DEFAULT_LINE, VERSION_LINE
 
 COMPILE_LINE = "(EngineCore pid=340) INFO 10-04 12:00:30 [monitor.py:53] torch.compile took {s} s in total"
+# The two lines plan 3's figure 4 splits a swap-in by (placement/stages.py).
+LOADING_LINE = ("(EngineCore pid=340) INFO 10-04 12:00:20 [model_runner.py:329] Model loading took "
+                "7.49 GiB and 8.0 seconds")
+INIT_LINE = ("(EngineCore pid=340) INFO 10-04 12:00:40 [core.py:348] init engine (profile, create "
+             "kv cache, warmup model) took {s} s (compilation: {c} s)")
 
 
 class Clock:
@@ -52,8 +57,9 @@ class FakeEngines:
     def served(self, model, *, args, env, port=8000, health_timeout=900.0):
         assert env.get("HF_HUB_OFFLINE") == "1", "engines must never download mid-measurement"
         self.clock.t += self.startup_s.get(model, 30.0)
-        lines = [VERSION_LINE, NON_DEFAULT_LINE, KV_LINE,
-                 COMPILE_LINE.format(s=self.compile_s.get(model, 19.0))]
+        compile_s = self.compile_s.get(model, 19.0)
+        lines = [VERSION_LINE, NON_DEFAULT_LINE, KV_LINE, LOADING_LINE,
+                 COMPILE_LINE.format(s=compile_s), INIT_LINE.format(s=compile_s + 10.0, c=compile_s)]
         server = FakeServer(model, args, port, self.healthy.get(model, True), lines)
         self.started.append(server)
         try:

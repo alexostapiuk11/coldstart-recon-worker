@@ -70,3 +70,117 @@ pairing rules, the warm-up window, the repetition count, the run-length pilot
 rule, the interference grid, the swap campaign's pairs and cache states, and
 the validation tolerance construction (scope amendment §12). It also records
 the owner's decision on the bursty-regime sizing gap (scope amendment §14).
+Step 2 is itself committed in two parts, below: its rules, then its values.
+
+## Step 2, part 1 — rules, fixed before reconnaissance's answers are read
+
+Every value step 2 needs is fixed here as a rule, so that once reconnaissance
+reports, the values follow mechanically. `placement/step2.py` holds these rules
+as code, and `tests/test_placement_step2_doc.py` fails if it and this section
+disagree. A rule whose input reconnaissance did not answer stops the
+experiment for the owner's decision; nothing defaults.
+
+### The owner's decision on scope amendment §14
+
+Decided 2026-10-04: in the bursty regime, the hot-model rule and dedicate's
+fleet size are set on each model's ON-period load, its average divided by the
+duty (`peak_factor` 1 / duty). In the spread regime they use the average. It
+remains one rule, applied identically to all three strategies.
+
+### Model class and request shape
+
+- **Model class:** the primary if its go/no-go passed; otherwise the fallback
+  if its go/no-go passed; otherwise stop.
+- **Output length:** fixed at `256` tokens per request, with `ignore_eos`.
+- **Total length:** the shortest of `512`, `1024`, `1536`, `2048` tokens at
+  which the split engine's logged KV capacity, divided by the total, is at most
+  `32` requests. Input length is the total minus the output length. If even
+  T_max leaves 256 or more requests, the KV split cannot bind and the
+  experiment stops (scope amendment §4).
+- **KV readings used:** the split capacity is the smaller of the two
+  co-resident engines'. The solo capacity is the smallest reading of the
+  measured checkpoint at full memory with a compile-cache hit; with none, the
+  solo grid spans the full range.
+
+### The measurement campaigns
+
+- **Grids:** concurrency levels 1, 2, 4, ... up to the first at least `1.5`
+  times the KV ceiling (capacity divided by total length), capped at 256. The
+  co-located grid uses the split ceiling for its own levels, and its neighbour
+  levels are 0 (idle) and the top three own levels. The solo grid uses the solo
+  ceiling.
+- **Neighbour checkpoint:** `Qwen/Qwen3-4B-Base` for the 4B class; a second
+  engine of `Qwen/Qwen3-1.7B` for the fallback.
+- **Held-out cells:** two cells between grid points, never used to build the
+  surface, each value rounded down: own 1.5 times the third-from-top own level with neighbour 1.5 times
+  the third neighbour level, and own 1.5 times the second-from-top own level
+  with neighbour 1.5 times the second neighbour level.
+- **Repeats:** each cell `4` times, interleaved; a cell needs `3` valid
+  repeats. A run is valid only if its measured engine read the compile cache
+  (`S4b` at most 5 s), because compile state moves KV capacity.
+- **Compile sharing:** shared if every swap-in in reconnaissance's compile
+  probe hit the cache.
+- **Validation set:** `Qwen/Qwen3-4B`, `Qwen/Qwen3-4B-Base` and
+  `Qwen/Qwen3-4B-Instruct-2507` if the class is 4B and compile is shared;
+  otherwise three tenants of the measured checkpoint.
+- **Swap campaign:** every ordered pair of distinct checkpoints in the
+  validation set (or the one checkpoint swapped to itself), with
+  `16` swaps per cache state in total, rounded up per pair.
+- **Page-cache eviction works** if, in every cold swap reconnaissance ran, a
+  method succeeded and the kernel's `Cached:` figure fell by at least `0.5` of
+  one 4B checkpoint's weights. Then swaps are measured cold and warm, and the
+  simulator and validation use cold swaps; otherwise warm only, and this is a
+  stated limit.
+- **Simulated swaps:** drawn from the measured swaps in the simulated cache
+  state whose incoming engine hit the compile cache.
+- **Sleep mode:** measured `8` times if reconnaissance found it working, and
+  reported beside the crossover. It is never simulated: that needs the host
+  memory a sleeping model holds, which reconnaissance does not measure (scope
+  amendment §6).
+
+### The simulated design
+
+- **Fleet:** N = `20` models; Zipf skews `0.6, 0.8, 1.0, 1.25, 1.5, 2.0`; both
+  locality regimes; hot-model fraction `0.7`; warm-up `300` s; bursty mean
+  burst `120` s at duty `0.2`; `30` repetitions; run length from the pilot
+  rule with `1200` pilot traces; seed `20261004`.
+- **Sizing and pairing:** as scope amendment §7, with the §14 decision above.
+- **Offered load and SLO:** chosen by a ranking-blind screen from offered loads
+  of `4.0`, `2.0` and `1.0` GPUs of saturation and SLOs of `1.0`, `2.0` and
+  `4.0` times the simulated swap's median. The screen runs `5` repetitions on
+  seed `20261005`, on provisional inputs: the placeholder engines and
+  reconnaissance's own swap times. Each evaluable grid point scores the number
+  of distinct sized fleets among the three strategies, minus one (0 to 2); a
+  candidate's score is the sum. It never looks at which strategy is cheaper.
+  The highest score wins; a tie goes to the earlier candidate, offered load
+  first, then the tighter SLO, in the order listed.
+- **Artifact 5's reference point:** the bursty regime at s = `1.0`.
+
+### The validation gate
+
+- **Trace:** the validation set's three tenants at Zipf s = `1.0`, bursty with
+  mean burst `180` s at duty `0.25`, offered at `0.3` of the measured solo
+  saturation over a `900` s window. The driver caps requests in flight at the
+  solo curve's top measured concurrency.
+- **Draw:** the first of seeds `4104` to `4123`, in order, whose replay is
+  feasible. Feasible means that the simulator, replaying the draw as the
+  prediction below does, finishes its last request within `1200` s, leaves at
+  least `10` bins with a median, and swaps at least `4` times. The check runs on
+  the measured curve and swaps, before any replay, and reads only predicted
+  feasibility, never a verdict. If no draw is feasible, the gate cannot run as
+  registered and the owner decides.
+- **Band:** exactly `3` real repeats of that one trace, binned at `30` s by
+  scheduled arrival. A request counts as unfinished if its scheduled arrival
+  plus its latency is past the window, the clock the prediction uses. A repeat
+  whose arrivals lag the schedule by more than `0.5` s is refused.
+- **Prediction:** the simulator replays the same trace on one GPU holding the
+  first tenant, with the solo curve, and every swap at the median of the
+  measured swaps in the validation's cache state plus the median page-cache
+  eviction, which a cold replay pays before every swap-in and a fleet does not.
+- **Pass rule:** at least `10` judged bins, at most `0.5` of them missing,
+  band edges widened by `0.001` s (`autoscale/validation_band.py`). The
+  predicted swap count must also lie within the real repeats' range, widened by
+  `1` either side.
+- **Interference check:** each held-out cell passes if the surface's
+  prediction lies inside its repeats' range or within `0.1` of their median.
+  A failure is reported against the co-locate strategy, not hidden.

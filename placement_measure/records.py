@@ -51,6 +51,19 @@ class A4Run:
 def _failure_of(kind: str, output: dict) -> str | None:
     if kind == "swap":
         return None if output.get("swap_s") is not None else (output.get("failure") or "no swap time")
+    if kind == "sleep":
+        return None if output.get("switch_s") is not None else (
+            output.get("failure") or "no switch time")
+    if kind == "replay":
+        # A replay cut short by the job budget, or with a request that errored,
+        # is not a repeat of the trace: an errored request has no latency, and
+        # the budget is the platform's limit, not the system under test's.
+        if output.get("failure"):
+            return output["failure"]
+        if output.get("deadline_hit"):
+            return "the replay hit the job budget before every request finished"
+        bad = sum(1 for ok in output.get("ok", ()) if not ok)
+        return f"{bad} requests did not complete cleanly" if bad else None
     if output.get("run") is None:
         return output.get("run_error") or "no measured run"
     return None

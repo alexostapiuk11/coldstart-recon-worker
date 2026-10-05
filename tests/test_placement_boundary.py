@@ -24,10 +24,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 PACKAGE = REPO / "placement"
 
-# Module file names allowed to load `coldstart`. Empty until the measurement
-# plan adds figure 4's adapter, which reads artifact 1's published stage
-# medians. When it lands, add its file name here and nothing else.
-ADAPTERS: frozenset[str] = frozenset()
+# Module file names allowed to load `coldstart`: figure 4's adapter, which
+# reads artifact 1's published stage medians (plan 3). Nothing else.
+ADAPTERS: frozenset[str] = frozenset({"a1_reference.py"})
 
 _PROBE = (
     "import importlib, sys; importlib.import_module({name!r}); "

@@ -14,7 +14,6 @@ import argparse
 import hashlib
 import json
 import sys
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
 
@@ -23,25 +22,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from autoscale.traffic import saturation_rps
 from placement.crossover import estimate_crossover
 from placement.design import Design
-from placement.evaluate import (
-    GridPoint,
-    Scenario,
-    dump_evaluations,
-    evaluate_point,
-    load_evaluations,
-)
+from placement.evaluate import Scenario, dump_evaluations, load_evaluations
+from placement.grid import evaluate_grid, grid
 from placement.money import Assumptions, monthly_difference
 from placement.resample import EmpiricalDistribution
-from placement.runlength import pilot_window
 from placement.sim import Engines
 from placement.sizing import sized_fleet
-from placement.tails import P99_FLOOR
-from placement.traffic import decile_of, zipf_shares
 
-# The pilot draws from its own seed range, so it never shares a stream with a
-# repetition it is sizing.
-PILOT_SEED_OFFSET = 1_000_003
 CROSSOVER_ITERATIONS = 2000
+# Bumped whenever an evaluation gains a field, so a cache written by older code
+# is never read back with the new fields silently empty.
+CACHE_VERSION = 2
 
 
 def _require_measured(design: Design, engines: Engines, swap_time: EmpiricalDistribution, allow: bool) -> None:
@@ -66,31 +57,41 @@ def _require_measured(design: Design, engines: Engines, swap_time: EmpiricalDist
     print(f"WARNING: {', '.join(unmeasured)} are placeholders. This is not a result.")
 
 
-def grid(design: Design, scenario: Scenario) -> list[GridPoint]:
-    """One grid point per (regime, skew), each with the window its pilot found."""
-    deciles = decile_of(design.n_models)
-    points = []
-    for regime in design.regimes:
-        for s in design.skews:
-            shares = zipf_shares(design.n_models, s)
-            coldest = min(sum(sh for sh, d in zip(shares, deciles) if d == k) for k in range(10))
-            # Start the pilot at half the break-even window; it only grows.
-            start = 0.5 * P99_FLOOR / (coldest * scenario.total_rate)
-            window = pilot_window(
-                shares, deciles, regime, scenario.total_rate, design.repetitions,
-                design.mean_burst, design.duty, design.pilot_traces,
-                seed=design.seed + PILOT_SEED_OFFSET, start=start,
-            )
-            points.append(GridPoint(s=s, regime=regime, until=design.warmup + window))
-    return points
-
-
 def _cache_key(design, engines, swap_time) -> str:
     material = json.dumps(
-        [asdict(design), asdict(engines.solo), asdict(engines.colocated), asdict(swap_time)],
+        [CACHE_VERSION, asdict(design), asdict(engines.solo), asdict(engines.colocated),
+         asdict(swap_time)],
         sort_keys=True, default=str,
     )
     return hashlib.sha256(material.encode()).hexdigest()[:16]
+
+
+def scenario_for(design: Design, engines: Engines) -> Scenario:
+    return Scenario(
+        n_models=design.n_models, offered_gpus=design.offered_gpus,
+        saturation_rps=saturation_rps(engines.solo), hot_fraction=design.hot_fraction,
+        warmup=design.warmup, mean_burst=design.mean_burst, duty=design.duty,
+    )
+
+
+def evaluations_for(design: Design, engines: Engines, swap_time: EmpiricalDistribution,
+                    out: Path, workers: int, refresh: bool = False) -> list:
+    """The grid's evaluations, from the cache when every input matches.
+    `scripts/a4_analyse.py` reads the sweep through here, so the analysis and
+    the summary are computed from the same evaluations."""
+    out.mkdir(parents=True, exist_ok=True)
+    scenario = scenario_for(design, engines)
+    cache = out / f"evaluations-{_cache_key(design, engines, swap_time)}.json"
+    if cache.exists() and not refresh:
+        print(f"reusing {cache} (--refresh to re-run)")
+        return load_evaluations(cache)
+    evaluations = evaluate_grid(
+        grid(design, scenario), scenario, engines, swap_time, design.repetitions,
+        design.seed, design.slo_seconds, workers,
+    )
+    dump_evaluations(cache, evaluations)
+    print(f"cached {len(evaluations)} grid points to {cache}")
+    return evaluations
 
 
 def run(
@@ -104,32 +105,7 @@ def run(
     refresh: bool = False,
 ) -> dict:
     _require_measured(design, engines, swap_time, allow_unmeasured)
-    out.mkdir(parents=True, exist_ok=True)
-    scenario = Scenario(
-        n_models=design.n_models, offered_gpus=design.offered_gpus,
-        saturation_rps=saturation_rps(engines.solo), hot_fraction=design.hot_fraction,
-        warmup=design.warmup, mean_burst=design.mean_burst, duty=design.duty,
-    )
-    cache = out / f"evaluations-{_cache_key(design, engines, swap_time)}.json"
-    if cache.exists() and not refresh:
-        print(f"reusing {cache} (--refresh to re-run)")
-        evaluations = load_evaluations(cache)
-    else:
-        points = grid(design, scenario)
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            evaluations = list(
-                pool.map(
-                    evaluate_point,
-                    points,
-                    [scenario] * len(points),
-                    [engines] * len(points),
-                    [swap_time] * len(points),
-                    [design.repetitions] * len(points),
-                    [design.seed] * len(points),
-                )
-            )
-        dump_evaluations(cache, evaluations)
-        print(f"cached {len(evaluations)} grid points to {cache}")
+    evaluations = evaluations_for(design, engines, swap_time, out, workers, refresh)
 
     everything = list(range(design.repetitions))
     summary: dict = {"design": asdict(design), "rate": asdict(rate), "regimes": {}}

@@ -59,6 +59,9 @@ def test_the_sweep_runs_end_to_end_and_reuses_its_cache(tmp_path, monkeypatch):
     def _must_not_run(*args, **kwargs):
         raise AssertionError("the cache should have been reused")
 
-    monkeypatch.setattr(script, "evaluate_point", _must_not_run)
+    # The sweep evaluates through `placement.grid.evaluate_grid` since plan 3
+    # moved it there; patching the name the script calls is what proves the
+    # cache was reused.
+    monkeypatch.setattr(script, "evaluate_grid", _must_not_run)
     again = script.run(DESIGN, ENGINES, FREE, RATE, tmp_path, workers=1, allow_unmeasured=True)
     assert again["regimes"] == summary["regimes"]

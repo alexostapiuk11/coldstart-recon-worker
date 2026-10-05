@@ -22,7 +22,7 @@ from pathlib import Path
 from placement.fleet import STRATEGIES, family, hot_allocation
 from placement.resample import EmpiricalDistribution
 from placement.sim import Engines, simulate
-from placement.tails import P99_FLOOR, decile_counts, decile_p99s
+from placement.tails import P99_FLOOR, aggregate_p99, decile_breach, decile_counts, decile_p99s
 from placement.traffic import bursty_trace, decile_of, spread_trace, zipf_shares
 
 __all__ = [
@@ -34,6 +34,7 @@ __all__ = [
     "dump_evaluations",
     "evaluate_point",
     "load_evaluations",
+    "sizing_load_factor",
 ]
 
 REGIMES = ("spread", "bursty")
@@ -79,13 +80,24 @@ class GridPoint:
 
 @dataclass(frozen=True)
 class ConfigOutcome:
-    """One configuration's results, one entry per repetition."""
+    """One configuration's results, one entry per repetition.
+
+    `decile_breach` is empty unless the evaluation was given an SLO; the
+    sizing never reads it, so the screen evaluates once and scores several
+    SLOs against the same p99s.
+    """
 
     strategy: str
     m: int
     decile_p99s: tuple[tuple[float | None, ...], ...]
     swaps: tuple[int, ...]
     extrapolated: tuple[int, ...]
+    aggregate_p99s: tuple[float | None, ...] = ()
+    hits: tuple[int, ...] = ()
+    requests: tuple[int, ...] = ()
+    decile_breach: tuple[tuple[float | None, ...], ...] = ()
+    # Swaps that began inside the measured window, [warm-up, until].
+    window_swaps: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -107,6 +119,23 @@ class PointEvaluation:
         return all(c >= P99_FLOOR for rep in self.counts for c in rep)
 
 
+def sizing_load_factor(regime: str, duty: float) -> float:
+    """What the hot-model rule multiplies a model's average load by.
+
+    1 in the spread regime; 1 / duty in the bursty one, where a model's load
+    while ON is its average divided by duty (amendment §14, decided
+    2026-10-04). Sizing on the average there left even dedicate missing a p99
+    SLO, so every strategy came out dominated by construction.
+    """
+    if regime not in REGIMES:
+        raise ValueError(f"unknown regime {regime!r}")
+    if regime == "spread":
+        return 1.0
+    if not (0.0 < duty < 1.0):
+        raise ValueError(f"duty must be strictly between 0 and 1, got {duty!r}")
+    return 1.0 / duty
+
+
 def _seed(seed: int, point: GridPoint, rep: int, stream: str) -> int:
     """Stable across processes, unlike `hash()`; see artifact 2's
     `sweep._derive_seed` for why that matters."""
@@ -121,13 +150,21 @@ def evaluate_point(
     swap_time: EmpiricalDistribution,
     repetitions: int,
     seed: int,
+    slo: float | None = None,
 ) -> PointEvaluation:
     shares = zipf_shares(scenario.n_models, point.s)
     deciles = decile_of(scenario.n_models)
-    hot = hot_allocation(shares, scenario.offered_gpus, scenario.hot_fraction)
+    hot = hot_allocation(
+        shares, scenario.offered_gpus, scenario.hot_fraction,
+        peak_factor=sizing_load_factor(point.regime, scenario.duty),
+    )
     families = {strategy: family(strategy, shares, hot) for strategy in STRATEGIES}
     per_config: dict[str, list[dict[str, list]]] = {
-        strategy: [{"p99s": [], "swaps": [], "extrapolated": []} for _ in configs]
+        strategy: [
+            {"p99s": [], "swaps": [], "extrapolated": [], "agg": [], "hits": [], "requests": [],
+             "breach": [], "window_swaps": []}
+            for _ in configs
+        ]
         for strategy, configs in families.items()
     }
     counts = []
@@ -154,6 +191,13 @@ def evaluate_point(
                 slot["p99s"].append(decile_p99s(result, deciles))
                 slot["swaps"].append(result.swaps)
                 slot["extrapolated"].append(result.extrapolated)
+                slot["agg"].append(aggregate_p99(result))
+                slot["hits"].append(result.hits)
+                slot["requests"].append(len(result.latencies))
+                slot["window_swaps"].append(
+                    sum(1 for t in result.swap_starts if scenario.warmup <= t <= point.until))
+                if slo is not None:
+                    slot["breach"].append(decile_breach(result, deciles, slo))
     outcomes = {
         strategy: tuple(
             ConfigOutcome(
@@ -162,6 +206,11 @@ def evaluate_point(
                 decile_p99s=tuple(slot["p99s"]),
                 swaps=tuple(slot["swaps"]),
                 extrapolated=tuple(slot["extrapolated"]),
+                aggregate_p99s=tuple(slot["agg"]),
+                hits=tuple(slot["hits"]),
+                requests=tuple(slot["requests"]),
+                decile_breach=tuple(slot["breach"]),
+                window_swaps=tuple(slot["window_swaps"]),
             )
             for placement, slot in zip(families[strategy], per_config[strategy], strict=True)
         )
@@ -186,6 +235,11 @@ def load_evaluations(path: Path) -> list[PointEvaluation]:
                     decile_p99s=tuple(tuple(rep) for rep in o["decile_p99s"]),
                     swaps=tuple(o["swaps"]),
                     extrapolated=tuple(o["extrapolated"]),
+                    aggregate_p99s=tuple(o.get("aggregate_p99s", ())),
+                    hits=tuple(o.get("hits", ())),
+                    requests=tuple(o.get("requests", ())),
+                    decile_breach=tuple(tuple(rep) for rep in o.get("decile_breach", ())),
+                    window_swaps=tuple(o.get("window_swaps", ())),
                 )
                 for o in configs
             )
