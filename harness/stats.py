@@ -456,3 +456,41 @@ def bootstrap_paired_contrast_difference(
         )
     deltas = [_paired_contrast_delta(t, arms, value) for t in triples]
     return _bootstrap_median_of_units(deltas, iterations, seed, alpha)
+
+
+def bootstrap_function_of_medians(
+    samples, statistic, iterations=10000, seed=0, alpha=0.05
+) -> dict:
+    """Percentile-method interval on `statistic(medians)`, where `medians[i]`
+    is the median of `samples[i]` and every sample is resampled independently.
+
+    For quantities built from several independent groups' medians that none of
+    the fixed-shape bootstraps above covers: a difference in differences over
+    four groups, or a ratio of two medians. Restricting the statistic to a
+    function of medians keeps it on this module's one estimator -- a caller
+    cannot smuggle a mean in through it.
+
+    Independent resampling is correct only for unpaired groups. For paired
+    data, compute one value per unit and call `bootstrap_median_ci` on those.
+    """
+    _check_iterations_and_alpha(iterations, alpha)
+    groups = [
+        _validate_bootstrap_sample(s, f"samples[{i}]") for i, s in enumerate(samples)
+    ]
+    if not groups:
+        raise ValueError("samples must contain at least one group")
+
+    def evaluate(medians: list[float]) -> float:
+        value = statistic(medians)
+        if not math.isfinite(value):
+            raise ValueError(f"statistic returned a non-finite value: {value!r}")
+        return value
+
+    rng = random.Random(seed)
+    point = evaluate([_median(g) for g in groups])
+    draws = []
+    for _ in range(iterations):
+        medians = [_median([g[rng.randrange(len(g))] for _ in range(len(g))]) for g in groups]
+        draws.append(evaluate(medians))
+    lo, hi = _percentile_interval(draws, alpha)
+    return {"point": point, "lo": lo, "hi": hi}
