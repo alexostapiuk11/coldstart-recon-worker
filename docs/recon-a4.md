@@ -24,9 +24,18 @@ those captures. Captures that did not answer their question are kept in
   ran 1,257 s in total; the three discarded attempts ran another 163 s.
   Queue and cold-start waits (`delay_ms`) are separate and whether they are
   billed was not established.
-- **Console spend: not yet read.** The RunPod console's figure for this run
-  and its per-second rate go here; the owner has to read them. Plan 3's task 21
-  needs the rate.
+- **Spend, from RunPod's billing API** (`GET /v1/billing/endpoints` for endpoint
+  `nnypnh9drkq5ux`, read 2026-10-05 after the last job): **$0.4988 for 1,623.2 s
+  billed**, in three hourly buckets (06:00 UTC $0.0464, 07:00 $0.1979, 08:00
+  $0.2544), with 720 disk GB-units billed for the day, as the API reports them.
+  That covers all eleven submissions, the three discarded ones included. Billed
+  time is 1,623 s against 1,420 s of execution in the captures, so some start-up
+  time is billed and the queue waits are probably not; this was not separated.
+  The implied rate is $0.000307 per second, $1.106 per hour. Step 2 registered
+  $1.1095 per hour, from an earlier partial read of the same record
+  (`placement/registered.py`); the 0.3% difference is not a reason to change a
+  registered value, and the campaigns' own spend is read from the same record.
+  The network volume's storage charge is separate and not in this figure.
 
 ## 2. Go/no-go (`coresidency-primary`, `coresidency-fallback`)
 
