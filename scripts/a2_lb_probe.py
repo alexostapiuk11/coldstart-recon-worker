@@ -36,7 +36,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from a2_lb_common import constant_rate, sender, summarize, warm_up
+from a2_lb_common import constant_rate, ensure_fd_limit, sender, summarize, warm_up
 
 from autoscale.validation_schedule import (
     VALIDATION_REPLICAS,
@@ -98,6 +98,7 @@ def main(argv=None) -> None:
     out = Path(args.out)
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f"{out} is not empty; move the earlier probe aside first")
+    ensure_fd_limit(8192)  # before the pin and before anything is written
     out.mkdir(parents=True, exist_ok=True)
     send = sender(endpoint, key)
     unwind_on_hangup_and_term()

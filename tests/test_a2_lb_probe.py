@@ -185,6 +185,46 @@ def test_the_ladder_and_thresholds_are_the_amendments():
     assert probe.LADDER_MAX_IN_FLIGHT == 4096 and probe.EARLY_STOP_FAILURE_FRACTION == 0.5
 
 
+class FakeResource:
+    RLIMIT_NOFILE = 8
+    RLIM_INFINITY = 2**63 - 1
+
+    def __init__(self, soft, hard, can_set=True):
+        self.limits = (soft, hard)
+        self.can_set = can_set
+        self.sets = []
+
+    def getrlimit(self, which):
+        return self.limits
+
+    def setrlimit(self, which, limits):
+        self.sets.append(limits)
+        if not self.can_set:
+            raise ValueError("current limit exceeds maximum limit")
+        self.limits = limits
+
+
+def test_the_open_files_limit_is_left_alone_when_high_enough():
+    res = FakeResource(10240, 10240)
+    common.ensure_fd_limit(8192, res)
+    assert res.sets == []
+
+
+def test_a_low_soft_limit_is_raised_up_to_the_hard_limit():
+    res = FakeResource(256, FakeResource.RLIM_INFINITY)
+    common.ensure_fd_limit(8192, res)
+    assert res.limits == (8192, FakeResource.RLIM_INFINITY)
+    res = FakeResource(256, 9000)
+    common.ensure_fd_limit(8192, res)
+    assert res.limits == (8192, 9000)
+
+
+def test_a_limit_that_cannot_be_raised_is_refused_naming_the_sockets():
+    for res in (FakeResource(256, 1024), FakeResource(256, 10240, can_set=False)):
+        with pytest.raises(SystemExit, match="pool threads each hold a socket.*ulimit -n 8192"):
+            common.ensure_fd_limit(8192, res)
+
+
 # --- main(), with a fake pin and a fake replay -------------------------------------
 
 KEY = "sk-fake-key-for-tests-0123"
@@ -220,6 +260,7 @@ def rig(monkeypatch, tmp_path):
     monkeypatch.setenv("RUNPOD_A2_LB_ENDPOINT_ID", "ep123")
     monkeypatch.setattr(probe, "WorkerPin", FakePin)
     monkeypatch.setattr(probe, "unwind_on_hangup_and_term", lambda: None)
+    monkeypatch.setattr(probe, "ensure_fd_limit", lambda needed: None)
     monkeypatch.setattr(probe, "sender", lambda *a: (lambda i: (200, {})))
     monkeypatch.setattr(probe, "warm_up",
                         lambda send, summary_out=None, **kw: (summary_out.update(
@@ -350,3 +391,36 @@ def test_the_api_key_is_written_nowhere(rig, capsys):
         assert KEY not in f.read_text()
     captured = capsys.readouterr()
     assert KEY not in captured.out + captured.err
+
+
+def _with_resource(monkeypatch, res):
+    """Route main()'s ensure_fd_limit(8192) at a fake resource module; returns the call log."""
+    calls = []
+
+    def fake(needed):
+        calls.append(needed)
+        common.ensure_fd_limit(needed, res)
+
+    monkeypatch.setattr(probe, "ensure_fd_limit", fake)
+    return calls
+
+
+def test_main_refuses_a_too_low_open_files_limit_before_any_pin_or_write(rig, monkeypatch):
+    _with_resource(monkeypatch, FakeResource(256, 1024))  # the hard limit is below the need
+    with pytest.raises(SystemExit, match="pool threads each hold a socket.*ulimit -n 8192"):
+        probe.main(["--out", str(rig["out"])])
+    assert FakePin.instances[0].log == [] and rig["calls"] == []
+    assert not rig["out"].exists()
+
+
+def test_main_raises_the_soft_limit_before_pinning(rig, monkeypatch):
+    res = FakeResource(256, FakeResource.RLIM_INFINITY)
+    calls = _with_resource(monkeypatch, res)
+    probe.main(["--out", str(rig["out"])])
+    assert calls == [8192] and res.limits[0] == 8192
+
+
+def test_preflight_only_does_not_touch_the_open_files_limit(rig, monkeypatch):
+    calls = _with_resource(monkeypatch, FakeResource(256, 1024))
+    probe.main(["--out", str(rig["out"]), "--preflight-only"])
+    assert calls == []

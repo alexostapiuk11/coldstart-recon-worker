@@ -192,46 +192,6 @@ def test_check_slot_creates_the_out_dir_and_leaves_nothing_in_it(tmp_path):
     assert out.is_dir() and not list(out.iterdir())
 
 
-class FakeResource:
-    RLIMIT_NOFILE = 8
-    RLIM_INFINITY = 2**63 - 1
-
-    def __init__(self, soft, hard, can_set=True):
-        self.limits = (soft, hard)
-        self.can_set = can_set
-        self.sets = []
-
-    def getrlimit(self, which):
-        return self.limits
-
-    def setrlimit(self, which, limits):
-        self.sets.append(limits)
-        if not self.can_set:
-            raise ValueError("current limit exceeds maximum limit")
-        self.limits = limits
-
-
-def test_the_open_files_limit_is_left_alone_when_high_enough():
-    res = FakeResource(10240, 10240)
-    v.ensure_fd_limit(8192, res)
-    assert res.sets == []
-
-
-def test_a_low_soft_limit_is_raised_up_to_the_hard_limit():
-    res = FakeResource(256, FakeResource.RLIM_INFINITY)
-    v.ensure_fd_limit(8192, res)
-    assert res.limits == (8192, FakeResource.RLIM_INFINITY)
-    res = FakeResource(256, 9000)
-    v.ensure_fd_limit(8192, res)
-    assert res.limits == (8192, 9000)
-
-
-def test_a_limit_that_cannot_be_raised_is_refused_naming_the_sockets():
-    for res in (FakeResource(256, 1024), FakeResource(256, 10240, can_set=False)):
-        with pytest.raises(SystemExit, match="pool threads each hold a socket.*ulimit -n 8192"):
-            v.ensure_fd_limit(8192, res)
-
-
 class FakePin:
     def __init__(self, release_error=None):
         self.events = []

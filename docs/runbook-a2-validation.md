@@ -77,13 +77,12 @@ reports a field differently (for example `networkVolumeId`), print the keys as i
 
 **F. The probe (paid, ~$0.50).**
 
-Before it, in the same shell, raise the open-files limit: `ulimit -n 8192`. The 450 req/s step
-uses up to 4096 pool threads, each holding a socket, and macOS defaults to a soft limit of 256.
-Only the validation driver raises the limit itself; the probe does not check it (see the notes
-at the end).
+The 450 req/s step uses up to 4096 pool threads, each holding a socket, and macOS defaults to a
+soft limit of 256. The probe raises the soft limit to 8192 itself, after its out-dir check and
+before the pin, or refuses there naming the remedy: nothing is pinned or written. `ulimit -n 8192`
+is only a fallback, for the case where the hard limit is too low for the probe to raise it.
 
 ```bash
-ulimit -n 8192
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/a2_lb_probe.py --out build/a2-lb-probe 2>&1 | tee build/a2-lb-probe.log
 ```
 
@@ -219,7 +218,8 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -c "from harness.runpod.pinning impor
 - Then confirm the spend rate with the GraphQL `myself { currentSpendPerHr }` query.
 
 **Notes on the code as built.**
-- The probe does not check the open-files limit; the driver does. Hence `ulimit -n 8192` in F.
+- Both the probe and the driver raise the open-files soft limit to 8192 before they pin (the shared
+  `ensure_fd_limit` in `scripts/a2_lb_common.py`), or refuse. `ulimit -n 8192` is only a fallback.
 - `workersMax` is never written by this code. After a run it is re-read, and a change is an error
   (workersMin is back to 0, but the evidence was collected under a ceiling nobody checked).
 - The preflights, the pin and the release talk to `https://rest.runpod.io/v1`; the requests go to

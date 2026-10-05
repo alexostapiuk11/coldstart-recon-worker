@@ -9,6 +9,7 @@ requests sent none, so both use the server's defaults (the model's
 generation_config).
 """
 
+import resource
 import sys
 import time
 from pathlib import Path
@@ -24,6 +25,36 @@ MODEL = "Qwen/Qwen3-8B"
 PROMPT_TOKEN_IDS = tuple(range(1000, 1013))
 OUTPUT_TOKENS = 16
 REQUEST_TIMEOUT_S = 120.0
+# Each pool thread keeps one keep-alive socket, so a replay with up to POOL_THREADS
+# threads needs about that many descriptors plus the process's own files. macOS
+# defaults to a soft limit of 256. The probe's ladder and the validation driver
+# both run at 4096 in flight (their own constants); this is the shared check.
+POOL_THREADS = 4096
+MIN_OPEN_FILES = 8192
+
+
+def ensure_fd_limit(needed: int = MIN_OPEN_FILES, res=resource) -> None:
+    """Raise the soft open-files limit to `needed`, or refuse before the pin.
+
+    Refusing after the workers are pinned was rejected: the replay would hit
+    "Too many open files" on the first few hundred sockets and the run would
+    be billed for nothing. Only the soft limit is raised, up to the hard one.
+    """
+    soft, hard = res.getrlimit(res.RLIMIT_NOFILE)
+    if soft >= needed:
+        return
+    target = needed if hard in (res.RLIM_INFINITY, -1) else min(hard, needed)
+    try:
+        res.setrlimit(res.RLIMIT_NOFILE, (target, hard))
+    except (ValueError, OSError):
+        pass
+    soft, _ = res.getrlimit(res.RLIMIT_NOFILE)
+    if soft < needed:
+        raise SystemExit(
+            f"the open-files soft limit is {soft} and could not be raised to {needed}: the "
+            f"replay's {POOL_THREADS} pool threads each hold a socket, so the run "
+            "would fail with 'Too many open files' after the workers were pinned and billing. "
+            f"Run `ulimit -n {needed}` in this shell and start again")
 
 
 def lb_url(endpoint_id: str) -> str:
