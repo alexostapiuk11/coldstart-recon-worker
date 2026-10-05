@@ -74,6 +74,24 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/a4_recon_capture.py --templat
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/a4_recon_report.py
 ```
 
+**F2. If a job fails.** Added after review; not part of the plan's text.
+`a4_recon_capture.py` saves a failed job's outcome like any other and then
+goes on to the next job in the same `--only` batch, so a failure does not stop
+the spend by itself. Read the `[capture] <label>: ...` lines as they print.
+When a stop point matters, run the batch one label at a time (`--only
+swaps-compile`, then `--only swaps-cache`, and so on), and stop after any line
+that is not `ok`: a failed `stage` means no later job has its checkpoints. The
+bound on a single job is the endpoint's `executionTimeoutMs` (30 minutes) with
+`workersMax` 1.
+
+A capture file that exists is never overwritten, and the check covers every
+label in the batch before any job is submitted, so one existing file aborts the
+whole batch and spends nothing. To re-run a failed job, move its file out of
+`fixtures/a4/recon/` (for example into `fixtures/a4/recon-failed/`, committed:
+it is evidence that the attempt happened) and run `--only <that label>` alone.
+`a4_recon_report.py` reads only `fixtures/a4/recon/`, so the moved-aside file is
+not counted; say in `docs/recon-a4.md` that it was re-run and why.
+
 **G. After the run.** Commit `fixtures/a4/recon/` and
 `fixtures/a4/recon-report.json`, record the image digest from A and the
 console's spend, and write `docs/recon-a4.md` from the report's output. Plan 3
