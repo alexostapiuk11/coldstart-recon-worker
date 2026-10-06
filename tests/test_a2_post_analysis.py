@@ -199,3 +199,13 @@ def test_the_iso_cost_slice_is_computed_not_assumed_to_leave_the_others_unconstr
     for tag, s in n.items():
         assert isinstance(s["iso_cost_slice_constrains_others"], bool), tag
         assert s["others_highest_frontier_cost_replica_s"] is not None
+
+
+def test_the_arms_measured_cold_starts_are_recorded_and_arm_a_is_slower_than_arm_c():
+    cs = _analysis()["simulator"]["cold_start"]
+    assert set(cs) == {"A", "C"}
+    for arm, s in cs.items():
+        assert s["n"] > 0, arm
+        assert s["p10"] <= s["median"] <= s["p90"], arm
+    assert cs["A"]["median"] > cs["C"]["median"]
+    assert "data/campaign.jsonl" in _analysis()["_provenance"]["inputs"]

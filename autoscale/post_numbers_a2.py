@@ -330,6 +330,8 @@ def _simulator(sim: dict) -> dict[str, str]:
             out[f"gap_{fk}_{_sweep_key(sweep)}"] = _s(g["point"])
             if factor == "1":
                 out[f"gap_{fk}_{_sweep_key(sweep)}_interval"] = _s_span(g["lo"], g["hi"])
+    for arm in ("A", "C"):
+        out[f"cold_start_median_{arm.lower()}"] = _s(sim["cold_start"][arm]["median"])
     out["h1"] = _verdict(sim["h1"]["overall"])
     out["h2"] = _verdict(sim["h2"]["overall"])
     out.update(_h3(sim["h3"]))

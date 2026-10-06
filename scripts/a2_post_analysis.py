@@ -45,6 +45,7 @@ from autoscale.a2_evidence import (
     per_worker_concurrency,
     stall_share,
 )
+from autoscale.coldstart_ecdf import load_measured_lags
 from autoscale.frontier import (
     COMPARED_SIGNALS,
     COST_TIE_RELATIVE_TOLERANCE,
@@ -71,6 +72,8 @@ ONE_REPLICA = A2 / "validation"
 PROBES = A2 / "lb-probes"
 EXPLORATORY = A2 / "exploratory"
 SWEEP = A2 / "frontier-sweep.json"
+# The store every sweep's cold-start samples came from (a2_render_figures' --store default).
+CAMPAIGN = Path("data/campaign.jsonl")
 SENSITIVITY = EXPLORATORY / "sensitivity-service-speed.json"
 CURVE = A2 / "service-curve.json"
 HOST_LEVELS = (32, 64, 128)
@@ -573,6 +576,26 @@ def _h2_noise(sources: dict, frontiers: dict, sweeps: dict, identity: dict) -> d
     }
 
 
+def _cold_start(inputs: list) -> dict:
+    """The arms' measured scale-up lag, as the sweeps resampled it (repeat-host runs only).
+
+    Read through `load_measured_lags`, the loader the sweeps used, so the median the
+    figure's axis shows is the median of the samples the simulation drew from. Rejected:
+    re-deriving the lag from the raw store, which would have to repeat that loader's
+    first-touch exclusion and drift from it. The percentiles interpolate linearly
+    (`statistics.quantiles(method="inclusive")` is numpy's default, as harness.stats uses).
+    """
+    inputs.append(CAMPAIGN)
+    lags = load_measured_lags(REPO / CAMPAIGN)
+    out = {}
+    for arm in ("A", "C"):
+        xs = sorted(lags[arm].samples)
+        deciles = statistics.quantiles(xs, n=10, method="inclusive")
+        out[arm] = {"median": statistics.median(xs), "p10": deciles[0], "p90": deciles[-1],
+                    "n": len(xs)}
+    return out
+
+
 def simulator_section(curve, inputs: list) -> dict:
     sources, _swept, gaps1, raw = render._load(REPO / SWEEP)
     inputs.append(SWEEP)
@@ -627,6 +650,7 @@ def simulator_section(curve, inputs: list) -> dict:
 
     return {
         "label": UNVALIDATED,
+        "cold_start": _cold_start(inputs),
         "gaps": gaps,
         "h3": h3,
         "sweeps": sweeps,

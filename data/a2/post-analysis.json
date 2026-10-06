@@ -50,7 +50,8 @@
    "data/a2/validation-engine/verdict.json",
    "data/a2/validation/repeat-1.json.gz",
    "data/a2/validation/repeat-2.json.gz",
-   "data/a2/validation/repeat-3.json.gz"
+   "data/a2/validation/repeat-3.json.gz",
+   "data/campaign.jsonl"
   ],
   "label": "simulator section: UNVALIDATED (failed validation twice)",
   "script": "scripts/a2_post_analysis.py"
@@ -852,6 +853,20 @@
   }
  },
  "simulator": {
+  "cold_start": {
+   "A": {
+    "median": 81.07123090312962,
+    "n": 99,
+    "p10": 80.7020058984228,
+    "p90": 96.25923160778912
+   },
+   "C": {
+    "median": 39.36539598401396,
+    "n": 100,
+    "p10": 38.77582224425205,
+    "p90": 54.838175199040414
+   }
+  },
   "gaps": {
    "0.88": {
     "arm A": {

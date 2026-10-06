@@ -257,3 +257,10 @@ def test_an_unknown_sweep_name_is_refused_with_its_consequence():
     a["simulator"]["h2"]["per_sweep"]["arm Z"] = True
     with pytest.raises(ValueError, match="arm Z"):
         numbers(a)
+
+
+def test_the_arms_cold_start_medians_are_stated_in_seconds():
+    n = numbers(A)
+    cs = A["simulator"]["cold_start"]
+    assert n["cold_start_median_a"] == f"{cs['A']['median']:.2f} s"
+    assert n["cold_start_median_c"] == f"{cs['C']['median']:.2f} s"
