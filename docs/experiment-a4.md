@@ -267,3 +267,57 @@ compiled its measured engine (17.18 s) and is not counted, but it also logged
 failed, the neighbour held its level of 16 (median 16 running), and the median
 end-to-end latency was 3.1 s in all three. The criterion is met; the byte value
 stands.
+
+## Amendment, 2026-10-06 (validity): a neighbour above one engine's capacity counts when it sat at capacity
+
+Made after the cell campaign ran and before any analysis of it. The owner
+approved the change on 2026-10-06.
+
+**Changed:** step 2's validity rule for a co-located cell required the neighbour
+engine to reach its level (`vllm:num_requests_running` at least the level)
+before the measured run. A neighbour level above the capacity of one engine can
+never meet that, so for such a level the cell now counts as valid if the ramp
+ended with at least `26` requests running (`placement.registered.SPLIT_CEILING`)
+and the median running count through the measured run was at least `26`, with
+the rest queued. A level at or below `26` must still reach its level, and a
+neighbour that ran out of prompts during the measured run still invalidates the
+cell. Nothing else in the rule changes.
+
+**Why.** With each engine pinned to the registered split KV (55,104 tokens), at
+most about 27 requests of 2,048 tokens run at once, and vLLM queues the rest. Of
+the 152 stored cell runs, the neighbour reached its level in 27, and in 49 more
+it sat at 26 to 28 running with the rest queued while the rule called it
+"never reached". Where the neighbour sat at capacity, latency was the same
+whatever the level above it, which is what a saturated neighbour should give:
+own 16, 6.36 s at neighbour 32 and 6.34 s at 64; own 64, 18.76 s and 18.67 s.
+Neighbour levels 32 and 64 are therefore the same load in effect, and the grid
+keeps both. On the stored cell runs this rule makes 98 of the 152 records
+valid, from 81.
+
+## Amendment, 2026-10-06 (ramp window): the neighbour's ramp wait can be lengthened
+
+Made after the cell campaign and before any analysis of it. The owner approved
+the approach on 2026-10-06; the cell list below needs the owner's confirmation
+before it runs.
+
+**Changed:** a cell design may set `ramp_timeout_s`, how long to wait for the
+neighbour to reach its load before the measured run starts. The default stays
+`60` s, is not sent, and leaves every committed design's payload unchanged.
+
+**Why.** In every cell whose neighbour had 4,032 or more prompts to send, the
+ramp ended at 60 s with nothing running, and the neighbour only started during
+the measured run, so the first part of that run was measured against no
+neighbour. In the cells with 2,688 prompts the neighbour was running by 34 to
+60 s. The 60 s wait is shorter than the load generator needs to prepare the
+larger prompt sets. This is the probable cause, not yet confirmed.
+
+**Confirmation and re-run.** One run of `pair:o1:n64` with `ramp_timeout_s` 600
+(`data/a4/designs/ramp-probe.json`, seed 4299, into `data/a4/ramp-probe.jsonl`)
+records how long the ramp takes. The cells still short of three valid repeats
+under the validity amendment are re-run with the window set to twice that time,
+rounded up to 30 s, at most 600 s, four repeats each, into
+`data/a4/cells-ramp-1.jsonl`. On the stored runs they are `pair:o1:n16`,
+`pair:o1:n32`, `pair:o1:n64`, `pair:o2:n32`, `pair:o2:n64`, `pair:o4:n64`,
+`pair:o8:n64`, `pair:o16:n64`, `pair:o24:n48`, `pair:o32:n64` and
+`pair:o64:n64`: eleven cells and 44 runs. Their earlier runs stay in the store as
+evidence and do not count.

@@ -117,6 +117,11 @@ class CellDesign:
     # and stopped when the measured run ends; a neighbour that still ran out
     # is flagged in the cell's own output.
     neighbour_overrun: int = 4
+    # How long to wait for the neighbour to reach its load before the measured run
+    # starts. The default is the worker's own and is not sent, so every committed
+    # design's payload is unchanged; a design with many neighbour prompts sets it
+    # longer (amendment 2026-10-06, ramp window).
+    ramp_timeout_s: float = 60.0
     # Cells outside the grid's product: the held-out cells the interference
     # check predicts, or a top-up of cells left short of valid repetitions.
     extra_cells: tuple[str, ...] = ()
@@ -153,7 +158,9 @@ class CellDesign:
                      "output_len": self.output_len, "num_prompts": num_prompts,
                      "warmup_prompts": self.warmup_waves * own,
                      "neighbour_prompts": neighbour_prompts,
-                     "seed": self.seed * 1000 + scheduled.run_index},
+                     "seed": self.seed * 1000 + scheduled.run_index,
+                     **({} if self.ramp_timeout_s == 60.0
+                        else {"ramp_timeout_s": self.ramp_timeout_s})},
         }
 
 
