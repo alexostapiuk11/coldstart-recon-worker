@@ -907,13 +907,13 @@ def test_assumptions_refuse_non_positive_rates():
 
 ### Task 13: Record artifact 2's spend
 
-**Status, 2026-10-05: owner-blocked:** the RunPod console's billing is the owner's to read. Until `spend` is recorded, `scripts/a2_prepublish_check.py` refuses the post.
+**Status, 2026-10-05: done.** The spend came from RunPod's billing API (`GET /v1/billing/endpoints`, day buckets, read 2026-10-05), committed as `data/a2/billing-endpoints.json` and cross-checked in scale against the owner's console export, rather than read off the console by hand. Artifact 2 billed $6.07 over 19,726 s on its four endpoints; artifact 1's endpoint billed $37.16. The bill also settled the rate: every endpoint billed about $1.108/h, so the money section now prices at the billed rate ("measured: billed"), not the worker record's $0.74/h `costPerHr` (RunPod's on-demand Pod price), and Task 12's "1.5× at list price" sentence is gone. `scripts/a2_prepublish_check.py` now refuses the post only for PUBLICATION-DATE.
 
 **Files:**
 - Create: `docs/spend-a2.md`
 - Modify: `scripts/a2_post_analysis.py` (read its table into `spend`)
 
-- [ ] **Step 1: The owner reads the RunPod console's billing for 2026-10-03 to 2026-10-05**, per endpoint (`a8261k5opy1ldl`, `7h0aglrmsjovyc`, `lybvnpnt2m327y`, `un0lhqt51q1bvp`), and gives the figures. The session's own estimates are below, to be replaced, never published as the record:
+- [x] **Step 1: The owner reads the RunPod console's billing for 2026-10-03 to 2026-10-05**, per endpoint (`a8261k5opy1ldl`, `7h0aglrmsjovyc`, `lybvnpnt2m327y`, `un0lhqt51q1bvp`), and gives the figures. The session's own estimates are below, to be replaced, never published as the record:
 
 | Item | Estimate |
 |---|---|
@@ -928,9 +928,9 @@ def test_assumptions_refuse_non_positive_rates():
 | Exploratory host sweeps | about $0.7 |
 | Calibrated attempt | about $0.6 |
 
-- [ ] **Step 2: Write `docs/spend-a2.md`.** It holds a table of item, endpoint, dates and dollars from the console, a total, and the one-line source ("RunPod console, billing, read by the owner on <date>").
-- [ ] **Step 3: Ask the owner whether artifact 1's actual spend has been read.** Spec §13 flagged it as unrecorded. If yes, add a line. If no, say so in the file.
-- [ ] **Step 4: Regenerate `post-analysis.json`, run the tests, and commit.**
+- [x] **Step 2: Write `docs/spend-a2.md`.** It holds a table of item, endpoint, dates and dollars from the console, a total, and the one-line source ("RunPod console, billing, read by the owner on <date>").
+- [x] **Step 3: Ask the owner whether artifact 1's actual spend has been read.** Spec §13 flagged it as unrecorded. If yes, add a line. If no, say so in the file.
+- [x] **Step 4: Regenerate `post-analysis.json`, run the tests, and commit.**
 
 ---
 
@@ -1009,7 +1009,7 @@ def test_every_amendment_is_listed_in_reproducing_this():
 
 ### Task 15: Repo README link back, and the pre-publish gate
 
-**Status, 2026-10-05: owner-blocked:** the employer-boundary answer and the publication date are the owner's, and the gate needs Tasks 13 and 16 first. `scripts/a2_prepublish_check.py` refuses the post today (PUBLICATION-DATE, SPEND-PENDING, spend null).
+**Status, 2026-10-05: owner-blocked:** the employer-boundary answer and the publication date are the owner's, and the gate needs Task 16 first (Task 13 is done). `scripts/a2_prepublish_check.py` refuses the post today for PUBLICATION-DATE only (the spend is recorded, Task 13).
 
 **Files:**
 - Modify: `README.md` (add the post's slug and title under artifacts)

@@ -6,9 +6,9 @@ publication without breaking the URL.
 
 The byline date is the publication date. PUBLICATION-DATE is a placeholder: the
 pre-publish check, `scripts/a2_prepublish_check.py`, refuses it and the owner sets
-the date there. The SPEND-PENDING line under "What it costs" is refused by the
-same check until the RunPod console has been read, as is an analysis whose
-`spend` is still null.
+the date there. The same check refuses a SPEND-PENDING line and an analysis whose
+`spend` is null; the spend is recorded, from RunPod's billing API, in
+`docs/spend-a2.md`.
 -->
 
 # An autoscaling simulator that failed its own test
@@ -424,19 +424,20 @@ Converted through assumptions published so you can substitute your own.
 
 | assumption | value | provenance |
 |---|---:|---|
-| GPU hourly rate, one RTX 4090 worker | $0.74/h | **reported** (RunPod API): the `costPerHr` field of a RunPod worker record, read on 2026-10-05 |
+| GPU hourly rate, one RTX 4090 serverless worker | $1.11/h | **measured: billed** (RunPod billing API): what this experiment's endpoints were billed, divided by the time billed, read on 2026-10-05 |
 | spikes | 24 per day | **illustrative**: one an hour |
 
-The rate is what RunPod's API reported for that worker, not an invoice. RunPod's
-[pricing page](https://www.runpod.io/pricing), read on 2026-10-05, lists $1.10/h for
-a serverless 24 GB 4090 PRO worker; $0.74/h is the price the same page gives for an
-on-demand RTX 4090 Pod. The dollar figures below are at $0.74/h; at the list price
-every one of them is 1.5× higher. Every dollar figure scales linearly with the rate.
+The rate is what RunPod billed this experiment's serverless endpoints per hour of
+worker time. RunPod's [pricing page](https://www.runpod.io/pricing), read on
+2026-10-05, lists $1.10/h for a serverless 24 GB 4090 PRO worker; the billed rate
+is 1% above it. The worker record's `costPerHr` field reported
+$0.74/h, which is the price the same page gives for an on-demand RTX 4090 Pod, not
+what serverless billed. Every dollar figure scales linearly with the rate.
 
 **The load balancer's default cap, measured.** Two workers at scaler value 4
-delivered 17.1 req/s: **$24.04** per million requests. Two workers at scaler value
+delivered 17.1 req/s: **$36.02** per million requests. Two workers at scaler value
 128 (a different pair, in probe 3) delivered 300.7 req/s at the 300 req/s step:
-**$1.37** per million, 18× less. The throughput is measured; probe 1's last step
+**$2.05** per million, 18× less. The throughput is measured; probe 1's last step
 was cut short by the driver, and the 128 figure is one step of one probe, not that
 endpoint's maximum.
 If you run a RunPod load-balancing endpoint, check this setting first.
@@ -448,17 +449,22 @@ If you run a RunPod load-balancing endpoint, check this setting first.
 On arm A's step, the three signals' reached p99s are within 82 ms of each other,
 inside utilisation's own spread, so at roughly equal p99:
 
-| signal | replica-seconds per spike | per spike at $0.74/h | per day |
+| signal | replica-seconds per spike | per spike at $1.11/h | per day |
 |---|---:|---:|---:|
-| queue depth | 880 replica-seconds | $0.18 | $4.34 |
-| in-flight concurrency | 2,535 replica-seconds | $0.52 | $12.51 |
-| GPU utilisation | 3,095 replica-seconds | $0.64 | $15.27 |
+| queue depth | 880 replica-seconds | $0.27 | $6.50 |
+| in-flight concurrency | 2,535 replica-seconds | $0.78 | $18.73 |
+| GPU utilisation | 3,095 replica-seconds | $0.95 | $22.87 |
 
 This does not carry to the other sweeps: on arm C and on the ramp, queue depth's
 lower spend comes with a p99 seconds worse than the other two signals'.
 
-**What this experiment cost.** SPEND-PENDING: the owner reads the RunPod console
-before publication.
+**What this experiment cost.** $6.07, for 5.5 hours of worker time billed on
+4 endpoints, per RunPod's billing API: the reconnaissance capture, the service-curve
+sweeps, the host re-measurement, the five load-balancer probes, and both validation
+attempts with the repeats before them. Per endpoint and day:
+[`docs/spend-a2.md`](https://github.com/alexostapiuk11/coldstart-recon-worker/blob/main/docs/spend-a2.md).
+The network volume's storage is billed to the account as a whole and is not
+included.
 
 ---
 
@@ -553,7 +559,10 @@ The data, all under `data/a2/` unless named:
   verdict;
 - `lb-probes/probe-1/` to `probe-5/`, every probe request;
 - `exploratory/`, the host re-measurement and the service-speed sensitivity;
-- `frontier-sweep.json`, the headline sweep; `gpu-rate.json`, the hourly rate;
+- `frontier-sweep.json`, the headline sweep;
+- `billing-endpoints.json`, what RunPod billed each endpoint, from which the hourly
+  rate comes; `gpu-rate.json`, the worker record's `costPerHr` and the list price,
+  for context;
 - `README-evidence.md`, what the load-balancer probe files and the frontier sweep
   are, and the commits that made them.
 
