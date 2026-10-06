@@ -15,6 +15,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matplotlib.ticker import FixedLocator, FuncFormatter
 
@@ -33,7 +34,7 @@ from autoscale.figures import (
     _tidy,
 )
 
-__all__ = ["load_balancer", "validation_attempts"]
+__all__ = ["host_speed", "load_balancer", "validation_attempts"]
 
 # (analysis key, panel label). The label names what was different about the
 # attempt, because the two panels' whole point is that the same gate was run
@@ -297,5 +298,98 @@ def load_balancer(analysis: dict, path, *, return_figure=False):
           y=-0.41)
     _figure_banner(fig, left, right, "MEASURED",
                    "RunPod load-balancing endpoint, 2 workers, probes run 2026-10-05",
+                   MEASURED_BANNER)
+    return _finish(fig, path, return_figure)
+
+
+HOST_LEVELS = ("32", "64", "128")
+# (analysis key, gid, colour, marker, x offset, legend label). The two exploratory sweeps are
+# the same host at two --max-num-seqs values; they get two colours and markers and are nudged
+# apart on x so their min-max bars do not overlap.
+EXPLORATORY_SWEEPS = (
+    ("maxseqs128", "128", SIGNAL_COLOR["queue_depth"], "o", -0.16),
+    ("maxseqs256", "256", SIGNAL_COLOR["in_flight_concurrency"], "s", 0.0),
+)
+CALIBRATED_COLOR = "#d98a1f"
+CALIBRATED_OFFSET = 0.2
+CALIBRATED_SPREAD = 0.045
+RATIO_YLIM = (0.75, 1.05)
+
+
+def host_speed(analysis: dict, path, *, return_figure=False):
+    """Figure C: how fast three RunPod hosts were, relative to the host the curve came from.
+
+    The simulator models one host's speed (the one the service curve was measured on);
+    RunPod assigns hosts at random. y is that host's median server latency over the curve's
+    at the same concurrency, so 1.0 is the curve's own host and below 1.0 is faster than the
+    curve. `daps3haubwrzbn` was re-measured in two exploratory sweeps (median over 3 runs per
+    level, bars min to max); `sef5s24viyecyr` is the host of the calibrated validation
+    attempt, one point per calibrated repeat at the two concurrencies it was measured at.
+
+    The y axis runs 0.75-1.05, not from zero, and the note says so. This is the
+    deliberate exception to the module's zero-based rule: every point is a ratio within
+    0.18 of 1, so on an axis from 0 the three hosts and the reference line are one smear
+    at the top of the panel. The truncation is stated rather than hidden, and the reference
+    line is drawn so the comparison is against 1.0 and not against the axis floor.
+
+    Rejected: a bar chart of ratios (bars from a floor of 0.75 would read as sizes);
+    plotting seconds (the three concurrencies span 0.38-0.61 s, which would bury the
+    4-18% differences this figure exists to show); and a legend-free draw with direct
+    labels, which collides at 375 px because the three series share the same 0.82-0.96 band.
+    The x axis is categorical: 32, 64, 128 are the levels measured, not a scale to read
+    between.
+    """
+    host = analysis["host_speed"]
+    curve_hosts = sorted({h for hosts in host["curve_hosts"].values() for h in hosts})
+    curve_host = " / ".join(curve_hosts)
+    fig, ax = plt.subplots(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN))
+    left, right = 0.11, 0.96
+    fig.subplots_adjust(left=left, right=right, top=0.80, bottom=0.38)
+    xs_of = {level: i for i, level in enumerate(HOST_LEVELS)}
+
+    ax.axhline(1.0, color=CURVE_COLOR, linewidth=2, gid="curve_host")
+    ax.text(len(HOST_LEVELS) - 0.55, 1.008, f"{curve_host} (the curve)", ha="right", va="bottom",
+            fontsize=_pt(PX_LEGEND), fontweight="bold", color=CURVE_COLOR)
+
+    handles = []
+    for key, seqs, color, marker, offset in EXPLORATORY_SWEEPS:
+        (host_id, levels), = host["exploratory"][key].items()
+        xs = [xs_of[lv] + offset for lv in HOST_LEVELS]
+        mid = [levels[lv]["ratio"] for lv in HOST_LEVELS]
+        lo = [levels[lv]["ratio"] - levels[lv]["ratio_min"] for lv in HOST_LEVELS]
+        hi = [levels[lv]["ratio_max"] - levels[lv]["ratio"] for lv in HOST_LEVELS]
+        ax.errorbar(xs, mid, yerr=[lo, hi], color=color, marker=marker, markersize=7,
+                    linestyle="none", capsize=5, elinewidth=2, gid=f"{host_id}_{seqs}")
+        handles.append(Line2D([], [], color=color, marker=marker, markersize=7, linestyle="-",
+                              label=f"{host_id}, max-num-seqs {seqs}: median, min–max"))
+    for host_id, levels in host["calibrated_ratios_by_host"].items():
+        for level, ratios in levels.items():
+            n = len(ratios)
+            for r, ratio in enumerate(ratios):
+                x = xs_of[level] + CALIBRATED_OFFSET + (r - (n - 1) / 2) * CALIBRATED_SPREAD
+                ax.plot([x], [ratio], marker="D", markersize=7, color=CALIBRATED_COLOR,
+                        linestyle="none", gid=host_id)
+        handles.append(Line2D([], [], color=CALIBRATED_COLOR, marker="D", markersize=7,
+                              linestyle="none",
+                              label=f"{host_id}: one point per calibrated repeat (64, 128)"))
+
+    ax.set_title("server-side latency ÷ the curve's (1.0 = the curve's host)", fontsize=_pt(PX_LEGEND),
+                 fontweight="bold", color=CURVE_COLOR)
+    _tidy(ax, "concurrency", "latency ratio to the curve", MEASURED_BG)
+    ax.set_xticks(range(len(HOST_LEVELS)))
+    ax.set_xticklabels(HOST_LEVELS)
+    ax.xaxis.set_major_locator(FixedLocator(range(len(HOST_LEVELS))))
+    ax.set_xlim(-0.5, len(HOST_LEVELS) - 0.45)
+    ax.set_ylim(*RATIO_YLIM)
+    # MaxNLocator's pick (0.88, 0.96, 1.04) puts no tick on 1.0, the one value the axis is about.
+    ax.yaxis.set_major_locator(FixedLocator([0.75, 0.80, 0.85, 0.90, 0.95, 1.00, 1.05]))
+    ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.0, -0.19),
+              fontsize=_pt(PX_LEGEND), frameon=False, borderaxespad=0.0)
+    _note(ax, "ratio axis starting at 0.75, not 0: a ratio near 1 is unreadable on an axis from 0\n"
+              "N: 3 runs per level (daps3haubwrzbn, each sweep); 3 repeats (sef5s24viyecyr)\n"
+              "4 hosts seen, 3 measured; not a distribution",
+          y=-0.60)
+    _figure_banner(fig, left, right, "MEASURED",
+                   "server-side latency on 3 RunPod hosts, relative to the curve's host",
                    MEASURED_BANNER)
     return _finish(fig, path, return_figure)

@@ -56,3 +56,34 @@ def test_load_balancer_shows_the_ceiling_and_the_fill_first_routing(tmp_path):
     assert sum(1 for g in _gids(fig) if g.startswith("worker_bar")) >= 8
     assert "MEASURED" in " ".join(_texts(fig))
     _legible_and_on_canvas(fig)
+
+
+def test_host_speed_plots_each_host_against_the_curves_host(tmp_path):
+    fig = fp.host_speed(A, tmp_path / "h.png", return_figure=True)
+    assert "curve_host" in _gids(fig)
+    assert {"daps3haubwrzbn_128", "daps3haubwrzbn_256", "sef5s24viyecyr"} <= set(_gids(fig))
+    text = " ".join(_texts(fig))
+    assert "not a distribution" in text and "MEASURED" in text
+    assert fig.axes[0].get_ylim() == pytest.approx((0.75, 1.05))
+    _legible_and_on_canvas(fig)
+
+
+def test_host_speed_clips_nothing_and_names_the_curve_host_from_the_analysis(tmp_path):
+    fig = fp.host_speed(A, tmp_path / "h.png", return_figure=True)
+    low, high = fig.axes[0].get_ylim()
+    host = A["host_speed"]
+    ratios = [
+        level[key]
+        for sweep in host["exploratory"].values()
+        for levels in sweep.values()
+        for level in levels.values()
+        for key in ("ratio", "ratio_min", "ratio_max")
+    ] + [r for levels in host["calibrated_ratios_by_host"].values()
+         for rs in levels.values() for r in rs]
+    assert ratios and all(low <= r <= high for r in ratios)
+    # The curve host's id is printed from curve_hosts; a different id must show up.
+    changed = json.loads(json.dumps(A))
+    changed["host_speed"]["curve_hosts"] = {k: ["curvehostxyz"] for k in host["curve_hosts"]}
+    assert "curvehostxyz (the curve)" in " ".join(
+        _texts(fp.host_speed(changed, tmp_path / "h2.png", return_figure=True)))
+    assert "ozhetwnhompob9 (the curve)" in " ".join(_texts(fig))
