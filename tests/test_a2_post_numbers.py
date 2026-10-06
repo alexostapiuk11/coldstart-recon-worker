@@ -158,8 +158,8 @@ def test_the_host_speed_ratios_are_stated_as_ratios_and_as_percent_below_the_cur
         "7%", "6%", "10%"]
     assert not [k for k in n if "_faster_pct_" in k]
     assert [n[f"maxseqs256_ratio_{c}"] for c in (32, 64, 128)] == ["0.96", "0.93", "0.90"]
-    assert n["host_sef5s24viyecyr_ratio_64"] == "0.87"
-    assert n["host_sef5s24viyecyr_ratio_128"] == "0.82–0.84"
+    assert n["attempt2_host_id"] == "sef5s24viyecyr"
+    assert not [k for k in n if k.startswith("host_")]  # one key per ratio, no host-named copy
 
 
 def test_the_gaps_are_stated_per_factor_and_tag_with_the_interval_at_factor_one():

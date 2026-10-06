@@ -215,9 +215,10 @@ def _calibrated_host(host_speed: dict) -> dict[str, str]:
                            "attempt 2's per-host ratio would describe a mix of machines "
                            "under one host id")
     out["attempt2_host_id"] = host
+    # One key per ratio. Rejected: a second, host-named copy of each: the post quotes the
+    # ratio once, beside `attempt2_host_id`, and a duplicate key only re-checks one string.
     for level, ratios in by_level.items():
         out[f"attempt2_host_ratio_{level}"] = _span(ratios, ".2f")
-        out[f"host_{host}_ratio_{level}"] = out[f"attempt2_host_ratio_{level}"]
     return out
 
 
