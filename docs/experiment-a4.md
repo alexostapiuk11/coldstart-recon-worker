@@ -342,3 +342,11 @@ the store as evidence and do not count):
 A run whose neighbour is still not at capacity when its ramp ends is invalid
 under the validity amendment, so a window that proves too short shows up as
 short cells, not as a wrong number.
+
+A top-up of the re-run, committed before it runs: design 1b left `pair:o2:n64`
+with two valid repeats, because one run failed on a rejected request and two
+timed out waiting for a worker while the endpoint had none for several hours
+(the endpoint's queue was purged and its worker count reset before the next
+runs). `data/a4/designs/cells-ramp-1d.json` runs that cell twice more with the
+same 360 s window, into `data/a4/cells-ramp-1d.jsonl`. Design 1c, which had
+not produced a run, is run as committed.

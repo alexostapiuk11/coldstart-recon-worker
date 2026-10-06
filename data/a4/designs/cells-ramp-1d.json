@@ -1,0 +1,19 @@
+{
+ "measured_model": "Qwen/Qwen3-1.7B",
+ "neighbour_model": "Qwen/Qwen3-1.7B",
+ "own_levels": [],
+ "neighbour_levels": [],
+ "solo": false,
+ "input_len": 1792,
+ "output_len": 256,
+ "repeats": 2,
+ "seed": 4304,
+ "waves": 20,
+ "min_prompts": 100,
+ "warmup_waves": 1,
+ "neighbour_overrun": 4,
+ "extra_cells": [
+  "pair:o2:n64"
+ ],
+ "ramp_timeout_s": 360.0
+}
