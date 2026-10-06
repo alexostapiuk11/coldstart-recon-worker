@@ -15,6 +15,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 from matplotlib.ticker import FixedLocator, FuncFormatter
 
 from autoscale.figures import (
@@ -24,6 +25,7 @@ from autoscale.figures import (
     MEASURED_BANNER,
     MEASURED_BG,
     PX_LEGEND,
+    SIGNAL_COLOR,
     _figure_banner,
     _finish,
     _note,
@@ -31,7 +33,7 @@ from autoscale.figures import (
     _tidy,
 )
 
-__all__ = ["validation_attempts"]
+__all__ = ["load_balancer", "validation_attempts"]
 
 # (analysis key, panel label). The label names what was different about the
 # attempt, because the two panels' whole point is that the same gate was run
@@ -155,5 +157,145 @@ def validation_attempts(analysis: dict, path, *, return_figure=False):
                    "y axis: symmetric log, linear within ±0.01 s; ticks in seconds",
           y=-0.20)
     _figure_banner(fig, left, right, "MEASURED", "1 replica, 3 repeats per attempt",
+                   MEASURED_BANNER)
+    return _finish(fig, path, return_figure)
+
+
+# Probe number -> (gid, colour, label) for the left panel. Probe 1 is the
+# RunPod default scaler value; probe 2 is the same two workers at 128 with no
+# 502 retry. Probe 3 (128, with retry) belongs to the right panel only: it
+# repeats probe 2's throughput and adds nothing to the left panel but a third
+# line on top of the second.
+DELIVERY_PROBES = (
+    ("1", "delivered_scaler_4", "#c0392b", "scaler value 4 (default)"),
+    ("2", "delivered_scaler_128", "#2f6fd0", "scaler value 128"),
+)
+WORKER_COLOR = {"worker 1": SIGNAL_COLOR["queue_depth"], "worker 2": "#d98a1f"}
+WORKER_CAP = 128
+BAR_WIDTH = 0.38
+
+
+def _steps(analysis: dict, probe: str) -> list[tuple[int, dict]]:
+    """A probe's steps as (offered rate, step), in numeric order.
+
+    The JSON keys are strings and sort as text ("100" < "25"), which would draw
+    the bars in the wrong order and the delivered-rate line as a zigzag.
+    """
+    steps = analysis["load_balancer"]["probes"][probe]["steps"]
+    return sorted(((int(rate), step) for rate, step in steps.items()))
+
+
+def load_balancer(analysis: dict, path, *, return_figure=False):
+    """Figure B: the load balancer's ceiling at scaler value 4, and its routing at 128.
+
+    Left, delivered completions per second against offered rate. At the default
+    scaler value of 4 the load balancer delivered about 17 req/s whatever was
+    offered, and the requests it did not deliver waited inside it (client p50
+    52 s, server p50 0.31 s), so the ceiling is the load balancer's and not the
+    workers'. At 128 delivery tracks the dashed y = x line until the two
+    workers saturate. Right, probe 3's in-flight requests per worker: worker 1
+    is filled to the cap before worker 2 gets any.
+
+    Rejected: plotting client p50 on the left, which is the same story in
+    seconds but puts a 52 s point on an axis that flattens every other probe;
+    and a stacked bar per rate for the two workers, which shows the split of
+    requests but not that each worker's PEAK sits at the cap of 128, which is
+    what "fills to the cap" means. Mean is the solid bar and peak the lighter
+    bar behind it, so the cap line is crossed by peaks, not by averages that
+    could never reach it.
+
+    Both axes start at zero. The plateau is 17 on a 0-450 axis and is a low flat
+    line, which is the honest size of it next to what scaler value 128 delivers.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN))
+    left, right = 0.09, 0.97
+    fig.subplots_adjust(left=left, right=right, top=0.78, bottom=0.36, wspace=0.28)
+    ax_rate, ax_bars = axes
+
+    # Left panel.
+    offered_max = 0
+    for probe, gid, color, label in DELIVERY_PROBES:
+        steps = _steps(analysis, probe)
+        xs = [rate for rate, _ in steps]
+        ys = [step["delivered_rate_rps"] for _, step in steps]
+        offered_max = max(offered_max, max(xs))
+        ax_rate.plot(xs, ys, color=color, linewidth=2.2, marker="o", markersize=5,
+                     label=label, gid=gid)
+    ax_rate.plot([0, offered_max], [0, offered_max], color=CURVE_COLOR, linewidth=1.3,
+                 linestyle="--", label="delivered = offered", gid="offered_equals_delivered")
+    plateau = statistics.mean(
+        step["delivered_rate_rps"] for _, step in _steps(analysis, "1"))
+    # Direct labels, not a legend: a legend in a panel this small lands on the
+    # lines it names (the first render did exactly that), and the plateau, which
+    # is the point of the panel, is a low flat line a label can sit above.
+    ax_rate.text(offered_max * 0.30, plateau + 22, f"scaler value 4:\nstuck at ~{plateau:.0f} req/s",
+                 fontsize=_pt(PX_LEGEND), fontweight="bold", color=DELIVERY_PROBES[0][2],
+                 ha="left", va="bottom")
+    end = _steps(analysis, "2")[-1]
+    ax_rate.text(offered_max * 0.99, 118, f"scaler value 128:\n{end[1]['delivered_rate_rps']:.0f} at {end[0]}",
+                 fontsize=_pt(PX_LEGEND), fontweight="bold", color=DELIVERY_PROBES[1][2],
+                 ha="right", va="bottom")
+    ax_rate.text(offered_max * 0.02, offered_max * 0.97, "dashed: delivered = offered",
+                 fontsize=_pt(PX_LEGEND), color=CURVE_COLOR, ha="left", va="top")
+    ax_rate.set_title("delivered vs offered rate", fontsize=_pt(PX_LEGEND),
+                      fontweight="bold", color=CURVE_COLOR)
+    _tidy(ax_rate, "offered rate (req/s)", "delivered (req/s)", MEASURED_BG)
+    ax_rate.set_xlim(0, offered_max * 1.03)
+    ax_rate.set_ylim(0, offered_max * 1.03)
+
+    # Right panel.
+    steps3 = _steps(analysis, "3")
+    for i, (rate, step) in enumerate(steps3):
+        conc = step["per_worker_concurrency"]
+        for j, worker in enumerate(("worker 1", "worker 2")):
+            stats = conc.get(worker, {"mean": 0.0, "max": 0})
+            x = i + (j - 0.5) * BAR_WIDTH
+            tag = f"w{j + 1}"
+            ax_bars.bar(x, stats["max"], BAR_WIDTH, color=WORKER_COLOR[worker], alpha=0.35,
+                        gid=f"worker_bar_{tag}_peak_{rate}")
+            ax_bars.bar(x, stats["mean"], BAR_WIDTH, color=WORKER_COLOR[worker],
+                        gid=f"worker_bar_{tag}_mean_{rate}")
+    ax_bars.axhline(WORKER_CAP, color=CURVE_COLOR, linewidth=1.4, linestyle="--", gid="cap_128")
+    shares = [
+        step["per_worker_concurrency"]["worker 1"]["requests"] / step["requests"]
+        for _, step in steps3
+    ]
+    ax_bars.set_xticks(range(len(steps3)))
+    ax_bars.set_xticklabels(
+        [f"{rate}\n{share * 100:.0f}" for (rate, _), share in zip(steps3, shares, strict=True)])
+    ax_bars.set_title("probe 3: in flight per worker\nsolid bar: mean, light bar: peak", fontsize=_pt(PX_LEGEND),
+                      fontweight="bold", color=CURVE_COLOR)
+    _tidy(ax_bars, "offered rate (req/s)\nbelow: % of requests to worker 1",
+          "requests in flight", MEASURED_BG)
+    ax_bars.xaxis.set_major_locator(FixedLocator(range(len(steps3))))
+    ax_bars.set_xlim(-0.6, len(steps3) - 0.4)
+    top = WORKER_CAP * 1.6
+    ax_bars.set_ylim(0, top)
+    ax_bars.text(0.03, 0.97, "the load balancer fills\nworker 1 to the cap\nbefore worker 2",
+                 transform=ax_bars.transAxes, ha="left", va="top",
+                 fontsize=_pt(PX_LEGEND), fontweight="bold", color=CURVE_COLOR)
+    ax_bars.text(0.03, WORKER_CAP / top + 0.01, f"cap {WORKER_CAP}",
+                 transform=ax_bars.transAxes, ha="left", va="bottom",
+                 fontsize=_pt(PX_LEGEND), color=CURVE_COLOR)
+    ax_bars.legend(
+        handles=[Patch(color=WORKER_COLOR["worker 1"], label="worker 1"),
+                 Patch(color=WORKER_COLOR["worker 2"], label="worker 2")],
+        loc="upper left", bbox_to_anchor=(0.0, 0.58), fontsize=_pt(PX_LEGEND),
+        frameon=False, handlelength=1.0, borderaxespad=0.3)
+
+    requests = [step["requests"] for _, step in steps3]
+    rates = [rate for rate, _ in steps3]
+    rates_1 = [rate for rate, _ in _steps(analysis, "1")]
+    leg = analysis["load_balancer"]["per_worker_concurrency_return_leg_s"]
+    _note(ax_rate,
+          f"N = requests per step: {min(requests):,} at {min(rates)} req/s up to "
+          f"{max(requests):,} at {max(rates)} req/s\n"
+          f"probe 1: scaler 4, ran {rates_1[0]}-{rates_1[-1]} req/s only. "
+          f"Probes 2, 3: scaler 128 (3: 502 retry)\n"
+          f"In-flight counts use reconstructed server intervals (return_leg_s = {leg}):\n"
+          f"each ends {leg} s before the client saw the response; length = stamped server latency",
+          y=-0.41)
+    _figure_banner(fig, left, right, "MEASURED",
+                   "RunPod load-balancing endpoint, 2 workers, probes run 2026-10-05",
                    MEASURED_BANNER)
     return _finish(fig, path, return_figure)

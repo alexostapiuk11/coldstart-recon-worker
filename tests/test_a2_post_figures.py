@@ -46,3 +46,13 @@ def test_attempts_draws_both_panels_with_their_verdicts(tmp_path):
     lo0, hi0 = fig.axes[0].get_ylim()
     assert lo0 == pytest.approx(-hi0) and fig.axes[1].get_ylim() == (lo0, hi0)
     _legible_and_on_canvas(fig)
+
+
+def test_load_balancer_shows_the_ceiling_and_the_fill_first_routing(tmp_path):
+    fig = fp.load_balancer(A, tmp_path / "lb.png", return_figure=True)
+    assert len(fig.axes) == 2
+    assert {"delivered_scaler_4", "delivered_scaler_128", "offered_equals_delivered",
+            "cap_128"} <= set(_gids(fig))
+    assert sum(1 for g in _gids(fig) if g.startswith("worker_bar")) >= 8
+    assert "MEASURED" in " ".join(_texts(fig))
+    _legible_and_on_canvas(fig)
