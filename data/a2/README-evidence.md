@@ -23,8 +23,9 @@ Each directory holds `summary.json` and one `step-<rate>.jsonl.gz` per step.
 `<rate>` is the step's target rate in requests per second. A row is one request
 (`index`, `scheduled`, `sent`, `dispatched`, `latency`, `status`, `error`,
 `headers`). `summary.json` holds `status`, the warm-up's aggregate statistics
-and the per-step statistics under `steps`; its `workers` and `release` records
-are empty in all five. The number of rows in each step file equals
+and the per-step statistics under `steps`; its `workers` list holds the raw
+worker ids the probe saw (two in probes 1-3, one in probes 4 and 5; not repeated
+here), and `release` reads `ok` in all five. The number of rows in each step file equals
 `steps[<rate>].requests`.
 
 | Probe | Written (local time) | Endpoint settings | Driver | Steps run | Status |
@@ -42,9 +43,12 @@ Notes on each:
 - **Probe 1** delivered about 17 requests per second whatever was offered:
   client p50 rose to 52 s while server p50 stayed 0.31 s, so requests waited in
   the load balancer, not in the engine. The ceiling is attributed to the
-  endpoint's scaler value of 4: probe 2, on the same two workers with the
-  scaler value at 128, ran every step with client p50 under 1 s
-  (`docs/runbook-a2-validation.md`). Separately, the driver stopped early
+  endpoint's scaler value of 4: probe 2, on the same endpoint type with two
+  workers and the scaler value at 128, ran every step with client p50 under 1 s
+  (`docs/runbook-a2-validation.md`). They were not the same two workers: probes 1,
+  2 and 3 each ran on a different pair (6 distinct `x-a2-worker` ids, none shared
+  between probes; counted in `data/a2/post-analysis.json`), and the driver changed
+  between probes 1 and 2. Separately, the driver stopped early
   because it could not start another thread, which is why the driver was
   changed afterwards (`c7861fe`, `6dc761f`).
 - **Probe 2** has no retry of a 502 that the load balancer returns without

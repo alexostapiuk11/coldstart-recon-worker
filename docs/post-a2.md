@@ -15,11 +15,11 @@ has been read.
 **Oleksii Ostapiuk** · PUBLICATION-DATE · `/experiments/autoscaling-signal-and-cold-start`
 
 I set out to measure which autoscaling signal suits an LLM server whose replicas
-take a minute or more to start. The simulator built to answer it failed its
-pre-registered validation twice, so the answer is not here. What is here: the two
-failures with every miss, a measured gap in speed between rented GPU hosts of the
-same model, five things RunPod's load balancer did in my probes, and, labelled as
-unvalidated, what the simulator would have said.
+take tens of seconds to over a minute to start. The simulator built to answer it
+failed its pre-registered validation twice, so the answer is not here. What is here:
+the two failures with every miss, a measured gap in speed between rented GPU hosts
+of the same model, four things RunPod's load balancer did in my probes and one gap
+in its REST API, and, labelled as unvalidated, what the simulator would have said.
 
 Harness, raw data, analysis and figure code:
 [github.com/alexostapiuk11/coldstart-recon-worker](https://github.com/alexostapiuk11/coldstart-recon-worker)
@@ -33,11 +33,13 @@ server the usual candidates are queue depth (requests waiting per replica),
 in-flight concurrency (requests being served per replica) and GPU utilisation. The
 question was which of the three gives the best tradeoff between cost and p99
 latency during a traffic spike, and whether the answer depends on how long a new
-replica takes to start. Artifact 1 measured two cold starts of the same stack:
-arm A, nothing cached, with a median of 81.07 s, and arm C, weights and compile
-cache warm, 39.37 s (repeat-host runs, as the simulator resamples them). The
-headline hypothesis, H3, was that the gap between the best and the worst signal at
-equal cost at least halves from arm A to arm C, on both a step spike and a ramp.
+replica takes to start. Artifact 1 measured cold starts of the same stack under
+three cache setups; this uses two. Arm A, nothing cached (weights from the hub, a
+cold compile cache), has a median of 81.07 s; arm C, weights on a network volume
+plus a warm compile cache, 39.37 s. Both exclude artifact 1's one first-touch run,
+an image pull on a new host, as the simulator does. The headline hypothesis, H3,
+was that the gap between the best and the worst signal at equal cost at least
+halves from arm A to arm C, on both a step spike and a ramp.
 
 **The answer: not answered by measurement.** The comparison needs dozens of
 policies run thirty times each through real spikes, so it was to be made in a
@@ -52,7 +54,7 @@ of the frontiers. This post does that.
 
 | | measured on RunPod | simulated |
 |---|---|---|
-| Cold start | artifact 1's 300 runs (`data/campaign.jsonl`), arms A and C | resampled from those runs |
+| Cold start | artifact 1's arm A and arm C runs (99 and 100 of its 300, `data/campaign.jsonl`) | resampled from those runs |
 | Service | one replica of vLLM serving `Qwen/Qwen3-8B` on an RTX 4090: latency, throughput and nvidia-smi GPU utilisation at concurrency 1 to 128, three runs per level | the measured curve, interpolated |
 | Fleet | one replica pinned, in the validation runs | up to 12 replicas, added and removed by a policy every 5 s with a 30 s cooldown |
 | Traffic | one fixed arrival schedule, replayed open-loop by a driver on my laptop | a step or ramp spike peaking at 1.20× one replica's measured capacity |
@@ -78,28 +80,36 @@ because a test written after seeing the runs can be bent to fit them. Its core:
 - **Latency p50 per 10 s bin**, judged on server-side latency, the engine's own
   receive-to-response time, which is what the simulator models.
 - **A bin misses** when all three repeats land on the same side of their own
-  predictions by more than 1 ms. A perfect model misses a bin with probability 1/4,
-  which is why the rule tolerates misses rather than demanding every bin.
+  predictions by more than 1 ms (as amended 2026-10-05). A perfect model misses a
+  bin with probability 1/4, which is why the rule tolerates misses rather than
+  demanding every bin.
 - **Pass:** at least 10 judged bins, and no more than half of them missing.
-- **A miss's size** is how far the prediction sits outside the range of the three
-  repeats in that bin: the distance to the repeat closest to its prediction. The
-  raw residual of any one repeat can be much larger.
+- **A miss's size** is the residual closest to zero among the three repeats: how
+  far the repeat nearest its own prediction sits from it. The raw residual of any
+  one repeat can be much larger.
 - **Two attempts at most.** The design allows one disclosed fix and one
   re-validation after a failure. The amendment that made the fix declared it the
   second and last attempt: if it also failed, the gate's failure would be published
   instead of the frontiers.
 
-The gate was amended three times on 2026-10-05 before any verdict was computed, each
-time because of the load balancer (below): a load-balancer 502 is retried once; the
-gate validates one replica instead of two; and each repeat is predicted from the
-arrival times the engine actually received rather than the times the driver sent.
-The last change means the prediction can no longer be written down before the run.
-The prediction for the schedule as sent stays on record in the amendment of
-2026-10-05 (second).
+Before any verdict, the gate was amended three times on 2026-10-05, each time
+because of the load balancer (below): a load-balancer 502 is retried once; the gate
+validates one replica instead of two; and each repeat is predicted from the arrival
+times the engine actually received rather than the times the driver sent. The last
+change means the prediction can no longer be written down before the run. The
+prediction for the schedule as sent stays on record in the amendment of 2026-10-05
+(second). A fourth amendment that day, after attempt one failed, added the
+calibration (below).
 
 **What this gate does not check, even had it passed.** The validation schedule
 peaks at 0.95× one replica's capacity; the policy sweep's spike peaks at 1.20×, so
-the queueing the sweep depends on, which queue depth reads, was never in the test.
+sustained overload like the sweep's, which queue depth reads, was never scheduled.
+The load balancer's bursts did push the engine past its `--max-num-seqs` of 128
+running requests: reconstructed from each request's engine arrival and server latency,
+33%–59% of attempt one's arrivals and 6%–17% of attempt two's took the engine above
+128 requests in flight, to as many as 512 in attempt one and 452–503 in attempt two.
+512 is the endpoint's scaler value, which fits the cap described under the load
+balancer (below). In those stretches the simulator's backlog was off by seconds.
 With one replica, the even split of load across replicas is untested; RunPod's load
 balancer does not split evenly. And no real autoscaling ran at all (see Limits).
 
@@ -116,10 +126,12 @@ y axis is logarithmic past ±0.01 s.
 The first attempt, judged on the engine's arrival times with the committed curve as
 measured, **failed: 34 of 37 judged bins** missed, all on the same side. Across the
 judged bins the engine's median latency was **14%** below the simulator's
-prediction. The largest miss beyond the tolerance band was **2.59 s**; raw residuals
-reached seconds in the bins after the load balancer released held requests in a
-burst. 1 repeat was void and run again once, as the rules allow: every one of its
-200 responses lacked a usable engine-arrival stamp, which the gate judges on.
+prediction. The largest miss beyond the tolerance band was **2.59 s**. In the bins
+after the load balancer released held requests in a burst, the simulator predicted
+a backlog seconds longer than the engine's own: raw residuals reached -6.20 s. 1
+repeat was void and run again once, as the rules allow: all 64,784 of its
+successful (HTTP 200) responses lacked a usable engine-arrival stamp, which the gate
+judges on.
 
 **The cause, found after the verdict (exploratory).** Two things separated the
 validation runs from the curve: the host, and the engine's `--max-num-seqs`, 128 for
@@ -136,18 +148,20 @@ host `ozhetwnhompob9`.
 
 The setting does not matter: at each level the two columns agree within their own
 run-to-run range. The host does, and its lead widens with load. Attempt one's
-repeats ran on a third host, `ku80i8usxw3st5`, whose speed was not measured; its
-latency at about 110 requests in flight is consistent with a host as fast as
-`daps3haubwrzbn`. The simulator models one host's speed, and RunPod, not the user,
-decides which host a worker lands on.
+repeats ran on a third host, `ku80i8usxw3st5`, whose speed was not measured
+closed-loop. Its records still show it at one load: the requests that arrived with
+90 to 110 in flight on the engine took a median 0.494 s, against 0.487 s for
+`daps3haubwrzbn` and 0.533 s for the curve, both interpolated to 100 in flight. At
+that load its latency matched `daps3haubwrzbn`'s. The simulator models one host's
+speed, and RunPod, not the user, decides which host a worker lands on.
 
 ![Server-side latency on two RunPod hosts as a ratio to the curve's host, at concurrency 32, 64 and 128. Every point sits below the line at 1.0. daps3haubwrzbn, measured with both engine settings, sits a little below it and lower at 128; sef5s24viyecyr's three calibrated repeats sit lower still at 64 and 128.](figures/a2/host_speed.png)
 
 The horizontal line at 1.0 is the host the curve was measured on; every other host
-measured sits below it, broadly further below as load rises. Four hosts figure in
-this story and three were measured. That is not a distribution of host speeds; it
-shows only that hosts of the same GPU model differ by about as much as the gate's
-misses.
+measured sits below it, broadly further below as load rises. In all, 6 hosts ran
+the curve and validation tests; 3 were measured for speed. That is not a
+distribution of host speeds; it shows only that hosts of the same GPU model differ
+by about as much as the gate's misses.
 
 ---
 
@@ -197,9 +211,10 @@ pre-registered. RunPod may change any of this.
 
 ![Left: delivered against offered request rate for two workers. At scaler value 4 the line is flat and low at every offered rate; at scaler value 128 it follows the delivered-equals-offered diagonal and bends below it only at the highest rates. Right: probe 3's mean and peak requests in flight per worker by offered rate; worker 1 alone serves the low rates, worker 2 takes load only once worker 1 nears the cap, and both reach the cap at the top rate.](figures/a2/load_balancer.png)
 
-On the left, compare the flat red line with the blue one: same two workers, one
-endpoint setting apart. On the right, see worker 2 stay empty until worker 1 is near
-its cap.
+On the left, compare the flat red line with the blue one: the same endpoint type,
+two workers each time (different workers: probes 1 to 3 ran on 6 workers in all, a
+new pair each time, and the driver changed between probes 1 and 2), scaler value 4
+against 128. On the right, see worker 2 stay empty until worker 1 is near its cap.
 
 **1. The endpoint's scaler value caps the requests in flight per worker.** At
 RunPod's default of 4, probe 1 offered 25, 50 and 100 req/s to two workers and the
@@ -219,8 +234,15 @@ The 100 req/s step is incomplete: it had 449 client-side errors, and the driver
 stopped when it could not start another thread. With the scaler value at 128, the
 same path carried hundreds of requests per second. At 300 req/s offered, probe 2
 delivered 277.7 req/s and probe 3 delivered 300.7 req/s; at 450 req/s offered they
-delivered 348.1 req/s and 350.4 req/s. As of 2026-10-05 RunPod documented no such
-limit; it was found by these probes.
+delivered 348.1 req/s and 350.4 req/s. RunPod documents the scaler value only as an
+autoscaling setting: the divisor in its request-count formula on the
+[endpoint settings page](https://docs.runpod.io/serverless/endpoints/endpoint-configurations),
+and, in the
+[REST API reference](https://docs.runpod.io/api-reference/endpoints/POST/endpoints),
+as either that divisor or a queue delay in seconds, default 4. Neither says the
+load balancer also caps the requests in flight per worker at that value; these
+probes found it (as of 2026-10-05). The validation endpoint's scaler value was 512,
+and 512 is the most requests its engine ever held at once (above).
 
 **2. It fills one worker to the cap before routing to the next.** Probe 3's share
 of requests sent to worker 1, step by step from 25 to 450 req/s: 100%, 100%, 100%,
@@ -231,32 +253,38 @@ gate went to one replica.
 
 **3. It stalls.** With one worker, the load balancer held requests for seconds and
 then released them together. In the three one-replica repeats run before the
-engine-arrival amendment, the share of requests that took over 2 s client-side was:
+engine-arrival amendment, the share of requests that took over 2 s client-side was
+21%–35%. That total includes time inside the engine: a released burst leaves a
+backlog there, and of the requests over 2 s, most also spent over 1.50 s in the
+engine. The part spent outside the engine, client minus server latency over 2 s, is
+the smaller share:
 
-| repeat | over 2 s |
-|---|---:|
-| 1 | 26% |
-| 2 | 35% |
-| 3 | 21% |
-| range | 21%–35% |
-| includes a void repeat? | yes, repeat 1 (void: 2 requests without a 200 (0 of them transport errors)) |
+| repeat | over 2 s client-side | over 2 s outside the engine | of those over 2 s, over 1.50 s in the engine |
+|---|---:|---:|---:|
+| 1 | 26% | 16% | 75% |
+| 2 | 35% | 19% | 90% |
+| 3 | 21% | 10% | 77% |
 
-The two requests that voided repeat 1 were answered 400 by the load balancer, with
-no worker header. The one-worker probes show the same thing as a shortfall that
-comes and goes: probe 4 delivered 108.7 req/s at 150 offered and 114.3 req/s at
+None of the three carries a verdict, and the range includes all three. Under the
+rules then in force, repeat 1 was void: 2 requests got 400s, and
+repeats 2 and 3 were refused for send jitter (0.591 s and 0.806 s). The two
+requests that voided repeat 1 were answered 400 by the load balancer, with no
+worker header. The one-worker probes show the same thing as a shortfall that comes and goes: probe 4 delivered 108.7 req/s at 150 offered and 114.3 req/s at
 180, and probe 5 delivered 156.7 req/s at 180 offered but 210.7 req/s at 210. A
 fixed capacity limit would not deliver more at a higher offered rate.
 
-**4. It returns 502s without reaching a worker.** Probe 2, which did not retry
-them, had 13 such 502s. From probe 3 on, the driver retried a 502 that carried no
-worker header once, at once. Across probes 3 to 5, 37 first attempts failed this
-way, and they were not instant: the median took 2.64 s to fail and the slowest
-14.09 s. A 502 that slow may mean the request was forwarded before the failure, so
-a retried request may have been served twice.
+**4. It returns 502s that no worker answered.** Probe 2, which did not retry them,
+had 13 such 502s, each failing after 0.124–0.284 s. From probe 3 on, the driver
+retried a 502 that carried no worker header once, at once. Across probes 3 to 5, 37
+first attempts failed this way, in two groups: 17 failed after 0.109–0.399 s, and
+20 took 2.50–14.09 s (median of all 37: 2.64 s). A 502 that slow may mean the request was forwarded before the failure, so a retried request
+may have been served twice.
 
-**5. Creating one takes an undocumented call.** The load-balancing endpoints were
-created through RunPod's GraphQL `saveEndpoint` with `type: "LB"`, which is
-undocumented; the REST create call has no type field.
+**One gap in the REST API: its create call cannot make one.** It has no type field.
+These endpoints were made through GraphQL `saveEndpoint` with `type: "LB"`, which
+RunPod's [GraphQL reference](https://docs.runpod.io/sdks/graphql/manage-endpoints)
+documents as of 2026-10-05, as does its Flash SDK for load-balanced endpoints it
+deploys.
 
 What the default costs in dollars is under "What it costs".
 
@@ -317,11 +345,12 @@ What each signal reached at the budget, and what it spent:
 | ramp, arm C | 11.43 s at 670 replica-seconds | 0.555 s at 2,448 replica-seconds | 0.554 s at 3,095 replica-seconds |
 
 **(b) This data cannot rank in-flight concurrency against utilisation.** All 19 of
-utilisation's policies run the identical fleet, yet their p99s spread widely,
-because each policy's thresholds seed different arrival traces. That spread is a
-noise floor for any comparison at the cap, and the margins between utilisation and
-in-flight sit far inside it (on arm A's step in-flight is the worse of the other two
-signals; in the other three sweeps it is the better):
+utilisation's policies run the same scale-up schedule at the same cost, yet their
+p99s spread widely, because each policy's thresholds seed different arrival traces
+and cold-start draws. That spread is a noise floor for any comparison at the cap,
+and the margins between utilisation and in-flight sit far inside it (on arm A's
+step in-flight is the worse of the other two signals; in the other three sweeps it
+is the better):
 
 | sweep | H2 here | utilisation minus the worse other signal | utilisation minus the better other signal | utilisation's 19 at-cap policies: p99 range (median) |
 |---|---|---:|---:|---|
@@ -332,8 +361,9 @@ signals; in the other three sweeps it is the better):
 
 The one sweep where H2 holds holds by +43 ms inside a spread of about a second. In
 the other three it fails by seconds, because queue depth reaches a much worse p99
-there; that is the one difference in these tables larger than that noise floor. Queue
-depth, on this grid, also spends far less: it runs fewer replica-seconds.
+there: larger than that spread several times over, and the gap's bootstrap
+intervals exclude zero. Queue depth also costs far less: 640–895 replica-seconds
+against 2,320–3,095 replica-seconds for the other two.
 
 **H1, H2 and H4 all fail, as defined.** Their operational definitions were written
 after the x1.00 frontiers had been seen, and signed by the owner before any verdict
@@ -348,8 +378,9 @@ choices made with the curves in view, not pre-registered tests:
   required, utilisation read from throughput instead of nvidia-smi, fails too, so it
   does not reverse the verdict.
 - **H4**, the ranking is stable across shapes and margins shrink on the ramp: fails
-  on both counts. Arm A's ranking differs between step and ramp, partly inside the
-  noise above; and the ramp's gap is larger than the step's on both arms.
+  on both counts. Arm A's ranking differs between step and ramp, but on the step
+  all three sit within 82 ms, inside the noise above; the margin condition fails
+  clearly: the ramp's gap is larger than the step's on both arms.
 
 The dollar version of the signal choice is under "What it costs", with the same
 label.
@@ -387,19 +418,21 @@ Converted through assumptions published so you can substitute your own.
 
 | assumption | value | provenance |
 |---|---:|---|
-| GPU hourly rate, one RTX 4090 worker | $0.74/h | **measured**: the `costPerHr` field of a RunPod worker record, read through the API on 2026-10-05 |
+| GPU hourly rate, one RTX 4090 worker | $0.74/h | **reported** (RunPod API): the `costPerHr` field of a RunPod worker record, read on 2026-10-05 |
 | spikes per day | 24 | **illustrative**: one an hour |
 
-The rate is RunPod's reported rate for that worker, not an invoice. Another reading
-in this repository (`docs/recon-a4.md`) implied a higher rate for a flex serverless
-RTX 4090, so the billed rate may differ. Every dollar figure below scales linearly
-with it.
+The rate is what RunPod's API reported for that worker, not an invoice. RunPod's
+[pricing page](https://www.runpod.io/pricing), read on 2026-10-05, lists $1.10/h for
+a serverless 24 GB 4090 PRO worker; $0.74/h is the price the same page gives for an
+on-demand RTX 4090 Pod. The dollar figures below are at $0.74/h; at the list price
+every one of them is 1.5× higher. Every dollar figure scales linearly with the rate.
 
 **The load balancer's default cap, measured.** Two workers at scaler value 4
-delivered 17.1 req/s: **$24.04** per million requests. The same two workers at
-scaler value 128 delivered 300.7 req/s at the 300 req/s step: **$1.37** per million,
-18× less. The throughput is measured; probe 1's last step was cut short by the
-driver, and the 128 figure is one step of one probe, not that endpoint's maximum.
+delivered 17.1 req/s: **$24.04** per million requests. Two workers at scaler value
+128 (a different pair, in probe 3) delivered 300.7 req/s at the 300 req/s step:
+**$1.37** per million, 18× less. The throughput is measured; probe 1's last step
+was cut short by the driver, and the 128 figure is one step of one probe, not that
+endpoint's maximum.
 If you run a RunPod load-balancing endpoint, check this setting first.
 
 **The signal choice, from the simulator.**
@@ -425,24 +458,34 @@ lower spend comes with a p99 seconds worse than the other two signals'.
 ## Limits
 
 - **One provider, one GPU class.** RunPod serverless, RTX 4090, one model
-  (`Qwen/Qwen3-8B`, `--max-model-len 8192`) and one engine image. Artifact 1's
+  (`Qwen/Qwen3-8B`, `--max-model-len 8192`) and one engine version (vLLM 0.27.1, as
+  the curve's and the host re-measurement's runs record it; the validation records
+  do not name it). The images differed: the curve's worker and the load balancer's
+  worker were different builds on the same pinned vLLM base image. Artifact 1's
   standing limits carry over to the cold-start lags: one host, one engine version,
   the first-touch run excluded.
-- **Four hosts in the host-speed story, three measured.** The earlier one-replica
-  repeats, which carry no verdict, ran on two others, and attempt one's void repeat
-  on one of those. A host here is the worker id RunPod reports. That is evidence of
-  a spread, not a distribution, and says nothing about which host is typical.
+- **6 hosts in the curve and validation records, 3 measured for speed.** Attempt
+  one ran on a fourth, measured only in its own records (above); the earlier
+  one-replica repeats, which carry no verdict, ran on two others, `dkuulgulj9v97y`
+  and `27sbjz78gztw8g`, and attempt one's void repeat on the first of those. A host
+  here is the worker id RunPod reports. That is evidence of a spread, not a
+  distribution, and says nothing about which host is typical.
 - **The load balancer as of 2026-10-05,** on the endpoints this project created, in
   probes that were not pre-registered.
 - **The closed-loop confirmatory gate was never built.** The design had a second
   gate: one real run with the GPU-utilisation policy driving actual replica changes,
   which would test the autoscaling loop itself, scale-ups, cold starts arriving
-  mid-spike and all. It was planned as a separate step after the open-loop gate.
-  With the open-loop gate failed twice there was nothing for it to confirm, so the
-  simulator's control loop has never been compared with a real one.
+  mid-spike and all. Reconnaissance kept it (`docs/recon-a2.md`: a driven scale-up
+  on this platform is a real cold start, the condition the design set for keeping
+  it). Plan 2b deferred it to a "plan 2c" that was never written. After the
+  open-loop gate failed twice it was dropped without running: a choice made at that
+  point, not a pre-registered rule. So the simulator's control loop has never been
+  compared with a real one.
 - **The regime under test was outside the gate.** The validation schedule stayed
-  below one replica's capacity; the policy sweep's spike went 20% past it. The
-  traffic regime itself was amended twice, the second time on the measured curve
+  below one replica's capacity, though the load balancer's bursts pushed the engine
+  past its `--max-num-seqs` of 128 in stretches, to as many as 512 in flight; the
+  policy sweep's spike went 20% past capacity and stayed there. The traffic regime
+  itself was amended twice, the second time on the measured curve
   after the first sweep was refused, by a rule that records only whether a gap is
   computable, never its value or which signal wins. Both amendments say what had
   been seen before choosing.
@@ -453,7 +496,7 @@ lower spend comes with a p99 seconds worse than the other two signals'.
 
 ## Reproducing this
 
-Every result above comes from `data/a2/post-analysis.json`, which one script
+Every number above comes from `data/a2/post-analysis.json`, which one script
 reduces from committed files; the design constants (bin width, replica cap, spike
 size) come from the pre-registration. All of it is in
 [github.com/alexostapiuk11/coldstart-recon-worker](https://github.com/alexostapiuk11/coldstart-recon-worker)
@@ -470,10 +513,16 @@ either replay does not reproduce its committed verdict. The figures:
 python scripts/a2_render_post_figures.py --phone
 ```
 
-The calibrated attempt's verdict can be re-judged from its three records:
+The calibrated attempt's verdict can be re-judged from its three records. By
+default this overwrites the committed `data/a2/validation-calibrated/verdict.json`
+and its residual figure in place, so `git diff` afterwards shows whether the
+re-judged verdict matches. `--out` names the directory it both reads the records
+from and writes into, so to leave the committed files alone, copy the three
+`repeat-*.json.gz` records to another directory and pass that:
 
 ```bash
 python scripts/a2_validate.py --judge
+python scripts/a2_validate.py --judge --out build/rejudge   # after copying the records there
 ```
 
 The two simulation runs take hours on a CPU: the headline frontier sweep, whose
@@ -502,7 +551,9 @@ The data, all under `data/a2/` unless named:
 
 The pre-registration, `docs/experiment-a2.md`, was first committed on 2026-09-04,
 and the validation gate's pass rule on 2026-10-03, before any real validation run.
-Every amendment, by its heading's date:
+Every amendment, by its heading's date (also added after the first commit, on
+2026-09-05 and without an amendment heading: the per-signal threshold grids,
+`652d7cb`, and the fixed control-loop parameters, `171b0bb`):
 
 - **2026-09-05**: the never-served exclusion rule, which as first written discarded
   every run;
