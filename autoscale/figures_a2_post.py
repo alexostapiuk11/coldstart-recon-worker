@@ -62,6 +62,29 @@ def _series(residuals) -> tuple[list[float], list[float]]:
     return xs, ys
 
 
+def _judged_residuals(attempt: dict) -> list[float]:
+    """The residuals of the bins the gate judged, across all repeats.
+
+    The analysis does not list the judged bins, but it pins them down: the
+    gate's `bins_used` equals `bins_judged` equals `compared`, and a bin is
+    only used when it has an ok p50 on both sides in every repeat. So the
+    judged bins are exactly those with a residual in every repeat, and that
+    count is checked against `compared` rather than trusted. Counting every
+    non-null residual instead gave 111 for one attempt and 112 for the other,
+    because a repeat can have a residual in a bin the gate did not judge.
+    """
+    repeats = [dict(map(tuple, repeat)) for repeat in attempt["residuals"]]
+    judged = sorted(
+        start for start in repeats[0] if all(r.get(start) is not None for r in repeats)
+    )
+    if len(judged) != attempt["compared"]:
+        raise ValueError(
+            f"{len(judged)} bins have a residual in every repeat but the gate judged "
+            f"{attempt['compared']}; the judged bins cannot be recovered from the residuals"
+        )
+    return [r[start] for r in repeats for start in judged]
+
+
 def validation_attempts(analysis: dict, path, *, return_figure=False):
     """Figure A: the same gate, run twice, and the residual changed sign.
 
@@ -97,18 +120,22 @@ def validation_attempts(analysis: dict, path, *, return_figure=False):
             axis.plot(xs, ys, color=MEASURED_BANNER, linewidth=1.1, marker="o",
                       markersize=2.5, alpha=0.8, gid="residual_series")
         axis.axhline(0.0, color=CURVE_COLOR, linewidth=2, gid="zero")
-        values = [y for repeat in attempt["residuals"] for _, y in repeat if y is not None]
-        drawn[key] = values
+        values = _judged_residuals(attempt)
+        drawn[key] = [y for repeat in attempt["residuals"] for _, y in repeat if y is not None]
         below = sum(v < 0 for v in values)
         above = sum(v > 0 for v in values)
-        every = max(below, above) == len(values)
         side, count = ("below", below) if below >= above else ("above", above)
-        axis.text(0.5, 0.97 if side == "below" else 0.03,
-                  f"median residual {statistics.median(values):+.3f} s\n".replace("-", "−")
-                  + (f"all {count}" if every else f"{count} of {len(values)}")
-                  + f" bins {side} zero",
-                  transform=axis.transAxes, ha="center", va="top" if side == "below" else "bottom",
-                  fontsize=_pt(PX_LEGEND), color=CURVE_COLOR)
+        axis.text(
+            0.5,
+            0.97 if side == "below" else 0.03,
+            f"median residual {statistics.median(values):+.3f} s\n".replace("-", "−")
+            + f"{count} of {len(values)} repeat-bins {side} zero",
+            transform=axis.transAxes,
+            ha="center",
+            va="top" if side == "below" else "bottom",
+            fontsize=_pt(PX_LEGEND),
+            color=CURVE_COLOR,
+        )
         axis.set_title(
             f"attempt {k}: {label}\n{attempt['misses']} of {attempt['compared']} misses",
             fontsize=_pt(PX_LEGEND), fontweight="bold", color=CURVE_COLOR)
@@ -123,7 +150,7 @@ def validation_attempts(analysis: dict, path, *, return_figure=False):
     axes[0].yaxis.set_major_locator(FixedLocator(Y_TICKS_S))
     axes[0].yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}".replace("-", "−")))
     compared = validation["engine"]["compared"]
-    _note(axes[0], f"n={compared} judged bins per attempt, 3 repeats each; bin counts are per repeat\n"
+    _note(axes[0], f"n={compared} judged bins × 3 repeats = {compared * 3} repeat-bins; counts use judged bins only\n"
                    "residual = real − predicted p50 per 10 s bin, binned by engine arrival\n"
                    "y axis: symmetric log, linear within ±0.01 s; ticks in seconds",
           y=-0.20)
