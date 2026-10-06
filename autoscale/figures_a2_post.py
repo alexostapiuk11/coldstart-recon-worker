@@ -49,9 +49,10 @@ BIN_WIDTH_S = 10.0
 # sit near 0.05 s with a few bins to 1.3 s; on a linear axis wide enough for the
 # first, the second is a flat line on zero and the change of sign -- the whole
 # point of the figure -- cannot be seen (the first render did exactly that, with
-# the sign carried only by an annotation). Linear inside +-0.01 s, which is
-# below every residual in the data, so zero stays a line and no value is
-# squashed into it.
+# the sign carried only by an annotation). Linear inside +-0.01 s, so zero
+# stays a line. Two of attempt 1's judged residuals (about -0.005 and -0.007 s)
+# fall inside that linear part: they are drawn close to zero at their true
+# linear position, not squashed onto it. Every other residual is outside it.
 SYMLOG_LINTHRESH_S = 0.01
 Y_TICKS_S = [-6, -1, -0.1, 0, 0.1, 1, 6]
 
@@ -232,7 +233,8 @@ def load_balancer(analysis: dict, path, *, return_figure=False):
                      label=label, gid=gid)
     ax_rate.plot([0, offered_max], [0, offered_max], color=CURVE_COLOR, linewidth=1.3,
                  linestyle="--", label="delivered = offered", gid="offered_equals_delivered")
-    plateau = statistics.mean(
+    # The median over probe 1's steps, as the post quotes it (`lb_ceiling_rate`).
+    plateau = statistics.median(
         step["delivered_rate_rps"] for _, step in _steps(analysis, "1"))
     # Direct labels, not a legend: a legend in a panel this small lands on the
     # lines it names (the first render did exactly that), and the plateau, which
@@ -299,8 +301,8 @@ def load_balancer(analysis: dict, path, *, return_figure=False):
     _note(ax_rate,
           f"N = requests per step: {min(requests):,} at {min(rates)} req/s up to "
           f"{max(requests):,} at {max(rates)} req/s\n"
-          f"probe 1: scaler 4, ran {rates_1[0]}-{rates_1[-1]} req/s only. "
-          f"Probes 2, 3: scaler 128 (3: 502 retry)\n"
+          f"left: probe 1 (scaler 4, {rates_1[0]}-{rates_1[-1]} req/s only), probe 2 "
+          f"(scaler 128);\nright: probe 3 (scaler 128, 502 retried once)\n"
           f"In-flight counts use reconstructed server intervals (return_leg_s = {leg}):\n"
           f"each ends {leg} s before the client saw the response; length = stamped server latency",
           y=-0.41)
@@ -353,7 +355,7 @@ def host_speed(analysis: dict, path, *, return_figure=False):
     curve_host = " / ".join(curve_hosts)
     fig, ax = plt.subplots(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN))
     left, right = 0.11, 0.96
-    fig.subplots_adjust(left=left, right=right, top=0.80, bottom=0.38)
+    fig.subplots_adjust(left=left, right=right, top=0.80, bottom=0.42)
     xs_of = {level: i for i, level in enumerate(HOST_LEVELS)}
 
     ax.axhline(1.0, color=CURVE_COLOR, linewidth=2, gid="curve_host")
@@ -396,9 +398,9 @@ def host_speed(analysis: dict, path, *, return_figure=False):
               fontsize=_pt(PX_LEGEND), frameon=False, borderaxespad=0.0)
     _note(ax, "ratio axis starting at 0.75, not 0: a ratio near 1 is unreadable on an axis from 0\n"
               "N: 3 runs per level (daps3haubwrzbn, each sweep); 3 repeats (sef5s24viyecyr)\n"
-              f"{seen['count']} hosts in the curve and validation records, "
-              f"{seen['measured_for_speed']} measured for speed; not a distribution",
-          y=-0.60)
+              f"{seen['count']} hosts in the curve, host re-measurement and validation "
+              f"records,\n{seen['measured_for_speed']} measured for speed; not a distribution",
+          y=-0.62)
     _figure_banner(fig, left, right, "MEASURED",
                    "server-side latency on 3 RunPod hosts, relative to the curve's host",
                    MEASURED_BANNER)

@@ -1,5 +1,6 @@
 """The post's four figures: content, legibility at phone width, nothing off canvas."""
 
+import copy
 import json
 from pathlib import Path
 
@@ -33,6 +34,11 @@ def _legible_and_on_canvas(fig):
                 t.get_text()
 
 
+def _flat(fig):
+    """Every text joined, line breaks as spaces: a note wrapped to fit reads as one line."""
+    return " ".join(" ".join(_texts(fig)).split())
+
+
 def _gids(fig):
     return [a.get_gid() for a in fig.findobj() if getattr(a, "get_gid", lambda: None)()]
 
@@ -62,15 +68,34 @@ def test_load_balancer_shows_the_ceiling_and_the_fill_first_routing(tmp_path):
     _legible_and_on_canvas(fig)
 
 
+def test_load_balancer_note_says_which_probe_each_panel_draws(tmp_path):
+    fig = fp.load_balancer(A, tmp_path / "lb.png", return_figure=True)
+    text = _flat(fig)
+    assert ("left: probe 1 (scaler 4, 25-100 req/s only), probe 2 (scaler 128); "
+            "right: probe 3 (scaler 128, 502 retried once)") in text
+
+
+def test_the_plateau_label_is_the_median_delivery_as_the_post_quotes_it(tmp_path):
+    a = copy.deepcopy(A)
+    for step, rate in zip(("25", "50", "100"), (10.0, 11.0, 30.0), strict=True):
+        a["load_balancer"]["probes"]["1"]["steps"][step]["delivered_rate_rps"] = rate
+    fig = fp.load_balancer(a, tmp_path / "lb.png", return_figure=True)
+    text = " ".join(_texts(fig))
+    assert "stuck at ~11 req/s" in text  # median 11; the mean would read 17
+
+
 def test_host_speed_plots_each_host_against_the_curves_host(tmp_path):
     fig = fp.host_speed(A, tmp_path / "h.png", return_figure=True)
     assert "curve_host" in _gids(fig)
     assert {"daps3haubwrzbn_128", "daps3haubwrzbn_256", "sef5s24viyecyr"} <= set(_gids(fig))
-    text = " ".join(_texts(fig))
+    text = _flat(fig)
     assert "not a distribution" in text and "MEASURED" in text
     hosts = A["host_speed"]["hosts_in_records"]
-    assert (f"{hosts['count']} hosts in the curve and validation records, "
-            f"{hosts['measured_for_speed']} measured for speed; not a distribution") in text
+    # The hosts are counted over the curve, the host re-measurement and the validation
+    # records; naming only two of the three sources would undercount where they came from.
+    assert (f"{hosts['count']} hosts in the curve, host re-measurement and validation "
+            f"records, {hosts['measured_for_speed']} measured for speed; not a distribution"
+            ) in text
     assert fig.axes[0].get_ylim() == pytest.approx((0.75, 1.05))
     _legible_and_on_canvas(fig)
 
