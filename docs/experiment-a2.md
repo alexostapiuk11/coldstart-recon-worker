@@ -823,8 +823,8 @@ tests in the sense the Hypotheses section is, and a reader should weigh them as
 the choice of an analyst who had seen the curves.
 
 They are implemented in `autoscale/hypotheses.py`, on the same iso-cost slice as
-H3's gap: "reached p99" is read by the function `gap_at_iso_cost` reads, so the
-two cannot disagree about what a signal reached at the budget.
+H3's gap: "reached p99" is read by `_p99_at_cost`, the function `gap_at_iso_cost`
+itself uses, so the two cannot disagree about what a signal reached at the budget.
 
 **H2 is stated for the headline utilisation signal** (nvidia-smi's). The
 `utilization_throughput` sensitivity arm is reported beside it, as the
