@@ -87,3 +87,12 @@ def test_host_speed_clips_nothing_and_names_the_curve_host_from_the_analysis(tmp
     assert "curvehostxyz (the curve)" in " ".join(
         _texts(fp.host_speed(changed, tmp_path / "h2.png", return_figure=True)))
     assert "ozhetwnhompob9 (the curve)" in " ".join(_texts(fig))
+
+
+def test_simulator_answer_is_labelled_unvalidated_on_its_face(tmp_path):
+    fig = fp.simulator_answer(A, tmp_path / "s.png", return_figure=True)
+    text = " ".join(_texts(fig))
+    assert "FAILED VALIDATION" in text and "not pre-registered" in text
+    assert _gids(fig).count("gap_series") == 6  # 3 speeds x 2 shapes
+    assert all(ax.get_ylim()[0] == 0 for ax in fig.axes)
+    _legible_and_on_canvas(fig)

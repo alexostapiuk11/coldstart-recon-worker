@@ -16,16 +16,20 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
+from matplotlib.patches import Patch, Rectangle
 from matplotlib.ticker import FixedLocator, FuncFormatter
 
 from autoscale.figures import (
+    CENSOR_COLOR,
     CURVE_COLOR,
     FIG_HEIGHT_IN,
     FIG_WIDTH_IN,
     MEASURED_BANNER,
     MEASURED_BG,
+    MODELED_BG,
+    PX_BANNER,
     PX_LEGEND,
+    PX_SUBTITLE,
     SIGNAL_COLOR,
     _figure_banner,
     _finish,
@@ -34,7 +38,7 @@ from autoscale.figures import (
     _tidy,
 )
 
-__all__ = ["host_speed", "load_balancer", "validation_attempts"]
+__all__ = ["host_speed", "load_balancer", "simulator_answer", "validation_attempts"]
 
 # (analysis key, panel label). The label names what was different about the
 # attempt, because the two panels' whole point is that the same gate was run
@@ -392,4 +396,124 @@ def host_speed(analysis: dict, path, *, return_figure=False):
     _figure_banner(fig, left, right, "MEASURED",
                    "server-side latency on 3 RunPod hosts, relative to the curve's host",
                    MEASURED_BANNER)
+    return _finish(fig, path, return_figure)
+
+
+# Engine speed -> (gid-neutral label, colour, line style, marker, x offset, linewidth). x1.00 is
+# the committed curve, the only one pre-registration covers, so it is the heaviest and darkest;
+# the other two are exploratory and are drawn lighter, dashed or dotted. Colour AND line style
+# separate them, so the three survive greyscale. The offsets nudge each speed sideways so the
+# intervals, which overlap in the step panel (x0.88 and x1.12 sit 0.12 s apart at arm C), do not
+# draw over one another.
+ENGINE_SPEEDS = (
+    ("1", "x1.00 (committed)", CURVE_COLOR, "-", "o", 0.0, 3.0),
+    ("0.88", "x0.88 (exploratory)", "#2f6fd0", "--", "s", -0.07, 1.8),
+    ("1.12", "x1.12 (exploratory)", "#d98a1f", ":", "D", 0.07, 1.8),
+)
+GAP_PANELS = (("step", "arm A", "arm C"), ("ramp", "ramp arm A", "ramp arm C"))
+H3_MARKER_DX = 0.2
+
+
+def _stamp(fig, left: float, right: float, word: str, subtitle: str) -> None:
+    """The SIMULATED banner: red text on a hatched strip, in figure coordinates.
+
+    The measured figures carry a solid white-on-green strip (`_figure_banner`). This one
+    must not look like that family at a glance, so the strip is hatched in CENSOR_COLOR and
+    the words are CENSOR_COLOR on an opaque white plate, which keeps them legible over the
+    hatching. Rejected: reusing `_figure_banner` with CENSOR_COLOR, which would make the
+    unvalidated figure the same solid slab as the measured ones in a different colour.
+    """
+    fig.add_artist(Rectangle((left, 0.925), right - left, 0.065, transform=fig.transFigure,
+                             facecolor="white", edgecolor=CENSOR_COLOR, hatch="////",
+                             linewidth=1.5, zorder=5))
+    fig.text((left + right) / 2, 0.9575, word, ha="center", va="center",
+             fontsize=_pt(PX_BANNER), fontweight="bold", color=CENSOR_COLOR, zorder=6,
+             bbox={"facecolor": "white", "edgecolor": "none", "pad": 4})
+    fig.text((left + right) / 2, 0.915, subtitle, ha="center", va="top",
+             fontsize=_pt(PX_SUBTITLE), color=CENSOR_COLOR)
+
+
+def simulator_answer(analysis: dict, path, *, return_figure=False):
+    """Figure D: what the simulator says about H3, drawn so it cannot be read as a finding.
+
+    H3 (the pre-registered headline) needed the p99 gap between the best and worst
+    autoscaling signal at equal spend to at least halve from arm A's cold starts to arm C's,
+    under both step and ramp traffic. Left step, right ramp; x is the arm (A: slow cold
+    starts, C: fast) at its measured median lag; y is the gap in seconds, one line per
+    engine speed. The committed x1.00 line rises in both panels, and on the step every speed
+    rises. A hollow marker at arm C shows where H3 needed the x1.00 line to land.
+
+    The simulator failed its pre-registered validation twice (engine latency 14% below its
+    prediction, then 13% above after calibrating to the host), so the answer is stamped on
+    the figure itself and not only in the prose. The x0.88 and x1.12 lines are an
+    exploratory sensitivity check, not pre-registered: they bracket the validation errors.
+
+    Rejected: a numeric x axis in seconds, which would put arm C (39 s) LEFT of arm A (81 s)
+    and draw the pre-registered A-to-C contrast right to left, for two points; and a shared
+    y axis if it hides the step panel (see the note on the axes below). The iso-cost budget
+    is utilisation's floor, which sits at the 12-replica cap, so the slice does not
+    constrain queue depth or in-flight; the note says so.
+    """
+    sim = analysis["simulator"]
+    gaps, cold = sim["gaps"], sim["cold_start"]
+    identity, noise = sim["identity"], sim["h2_noise"]["per_sweep"]
+    fig, axes = plt.subplots(1, 2, figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN))
+    left, right = 0.09, 0.97
+    fig.subplots_adjust(left=left, right=right, top=0.76, bottom=0.46, wspace=0.28)
+
+    for axis, (shape, tag_a, tag_c) in zip(axes, GAP_PANELS, strict=True):
+        for factor, _label, color, style, marker, dx, width in ENGINE_SPEEDS:
+            pts = [gaps[factor][tag_a], gaps[factor][tag_c]]
+            xs = [0 + dx, 1 + dx]
+            ys = [p["point"] for p in pts]
+            axis.errorbar(xs, ys, yerr=[[p["point"] - p["lo"] for p in pts],
+                                        [p["hi"] - p["point"] for p in pts]],
+                          fmt="none", ecolor=color, elinewidth=width * 0.8, capsize=4,
+                          zorder=2)
+            axis.plot(xs, ys, color=color, linestyle=style, linewidth=width, marker=marker,
+                      markersize=7 if factor == "1" else 5.5, zorder=3, gid="gap_series")
+        needed = gaps["1"][tag_a]["point"] / 2
+        axis.plot([1 + H3_MARKER_DX], [needed], marker="<", markersize=9, markerfacecolor="none",
+                  markeredgecolor=CENSOR_COLOR, markeredgewidth=2, linestyle="none",
+                  zorder=4, clip_on=False, gid="h3_needed")
+        a, c = gaps["1"][tag_a]["point"], gaps["1"][tag_c]["point"]
+        axis.set_title(f"{shape} traffic\nx1.00 gap: {a:.2f} s to {c:.2f} s",
+                       fontsize=_pt(PX_LEGEND), fontweight="bold", color=CURVE_COLOR)
+        _tidy(axis, "cold start (measured median)",
+              "gap between best and worst signal (s)" if shape == "step" else "", MODELED_BG)
+        axis.set_xticks([0, 1])
+        axis.set_xticklabels([f"arm A\n{cold['A']['median']:.0f} s median",
+                              f"arm C\n{cold['C']['median']:.0f} s median"])
+        axis.xaxis.set_major_locator(FixedLocator([0, 1]))
+        axis.set_xlim(-0.35, 1 + H3_MARKER_DX + 0.2)
+        top = max(g["hi"] for tag in (tag_a, tag_c) for g in (gaps[f][tag] for f in gaps))
+        axis.set_ylim(0, top * 1.08)
+
+    handles = [Line2D([], [], color=color, linestyle=style, linewidth=width, marker=marker,
+                      markersize=6, label=label)
+               for _f, label, color, style, marker, _dx, width in ENGINE_SPEEDS]
+    handles.append(Line2D([], [], color=CENSOR_COLOR, marker="<", markersize=9,
+                          markerfacecolor="none", markeredgewidth=2, linestyle="none",
+                          label="H3 needed at arm C: half of arm A's"))
+    fig.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, 0.325), ncol=2,
+               fontsize=_pt(PX_LEGEND), frameon=False, borderaxespad=0.0,
+               columnspacing=1.2, handlelength=2.4)
+    budget = sim["sweeps"]["arm A"]["budget_replica_s"]
+    reps = identity["repetitions"]
+    constrained = [t for t, n in noise.items() if n["iso_cost_slice_constrains_others"]]
+    caveat = ("it does not constrain queue depth or in-flight" if not constrained
+              else f"it constrains the other signals in: {', '.join(constrained)}")
+    _note(axes[0],
+          "exploratory sensitivity (x0.88, x1.12) not pre-registered;\n"
+          "the simulator failed its validation twice\n"
+          f"N = {reps} paired repetitions per gap; bars: 95% bootstrap interval\n"
+          "y axes differ between panels, both start at 0\n"
+          f"iso-cost budget {budget:,.0f} replica-s = utilisation's floor at the "
+          f"{identity['max_replicas']}-replica cap;\n{caveat}",
+          y=-0.80)
+    grew = sum(gaps[f]["arm C"]["point"] > gaps[f]["arm A"]["point"] for f in gaps)
+    every = "all three" if grew == len(gaps) else f"{grew} of {len(gaps)}"
+    _stamp(fig, left, right, "SIMULATED · FAILED VALIDATION",
+           "H3 needed the gap to halve from arm A to arm C.\n"
+           f"On the step it grew at {every} engine speeds.")
     return _finish(fig, path, return_figure)
