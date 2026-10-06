@@ -43,6 +43,10 @@ def test_attempts_draws_both_panels_with_their_verdicts(tmp_path):
     assert _gids(fig).count("residual_series") == 6 and _gids(fig).count("zero") == 2
     text = " ".join(_texts(fig))
     assert "34 of 37" in text and "37 of 37" in text and "MEASURED" in text
+    # The residual is real minus the SIMULATOR's prediction; a banner reading only
+    # "MEASURED" would pass a model output off as a measurement.
+    assert "MEASURED − SIMULATED PREDICTION" in text
+    assert "real p50 minus the simulator's prediction" in text
     lo0, hi0 = fig.axes[0].get_ylim()
     assert lo0 == pytest.approx(-hi0) and fig.axes[1].get_ylim() == (lo0, hi0)
     _legible_and_on_canvas(fig)
@@ -64,6 +68,9 @@ def test_host_speed_plots_each_host_against_the_curves_host(tmp_path):
     assert {"daps3haubwrzbn_128", "daps3haubwrzbn_256", "sef5s24viyecyr"} <= set(_gids(fig))
     text = " ".join(_texts(fig))
     assert "not a distribution" in text and "MEASURED" in text
+    hosts = A["host_speed"]["hosts_in_records"]
+    assert (f"{hosts['count']} hosts in the curve and validation records, "
+            f"{hosts['measured_for_speed']} measured for speed; not a distribution") in text
     assert fig.axes[0].get_ylim() == pytest.approx((0.75, 1.05))
     _legible_and_on_canvas(fig)
 

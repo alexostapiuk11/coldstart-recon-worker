@@ -161,7 +161,11 @@ def validation_attempts(analysis: dict, path, *, return_figure=False):
                    "residual = real − predicted p50 per 10 s bin, binned by engine arrival\n"
                    "y axis: symmetric log, linear within ±0.01 s; ticks in seconds",
           y=-0.20)
-    _figure_banner(fig, left, right, "MEASURED", "1 replica, 3 repeats per attempt",
+    # Not "MEASURED" alone: each residual is a measurement minus the simulator's
+    # prediction, and the banner says so, so the green measured strip cannot pass the
+    # model's half off as measured.
+    _figure_banner(fig, left, right, "MEASURED − SIMULATED PREDICTION",
+                   "real p50 minus the simulator's prediction; 1 replica, 3 repeats per attempt",
                    MEASURED_BANNER)
     return _finish(fig, path, return_figure)
 
@@ -344,6 +348,7 @@ def host_speed(analysis: dict, path, *, return_figure=False):
     between.
     """
     host = analysis["host_speed"]
+    seen = host["hosts_in_records"]
     curve_hosts = sorted({h for hosts in host["curve_hosts"].values() for h in hosts})
     curve_host = " / ".join(curve_hosts)
     fig, ax = plt.subplots(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN))
@@ -391,7 +396,8 @@ def host_speed(analysis: dict, path, *, return_figure=False):
               fontsize=_pt(PX_LEGEND), frameon=False, borderaxespad=0.0)
     _note(ax, "ratio axis starting at 0.75, not 0: a ratio near 1 is unreadable on an axis from 0\n"
               "N: 3 runs per level (daps3haubwrzbn, each sweep); 3 repeats (sef5s24viyecyr)\n"
-              "4 hosts seen, 3 measured; not a distribution",
+              f"{seen['count']} hosts in the curve and validation records, "
+              f"{seen['measured_for_speed']} measured for speed; not a distribution",
           y=-0.60)
     _figure_banner(fig, left, right, "MEASURED",
                    "server-side latency on 3 RunPod hosts, relative to the curve's host",
