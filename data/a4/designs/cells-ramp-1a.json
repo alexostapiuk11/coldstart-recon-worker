@@ -1,0 +1,26 @@
+{
+ "measured_model": "Qwen/Qwen3-1.7B",
+ "neighbour_model": "Qwen/Qwen3-1.7B",
+ "own_levels": [],
+ "neighbour_levels": [],
+ "solo": false,
+ "input_len": 1792,
+ "output_len": 256,
+ "repeats": 4,
+ "seed": 4301,
+ "waves": 20,
+ "min_prompts": 100,
+ "warmup_waves": 1,
+ "neighbour_overrun": 4,
+ "extra_cells": [
+  "pair:o1:n16",
+  "pair:o2:n32",
+  "pair:o4:n64",
+  "pair:o8:n64",
+  "pair:o16:n64",
+  "pair:o24:n48",
+  "pair:o32:n64",
+  "pair:o64:n64"
+ ],
+ "ramp_timeout_s": 180.0
+}

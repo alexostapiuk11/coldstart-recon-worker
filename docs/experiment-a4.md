@@ -313,11 +313,32 @@ larger prompt sets. This is the probable cause, not yet confirmed.
 
 **Confirmation and re-run.** One run of `pair:o1:n64` with `ramp_timeout_s` 600
 (`data/a4/designs/ramp-probe.json`, seed 4299, into `data/a4/ramp-probe.jsonl`)
-records how long the ramp takes. The cells still short of three valid repeats
-under the validity amendment are re-run with the window set to twice that time,
-rounded up to 30 s, at most 600 s, four repeats each, into
-`data/a4/cells-ramp-1.jsonl`. On the stored runs they are `pair:o1:n16`,
-`pair:o1:n32`, `pair:o1:n64`, `pair:o2:n32`, `pair:o2:n64`, `pair:o4:n64`,
-`pair:o8:n64`, `pair:o16:n64`, `pair:o24:n48`, `pair:o32:n64` and
-`pair:o64:n64`: eleven cells and 44 runs. Their earlier runs stay in the store as
-evidence and do not count.
+confirms the cause: with the longer window the neighbour was at capacity when
+the ramp ended (28 running), stayed there (median 27, minimum 25), and the run
+completed 100 of 100 requests, so it is valid under the validity amendment. It
+cannot give the ramp time: for a neighbour level above one engine's capacity the
+wait polls for the full level, which is never reached, so it always runs the
+whole window. The probe therefore does not count toward any cell and the window
+is set another way, which replaces "twice the observed ramp time".
+
+The one reading of how long a neighbour takes to start is the pre-register's own
+stored data: with 2,688 neighbour prompts the neighbour was running by 34 s,
+about 79 prompts per second. That predicts about 84 s for 6,656 prompts, 166 s
+for 13,056 and 327 s for 25,856. The re-run uses twice those times, rounded to
+a whole number of 30 s and capped at 600 s, in three designs, four repeats
+each, into one store each (the cells still short of three valid repeats under
+the validity amendment, eleven cells and 44 runs; their earlier runs stay in
+the store as evidence and do not count):
+- `data/a4/designs/cells-ramp-1a.json`, window 180 s, into
+  `data/a4/cells-ramp-1a.jsonl`: `pair:o1:n16`, `pair:o2:n32`, `pair:o4:n64`,
+  `pair:o8:n64`, `pair:o16:n64`, `pair:o24:n48`, `pair:o32:n64`, `pair:o64:n64`
+  (at most 6,656 neighbour prompts);
+- `data/a4/designs/cells-ramp-1b.json`, window 360 s, into
+  `data/a4/cells-ramp-1b.jsonl`: `pair:o1:n32`, `pair:o2:n64` (12,928 and 13,056
+  prompts);
+- `data/a4/designs/cells-ramp-1c.json`, window 600 s, into
+  `data/a4/cells-ramp-1c.jsonl`: `pair:o1:n64` (25,856 prompts).
+
+A run whose neighbour is still not at capacity when its ramp ends is invalid
+under the validity amendment, so a window that proves too short shows up as
+short cells, not as a wrong number.
