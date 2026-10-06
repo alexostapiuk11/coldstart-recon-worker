@@ -1,0 +1,105 @@
+{
+ "status": "complete",
+ "workers": [
+  "6kr7ewoci6yumy",
+  "imu6lkjuy5nlu7"
+ ],
+ "warmup": {
+  "requests": 100,
+  "non_200": 0,
+  "errors": 0,
+  "headerless_200": 0,
+  "worker_share": {
+   "imu6lkjuy5nlu7": 1.0
+  },
+  "client_p50_s": 0.534370562483673,
+  "server_p50_s": 0.320186,
+  "client_minus_server_p50_s": 0.21418456248367296,
+  "max_jitter_s": 0.010477624979102984
+ },
+ "steps": {
+  "25": {
+   "requests": 750,
+   "non_200": 0,
+   "errors": 0,
+   "headerless_200": 0,
+   "worker_share": {
+    "imu6lkjuy5nlu7": 1.0
+   },
+   "client_p50_s": 0.5297534370038193,
+   "server_p50_s": 0.320628,
+   "client_minus_server_p50_s": 0.20912543700381925,
+   "max_jitter_s": 0.014834333008620915
+  },
+  "50": {
+   "requests": 1500,
+   "non_200": 0,
+   "errors": 0,
+   "headerless_200": 0,
+   "worker_share": {
+    "imu6lkjuy5nlu7": 1.0
+   },
+   "client_p50_s": 0.54324362501211,
+   "server_p50_s": 0.33415,
+   "client_minus_server_p50_s": 0.20909362501210998,
+   "max_jitter_s": 0.014177790988469496
+  },
+  "100": {
+   "requests": 3000,
+   "non_200": 0,
+   "errors": 0,
+   "headerless_200": 0,
+   "worker_share": {
+    "imu6lkjuy5nlu7": 1.0
+   },
+   "client_p50_s": 0.5903309795103269,
+   "server_p50_s": 0.37823249999999997,
+   "client_minus_server_p50_s": 0.2120984795103269,
+   "max_jitter_s": 0.024444833002053912
+  },
+  "200": {
+   "requests": 6000,
+   "non_200": 0,
+   "errors": 0,
+   "headerless_200": 0,
+   "worker_share": {
+    "6kr7ewoci6yumy": 0.02,
+    "imu6lkjuy5nlu7": 0.98
+   },
+   "client_p50_s": 0.7066499994980404,
+   "server_p50_s": 0.4902115,
+   "client_minus_server_p50_s": 0.2164384994980404,
+   "max_jitter_s": 0.01873154199332916
+  },
+  "300": {
+   "requests": 9000,
+   "non_200": 2,
+   "errors": 0,
+   "headerless_200": 0,
+   "worker_share": {
+    "6kr7ewoci6yumy": 0.3267392753945321,
+    "imu6lkjuy5nlu7": 0.6732607246054679
+   },
+   "client_p50_s": 0.705052479490405,
+   "server_p50_s": 0.487547,
+   "client_minus_server_p50_s": 0.21750547949040494,
+   "max_jitter_s": 0.013738249983871853
+  },
+  "450": {
+   "requests": 13500,
+   "non_200": 11,
+   "errors": 0,
+   "headerless_200": 0,
+   "worker_share": {
+    "6kr7ewoci6yumy": 0.5333234487360071,
+    "imu6lkjuy5nlu7": 0.4666765512639929
+   },
+   "client_p50_s": 0.9177737910067663,
+   "server_p50_s": 0.499721,
+   "client_minus_server_p50_s": 0.41805279100676623,
+   "max_jitter_s": 0.08245711078543927
+  }
+ },
+ "release": "ok",
+ "error": null
+}

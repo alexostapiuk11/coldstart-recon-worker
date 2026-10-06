@@ -1,0 +1,67 @@
+{
+ "status": "stopped: RuntimeError: can't start new thread",
+ "workers": [
+  "38yfp2e8fbuocu",
+  "rxw7riqhdf7otp"
+ ],
+ "warmup": {
+  "requests": 100,
+  "non_200": 0,
+  "errors": 0,
+  "headerless_200": 0,
+  "worker_share": {
+   "38yfp2e8fbuocu": 0.75,
+   "rxw7riqhdf7otp": 0.25
+  },
+  "client_p50_s": 2.624494624484214,
+  "server_p50_s": 0.3108135,
+  "client_minus_server_p50_s": 2.313681124484214,
+  "max_jitter_s": 0.0052507499989588036
+ },
+ "steps": {
+  "25": {
+   "requests": 750,
+   "non_200": 2,
+   "errors": 0,
+   "headerless_200": 0,
+   "worker_share": {
+    "38yfp2e8fbuocu": 0.5227272727272727,
+    "rxw7riqhdf7otp": 0.4772727272727273
+   },
+   "client_p50_s": 3.797386208520038,
+   "server_p50_s": 0.3114625,
+   "client_minus_server_p50_s": 3.485923708520038,
+   "max_jitter_s": 0.015243333989054975
+  },
+  "50": {
+   "requests": 1500,
+   "non_200": 0,
+   "errors": 0,
+   "headerless_200": 0,
+   "worker_share": {
+    "38yfp2e8fbuocu": 0.504,
+    "rxw7riqhdf7otp": 0.496
+   },
+   "client_p50_s": 21.737091750008403,
+   "server_p50_s": 0.31020400000000004,
+   "client_minus_server_p50_s": 21.426887750008405,
+   "max_jitter_s": 0.03237916699028531
+  },
+  "100": {
+   "requests": 3000,
+   "non_200": 0,
+   "errors": 449,
+   "headerless_200": 0,
+   "worker_share": {
+    "38yfp2e8fbuocu": 0.5060760486083888,
+    "rxw7riqhdf7otp": 0.49392395139161116
+   },
+   "client_p50_s": 51.99638679198688,
+   "server_p50_s": 0.31094099999999997,
+   "client_minus_server_p50_s": 51.68544579198688,
+   "max_jitter_s": 0.012742832989896868
+  }
+ },
+ "release": "ok",
+ "error": "RuntimeError: can't start new thread"
+}

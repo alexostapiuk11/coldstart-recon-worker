@@ -1,0 +1,112 @@
+{
+ "status": "complete",
+ "workers": [
+  "eyq4h3suepxlz0",
+  "kywbic97n9yt0l"
+ ],
+ "warmup": {
+  "requests": 100,
+  "non_200": 0,
+  "errors": 0,
+  "headerless_200": 0,
+  "lb_502_retried": 0,
+  "worker_share": {
+   "kywbic97n9yt0l": 1.0
+  },
+  "client_p50_s": 0.5406820834905375,
+  "server_p50_s": 0.31792549999999997,
+  "client_minus_server_p50_s": 0.2227565834905375,
+  "max_jitter_s": 0.016000791982514695
+ },
+ "steps": {
+  "25": {
+   "requests": 750,
+   "non_200": 0,
+   "errors": 0,
+   "headerless_200": 0,
+   "lb_502_retried": 0,
+   "worker_share": {
+    "kywbic97n9yt0l": 1.0
+   },
+   "client_p50_s": 0.5327713540027617,
+   "server_p50_s": 0.3183625,
+   "client_minus_server_p50_s": 0.21440885400276166,
+   "max_jitter_s": 0.08369762497953914
+  },
+  "50": {
+   "requests": 1500,
+   "non_200": 0,
+   "errors": 0,
+   "headerless_200": 0,
+   "lb_502_retried": 0,
+   "worker_share": {
+    "kywbic97n9yt0l": 1.0
+   },
+   "client_p50_s": 0.5419825830031186,
+   "server_p50_s": 0.33143199999999995,
+   "client_minus_server_p50_s": 0.21055058300311869,
+   "max_jitter_s": 0.01878679201123301
+  },
+  "100": {
+   "requests": 3000,
+   "non_200": 0,
+   "errors": 0,
+   "headerless_200": 0,
+   "lb_502_retried": 0,
+   "worker_share": {
+    "kywbic97n9yt0l": 1.0
+   },
+   "client_p50_s": 0.5831202289991779,
+   "server_p50_s": 0.3700485,
+   "client_minus_server_p50_s": 0.21307172899917792,
+   "max_jitter_s": 0.08536937499651742
+  },
+  "200": {
+   "requests": 6000,
+   "non_200": 0,
+   "errors": 0,
+   "headerless_200": 0,
+   "lb_502_retried": 0,
+   "worker_share": {
+    "eyq4h3suepxlz0": 0.013333333333333334,
+    "kywbic97n9yt0l": 0.9866666666666667
+   },
+   "client_p50_s": 0.6768041040049866,
+   "server_p50_s": 0.461895,
+   "client_minus_server_p50_s": 0.21490910400498658,
+   "max_jitter_s": 0.028607290980872335
+  },
+  "300": {
+   "requests": 9000,
+   "non_200": 0,
+   "errors": 0,
+   "headerless_200": 0,
+   "lb_502_retried": 0,
+   "worker_share": {
+    "eyq4h3suepxlz0": 0.29844444444444446,
+    "kywbic97n9yt0l": 0.7015555555555556
+   },
+   "client_p50_s": 0.6873891459981678,
+   "server_p50_s": 0.4726595,
+   "client_minus_server_p50_s": 0.2147296459981678,
+   "max_jitter_s": 0.04739662566610292
+  },
+  "450": {
+   "requests": 13500,
+   "non_200": 0,
+   "errors": 0,
+   "headerless_200": 0,
+   "lb_502_retried": 2,
+   "worker_share": {
+    "eyq4h3suepxlz0": 0.49044444444444446,
+    "kywbic97n9yt0l": 0.5095555555555555
+   },
+   "client_p50_s": 0.7926202499947976,
+   "server_p50_s": 0.488028,
+   "client_minus_server_p50_s": 0.3045922499947976,
+   "max_jitter_s": 0.0950244166636054
+  }
+ },
+ "release": "ok",
+ "error": null
+}
