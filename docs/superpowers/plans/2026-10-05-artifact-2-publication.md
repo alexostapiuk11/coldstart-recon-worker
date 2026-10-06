@@ -94,9 +94,9 @@ There is no replacement or removal of code in this plan. `autoscale/figures.py`,
 **Files:**
 - Modify: `docs/superpowers/plans/2026-10-05-artifact-2-publication.md` (this file, "Owner decisions" section)
 
-- [ ] **Step 1: Ask the owner the four questions above.** For the H1, H2 and H4 definitions, show them verbatim, and say they were written after the x1.00 frontiers were seen (the sensitivity check's output printed them).
-- [ ] **Step 2: Write the answers under "Owner decisions"**, each with the date and "signed by the owner".
-- [ ] **Step 3: Commit**
+- [x] **Step 1: Ask the owner the four questions above.** For the H1, H2 and H4 definitions, show them verbatim, and say they were written after the x1.00 frontiers were seen (the sensitivity check's output printed them).
+- [x] **Step 2: Write the answers under "Owner decisions"**, each with the date and "signed by the owner".
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/superpowers/plans/2026-10-05-artifact-2-publication.md
@@ -124,7 +124,7 @@ The probe directories are `build/a2-lb-probe` (probe 1: scaler value 4, 2 worker
 | 4 | scaler 512, 1 worker, old endpoint | |
 | 5 | scaler 512, 1 worker, new endpoint, new image | |
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 """The load-balancer and frontier evidence the post cites is committed, not only in build/."""
@@ -159,11 +159,11 @@ def test_the_frontier_sweep_is_the_headline_x1_sweep():
     assert round(raw["gaps"]["arm C"]["point"], 4) == 3.955
 ```
 
-- [ ] **Step 2: Run it and see it fail** (`FileNotFoundError`)
+- [x] **Step 2: Run it and see it fail** (`FileNotFoundError`)
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -o addopts="" -q tests/test_a2_evidence_files.py`
 
-- [ ] **Step 3: Copy the evidence**
+- [x] **Step 3: Copy the evidence**
 
 ```bash
 for pair in "a2-lb-probe:1" "a2-lb-probe-2:2" "a2-lb-probe-3:3" "a2-lb-probe-4:4" "a2-lb-probe-5:5"; do
@@ -177,13 +177,13 @@ du -sh data/a2/lb-probes data/a2/frontier-sweep.json
 
 Expected: about 6 MB for the probes and 1 MB for the sweep.
 
-- [ ] **Step 4: Write `data/a2/README-evidence.md`.** For each file, give what it is, the date, the commit of the code that produced it, the endpoint settings, and the command that recreates it:
+- [x] **Step 4: Write `data/a2/README-evidence.md`.** For each file, give what it is, the date, the commit of the code that produced it, the endpoint settings, and the command that recreates it:
   - probes: `scripts/a2_lb_probe.py --out …`;
   - sweep: `scripts/a2_render_figures.py --out build/a2-figures-k05`.
 
   It must state that the probes are evidence for the post's load-balancer findings, not pre-registered measurements.
 
-- [ ] **Step 5: Run the test and see it pass.** Then commit:
+- [x] **Step 5: Run the test and see it pass.** Then commit:
 
 ```bash
 git add data/a2/lb-probes data/a2/frontier-sweep.json data/a2/README-evidence.md tests/test_a2_evidence_files.py
@@ -200,7 +200,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Create: `autoscale/a2_evidence.py`
 - Test: `tests/test_a2_evidence.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 """Derived evidence: load-balancer throughput and routing, stalls, host speed."""
@@ -245,11 +245,11 @@ def test_host_speed_table_divides_each_hosts_medians_by_the_curve():
     assert table["h"][64]["n"] == 3
 ```
 
-- [ ] **Step 2: Run them and see them fail** (`ImportError`)
+- [x] **Step 2: Run them and see them fail** (`ImportError`)
 
 Run: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -o addopts="" -q tests/test_a2_evidence.py`
 
-- [ ] **Step 3: Implement `autoscale/a2_evidence.py`**
+- [x] **Step 3: Implement `autoscale/a2_evidence.py`**
 
 ```python
 """Numbers the post derives from committed load-balancer, validation and host evidence.
@@ -338,8 +338,8 @@ def host_speed_table(runs, curve_latency: dict) -> dict:
             for host, levels in by.items()}
 ```
 
-- [ ] **Step 4: Run the tests and see them pass.** Run ruff on the two files.
-- [ ] **Step 5: Commit**
+- [x] **Step 4: Run the tests and see them pass.** Run ruff on the two files.
+- [x] **Step 5: Commit**
 
 ```bash
 git add autoscale/a2_evidence.py tests/test_a2_evidence.py
@@ -358,7 +358,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 Precondition: Task 0 has recorded the owner's sign-off on the definitions. If the owner changed them, implement the signed text instead and record the change in the docstring.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 """H1, H2 and H4 on frontiers, as defined in the publication plan's Task 0."""
@@ -419,9 +419,9 @@ def test_h4_needs_the_same_ranking_and_a_smaller_ramp_gap():
     assert h4_holds_on(step, ramp_reordered) is False
 ```
 
-- [ ] **Step 2: Run them and see them fail** (`ImportError`)
+- [x] **Step 2: Run them and see them fail** (`ImportError`)
 
-- [ ] **Step 3: Implement `autoscale/hypotheses.py`**
+- [x] **Step 3: Implement `autoscale/hypotheses.py`**
 
 ```python
 """H1, H2 and H4, operationalised after the simulator's frontiers were seen.
@@ -489,8 +489,8 @@ def h4_holds_on(step, ramp) -> bool:
     return ranking(step) == ranking(ramp) and gap(ramp) < gap(step)
 ```
 
-- [ ] **Step 4: Run the tests and see them pass.** Run ruff.
-- [ ] **Step 5: Commit**
+- [x] **Step 4: Run the tests and see them pass.** Run ruff.
+- [x] **Step 5: Commit**
 
 ```bash
 git add autoscale/hypotheses.py tests/test_hypotheses.py
@@ -507,11 +507,11 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `docs/experiment-a2.md` (append before `## Stopping rule`)
 - Test: `tests/test_prereg_a2_plan2b.py` (append)
 
-- [ ] **Step 1: Append the section** `## Analysis note, <date>: H1, H2 and H4 operationalised after the frontiers were seen`. It contains:
+- [x] **Step 1: Append the section** `## Analysis note, <date>: H1, H2 and H4 operationalised after the frontiers were seen`. It contains:
   - the three definitions verbatim from Task 0;
   - the statement that they were written after the x1.00 frontiers were seen, and signed by the owner;
   - the statement that every verdict is on a simulator that failed validation twice.
-- [ ] **Step 2: Append a test** that `TIE_SECONDS` and the phrase "after the frontiers were seen" appear in that section:
+- [x] **Step 2: Append a test** that `TIE_SECONDS` and the phrase "after the frontiers were seen" appear in that section:
 
 ```python
 def test_the_h1_h2_h4_definitions_are_recorded():
@@ -523,7 +523,7 @@ def test_the_h1_h2_h4_definitions_are_recorded():
     assert f"within {TIE_SECONDS * 1000:g} ms" in s
 ```
 
-- [ ] **Step 3: Run that test and see it pass. Commit.**
+- [x] **Step 3: Run that test and see it pass. Commit.**
 
 ---
 
@@ -534,7 +534,7 @@ def test_the_h1_h2_h4_definitions_are_recorded():
 - Create: `data/a2/post-analysis.json` (generated)
 - Test: `tests/test_a2_post_analysis.py`
 
-- [ ] **Step 1: Write the failing test** (reproducibility, plus the shape of the output)
+- [x] **Step 1: Write the failing test** (reproducibility, plus the shape of the output)
 
 ```python
 """data/a2/post-analysis.json is what the script computes from committed data, byte for byte."""
@@ -563,7 +563,7 @@ def test_the_analysis_has_every_section_the_post_cites():
     assert set(a["simulator"]["h3"]) == {"0.88", "1", "1.12"}
 ```
 
-- [ ] **Step 2: Implement `scripts/a2_post_analysis.py`.** It reads only committed files:
+- [x] **Step 2: Implement `scripts/a2_post_analysis.py`.** It reads only committed files:
   - `data/a2/validation*/verdict.json` and records;
   - `data/a2/lb-probes/*`;
   - `data/a2/exploratory/*`;
@@ -587,9 +587,9 @@ def test_the_analysis_has_every_section_the_post_cites():
 
   Rebuild `PolicyPoint`s from `frontier-sweep.json` with `a2_render_figures._points`.
 
-- [ ] **Step 3: Generate the file:** `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/a2_post_analysis.py --out data/a2/post-analysis.json`
-- [ ] **Step 4: Run the tests and see them pass.** Read the JSON's `simulator` section and confirm the x1.00 gaps are 0.0821, 3.9550, 8.2488 and 10.8734.
-- [ ] **Step 5: Commit** the script, the JSON and the test.
+- [x] **Step 3: Generate the file:** `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/a2_post_analysis.py --out data/a2/post-analysis.json`
+- [x] **Step 4: Run the tests and see them pass.** Read the JSON's `simulator` section and confirm the x1.00 gaps are 0.0821, 3.9550, 8.2488 and 10.8734.
+- [x] **Step 5: Commit** the script, the JSON and the test.
 
 ---
 
@@ -599,7 +599,7 @@ def test_the_analysis_has_every_section_the_post_cites():
 - Create: `autoscale/post_numbers_a2.py`
 - Test: `tests/test_a2_post_numbers.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 """Every number the post quotes, formatted once from data/a2/post-analysis.json."""
@@ -629,7 +629,7 @@ def test_every_value_is_a_non_empty_string():
     assert all(isinstance(v, str) and v for v in numbers(A).values())
 ```
 
-- [ ] **Step 2: Implement `numbers(analysis) -> dict[str, str]`.** Formats:
+- [x] **Step 2: Implement `numbers(analysis) -> dict[str, str]`.** Formats:
   - seconds to three decimals below 1 s, otherwise two;
   - percentages as whole numbers;
   - rates to one decimal with " req/s";
@@ -642,7 +642,7 @@ def test_every_value_is_a_non_empty_string():
   - simulator: the gaps at three factors, H1, H2, H3 and H4 outcomes, and the reached p99 per signal;
   - spend lines.
 
-- [ ] **Step 3: Run the tests and see them pass. Commit.**
+- [x] **Step 3: Run the tests and see them pass. Commit.**
 
 ---
 
@@ -708,7 +708,7 @@ Each panel has a zero line, and its miss count is on its face. The y-axes are sh
 
 Inputs: Task 5 must also write `validation.<attempt>.residuals` (a per-repeat list of `[bin_start, residual or null]`), computed with `autoscale.validation.engine_trajectories` on each attempt's records.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 def test_attempts_draws_both_panels_with_their_verdicts(tmp_path):
@@ -722,8 +722,8 @@ def test_attempts_draws_both_panels_with_their_verdicts(tmp_path):
     _legible_and_on_canvas(fig)
 ```
 
-- [ ] **Step 2: Run it and see it fail.**
-- [ ] **Step 3: Implement `validation_attempts(analysis, path, *, return_figure=False)`.**
+- [x] **Step 2: Run it and see it fail.**
+- [x] **Step 3: Implement `validation_attempts(analysis, path, *, return_figure=False)`.**
   - Use `plt.subplots(1, 2, sharey=True, figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN))`.
   - Each series is a `plot` with `gid="residual_series"`, and the zero line uses `gid="zero"`.
   - Set the y-limits to ±1.15 × the largest |residual| across both attempts.
@@ -731,8 +731,8 @@ def test_attempts_draws_both_panels_with_their_verdicts(tmp_path):
   - The banner reads "MEASURED · 1 replica, 3 repeats per attempt".
   - The note gives n per repeat and states "residual = real − predicted p50 per 10 s bin, binned by engine arrival".
   - Reuse `_tidy`, `_note`, `_finish` and `_pt` by importing them from `autoscale.figures`.
-- [ ] **Step 4: Run the test and see it pass.** Then render to `build/post-figs/attempts.png`, make the 375 px variant with the snippet in Task 11, and **look at both**. Check: no overlap, readable at 375 px, the change of sign obvious. Fix and re-render until all three hold.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Run the test and see it pass.** Then render to `build/post-figs/attempts.png`, make the 375 px variant with the snippet in Task 11, and **look at both**. Check: no overlap, readable at 375 px, the change of sign obvious. Fix and re-render until all three hold.
+- [x] **Step 5: Commit.**
 
 ### Task 8: Figure "the load balancer"
 
@@ -742,7 +742,7 @@ What it shows: two panels.
 
 The note discloses the server-interval reconstruction (`return_leg_s = 0.1`).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 def test_load_balancer_shows_the_ceiling_and_the_fill_first_routing(tmp_path):
@@ -755,7 +755,7 @@ def test_load_balancer_shows_the_ceiling_and_the_fill_first_routing(tmp_path):
     _legible_and_on_canvas(fig)
 ```
 
-- [ ] **Steps 2–5:** see it fail; implement `load_balancer(analysis, path, *, return_figure=False)` with those gids; render and **look at it at full size and at 375 px**; commit.
+- [x] **Steps 2–5:** see it fail; implement `load_balancer(analysis, path, *, return_figure=False)` with those gids; render and **look at it at full size and at 375 px**; commit.
 
 ### Task 9: Figure "host speed"
 
@@ -765,7 +765,7 @@ What it shows: one panel. The x axis is concurrency (32, 64, 128); the y axis is
 
 The y axis runs 0.75–1.05, as a ratio axis starting at 0.75; the note says so explicitly, because a ratio near 1 is unreadable on an axis from 0. The note also states "4 hosts seen, 3 measured; not a distribution".
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 def test_host_speed_plots_each_host_against_the_curves_host(tmp_path):
@@ -777,7 +777,7 @@ def test_host_speed_plots_each_host_against_the_curves_host(tmp_path):
     _legible_and_on_canvas(fig)
 ```
 
-- [ ] **Steps 2–5:** as in Task 8, including the visual check at both widths.
+- [x] **Steps 2–5:** as in Task 8, including the visual check at both widths.
 
 ### Task 10: Figure "what the unvalidated simulator says"
 
@@ -788,7 +788,7 @@ What it shows: two panels, step and ramp.
 
 The banner is **"SIMULATED · FAILED VALIDATION"** in `CENSOR_COLOR`, on a hatched background. The note says "exploratory sensitivity (x0.88, x1.12) not pre-registered; the simulator failed its validation twice".
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 def test_simulator_answer_is_labelled_unvalidated_on_its_face(tmp_path):
@@ -800,7 +800,7 @@ def test_simulator_answer_is_labelled_unvalidated_on_its_face(tmp_path):
     _legible_and_on_canvas(fig)
 ```
 
-- [ ] **Steps 2–5:** as above, with the visual check at both widths. Confirm "FAILED VALIDATION" is readable at 375 px.
+- [x] **Steps 2–5:** as above, with the visual check at both widths. Confirm "FAILED VALIDATION" is readable at 375 px.
 
 ---
 
@@ -811,7 +811,7 @@ def test_simulator_answer_is_labelled_unvalidated_on_its_face(tmp_path):
 - Create: `docs/figures/a2/{attempts,load_balancer,host_speed,simulator_answer,service_curve}.png` and `*-phone.png`
 - Test: `tests/test_a2_published_figures.py`
 
-- [ ] **Step 1: Write the failing test** (it mirrors `tests/test_published_figures.py`)
+- [x] **Step 1: Write the failing test** (it mirrors `tests/test_published_figures.py`)
 
 ```python
 """Artifact 2's published figures are a fresh render's bytes, linked from the post, tracked."""
@@ -856,11 +856,11 @@ def test_phone_variant_is_published_and_tracked(name):
         assert tracked.returncode == 0, f
 ```
 
-- [ ] **Step 2: Implement the render script.** It writes the five desktop PNGs to `--out`. `service_curve` comes from `autoscale.figures.service_curve` with the measured curve. Phone variants are written only with `--phone`: each is a 375 px-wide LANCZOS downscale with PIL (`Image.resize((375, round(h * 375 / w)))`). The phone files aren't re-derived in the test, as in artifact 1.
-- [ ] **Step 3: Publish**
+- [x] **Step 2: Implement the render script.** It writes the five desktop PNGs to `--out`. `service_curve` comes from `autoscale.figures.service_curve` with the measured curve. Phone variants are written only with `--phone`: each is a 375 px-wide LANCZOS downscale with PIL (`Image.resize((375, round(h * 375 / w)))`). The phone files aren't re-derived in the test, as in artifact 1.
+- [x] **Step 3: Publish**
   1. Run `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/a2_render_post_figures.py --out docs/figures/a2 --phone`.
   2. **Look at all ten images.** Invoke `superpowers:verifying-visual-output` and note in the commit message what you checked.
-- [ ] **Step 4: Commit** the script, `docs/figures/a2/*` and the test. The link test passes only after Task 14.
+- [x] **Step 4: Commit** the script, `docs/figures/a2/*` and the test. The link test passes only after Task 14.
 
 ---
 
@@ -876,7 +876,7 @@ Two money statements, both computed from `post-analysis.json`:
 
 The assumption table follows artifact 1's style. `gpu_hourly_rate` is **0.74 $/h, measured** (the RunPod worker records' `costPerHr` for an RTX 4090 on 2026-10-05). `spikes_per_day` is **24, illustrative**.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 from autoscale.money_a2 import Assumptions, dollars_per_million_requests, dollars_per_spike
@@ -900,12 +900,14 @@ def test_assumptions_refuse_non_positive_rates():
         Assumptions(gpu_hourly_rate=0.0, spikes_per_day=24.0)
 ```
 
-- [ ] **Step 2: Implement** a frozen dataclass with `__post_init__` validation and the two functions, rounding to cents. Each assumption carries a provenance string: "measured" or "illustrative".
-- [ ] **Step 3: Add the money lines to `post-analysis.json`** (Task 5's script) and to `numbers()` (Task 6). Regenerate, run all tests, and commit.
+- [x] **Step 2: Implement** a frozen dataclass with `__post_init__` validation and the two functions, rounding to cents. Each assumption carries a provenance string: "measured" or "illustrative".
+- [x] **Step 3: Add the money lines to `post-analysis.json`** (Task 5's script) and to `numbers()` (Task 6). Regenerate, run all tests, and commit.
 
 ---
 
 ### Task 13: Record artifact 2's spend
+
+**Status, 2026-10-05: owner-blocked:** the RunPod console's billing is the owner's to read. Until `spend` is recorded, `scripts/a2_prepublish_check.py` refuses the post.
 
 **Files:**
 - Create: `docs/spend-a2.md`
@@ -938,7 +940,7 @@ def test_assumptions_refuse_non_positive_rates():
 - Create: `docs/post-a2.md`
 - Test: `tests/test_a2_post.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 """docs/post-a2.md quotes every computed number, links every figure, and labels the
@@ -979,7 +981,7 @@ def test_every_amendment_is_listed_in_reproducing_this():
     assert all(d in repro for d in dates), dates
 ```
 
-- [ ] **Step 2: Write `docs/post-a2.md`,** following the header form of artifact 1's `docs/post.md` lines 1–20:
+- [x] **Step 2: Write `docs/post-a2.md`,** following the header form of artifact 1's `docs/post.md` lines 1–20:
   - an HTML comment with "Permanent slug: <Task 0 slug>";
   - `# <title>`;
   - the byline `**Oleksii Ostapiuk** · <Task 0 date> · `<slug>``;
@@ -1000,12 +1002,14 @@ def test_every_amendment_is_listed_in_reproducing_this():
   12. `## Next`
 
   Every number comes from `numbers()`; copy the strings, don't retype them. Embed the figures as `![alt](figures/a2/<name>.png)`.
-- [ ] **Step 3: Run `tests/test_a2_post.py` and `tests/test_a2_published_figures.py`.** Fix the post until both pass.
-- [ ] **Step 4: Commit** the post and its test.
+- [x] **Step 3: Run `tests/test_a2_post.py` and `tests/test_a2_published_figures.py`.** Fix the post until both pass.
+- [x] **Step 4: Commit** the post and its test.
 
 ---
 
 ### Task 15: Repo README link back, and the pre-publish gate
+
+**Status, 2026-10-05: owner-blocked:** the employer-boundary answer and the publication date are the owner's, and the gate needs Tasks 13 and 16 first. `scripts/a2_prepublish_check.py` refuses the post today (PUBLICATION-DATE, SPEND-PENDING, spend null).
 
 **Files:**
 - Modify: `README.md` (add the post's slug and title under artifacts)
@@ -1026,6 +1030,8 @@ def test_every_amendment_is_listed_in_reproducing_this():
 
 ### Task 16: Housekeeping on RunPod (owner-approved, each step separately)
 
+**Status, 2026-10-05: owner-blocked:** each step changes RunPod or the remote and needs the owner's approval, step by step.
+
 - [ ] **Step 1: Rotate the credentials printed in the session on 2026-10-05.**
   1. Create a replacement load-balancing endpoint with the same settings as `un0lhqt51q1bvp`: GraphQL `saveEndpoint`, `type: "LB"`, `scalerValue: 512`, `workersMax: 1`.
   2. Update `RUNPOD_A2_LB_ENDPOINT_ID` in `.env`.
@@ -1044,15 +1050,15 @@ def test_every_amendment_is_listed_in_reproducing_this():
 
 No Markdown package is installed, so this writes `build/post-a2-preview.html`. The page embeds the post's text and renders it in the browser with marked from `https://cdn.jsdelivr.net/npm/marked/marked.min.js`, with image paths rewritten to `../docs/figures/a2/`.
 
-- [ ] **Step 1: Write and run the script.**
-- [ ] **Step 2: Open the preview in the browser pane** at `file://<repo>/build/post-a2-preview.html`. Use `mcp__Claude_Browser__resize_window` at a width ≥ 1280 and take a screenshot. Scroll through and screenshot each figure in place.
-- [ ] **Step 3: Resize to 375 × 667 (preset `mobile`)** and repeat. Then reset to `desktop`.
-- [ ] **Step 4: Look at every screenshot.** Check:
+- [x] **Step 1: Write and run the script.**
+- [x] **Step 2: Open the preview in the browser pane** at `file://<repo>/build/post-a2-preview.html`. Use `mcp__Claude_Browser__resize_window` at a width ≥ 1280 and take a screenshot. Scroll through and screenshot each figure in place.
+- [x] **Step 3: Resize to 375 × 667 (preset `mobile`)** and repeat. Then reset to `desktop`.
+- [x] **Step 4: Look at every screenshot.** Check:
   - figures render in place, legibly;
   - no broken images;
   - the "FAILED VALIDATION" banner is readable on a phone;
   - the simulator section can't be mistaken for a measurement.
-- [ ] **Step 5: Report** the screenshot paths and what was checked. The owner reads the post in full and decides to publish.
+- [x] **Step 5: Report** the screenshot paths and what was checked. The owner reads the post in full and decides to publish.
 
 ---
 
