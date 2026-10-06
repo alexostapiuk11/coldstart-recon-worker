@@ -203,3 +203,12 @@ def test_the_host_calibration_amendment_matches_the_code():
     assert f"at least **{common.CALIBRATION_MIN_REQUESTS}**" in s
     assert f"`{v.OUT.as_posix()}/`" in s
     assert "**second and last** attempt" in s
+
+
+def test_the_h1_h2_h4_definitions_are_recorded():
+    from autoscale.hypotheses import TIE_SECONDS
+    part = DOC.split("## Analysis note, ", 1)
+    assert len(part) == 2, "the H1/H2/H4 analysis note is missing"
+    s = " ".join(part[1].split("\n## ", 1)[0].split())
+    assert "after the frontiers were seen" in s
+    assert f"within {TIE_SECONDS * 1000:g} ms" in s

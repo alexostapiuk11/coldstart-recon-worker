@@ -796,6 +796,46 @@ frontier moves with the host by up to about 10% in service time.
 repeats come to about $0.5–0.6 in all. The probe is not re-run, because the
 endpoint and the load-balancer path are unchanged.
 
+## Analysis note, 2026-10-05: H1, H2 and H4 operationalised after the frontiers were seen
+
+The Hypotheses section states H1, H2 and H4 in words only. These are the
+operational definitions the post's verdicts use:
+
+- **H1** (in-flight concurrency dominates on the step): on each arm, every
+  frontier point of queue depth and of GPU utilisation is weakly dominated by
+  some in-flight frontier point (cost ≤ and p99 ≤, at least one strictly), on
+  medians. It **holds** only if it holds on both arms.
+- **H2** (utilisation is the worst): at the iso-cost budget, utilisation's
+  reached p99 is the highest of the three signals (by more than 1 ms), on both
+  arms and both shapes. Its mechanism (censoring) is reported descriptively:
+  utilisation's frontier sits at the replica cap.
+- **H4** (ranking stable across shapes, margins shrink on the ramp): on each
+  arm, the order of the three signals by reached p99 at the iso-cost budget is
+  the same for step and ramp (ties within 1 ms count as ties), **and** the
+  ramp's gap is smaller than the step's. It holds only if both conditions hold
+  on both arms.
+
+**These were written after the frontiers were seen.** The x1.00 frontiers had
+been printed by the exploratory sensitivity run before the definitions existed.
+The owner signed them on 2026-10-05, before `autoscale/hypotheses.py` computed
+anything. The post says so beside every verdict. They are not pre-registered
+tests in the sense the Hypotheses section is, and a reader should weigh them as
+the choice of an analyst who had seen the curves.
+
+They are implemented in `autoscale/hypotheses.py`, on the same iso-cost slice as
+H3's gap: "reached p99" is read by the function `gap_at_iso_cost` reads, so the
+two cannot disagree about what a signal reached at the budget.
+
+**H2 is stated for the headline utilisation signal** (nvidia-smi's). The
+`utilization_throughput` sensitivity arm is reported beside it, as the
+2026-10-04 amendment already requires, and does not enter any of the three
+definitions above.
+
+**Every verdict is on a simulator that failed validation twice**
+(`data/a2/validation-engine/verdict.json`,
+`data/a2/validation-calibrated/verdict.json`). Each is the simulator's answer,
+not a measured one, and is labelled so wherever it appears.
+
 ## Stopping rule
 
 The sweep is exhaustive over the pre-declared threshold grid; there is no
