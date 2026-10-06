@@ -1,0 +1,177 @@
+"""Every number the post quotes, formatted once from data/a2/post-analysis.json."""
+
+import copy
+import json
+from pathlib import Path
+
+import pytest
+
+from autoscale import post_numbers_a2
+from autoscale.post_numbers_a2 import numbers
+
+A = json.loads((Path(__file__).resolve().parents[1] / "data" / "a2" / "post-analysis.json")
+               .read_text())
+
+
+def test_the_validation_verdicts_are_stated_with_their_bins():
+    n = numbers(A)
+    assert n["attempt1_misses"] == "34 of 37 judged bins"
+    assert n["attempt2_misses"] == "37 of 37 judged bins"
+    assert n["attempt2_max_miss"] == "0.060 s"
+    assert n["attempt1_max_miss"] == "2.59 s"
+
+
+def test_the_load_balancer_ceiling_is_a_rate():
+    n = numbers(A)
+    assert n["lb_ceiling_rate"].endswith(" req/s") and n["lb_ceiling_rate"].startswith("1")
+    assert n["lb_ceiling_rate"] == "17.1 req/s"
+    assert n["lb_ceiling_offered"] == "25, 50 and 100 req/s"
+
+
+def test_every_value_is_a_non_empty_string():
+    assert all(isinstance(v, str) and v for v in numbers(A).values())
+
+
+def test_seconds_use_three_decimals_below_one_and_two_from_one_up():
+    assert post_numbers_a2._s(0.0596) == "0.060 s"
+    assert post_numbers_a2._s(0.999) == "0.999 s"
+    assert post_numbers_a2._s(1.0) == "1.00 s"
+    assert post_numbers_a2._s(14.4406) == "14.44 s"
+
+
+def test_counts_carry_a_thousands_comma():
+    assert post_numbers_a2._count(3095) == "3,095"
+    assert post_numbers_a2._count(37) == "37"
+    assert post_numbers_a2._count(3094.9999999999936) == "3,095"
+
+
+def test_percentages_are_whole_numbers():
+    assert post_numbers_a2._pct(0.144) == "14%"
+    assert post_numbers_a2._pct(0.146) == "15%"
+    assert post_numbers_a2._pct(0.9867) == "99%"
+
+
+def test_rates_have_one_decimal():
+    assert post_numbers_a2._rate(277.7695) == "277.8 req/s"
+
+
+def test_a_range_collapses_when_both_ends_format_alike():
+    assert post_numbers_a2._span([0.8745, 0.8705, 0.8666], ".2f") == "0.87"
+    assert post_numbers_a2._span([0.8414, 0.8223, 0.8342], ".2f") == "0.82–0.84"
+
+
+def test_engine_and_calibrated_residuals_are_stated_in_their_own_direction():
+    n = numbers(A)
+    assert n["attempt1_engine_faster_pct"] == "14%"
+    assert n["attempt2_engine_slower_pct"] == "13%"
+
+
+def test_void_repeats_and_calibrated_host_ratios_are_stated():
+    n = numbers(A)
+    assert n["attempt1_void_repeats"] == "1"
+    assert n["attempt2_host_ratio_64"] == "0.87"
+    assert n["attempt2_host_ratio_128"] == "0.82–0.84"
+
+
+def test_probe_1_peaks_use_the_typical_value_not_the_reconstruction_artifact():
+    n = numbers(A)
+    # step 100 worker 2 reads 5, every other reading is 4
+    assert n["probe1_peak_per_worker"] == "4"
+    assert n["probe1_client_p50_100"] == "52.00 s"
+    assert n["probe1_server_p50_100"] == "0.311 s"
+
+
+def test_probes_2_and_3_are_stated_against_what_was_offered():
+    n = numbers(A)
+    assert n["probe2_non_200_total"] == "13"
+    assert n["probe2_delivered_300"] == "277.8 req/s"
+    assert n["probe3_delivered_450"] == "350.4 req/s"
+    assert n["offered_300"] == "300 req/s" and n["offered_450"] == "450 req/s"
+    assert [n[f"probe3_worker1_share_{s}"] for s in (25, 50, 100, 200, 300, 450)] == [
+        "100%", "100%", "100%", "99%", "70%", "51%"]
+    assert n["probe3_peak_worker1_450"] == "128" and n["probe3_peak_worker2_450"] == "128"
+
+
+def test_probes_4_and_5_deliveries_and_the_502_first_attempts_are_stated():
+    n = numbers(A)
+    assert n["probe4_delivered_150"] == "108.8 req/s" and n["probe4_delivered_180"] == "114.3 req/s"
+    assert n["probe5_delivered_180"] == "156.7 req/s" and n["probe5_delivered_210"] == "210.8 req/s"
+    assert n["lb_502_first_attempt_count"] == "37"
+    assert n["lb_502_first_attempt_median"] == "2.64 s"
+    assert n["lb_502_first_attempt_max"] == "14.09 s"
+
+
+def test_the_stall_share_is_a_range_over_the_three_repeats():
+    n = numbers(A)
+    assert n["stall_share_range"] == "21%–35%"
+    assert [n[f"stall_share_repeat_{i}"] for i in (1, 2, 3)] == ["26%", "35%", "21%"]
+
+
+def test_the_host_speed_ratios_are_stated_as_ratios_and_as_percent_faster():
+    n = numbers(A)
+    assert n["curve_host_id"] == "ozhetwnhompob9"
+    assert n["maxseqs128_host_id"] == "daps3haubwrzbn"
+    assert [n[f"maxseqs128_ratio_{c}"] for c in (32, 64, 128)] == ["0.93", "0.94", "0.90"]
+    assert [n[f"maxseqs128_faster_pct_{c}"] for c in (32, 64, 128)] == ["7%", "6%", "10%"]
+    assert [n[f"maxseqs256_ratio_{c}"] for c in (32, 64, 128)] == ["0.96", "0.93", "0.90"]
+    assert n["host_sef5s24viyecyr_ratio_64"] == "0.87"
+    assert n["host_sef5s24viyecyr_ratio_128"] == "0.82–0.84"
+
+
+def test_the_gaps_are_stated_per_factor_and_tag_with_the_interval_at_factor_one():
+    n = numbers(A)
+    assert n["gap_x1_step_a"] == "0.082 s" and n["gap_x1_ramp_c"] == "10.87 s"
+    assert n["gap_x1_step_a_interval"] == "0.050–1.06 s"
+    assert n["gap_x088_ramp_c"] == "3.42 s" and n["gap_x112_ramp_c"] == "16.71 s"
+    assert "gap_x088_step_a_interval" not in n
+
+
+def test_the_simulator_hypotheses_all_read_fails():
+    n = numbers(A)
+    for key in ("h1", "h2", "h4", "h2_sensitivity",
+                "h3_x1", "h3_x088", "h3_x112"):
+        assert n[key] == "fails", key
+    assert n["h2_step_a"] == "holds" and n["h2_step_c"] == "fails"
+    assert n["h2_ramp_a"] == "fails" and n["h2_ramp_c"] == "fails"
+
+
+def test_a_partial_h3_reads_partial():
+    a = copy.deepcopy(A)
+    a["simulator"]["h3"]["1"].update(holds=False, partial=True)
+    assert numbers(a)["h3_x1"] == "partial"
+
+
+def test_the_budget_and_the_reached_p99_and_cost_per_sweep_and_signal():
+    n = numbers(A)
+    assert n["budget"] == "3,095 replica-seconds"
+    assert n["reached_step_a_queue_depth_p99"] == "14.44 s"
+    assert n["reached_step_a_queue_depth_cost"] == "880 replica-seconds"
+    assert n["reached_ramp_c_utilization_p99"] == "0.554 s"
+    assert n["reached_ramp_c_utilization_cost"] == "3,095 replica-seconds"
+    assert n["reached_ramp_a_in_flight_concurrency_cost"] == "2,875 replica-seconds"
+
+
+def test_the_censoring_fact_is_stated():
+    n = numbers(A)
+    assert n["utilization_policies_at_cap"] == "19 of 19"
+    assert n["utilization_scale_up_max_threshold"] == "0.95"
+    assert n["curve_gpu_util"] == "1.0"
+
+
+def test_a_utilization_run_below_the_cap_is_refused_not_miscounted():
+    a = copy.deepcopy(A)
+    a["simulator"]["h2_censoring"]["per_sweep"]["arm A"]["every_utilization_run_at_cap_cost"] = False
+    with pytest.raises(ValueError, match="at the cap"):
+        numbers(a)
+
+
+def test_with_no_spend_no_spend_key_is_emitted():
+    assert A["spend"] is None
+    assert not [k for k in numbers(A) if k.startswith("spend")]
+
+
+def test_a_recorded_spend_is_refused_until_task_13_defines_its_keys():
+    a = copy.deepcopy(A)
+    a["spend"] = {"total_usd": 1.0}
+    with pytest.raises(NotImplementedError, match="Task 13"):
+        numbers(a)
