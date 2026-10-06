@@ -9,7 +9,7 @@ otherwise.
 findings. They are not pre-registered measurements.** They were run to find out
 whether RunPod's load balancer could carry the validation gate's traffic, and
 the endpoint settings changed between them on purpose. None has a hypothesis,
-a threshold or a verdict in `docs/experiment.md`.
+a threshold or a verdict in `docs/experiment-a2.md`.
 
 All dates are 2026-10-05, from the mtimes of the files in `build/`. The commit
 is the last one to touch `scripts/a2_lb_probe.py`, `scripts/a2_lb_common.py` or
@@ -39,10 +39,14 @@ Steps: probes 2 and 3 ran 25, 50, 100, 200, 300 and 450 requests per second;
 probes 4 and 5 ran 25, 50, 100, 150, 180 and 210.
 
 Notes on each:
-- **Probe 1** delivered about 17 requests per second at its steps. The driver
-  stopped early because it could not start another thread, which is why the
-  driver was changed afterwards (`c7861fe`, `6dc761f`). This probe cannot
-  separate the driver's thread limit from the load balancer's own ceiling.
+- **Probe 1** delivered about 17 requests per second whatever was offered:
+  client p50 rose to 52 s while server p50 stayed 0.31 s, so requests waited in
+  the load balancer, not in the engine. The ceiling is attributed to the
+  endpoint's scaler value of 4: probe 2, on the same two workers with the
+  scaler value at 128, ran every step with client p50 under 1 s
+  (`docs/runbook-a2-validation.md`). Separately, the driver stopped early
+  because it could not start another thread, which is why the driver was
+  changed afterwards (`c7861fe`, `6dc761f`).
 - **Probe 2** has no retry of a 502 that the load balancer returns without
   reaching a worker. **Probe 3** retries it once and marks the row with the
   `a2-driver-lb-retry` header.
@@ -53,7 +57,8 @@ Notes on each:
   worker count are the same as probe 4's.
 
 The endpoint's scaler value, worker count and image are RunPod settings, not
-code. They are recorded here from the owner's account of the runs; the files
+code. They are recorded here from the run notes in
+`docs/runbook-a2-validation.md` and the session that ran them; the files
 themselves do not contain them. The endpoint ids are not in the files and are not recorded here.
 
 The endpoint settings of probes 1-3 (2 workers) cannot be recreated by the
