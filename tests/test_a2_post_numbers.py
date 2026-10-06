@@ -264,3 +264,51 @@ def test_the_arms_cold_start_medians_are_stated_in_seconds():
     cs = A["simulator"]["cold_start"]
     assert n["cold_start_median_a"] == f"{cs['A']['median']:.2f} s"
     assert n["cold_start_median_c"] == f"{cs['C']['median']:.2f} s"
+
+
+def test_the_rate_and_the_default_cap_are_stated_in_dollars():
+    n = numbers(A)
+    assert n["money_rate"] == "$0.74/h"
+    assert n["spikes_per_day"] == "24"
+    cap = A["money"]["load_balancer_cap"]
+    assert n["money_per_million_scaler4"] == f"${cap['scaler_4']['dollars_per_million']:.2f}"
+    assert n["money_per_million_scaler128"] == f"${cap['scaler_128']['dollars_per_million']:.2f}"
+    assert n["money_scaler_ratio"] == f"{round(cap['ratio'])}×"
+    assert n["money_scaler_ratio"] == "18×"
+    assert n["money_per_million_scaler4"] == "$24.04"
+
+
+def test_the_signal_choice_is_stated_per_spike_and_per_day_with_its_label():
+    n = numbers(A)
+    assert n["money_spike_queue_depth_step_a"] == "$0.18"
+    assert n["money_spike_in_flight_step_a"] == "$0.52"
+    assert n["money_spike_utilization_step_a"] == "$0.64"
+    assert n["money_day_queue_depth_step_a"] == "$4.34"
+    assert n["money_day_utilization_step_a"] == "$15.27"
+    assert n["money_signal_label"] == ("UNVALIDATED: simulator failed validation twice; "
+                                       "p99s differ by 82 ms")
+
+
+def test_dollars_take_cents_and_four_decimals_below_a_cent():
+    assert post_numbers_a2._dollars(24.06) == "$24.06"
+    assert post_numbers_a2._dollars(0.18) == "$0.18"
+    assert post_numbers_a2._dollars(0.01) == "$0.01"
+    assert post_numbers_a2._dollars(0.0002) == "$0.0002"
+    assert post_numbers_a2._dollars(1234.5) == "$1,234.50"
+    with pytest.raises(ValueError, match="positive"):
+        post_numbers_a2._dollars(0.0)
+
+
+def test_a_money_section_without_the_unvalidated_label_is_refused():
+    a = copy.deepcopy(A)
+    a["money"]["signal_choice"]["label"] = "p99s differ by 82 ms"
+    with pytest.raises(ValueError, match="UNVALIDATED"):
+        numbers(a)
+
+
+def test_a_signal_the_money_keys_do_not_name_is_refused():
+    a = copy.deepcopy(A)
+    a["money"]["signal_choice"]["per_signal"]["mystery"] = copy.deepcopy(
+        a["money"]["signal_choice"]["per_signal"]["queue_depth"])
+    with pytest.raises(ValueError, match="mystery"):
+        numbers(a)

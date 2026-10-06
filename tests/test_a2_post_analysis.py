@@ -209,3 +209,46 @@ def test_the_arms_measured_cold_starts_are_recorded_and_arm_a_is_slower_than_arm
         assert s["p10"] <= s["median"] <= s["p90"], arm
     assert cs["A"]["median"] > cs["C"]["median"]
     assert "data/campaign.jsonl" in _analysis()["_provenance"]["inputs"]
+
+
+def test_the_money_section_prices_the_default_cap_at_the_committed_rate():
+    a = _analysis()
+    m = a["money"]
+    rate = json.loads((REPO / "data" / "a2" / "gpu-rate.json").read_text())
+    assert m["gpu_hourly_rate"] == rate["gpu_hourly_rate"] == 0.74
+    assert m["gpu_rate_provenance"] == "measured"
+    assert m["spikes_per_day"] == 24.0 and m["spikes_per_day_provenance"] == "illustrative"
+    assert "billing" in m["gpu_rate_caveat"]
+    cap = m["load_balancer_cap"]
+    probes = a["load_balancer"]["probes"]
+    assert cap["workers"] == probes["1"]["workers"] == probes["3"]["workers"] == 2
+    assert cap["scaler_4"]["delivered_rate_rps"] == pytest.approx(17.1, abs=0.05)
+    assert cap["scaler_128"]["delivered_rate_rps"] == probes["3"]["steps"]["300"][
+        "delivered_rate_rps"]
+    assert cap["scaler_4"]["dollars_per_million"] == round(2 * 0.74 / (
+        cap["scaler_4"]["delivered_rate_rps"] * 3600) * 1e6, 2)
+    assert cap["scaler_4"]["dollars_per_million"] > 10 * cap["scaler_128"]["dollars_per_million"]
+    assert cap["ratio"] == pytest.approx(cap["scaler_128"]["delivered_rate_rps"]
+                                         / cap["scaler_4"]["delivered_rate_rps"])
+
+
+def test_the_money_section_prices_the_signals_on_arm_a_and_labels_them_unvalidated():
+    a = _analysis()
+    sig = a["money"]["signal_choice"]
+    reached = a["simulator"]["sweeps"]["arm A"]["reached"]
+    assert sig["sweep"] == "arm A"
+    assert {s: v["replica_seconds"] for s, v in sig["per_signal"].items()} == {
+        s: v["cost_replica_s"] for s, v in reached.items()}
+    p99s = [v["p99_s"] for v in reached.values()]
+    spread_ms = round((max(p99s) - min(p99s)) * 1000)
+    assert sig["p99_spread_s"] == max(p99s) - min(p99s)
+    assert sig["label"] == ("UNVALIDATED: simulator failed validation twice; "
+                            f"p99s differ by {spread_ms} ms")
+    assert sig["per_signal"]["queue_depth"]["dollars_per_spike"] == 0.18
+    assert sig["per_signal"]["utilization"]["dollars_per_day"] == pytest.approx(15.27, abs=0.01)
+
+
+def test_the_rate_file_is_a_listed_input_and_the_endpoint_id_is_not_republished():
+    a = _analysis()
+    assert "data/a2/gpu-rate.json" in a["_provenance"]["inputs"]
+    assert "un0lhqt51q1bvp" not in A.read_text()

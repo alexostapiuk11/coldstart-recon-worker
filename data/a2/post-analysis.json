@@ -5,6 +5,7 @@
    "data/a2/exploratory/maxseqs256.jsonl",
    "data/a2/exploratory/sensitivity-service-speed.json",
    "data/a2/frontier-sweep.json",
+   "data/a2/gpu-rate.json",
    "data/a2/lb-probes/probe-1/step-100.jsonl.gz",
    "data/a2/lb-probes/probe-1/step-25.jsonl.gz",
    "data/a2/lb-probes/probe-1/step-50.jsonl.gz",
@@ -851,6 +852,53 @@
    "source": "data/a2/validation (one-replica repeats, client latency)",
    "threshold_s": 2.0
   }
+ },
+ "money": {
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "gpu_hourly_rate": 0.74,
+  "gpu_rate_caveat": "RunPod's reported rate for that worker, not cross-checked against billing; artifact 4's recon (docs/recon-a4.md) implied $1.106/h for a flex serverless RTX 4090 worker, so the billed rate may differ; the spend record (docs/spend-a2.md) is the billing",
+  "gpu_rate_provenance": "measured",
+  "gpu_rate_source_file": "data/a2/gpu-rate.json",
+  "load_balancer_cap": {
+   "ratio": 17.582791490948527,
+   "ratio_definition": "scaler 128's delivered rate over scaler 4's, which is also scaler 4's cost per request over scaler 128's (same workers, same hourly rate)",
+   "scaler_128": {
+    "delivered_rate_rps": 300.6505087759198,
+    "dollars_per_million": 1.37
+   },
+   "scaler_128_source": "probe 3 (scaler value 128), delivered rate at the 300 req/s step",
+   "scaler_4": {
+    "delivered_rate_rps": 17.099134055630024,
+    "dollars_per_million": 24.04
+   },
+   "scaler_4_source": "probe 1 (scaler value 4), median of its steps' delivered rates; the 100 req/s step ended on client-side errors",
+   "workers": 2
+  },
+  "signal_choice": {
+   "label": "UNVALIDATED: simulator failed validation twice; p99s differ by 82 ms",
+   "p99_spread_definition": "highest minus lowest reached p99 over the three signals on this sweep",
+   "p99_spread_s": 0.0820652509890909,
+   "per_signal": {
+    "in_flight_concurrency": {
+     "dollars_per_day": 12.51,
+     "dollars_per_spike": 0.52,
+     "replica_seconds": 2535.000000000001
+    },
+    "queue_depth": {
+     "dollars_per_day": 4.34,
+     "dollars_per_spike": 0.18,
+     "replica_seconds": 880.0000000000014
+    },
+    "utilization": {
+     "dollars_per_day": 15.27,
+     "dollars_per_spike": 0.64,
+     "replica_seconds": 3094.9999999999936
+    }
+   },
+   "sweep": "arm A"
+  },
+  "spikes_per_day": 24.0,
+  "spikes_per_day_provenance": "illustrative"
  },
  "simulator": {
   "cold_start": {

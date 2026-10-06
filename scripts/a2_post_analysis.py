@@ -55,6 +55,12 @@ from autoscale.frontier import (
     pareto_frontier,
 )
 from autoscale.measured_curve import load_measured_curve
+from autoscale.money_a2 import (
+    Assumptions,
+    dollars_per_day,
+    dollars_per_million_requests,
+    dollars_per_spike,
+)
 from autoscale.validation import (
     BIN_SECONDS,
     EngineRun,
@@ -76,6 +82,9 @@ SWEEP = A2 / "frontier-sweep.json"
 CAMPAIGN = Path("data/campaign.jsonl")
 SENSITIVITY = EXPLORATORY / "sensitivity-service-speed.json"
 CURVE = A2 / "service-curve.json"
+GPU_RATE = A2 / "gpu-rate.json"
+# Illustrative: one spike an hour. The post says so wherever it multiplies by it.
+SPIKES_PER_DAY = 24.0
 HOST_LEVELS = (32, 64, 128)
 HEADLINE = ("arm A", "arm C", "ramp arm A", "ramp arm C")
 STEP_RAMP = {"arm A": ("arm A", "ramp arm A"), "arm C": ("arm C", "ramp arm C")}
@@ -673,6 +682,75 @@ def simulator_section(curve, inputs: list) -> dict:
     }
 
 
+def money_section(lb: dict, sim: dict, inputs: list) -> dict:
+    """Two money statements: the load balancer's default cap (measured), the signal choice
+    (UNVALIDATED).
+
+    The rate is RunPod's reported `costPerHr` for one worker, read from
+    data/a2/gpu-rate.json; the source string there names the endpoint and is not
+    republished here (the file is the input). Rejected: a rate typed into this script,
+    which would drift from the file the post's assumptions table cites.
+    """
+    inputs.append(GPU_RATE)
+    rate = _read_json(GPU_RATE)
+    if rate.get("provenance") != "measured":
+        raise SystemExit(f"{GPU_RATE} is marked {rate.get('provenance')!r}, not 'measured'; "
+                         "the post would label an unmeasured rate as measured")
+    a = Assumptions(gpu_hourly_rate=rate["gpu_hourly_rate"], spikes_per_day=SPIKES_PER_DAY)
+
+    p1, p3 = lb["probes"]["1"], lb["probes"]["3"]
+    workers = _only({p1["workers"], p3["workers"]}, "worker counts across probes 1 and 3",
+                    "the same two workers are priced at both scaler values, so a different "
+                    "count would make the ratio compare different fleets")
+    ceiling = statistics.median(s["delivered_rate_rps"] for s in p1["steps"].values())
+    at_300 = p3["steps"]["300"]["delivered_rate_rps"]
+
+    def priced(delivered: float) -> dict:
+        return {"delivered_rate_rps": delivered,
+                "dollars_per_million": dollars_per_million_requests(
+                    a, workers=workers, rate=delivered)}
+
+    reached = sim["sweeps"]["arm A"]["reached"]
+    p99s = [r["p99_s"] for r in reached.values()]
+    spread = max(p99s) - min(p99s)
+    return {
+        "gpu": rate["gpu"],
+        "gpu_hourly_rate": a.gpu_hourly_rate,
+        "gpu_rate_provenance": a.provenance["gpu_hourly_rate"],
+        "gpu_rate_caveat": rate["caveat"],
+        "gpu_rate_source_file": str(GPU_RATE),
+        "spikes_per_day": a.spikes_per_day,
+        "spikes_per_day_provenance": a.provenance["spikes_per_day"],
+        "load_balancer_cap": {
+            "workers": workers,
+            "scaler_4": priced(ceiling),
+            "scaler_4_source": "probe 1 (scaler value 4), median of its steps' delivered rates; "
+                               "the 100 req/s step ended on client-side errors",
+            "scaler_128": priced(at_300),
+            "scaler_128_source": "probe 3 (scaler value 128), delivered rate at the 300 req/s step",
+            "ratio": at_300 / ceiling,
+            "ratio_definition": "scaler 128's delivered rate over scaler 4's, which is also "
+                                "scaler 4's cost per request over scaler 128's (same workers, "
+                                "same hourly rate)",
+        },
+        "signal_choice": {
+            "label": "UNVALIDATED: simulator failed validation twice; "
+                     f"p99s differ by {round(spread * 1000)} ms",
+            "sweep": "arm A",
+            "p99_spread_s": spread,
+            "p99_spread_definition": "highest minus lowest reached p99 over the three signals "
+                                     "on this sweep",
+            "per_signal": {
+                s: {"replica_seconds": r["cost_replica_s"],
+                    "dollars_per_spike": dollars_per_spike(
+                        a, replica_seconds=r["cost_replica_s"]),
+                    "dollars_per_day": dollars_per_day(
+                        a, replica_seconds_per_spike=r["cost_replica_s"])}
+                for s, r in reached.items()},
+        },
+    }
+
+
 def build() -> dict:
     curve = load_measured_curve(REPO / CURVE)
     inputs: list = []
@@ -685,6 +763,7 @@ def build() -> dict:
         "spend_why": "measured spend is not in the committed evidence; its keys are defined by "
                      "Task 13 of the publication plan, which has not landed",
     }
+    analysis["money"] = money_section(analysis["load_balancer"], analysis["simulator"], inputs)
     analysis["_provenance"] = {"inputs": sorted(set(_rel(inputs))), "label": UNVALIDATED,
                                "script": "scripts/a2_post_analysis.py"}
     return analysis

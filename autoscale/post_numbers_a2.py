@@ -8,7 +8,8 @@ cannot. `placement/post_numbers.py` does the same for artifact 4.
 Formats are fixed here, not at the call site, so one quantity is never written
 two ways in one post: seconds take three decimals below 1 s and two from there
 up, percentages are whole numbers, rates take one decimal, counts are integers
-with a thousands comma, dollars (once `spend` exists) take cents.
+with a thousands comma, dollars take cents (four decimals below a cent, so a real
+cost never prints as "$0.00").
 
 `numbers` is pure. It takes the loaded analysis rather than a path because the
 alternative, reading the file here, would make the formatting untestable
@@ -29,6 +30,9 @@ __all__ = ["numbers"]
 # its numbers.
 _SWEEP_KEY = {"arm A": "step_a", "arm C": "step_c", "ramp arm A": "ramp_a", "ramp arm C": "ramp_c"}
 _SIGNALS = ("queue_depth", "in_flight_concurrency", "utilization")
+# The money keys name the signals the way the post's prose does.
+_MONEY_SIGNAL_KEY = {"queue_depth": "queue_depth", "in_flight_concurrency": "in_flight",
+                     "utilization": "utilization"}
 
 
 def _secs(x: float) -> str:
@@ -64,6 +68,19 @@ def _count(x: float) -> str:
 
 def _replica_s(x: float) -> str:
     return f"{_count(x)} replica-seconds"
+
+
+def _dollars(x: float) -> str:
+    """Cents, or four decimals below a cent; positive amounts only.
+
+    Chosen after rounding, as `_secs` does: 0.00996 rounds to 0.01 and prints "$0.01".
+    A zero or negative amount is refused: a free price is a broken reading, and "$0.00"
+    would state it as a fact.
+    """
+    if not x > 0:
+        raise ValueError(f"a dollar amount must be positive to be quoted, got {x!r}; "
+                         "printing it would state a free or negative price")
+    return f"${x:,.2f}" if round(x, 2) >= 0.01 else f"${x:.4f}"
 
 
 def _span(values: list[float], spec: str) -> str:
@@ -144,6 +161,34 @@ def _spend_numbers(spend: dict) -> dict[str, str]:
         "analysis['spend'] is set but its keys are defined by Task 13 of the publication "
         "plan, which has not landed: post_numbers_a2 would otherwise emit no spend numbers "
         "and the post would omit the cost of the experiment")
+
+
+def _money(m: dict) -> dict[str, str]:
+    """The default cap's cost (measured rate and throughput) and the signal choice's (UNVALIDATED)."""
+    cap = m["load_balancer_cap"]
+    out = {
+        "money_rate": f"{_dollars(m['gpu_hourly_rate'])}/h",
+        "spikes_per_day": _count(m["spikes_per_day"]),
+        "money_per_million_scaler4": _dollars(cap["scaler_4"]["dollars_per_million"]),
+        "money_per_million_scaler128": _dollars(cap["scaler_128"]["dollars_per_million"]),
+        "money_scaler_ratio": f"{round(cap['ratio'])}×",
+    }
+    sig = m["signal_choice"]
+    if "UNVALIDATED" not in sig["label"]:
+        raise ValueError(f"the signal-choice dollars carry the label {sig['label']!r}, which "
+                         "does not say UNVALIDATED; they come from a simulator that failed "
+                         "validation twice and the post must say so beside them")
+    out["money_signal_label"] = sig["label"]
+    out["money_p99_spread_step_a"] = f"{round(sig['p99_spread_s'] * 1000)} ms"
+    for signal, row in sig["per_signal"].items():
+        if signal not in _MONEY_SIGNAL_KEY:
+            raise ValueError(f"the money section prices a signal {signal!r} that has no post key "
+                             f"(known: {sorted(_MONEY_SIGNAL_KEY)}); its dollars would be "
+                             "dropped from the post without notice")
+        k = _MONEY_SIGNAL_KEY[signal]
+        out[f"money_spike_{k}_step_a"] = _dollars(row["dollars_per_spike"])
+        out[f"money_day_{k}_step_a"] = _dollars(row["dollars_per_day"])
+    return out
 
 
 def _validation(v: dict) -> dict[str, str]:
@@ -362,6 +407,7 @@ def numbers(analysis: dict) -> dict[str, str]:
     out.update(_load_balancer(analysis["load_balancer"]))
     out.update(_host_speed(analysis["host_speed"]))
     out.update(_simulator(analysis["simulator"]))
+    out.update(_money(analysis["money"]))
     if analysis["spend"] is not None:
         out.update(_spend_numbers(analysis["spend"]))
     return out
