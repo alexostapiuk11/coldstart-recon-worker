@@ -52,6 +52,18 @@ House rules, all of them binding:
 3. **The figure set:** the four post figures of Tasks 7–10, plus the measured service curve (existing figure 4).
 4. **The publication date** in the byline.
 
+
+### Owner decisions, recorded 2026-10-05 (signed by the owner)
+
+1. **Slug:** `/experiments/autoscaling-signal-and-cold-start`, as proposed.
+2. **H1, H2 and H4:** signed off exactly as written above, with the disclosure that
+   they were written after the x1.00 frontiers were seen. Task 3 implements them unchanged.
+3. **Figures:** the five as proposed: validation attempts, load balancer, host speed, the
+   simulator's answer (labelled unvalidated), and the measured service curve.
+4. **Date:** the date the post is published. The post carries the placeholder
+   `PUBLICATION-DATE` in its byline until the pre-publish gate (Task 15), where the owner sets
+   it. Task 14's test accepts the placeholder; Task 15's gate refuses it.
+
 ---
 
 ## File structure
