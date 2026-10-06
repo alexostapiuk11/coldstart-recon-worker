@@ -47,16 +47,25 @@ from autoscale.a2_evidence import (
 )
 from autoscale.frontier import (
     COMPARED_SIGNALS,
+    COST_TIE_RELATIVE_TOLERANCE,
     gap_at_iso_cost,
     h3_verdict,
     iso_cost_budget,
     pareto_frontier,
 )
 from autoscale.measured_curve import load_measured_curve
-from autoscale.validation import EngineRun, engine_trajectories, validate_engine_arrivals
+from autoscale.validation import (
+    BIN_SECONDS,
+    EngineRun,
+    engine_trajectories,
+    validate_engine_arrivals,
+)
 
 A2 = Path("data/a2")
-OUT = A2 / "post-analysis.json"
+# Anchored at REPO like every input is: a bare relative default would write wherever the
+# script happened to be launched from, and the test that compares the committed file
+# would then compare nothing.
+OUT = REPO / A2 / "post-analysis.json"
 ATTEMPTS = {"engine": A2 / "validation-engine", "calibrated": A2 / "validation-calibrated"}
 ONE_REPLICA = A2 / "validation"
 PROBES = A2 / "lb-probes"
@@ -91,6 +100,19 @@ def _read_json(path: Path):
 
 def _rel(paths) -> list[str]:
     return sorted(str(p) for p in paths)
+
+
+def _only(items, what: str, consequence: str):
+    """The one element of `items`, or a refusal that names what was found and what breaks.
+
+    Rejected: `(x,) = items`, whose "too many values to unpack" names neither the
+    evidence nor the number that would have been mislabelled.
+    """
+    items = list(items)
+    if len(items) != 1:
+        raise SystemExit(f"expected exactly one of {what}, found {len(items)} ({items!r}); "
+                         f"{consequence}")
+    return items[0]
 
 
 # --- validation -----------------------------------------------------------------------
@@ -161,7 +183,7 @@ def _typical_residual(verdicts, pairs) -> dict:
     return {"median_ratio_real_over_predicted": statistics.median(per_bin),
             "range_over_bins": [min(per_bin), max(per_bin)],
             "bins_judged": len(judged), "bins_used": len(per_bin),
-            "definition": "per judged bin with an ok p50 on both sides in all three repeats: "
+            "definition": f"per judged bin with an ok p50 on both sides in all {len(pairs)} repeats: "
                           "median over repeats of real p50 / predicted p50; then the median "
                           "and min..max of that over bins"}
 
@@ -201,8 +223,9 @@ def validation_section(curve, inputs: list) -> dict:
             "typical_residual": _typical_residual(result.bins, pairs),
             "per_repeat": per_repeat,
             "residuals": residuals,
-            "residuals_definition": "per repeat, [bin start s, real p50 - predicted p50 s or "
-                                    "null unless both sides ok], 10 s bins by engine arrival",
+            "residuals_definition": f"per repeat, [bin start s, real p50 - predicted p50 s or "
+                                    f"null unless both sides ok], {BIN_SECONDS:g} s bins by "
+                                    "engine arrival",
         }
     return out
 
@@ -260,6 +283,13 @@ def load_balancer_section(inputs: list) -> dict:
         labels = _worker_labels(rows, summary.get("workers"))
         steps = {}
         for rate, stats in summary["steps"].items():
+            unlabelled = sorted(set(stats["worker_share"]) - set(labels))
+            if unlabelled:
+                raise SystemExit(
+                    f"probe {n} step {rate}: worker_share names {len(unlabelled)} worker(s) "
+                    "that no row's x-a2-worker header or the summary's worker list carries, "
+                    "so they cannot be given a 'worker N' label and the share table would "
+                    "either drop them or publish their raw ids")
             step = {k: v for k, v in stats.items() if k != "worker_share"}
             step["worker_share"] = {labels[w]: s for w, s in stats["worker_share"].items()}
             step["delivered_rate_rps"] = delivered_rate(rows[rate])
@@ -299,7 +329,8 @@ def load_balancer_section(inputs: list) -> dict:
             "min": every[0] if every else None,
             "median": statistics.median(every) if every else None,
             "max": every[-1] if every else None,
-            "source": f"the {RETRY_MARK} header value '502:<seconds>' on rows of probes 3-5",
+            "source": f"the {RETRY_MARK} header value '502:<seconds>' on rows of probes "
+                      + ", ".join(sorted(retries)),
         },
         "lb_502_first_attempt_validation_s": None,
         "lb_502_first_attempt_validation_s_why":
@@ -335,6 +366,11 @@ def host_speed_section(curve, inputs: list) -> dict:
         for r in runs:
             if r.get("outcome") == "ok":
                 key = (r["host"]["host_id"], int(r["level"]))
+                if key[1] not in latency:
+                    raise SystemExit(
+                        f"{path}: a run at concurrency {key[1]} has no curve latency to "
+                        "divide by; its host ratio would be undefined and the host-speed "
+                        "table would silently lack that level")
                 spread.setdefault(key, []).append(r["latency_s"] / latency[key[1]])
         tables[setting] = {
             host: {str(level): {**row, "ratio_min": min(spread[(host, level)]),
@@ -344,7 +380,9 @@ def host_speed_section(curve, inputs: list) -> dict:
     calibrated: dict[str, dict[str, list[float]]] = {}
     for k in (1, 2, 3):
         rec = _read_gz_json(ATTEMPTS["calibrated"] / f"repeat-{k}.json.gz")
-        (host,) = rec["host_ids"]
+        host = _only(rec["host_ids"], f"host ids of calibrated repeat {k}",
+                     "its calibration ratios would be filed under the wrong host or none, and "
+                     "the post's per-host ratio would describe a mix of machines")
         for level, entry in rec["calibration"]["levels"].items():
             calibrated.setdefault(host, {}).setdefault(level, []).append(entry["ratio"])
     return {
@@ -366,6 +404,11 @@ def host_speed_section(curve, inputs: list) -> dict:
 
 def _compared(points) -> dict:
     by = render._by_signal(points)
+    missing = sorted(COMPARED_SIGNALS - set(by))
+    if missing:
+        raise SystemExit(f"a sweep has no points for signal(s) {missing}; its frontiers, "
+                         "reached p99s and hypotheses would be computed over a different "
+                         "set of signals than the ones the post names")
     return {s: pareto_frontier(by[s]) for s in sorted(COMPARED_SIGNALS)}
 
 
@@ -393,6 +436,11 @@ def _verdict_dict(v) -> dict:
 
 
 def _h3(gaps: dict):
+    refused = sorted(t for t in HEADLINE if "point" not in gaps[t])
+    if refused:
+        raise SystemExit(f"the gap of sweep(s) {refused} was refused (no 'point'); H3 on the "
+                         "remaining sweeps would be a verdict about a different set of sweeps "
+                         "under the same name, so it is not computed")
     return h3_verdict(
         step_gap_a=gaps["arm A"]["point"], step_gap_c=gaps["arm C"]["point"],
         ramp_gap_a=gaps["ramp arm A"]["point"], ramp_gap_c=gaps["ramp arm C"]["point"],
@@ -413,6 +461,26 @@ def _cap_cost(identity: dict) -> float:
     return until + sum(until - every - k * cooldown for k in range(cap - 1))
 
 
+def _censoring_reading(*, min_util: float, highest_threshold: float, all_at_cap: bool) -> str:
+    """The sentence that explains the censoring, written only if its premises hold.
+
+    Rejected: a fixed sentence, which would go on saying "above every threshold"
+    after a re-measured curve or a changed grid made it false.
+    """
+    if not min_util > highest_threshold:
+        raise SystemExit(
+            f"the curve's lowest GPU utilisation ({min_util:g}) is not above the highest "
+            f"utilisation scale-up threshold ({highest_threshold:g}), so the utilisation "
+            "controller would not scale up at every chance and the 'above every threshold' "
+            "reading would be false; the censoring explanation must be rewritten, not "
+            "emitted")
+    tail = ("every utilisation run's cost equals the cap cost" if all_at_cap
+            else "NOT every utilisation run's cost equals the cap cost (see per_sweep)")
+    return (f"the curve's GPU utilisation is at least {min_util:g} at every measured level, "
+            f"above the highest utilisation scale-up threshold ({highest_threshold:g}), so the "
+            f"utilisation controller scales up at every chance; {tail}")
+
+
 def _censoring(sources: dict, identity: dict, curve) -> dict:
     """H2's mechanism, descriptively: does every utilisation policy sit at the replica cap?"""
     cap = _cap_cost(identity)
@@ -430,6 +498,7 @@ def _censoring(sources: dict, identity: dict, curve) -> dict:
                 math.isclose(c, cap, rel_tol=CAP_COST_RELATIVE_TOLERANCE) for c in costs),
         }
     util_levels = [u for c, _lat, _t, u in curve.measured_points]
+    highest = max(identity["thresholds"]["utilization"][0])
     return {
         "cap_cost_replica_s": cap,
         "cap_cost_definition": "one initial replica for the window plus one more at every "
@@ -439,10 +508,68 @@ def _censoring(sources: dict, identity: dict, curve) -> dict:
         "max_replicas": identity["max_replicas"],
         "per_sweep": per,
         "curve_gpu_util_min_over_measured_levels": min(util_levels),
-        "highest_utilization_scale_up_threshold": max(identity["thresholds"]["utilization"][0]),
-        "reading": "the curve reads GPU utilisation 1.0 at every measured level, above every "
-                   "scale-up threshold, so the utilisation controller scales up at every "
-                   "chance; every utilisation run's cost equals the cap cost",
+        "highest_utilization_scale_up_threshold": highest,
+        "reading": _censoring_reading(
+            min_util=min(util_levels), highest_threshold=highest,
+            all_at_cap=all(s["every_utilization_run_at_cap_cost"] for s in per.values())),
+    }
+
+
+def _h2_noise(sources: dict, frontiers: dict, sweeps: dict, identity: dict) -> dict:
+    """What H2's per-sweep verdicts rest on: how far apart the signals are against how far
+    apart utilisation's own identical-fleet policies are.
+
+    Every at-cap utilisation policy runs the same fleet, yet their median p99s differ,
+    because `autoscale.sweep._derive_seed` keys a trace on (seed, scale_up_at,
+    scale_down_at, repetition) and not on the signal: policies with different thresholds
+    replay different arrival traces. That spread is therefore trace-to-trace noise, and a
+    margin between signals smaller than it is not distinguishable from it. Rejected:
+    quoting the margin alone, which makes a 43 ms lead look like a measurement.
+
+    `iso_cost_slice_constrains_others` is computed: it is True if any queue-depth or
+    in-flight frontier point costs more than the budget, i.e. the slice cuts off a point
+    the others could have used. False means the slice binds on utilisation only.
+    """
+    cap = _cap_cost(identity)
+    out = {}
+    for tag in HEADLINE:
+        at_cap = [p.p99 for p in sources[tag] if p.signal == "utilization" and all(
+            math.isclose(c, cap, rel_tol=CAP_COST_RELATIVE_TOLERANCE) for c in p.cost_samples)]
+        if not at_cap:
+            raise SystemExit(f"{tag}: no utilisation policy is at the cap cost, so there is no "
+                             "at-cap spread to compare the H2 margin against; the post would "
+                             "state a margin with nothing to size it by")
+        reached = {s: r["p99_s"] for s, r in sweeps[tag]["reached"].items()}
+        others = {s: v for s, v in reached.items() if s != "utilization"}
+        budget = sweeps[tag]["budget_replica_s"]
+        other_costs = [p.cost for s in ("queue_depth", "in_flight_concurrency")
+                       for p in frontiers[tag][s]]
+        margin = reached["utilization"] - max(others.values())
+        out[tag] = {
+            "at_cap_policy_p99_s": {"count": len(at_cap), "min": min(at_cap),
+                                    "median": statistics.median(at_cap), "max": max(at_cap)},
+            "h2_margin_s": margin,
+            "margin_vs_best_other_s": reached["utilization"] - min(others.values()),
+            "tie_seconds": hyp.TIE_SECONDS,
+            "margin_inside_at_cap_spread": abs(margin) < max(at_cap) - min(at_cap),
+            "margin_vs_best_other_inside_at_cap_spread":
+                abs(reached["utilization"] - min(others.values())) < max(at_cap) - min(at_cap),
+            "iso_cost_slice_constrains_others": any(
+                c > budget * (1 + COST_TIE_RELATIVE_TOLERANCE) for c in other_costs),
+            "others_highest_frontier_cost_replica_s": max(other_costs),
+            "budget_replica_s": budget,
+        }
+    return {
+        "per_sweep": out,
+        "_note": "at-cap utilisation policies run the same fleet (every run at the cap cost) "
+                 "but differ in median p99 because autoscale.sweep._derive_seed seeds a trace "
+                 "by (seed, scale_up_at, scale_down_at, repetition), not by signal, so "
+                 "policies with different thresholds replay different traces",
+        "h2_margin_definition": "utilisation's reached p99 minus the highest reached p99 of "
+                                "the other two signals, signed; H2 holds exactly when it "
+                                "exceeds tie_seconds",
+        "margin_vs_best_other_definition": "utilisation's reached p99 minus the lowest "
+                                           "reached p99 of the other two signals, signed",
     }
 
 
@@ -516,6 +643,7 @@ def simulator_section(curve, inputs: list) -> dict:
                           "in utilisation's place; queue depth and in-flight frontiers are the "
                           "headline's, and the iso-cost budget is recomputed for the set"},
         "h2_censoring": _censoring(sources, identity, curve),
+        "h2_noise": _h2_noise(sources, frontiers, sweeps, identity),
         "identity": {k: identity[k] for k in ("seed", "repetitions", "until", "max_replicas",
                                               "cooldown", "evaluate_every")},
     }
@@ -530,6 +658,8 @@ def build() -> dict:
         "host_speed": host_speed_section(curve, inputs),
         "simulator": simulator_section(curve, inputs),
         "spend": None,
+        "spend_why": "measured spend is not in the committed evidence; its keys are defined by "
+                     "Task 13 of the publication plan, which has not landed",
     }
     analysis["_provenance"] = {"inputs": sorted(set(_rel(inputs))), "label": UNVALIDATED,
                                "script": "scripts/a2_post_analysis.py"}
@@ -538,7 +668,8 @@ def build() -> dict:
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--out", default=str(OUT))
+    ap.add_argument("--out", default=str(OUT), help="default: data/a2/post-analysis.json "
+                                                    "under the repository root")
     args = ap.parse_args(argv)
     out = Path(args.out)
     text = json.dumps(build(), indent=1, sort_keys=True, allow_nan=False) + "\n"

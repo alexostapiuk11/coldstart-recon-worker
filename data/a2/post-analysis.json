@@ -207,7 +207,7 @@
      ]
     }
    },
-   "source": "the a2-driver-lb-retry header value '502:<seconds>' on rows of probes 3-5"
+   "source": "the a2-driver-lb-retry header value '502:<seconds>' on rows of probes 3, 4, 5"
   },
   "lb_502_first_attempt_validation_s": null,
   "lb_502_first_attempt_validation_s_why": "the validation records keep only the indices of retried requests (lb_502_retried), not the retry header's value, so the first attempt's duration was not recorded for any validation repeat",
@@ -1002,7 +1002,78 @@
      "utilization_policies": 19
     }
    },
-   "reading": "the curve reads GPU utilisation 1.0 at every measured level, above every scale-up threshold, so the utilisation controller scales up at every chance; every utilisation run's cost equals the cap cost"
+   "reading": "the curve's GPU utilisation is at least 1 at every measured level, above the highest utilisation scale-up threshold (0.95), so the utilisation controller scales up at every chance; every utilisation run's cost equals the cap cost"
+  },
+  "h2_noise": {
+   "_note": "at-cap utilisation policies run the same fleet (every run at the cap cost) but differ in median p99 because autoscale.sweep._derive_seed seeds a trace by (seed, scale_up_at, scale_down_at, repetition), not by signal, so policies with different thresholds replay different traces",
+   "h2_margin_definition": "utilisation's reached p99 minus the highest reached p99 of the other two signals, signed; H2 holds exactly when it exceeds tie_seconds",
+   "margin_vs_best_other_definition": "utilisation's reached p99 minus the lowest reached p99 of the other two signals, signed",
+   "per_sweep": {
+    "arm A": {
+     "at_cap_policy_p99_s": {
+      "count": 19,
+      "max": 15.520953832272859,
+      "median": 14.732002492161463,
+      "min": 14.526131589703262
+     },
+     "budget_replica_s": 3094.9999999999936,
+     "h2_margin_s": 0.04292290268896615,
+     "iso_cost_slice_constrains_others": false,
+     "margin_inside_at_cap_spread": true,
+     "margin_vs_best_other_inside_at_cap_spread": true,
+     "margin_vs_best_other_s": 0.0820652509890909,
+     "others_highest_frontier_cost_replica_s": 2535.000000000001,
+     "tie_seconds": 0.001
+    },
+    "arm C": {
+     "at_cap_policy_p99_s": {
+      "count": 19,
+      "max": 7.7327895217391625,
+      "median": 7.492317604921349,
+      "min": 7.195989322383018
+     },
+     "budget_replica_s": 3094.999999999992,
+     "h2_margin_s": -3.955033080650529,
+     "iso_cost_slice_constrains_others": false,
+     "margin_inside_at_cap_spread": false,
+     "margin_vs_best_other_inside_at_cap_spread": true,
+     "margin_vs_best_other_s": -0.022263815621764493,
+     "others_highest_frontier_cost_replica_s": 2320.0000000000136,
+     "tie_seconds": 0.001
+    },
+    "ramp arm A": {
+     "at_cap_policy_p99_s": {
+      "count": 19,
+      "max": 3.068816995054795,
+      "median": 2.4627677882811856,
+      "min": 2.278419010429989
+     },
+     "budget_replica_s": 3095.000000000006,
+     "h2_margin_s": -8.248823985219952,
+     "iso_cost_slice_constrains_others": false,
+     "margin_inside_at_cap_spread": false,
+     "margin_vs_best_other_inside_at_cap_spread": true,
+     "margin_vs_best_other_s": -0.026202680073771134,
+     "others_highest_frontier_cost_replica_s": 2875.0000000000227,
+     "tie_seconds": 0.001
+    },
+    "ramp arm C": {
+     "at_cap_policy_p99_s": {
+      "count": 19,
+      "max": 0.5681761334535622,
+      "median": 0.5590308778664639,
+      "min": 0.5538050175309763
+     },
+     "budget_replica_s": 3094.999999999996,
+     "h2_margin_s": -10.873445222834576,
+     "iso_cost_slice_constrains_others": false,
+     "margin_inside_at_cap_spread": false,
+     "margin_vs_best_other_inside_at_cap_spread": true,
+     "margin_vs_best_other_s": -0.0013064650838714442,
+     "others_highest_frontier_cost_replica_s": 2447.5000000000055,
+     "tie_seconds": 0.001
+    }
+   }
   },
   "h2_sensitivity": {
    "definition": "H2 with utilization_throughput (the 'sensitivity <sweep>' sources) in utilisation's place; queue depth and in-flight frontiers are the headline's, and the iso-cost budget is recomputed for the set",
@@ -1312,6 +1383,7 @@
   }
  },
  "spend": null,
+ "spend_why": "measured spend is not in the committed evidence; its keys are defined by Task 13 of the publication plan, which has not landed",
  "validation": {
   "calibrated": {
    "agreeing": 0,
@@ -1857,7 +1929,7 @@
    "typical_residual": {
     "bins_judged": 37,
     "bins_used": 37,
-    "definition": "per judged bin with an ok p50 on both sides in all three repeats: median over repeats of real p50 / predicted p50; then the median and min..max of that over bins",
+    "definition": "per judged bin with an ok p50 on both sides in all 3 repeats: median over repeats of real p50 / predicted p50; then the median and min..max of that over bins",
     "median_ratio_real_over_predicted": 1.1271088407707246,
     "range_over_bins": [
      1.116243319008264,
@@ -2398,7 +2470,7 @@
    "typical_residual": {
     "bins_judged": 37,
     "bins_used": 37,
-    "definition": "per judged bin with an ok p50 on both sides in all three repeats: median over repeats of real p50 / predicted p50; then the median and min..max of that over bins",
+    "definition": "per judged bin with an ok p50 on both sides in all 3 repeats: median over repeats of real p50 / predicted p50; then the median and min..max of that over bins",
     "median_ratio_real_over_predicted": 0.8558851671535963,
     "range_over_bins": [
      0.11003906466463007,
