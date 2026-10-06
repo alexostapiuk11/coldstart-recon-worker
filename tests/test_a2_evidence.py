@@ -10,9 +10,10 @@ def _row(i, sent, latency, worker="w1", server_ms="300", status=200):
             "headers": {"x-a2-worker": worker, "x-a2-server-latency-ms": server_ms}}
 
 
-def test_delivered_rate_counts_completions_over_their_span():
+def test_delivered_rate_counts_intervals_between_completions_not_completions():
+    # 11 completions 0.1 s apart span 1.0 s and enclose 10 intervals: 10/s, not 11/s
     rows = [_row(i, i * 0.1, 0.5) for i in range(11)]  # completions 0.5 .. 1.5 s
-    assert ev.delivered_rate(rows) == pytest.approx(11 / 1.0)
+    assert ev.delivered_rate(rows) == pytest.approx(10.0)
 
 
 def test_per_worker_concurrency_reconstructs_server_side_occupancy():
@@ -48,7 +49,7 @@ def test_delivered_rate_refuses_fewer_than_two_completions():
 def test_delivered_rate_excludes_non_200_rows():
     rows = [_row(i, i * 0.1, 0.5) for i in range(11)]
     rows.append(_row(11, 0.0, 30.0, status=503))  # would stretch the span if counted
-    assert ev.delivered_rate(rows) == pytest.approx(11 / 1.0)
+    assert ev.delivered_rate(rows) == pytest.approx(10.0)
 
 
 def test_delivered_rate_with_only_failures_refuses():
@@ -80,3 +81,20 @@ def test_host_speed_table_excludes_runs_that_are_not_ok():
     assert table["h"][64]["n"] == 1
     assert table["h"][64]["median_s"] == pytest.approx(0.45)
     assert "bad" not in table
+
+
+def test_per_worker_concurrency_touching_intervals_do_not_overlap():
+    # first request's server interval is [0.0, 1.0]; the second's starts exactly where
+    # that ends. Return leg 0.0 so the client-side end is the server-side end.
+    rows = [_row(0, 0.0, 1.0, "w1", "1000"), _row(1, 1.0, 1.0, "w1", "1000")]
+    got = ev.per_worker_concurrency(rows, return_leg_s=0.0)
+    assert got["w1"]["max"] == 1
+
+
+def test_per_worker_concurrency_mean_is_the_time_weighted_level():
+    # w1 intervals [0, 2] and [1, 3]: level 1 on [0,1], 2 on [1,2], 1 on [2,3]
+    # area = 1 + 2 + 1 = 4 over a span of 3 s -> 4/3
+    rows = [_row(0, 0.0, 2.0, "w1", "2000"), _row(1, 1.0, 2.0, "w1", "2000")]
+    got = ev.per_worker_concurrency(rows, return_leg_s=0.0)
+    assert got["w1"]["max"] == 2
+    assert got["w1"]["mean"] == pytest.approx(4 / 3)

@@ -3,7 +3,14 @@
 import pytest
 
 from autoscale.frontier import PolicyPoint, gap_at_iso_cost, iso_cost_budget, pareto_frontier
-from autoscale.hypotheses import h1_holds_on, h2_worst_on, h4_holds_on, ranking, reached_p99
+from autoscale.hypotheses import (
+    _dominates,
+    h1_holds_on,
+    h2_worst_on,
+    h4_holds_on,
+    ranking,
+    reached_p99,
+)
 
 
 def _pp(signal, cost, p99, up=1.0):
@@ -189,3 +196,29 @@ def test_a_missing_compared_signal_is_refused_not_scored():
     for fn in (h1_holds_on, h2_worst_on, ranking):
         with pytest.raises(ValueError, match="utilization"):
             fn(fr)
+
+
+def test_ranking_chains_ties_so_the_ends_of_a_chain_can_be_over_a_millisecond_apart():
+    # A~B (0.9 ms) and B~C (0.9 ms) but A-C is 1.8 ms: the documented behaviour is
+    # one group, because each member is compared with its neighbour, not the first.
+    fr = _fr(
+        [
+            _pp("in_flight_concurrency", 10, 3.0),
+            _pp("queue_depth", 10, 3.0009),
+            _pp("utilization", 10, 3.0018),
+        ]
+    )
+    assert ranking(fr) == [["in_flight_concurrency", "queue_depth", "utilization"]]
+
+
+def test_dominates_treats_float_dust_in_cost_as_equal_cost():
+    dust = 10.0 * (1 + 1e-13)
+    # a costs dust more but is strictly faster: at the same cost it dominates
+    assert _dominates(_pp("in_flight_concurrency", dust, 2.0),
+                      _pp("queue_depth", 10.0, 3.0)) is True
+    # a costs dust less and is exactly as fast: a tie on both axes, not domination
+    assert _dominates(_pp("in_flight_concurrency", 10.0 * (1 - 1e-13), 2.0),
+                      _pp("queue_depth", 10.0, 2.0)) is False
+    # a real cost difference still counts
+    assert _dominates(_pp("in_flight_concurrency", 9.0, 2.0),
+                      _pp("queue_depth", 10.0, 2.0)) is True

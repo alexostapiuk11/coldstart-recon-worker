@@ -20,12 +20,17 @@ def delivered_rate(rows) -> float:
 
     Completions, not sends: the first probe offered 25-100 req/s and the path
     delivered ~17/s, which a send count would hide.
+
+    n completions between the first and the last enclose n - 1 intervals, so
+    the rate is (n - 1) / span. n / span overstates by one interval's worth,
+    which made probe 5 "deliver" 210.8 req/s against 210 offered, more than
+    was sent. Rejected: n / span, for exactly that overshoot.
     """
     done = sorted(r["sent"] + r["latency"] for r in rows
                   if r.get("status") == 200 and r.get("latency") is not None)
     if len(done) < 2:
         raise ValueError("fewer than two completions; a rate needs a span")
-    return len(done) / (done[-1] - done[0])
+    return (len(done) - 1) / (done[-1] - done[0])
 
 
 def per_worker_concurrency(rows, *, return_leg_s: float) -> dict:

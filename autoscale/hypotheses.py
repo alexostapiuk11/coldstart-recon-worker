@@ -23,8 +23,11 @@ passes it the three. A compared signal that is absent is refused (see
 `gap_at_iso_cost` gives.
 """
 
+import math
+
 from autoscale.frontier import (
     COMPARED_SIGNALS,
+    COST_TIE_RELATIVE_TOLERANCE,
     PolicyPoint,
     _p99_at_cost,
     iso_cost_budget,
@@ -66,7 +69,19 @@ def reached_p99(frontiers: dict[str, list[PolicyPoint]], budget: float) -> dict[
 
 
 def _dominates(a: PolicyPoint, b: PolicyPoint) -> bool:
-    return a.cost <= b.cost and a.p99 <= b.p99 and (a.cost < b.cost or a.p99 < b.p99)
+    """a is no costlier and no slower than b, and strictly better on one axis.
+
+    Costs within `COST_TIE_RELATIVE_TOLERANCE` are EQUAL, the tolerance
+    `pareto_frontier` already applies to cost ties: replica-seconds are float
+    sums whose last digits are accumulation-order dust, and an exact `<=`
+    would let that dust decide whether a point is dominated (and so whether H1
+    holds). Rejected: exact comparison, which disagrees with the frontier
+    about which points tie.
+    """
+    same_cost = math.isclose(a.cost, b.cost, rel_tol=COST_TIE_RELATIVE_TOLERANCE)
+    cost_no_worse = a.cost <= b.cost or same_cost
+    cost_better = a.cost < b.cost and not same_cost
+    return cost_no_worse and a.p99 <= b.p99 and (cost_better or a.p99 < b.p99)
 
 
 def h1_holds_on(frontiers: dict[str, list[PolicyPoint]]) -> bool:

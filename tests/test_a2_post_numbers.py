@@ -84,7 +84,7 @@ def test_probe_1_peaks_use_the_typical_value_not_the_reconstruction_artifact():
 def test_probes_2_and_3_are_stated_against_what_was_offered():
     n = numbers(A)
     assert n["probe2_non_200_total"] == "13"
-    assert n["probe2_delivered_300"] == "277.8 req/s"
+    assert n["probe2_delivered_300"] == "277.7 req/s"
     assert n["probe3_delivered_450"] == "350.4 req/s"
     assert n["offered_300"] == "300 req/s" and n["offered_450"] == "450 req/s"
     assert [n[f"probe3_worker1_share_{s}"] for s in (25, 50, 100, 200, 300, 450)] == [
@@ -94,8 +94,8 @@ def test_probes_2_and_3_are_stated_against_what_was_offered():
 
 def test_probes_4_and_5_deliveries_and_the_502_first_attempts_are_stated():
     n = numbers(A)
-    assert n["probe4_delivered_150"] == "108.8 req/s" and n["probe4_delivered_180"] == "114.3 req/s"
-    assert n["probe5_delivered_180"] == "156.7 req/s" and n["probe5_delivered_210"] == "210.8 req/s"
+    assert n["probe4_delivered_150"] == "108.7 req/s" and n["probe4_delivered_180"] == "114.3 req/s"
+    assert n["probe5_delivered_180"] == "156.7 req/s" and n["probe5_delivered_210"] == "210.7 req/s"
     assert n["lb_502_first_attempt_count"] == "37"
     assert n["lb_502_first_attempt_median"] == "2.64 s"
     assert n["lb_502_first_attempt_max"] == "14.09 s"
