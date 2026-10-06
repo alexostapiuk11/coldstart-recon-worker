@@ -20,6 +20,7 @@ plan 3's analysis turns it on.
 from autoscale.service import ServiceCurve
 from harness.stats import median
 from harness.store import JsonlStore
+from placement import registered
 from placement.colocated import ColocatedSurface
 from placement.resample import EmpiricalDistribution
 from placement_measure.campaigns import parse_cell, parse_swap
@@ -100,13 +101,26 @@ def eviction_seconds(records, *, cold: bool) -> float:
     return median(samples)
 
 
+def _saturated(load: dict) -> bool:
+    """A neighbour level above one engine's capacity cannot be reached: vLLM
+    runs at most `registered.SPLIT_CEILING` such requests and queues the rest.
+    The level then counts as reached if the ramp ended with the engine at
+    capacity and it stayed there through the measured run (amendment
+    2026-10-06, validity)."""
+    if load["level"] <= registered.SPLIT_CEILING:
+        return False
+    last = ((load.get("ramp") or {}).get("last") or {}).get("running") or 0
+    median_running = load.get("median_running") or 0
+    return last >= registered.SPLIT_CEILING and median_running >= registered.SPLIT_CEILING
+
+
 def cell_validity(record, *, require_warm_compile: bool = False) -> str | None:
     """None if the cell's measurement stands; otherwise why it does not."""
     if record.outcome != "ok":
         return f"run failed: {record.failure}"
     load = record.output.get("neighbour_load")
     if load and load.get("level"):
-        if not (load.get("ramp") or {}).get("reached"):
+        if not ((load.get("ramp") or {}).get("reached") or _saturated(load)):
             return "the neighbour never reached its load before the measured run"
         if load.get("ended_before_measured_run"):
             return "the neighbour ran out of requests during the measured run"

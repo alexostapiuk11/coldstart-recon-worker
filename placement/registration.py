@@ -114,8 +114,13 @@ def render_doc(v: dict, date: str) -> str:
 
 def design_files(measurement: dict) -> dict[str, dict]:
     """The campaign designs as the JSON `scripts/a4_measure.py --design` reads."""
-    out = {"cells": dataclasses.asdict(measurement["cells"]),
-           "swaps": dataclasses.asdict(measurement["swaps"])}
+    cells = dataclasses.asdict(measurement["cells"])
+    # The default ramp window is the worker's own and is never written: the
+    # registered design file is the one committed before the first run, and the
+    # field was added later (amendment 2026-10-06, ramp window).
+    if cells.get("ramp_timeout_s") == 60.0:
+        del cells["ramp_timeout_s"]
+    out = {"cells": cells, "swaps": dataclasses.asdict(measurement["swaps"])}
     if measurement["sleep"] is not None:
         out["sleep"] = dataclasses.asdict(measurement["sleep"])
     return out
