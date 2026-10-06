@@ -69,13 +69,14 @@ def test_spike_cost_refuses_bad_replica_seconds(bad):
 
 def test_each_assumption_carries_its_provenance():
     a = Assumptions(gpu_hourly_rate=0.74, spikes_per_day=24.0)
-    assert a.provenance == {"gpu_hourly_rate": "measured", "spikes_per_day": "illustrative"}
+    # RunPod reports the rate through its API; nothing here measured a bill.
+    assert a.provenance == {"gpu_hourly_rate": "reported", "spikes_per_day": "illustrative"}
 
 
 def test_the_committed_rate_file_is_what_the_analysis_will_read():
     rec = json.loads((REPO / "data" / "a2" / "gpu-rate.json").read_text())
     assert rec["gpu_hourly_rate"] == 0.74
-    assert rec["provenance"] == "measured"
+    assert rec["provenance"] == "reported"
     assert rec["gpu"] == "NVIDIA GeForce RTX 4090"
     # the billing record is named as the authority over this rate
     assert "billing" in rec["caveat"] and "1.106" in rec["caveat"]
@@ -98,3 +99,11 @@ def test_dollars_per_day_refuses_bad_replica_seconds():
     a = Assumptions(gpu_hourly_rate=0.74, spikes_per_day=24.0)
     with pytest.raises(ValueError, match="replica_seconds"):
         dollars_per_day(a, replica_seconds_per_spike=math.nan)
+
+
+def test_the_rate_file_carries_the_list_price_it_was_checked_against():
+    rec = json.loads((REPO / "data" / "a2" / "gpu-rate.json").read_text())
+    assert rec["list_price_hourly"] == 1.10
+    assert rec["list_price_source"] == "https://www.runpod.io/pricing"
+    assert rec["list_price_read_on"] == "2026-10-05"
+    assert rec["list_price_hourly"] > rec["gpu_hourly_rate"]

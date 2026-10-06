@@ -41,6 +41,9 @@ def test_seconds_use_three_decimals_below_one_and_two_from_one_up():
     assert post_numbers_a2._s(0.9994) == "0.999 s"
     assert post_numbers_a2._s_span(0.9996, 1.5) == "1.00–1.50 s"
     assert post_numbers_a2._s(14.4406) == "14.44 s"
+    # the magnitude picks the decimals, so a negative takes the positive's format
+    assert post_numbers_a2._s(-6.1977) == "-6.20 s"
+    assert post_numbers_a2._s(-0.0596) == "-0.060 s"
 
 
 def test_counts_carry_a_thousands_comma():
@@ -141,12 +144,27 @@ def test_the_stall_share_is_a_range_over_the_three_repeats():
 
 
 def test_the_stall_share_range_says_it_includes_the_void_repeat():
+    # Said from the data, in one plain clause: which repeat was void and what voided it.
     n = numbers(A)
-    assert n["stall_share_includes_void_repeat"].startswith("yes, repeat 1 (void: 2 requests")
+    assert n["stall_share_includes_void_repeat"] == "repeat 1 was void: 2 requests got 400s"
     a = copy.deepcopy(A)
     for r in a["load_balancer"]["stall_share"]["repeats"]:
         r["void"] = []
-    assert numbers(a)["stall_share_includes_void_repeat"].startswith("no")
+    assert numbers(a)["stall_share_includes_void_repeat"] == "no repeat was void"
+
+
+def test_the_repeats_refused_for_send_jitter_are_named_with_their_jitter():
+    n = numbers(A)
+    assert n["stall_jitter_refused"] == "repeats 2 and 3 were refused for send jitter (0.591 s and 0.806 s)"
+
+
+def test_the_stall_share_is_split_into_outside_and_inside_the_engine():
+    n = numbers(A)
+    assert [n[f"stall_outside_engine_share_repeat_{i}"] for i in (1, 2, 3)] == [
+        "16%", "19%", "10%"]
+    assert [n[f"stall_engine_backlog_share_repeat_{i}"] for i in (1, 2, 3)] == [
+        "75%", "90%", "77%"]
+    assert n["stall_server_backlog_s"] == "1.50 s"
 
 
 def test_the_host_speed_ratios_are_stated_as_ratios_and_as_percent_below_the_curve():
@@ -312,3 +330,52 @@ def test_a_signal_the_money_keys_do_not_name_is_refused():
         a["money"]["signal_choice"]["per_signal"]["queue_depth"])
     with pytest.raises(ValueError, match="mystery"):
         numbers(a)
+
+
+def test_the_engine_in_flight_past_its_cap_is_stated_per_attempt():
+    n = numbers(A)
+    assert n["attempt1_engine_over_cap_range"] == "33%–59%"
+    assert n["attempt1_engine_max_in_flight"] == "512"
+    assert n["attempt2_engine_over_cap_range"] == "6%–17%"
+    assert n["attempt2_engine_max_in_flight"] == "452–503"
+
+
+def test_attempt_1s_most_negative_raw_residual_and_void_stamp_count():
+    n = numbers(A)
+    assert n["attempt1_min_residual"] == "-6.20 s"
+    assert n["attempt1_void_200_without_stamp"] == "64,784"
+
+
+def test_the_502s_are_stated_as_fast_and_slow_with_their_ranges():
+    n = numbers(A)
+    assert n["lb_502_fast_count"] == "17" and n["lb_502_fast_span"] == "0.109–0.399 s"
+    assert n["lb_502_slow_count"] == "20" and n["lb_502_slow_span"] == "2.50–14.09 s"
+    assert n["probe2_502_span"] == "0.124–0.284 s"
+
+
+def test_the_probe_workers_hosts_and_engine_version_are_counts():
+    n = numbers(A)
+    assert n["probes_1_to_3_distinct_workers"] == "6"
+    assert n["hosts_in_records"] == "6" and n["hosts_measured_for_speed"] == "3"
+    assert n["engine_version"] == "vLLM 0.27.1"
+
+
+def test_attempt_1s_host_at_about_100_in_flight_is_stated_beside_its_references():
+    n = numbers(A)
+    assert n["attempt1_in_flight_band"] == "90 to 110"
+    assert n["attempt1_latency_at_100"] == "0.494 s"
+    assert n["maxseqs128_latency_at_100"] == "0.487 s"
+    assert n["curve_latency_at_100"] == "0.533 s"
+
+
+def test_the_cold_start_counts_and_the_cost_spans_across_sweeps():
+    n = numbers(A)
+    assert (n["cold_start_n_a"], n["cold_start_n_c"], n["campaign_runs"]) == ("99", "100", "300")
+    assert n["queue_depth_cost_span"] == "640–895 replica-seconds"
+    assert n["others_cost_span"] == "2,320–3,095 replica-seconds"
+
+
+def test_the_list_price_and_its_ratio_to_the_reported_rate():
+    n = numbers(A)
+    assert n["money_list_rate"] == "$1.10/h"
+    assert n["money_list_ratio"] == "1.5×"

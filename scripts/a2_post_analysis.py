@@ -41,8 +41,10 @@ import a2_render_figures as render
 from autoscale import hypotheses as hyp
 from autoscale.a2_evidence import (
     delivered_rate,
+    engine_occupancy,
     host_speed_table,
     per_worker_concurrency,
+    stall_breakdown,
     stall_share,
 )
 from autoscale.coldstart_ecdf import load_measured_lags
@@ -63,6 +65,7 @@ from autoscale.money_a2 import (
 )
 from autoscale.validation import (
     BIN_SECONDS,
+    MAX_SEND_JITTER_SECONDS,
     EngineRun,
     engine_trajectories,
     validate_engine_arrivals,
@@ -92,6 +95,22 @@ STEP_RAMP = {"arm A": ("arm A", "ramp arm A"), "arm C": ("arm C", "ramp arm C")}
 CONCURRENCY_PROBES = ("1", "2", "3")
 RETURN_LEG_S = 0.1
 STALL_THRESHOLD_S = 2.0
+# A request over STALL_THRESHOLD_S client-side whose server latency is over this spent most
+# of its delay inside the engine (the engine's own unloaded p50 is about 0.3 s).
+SERVER_BACKLOG_S = 1.5
+# The validation engine's --max-num-seqs (amendment 2026-10-04, second): what it runs at
+# once. Requests past it queue inside the engine, which is what the in-flight count shows.
+VALIDATION_ENGINE_CAP = 128
+# Engine in-flight band around 100, for attempt 1's host against the re-measured host.
+IN_FLIGHT_BAND = (90, 110)
+# A load-balancer 502 that fails within this is "fast"; the 37 first attempts fall either
+# well under it (at most 0.40 s) or well over it (at least 2.50 s), so the split does not
+# depend on where inside that empty interval it is drawn.
+FAST_502_S = 1.0
+# Every store whose records name the host a worker ran on: the curve, the host
+# re-measurement, and the three sets of validation repeats (void ones included).
+HOST_RECORD_SOURCES = ("service-sweep", "exploratory", "validation", "validation-engine",
+                       "validation-calibrated")
 WORKER = "x-a2-worker"
 RETRY_MARK = "a2-driver-lb-retry"  # scripts/a2_lb_common.RETRY_MARK, "<status>:<seconds>"
 LB_RETRY_STATUS = 502
@@ -211,6 +230,14 @@ def validation_section(curve, inputs: list) -> dict:
             records.append(_read_gz_json(path))
         voids = sorted((REPO / d).glob("repeat-*.void.json.gz"))
         inputs.extend(d / v.name for v in voids)
+        void_detail = []
+        for v in voids:
+            rec = _read_gz_json(d / v.name)
+            ok = [t for t, st in zip(rec["server_received_s"], rec["status"], strict=True)
+                  if st == 200]
+            void_detail.append({"repeat": rec["repeat"], "responses_200": len(ok),
+                                "responses_200_without_engine_arrival":
+                                    sum(1 for t in ok if t is None)})
         inputs.append(d / "verdict.json")
         runs = [_engine_run(r) for r in records]
         pairs = [engine_trajectories(r, curve.curve) for r in runs]
@@ -226,12 +253,29 @@ def validation_section(curve, inputs: list) -> dict:
             per_repeat.append(row)
         residuals = [[[r.start, (r.p50 - p.p50) if r.status == p.status == "ok" else None]
                       for r, p in zip(real, pred, strict=True)] for real, pred in pairs]
+        raw = [y for repeat in residuals for _, y in repeat if y is not None]
+        occupancy = []
+        for record in records:
+            counts = [n for _, n, _ in engine_occupancy(record)]
+            occupancy.append({"repeat": record["repeat"], "arrivals": len(counts),
+                              "share_of_arrivals_over_cap":
+                                  sum(1 for n in counts if n > VALIDATION_ENGINE_CAP) / len(counts),
+                              "max_in_flight": max(counts)})
         out[name] = {
             "outcome": verdict["outcome"], "detail": verdict["detail"],
             "compared": verdict["compared"], "misses": verdict["misses"],
             "agreeing": verdict["agreeing"], "max_miss_seconds": verdict["max_miss_seconds"],
             "max_miss_is_censoring": verdict["max_miss_is_censoring"],
             "void_repeats": len(voids),
+            "void_repeat_detail": void_detail,
+            "engine_in_flight": {
+                "cap": VALIDATION_ENGINE_CAP, "per_repeat": occupancy,
+                "definition": "each stamped 200 occupies the engine over [server_received_s, "
+                              "server_received_s + server_latency_s]; at each arrival, the "
+                              "requests in flight on the engine, the arriving one included "
+                              "(autoscale.a2_evidence.engine_occupancy); share of arrivals "
+                              "with more than cap in flight, and the most in flight"},
+            "residual_min_s": min(raw), "residual_max_s": max(raw),
             "typical_residual": _typical_residual(result.bins, pairs),
             "per_repeat": per_repeat,
             "residuals": residuals,
@@ -283,6 +327,8 @@ def _first_attempt_s(row) -> float | None:
 def load_balancer_section(inputs: list) -> dict:
     probes = {}
     retries: dict[str, dict[str, list[float]]] = {}
+    seen: dict[str, set] = {}  # raw worker ids per probe; only their counts leave this function
+    probe2_502: list[float] = []
     for probe in sorted((REPO / PROBES).iterdir()):
         n = probe.name.removeprefix("probe-")
         rel = PROBES / probe.name
@@ -293,6 +339,7 @@ def load_balancer_section(inputs: list) -> dict:
             rows[rate] = _probe_rows(rel, rate)
             inputs.append(rel / f"step-{rate}.jsonl.gz")
         labels = _worker_labels(rows, summary.get("workers"))
+        seen[n] = set(labels)
         steps = {}
         for rate, stats in summary["steps"].items():
             unlabelled = sorted(set(stats["worker_share"]) - set(labels))
@@ -310,10 +357,19 @@ def load_balancer_section(inputs: list) -> dict:
                     labels[w]: c for w, c in
                     per_worker_concurrency(rows[rate], return_leg_s=RETURN_LEG_S).items()}
             got = [s for s in (_first_attempt_s(r) for r in rows[rate]) if s is not None]
+            if n == "2":
+                # Probe 2 did not retry: a load-balancer 502 is the row itself, with no
+                # worker header, and its latency is how long it took to fail.
+                probe2_502.extend(r["latency"] for r in rows[rate]
+                                  if r.get("status") == LB_RETRY_STATUS
+                                  and WORKER not in (r.get("headers") or {}))
             if got:
                 retries.setdefault(n, {})[rate] = got
             steps[rate] = step
         probes[n] = {"status": summary["status"], "workers": len(labels), "steps": steps}
+    for n, workers in seen.items():
+        others = set().union(*(w for m, w in seen.items() if m != n))
+        probes[n]["workers_seen_in_other_probes"] = len(workers & others)
 
     stall = []
     for path in sorted((REPO / ONE_REPLICA).glob("repeat-*.json.gz")):
@@ -322,18 +378,48 @@ def load_balancer_section(inputs: list) -> dict:
         rec = _read_gz_json(rel)
         ok = sum(1 for x, st in zip(rec["client_latency_s"], rec["status"], strict=True)
                  if x is not None and st == 200)
+        split = stall_breakdown(rec, threshold_s=STALL_THRESHOLD_S,
+                                server_backlog_s=SERVER_BACKLOG_S)
+        statuses: dict[str, int] = {}
+        for st in rec["status"]:
+            if st != 200:
+                statuses[str(st)] = statuses.get(str(st), 0) + 1
         stall.append({"repeat": rec["repeat"], "completed": ok, "void": rec["void"],
-                      "share_over_threshold": stall_share(rec, threshold_s=STALL_THRESHOLD_S)})
+                      "share_over_threshold": stall_share(rec, threshold_s=STALL_THRESHOLD_S),
+                      "share_client_minus_server_over_threshold":
+                          split["share_client_minus_server_over"],
+                      "share_of_over_threshold_with_server_over":
+                          split["share_of_slow_with_server_over"],
+                      "non_200_status": statuses,
+                      "max_send_jitter_s": rec["max_jitter_s"],
+                      "refused_for_send_jitter": rec["max_jitter_s"] > MAX_SEND_JITTER_SECONDS})
 
     every = sorted(s for steps in retries.values() for got in steps.values() for s in got)
+
+    def _spread(xs: list[float]) -> dict:
+        return {"count": len(xs), "min": min(xs) if xs else None, "max": max(xs) if xs else None}
+
     return {
         "probes": probes,
         "per_worker_concurrency_return_leg_s": RETURN_LEG_S,
         "per_worker_concurrency_note": "server intervals reconstructed: each ends return_leg_s "
                                        "before the client saw the response and lasts the "
                                        "stamped server latency (autoscale.a2_evidence)",
+        "probes_1_to_3_distinct_workers": len(set().union(*(seen[n] for n in CONCURRENCY_PROBES))),
+        "probes_1_to_3_distinct_workers_note": "x-a2-worker ids across the steps and summary of "
+                                               "probes 1, 2 and 3, counted; the ids are not "
+                                               "published",
         "stall_share": {"threshold_s": STALL_THRESHOLD_S,
+                        "server_backlog_s": SERVER_BACKLOG_S,
+                        "send_jitter_limit_s": MAX_SEND_JITTER_SECONDS,
                         "source": str(ONE_REPLICA) + " (one-replica repeats, client latency)",
+                        "definition": "share_over_threshold: completed requests over threshold_s "
+                                      "client-side; share_client_minus_server_over_threshold: "
+                                      "client minus server latency over threshold_s (time "
+                                      "outside the engine); share_of_over_threshold_with_server_"
+                                      "over: of the requests over threshold_s client-side, those "
+                                      "whose server latency is over server_backlog_s (time "
+                                      "inside the engine)",
                         "repeats": stall},
         "lb_502_first_attempt_s": {
             "probes": retries,
@@ -341,9 +427,15 @@ def load_balancer_section(inputs: list) -> dict:
             "min": every[0] if every else None,
             "median": statistics.median(every) if every else None,
             "max": every[-1] if every else None,
+            "fast_threshold_s": FAST_502_S,
+            "fast": _spread([s for s in every if s <= FAST_502_S]),
+            "slow": _spread([s for s in every if s > FAST_502_S]),
             "source": f"the {RETRY_MARK} header value '502:<seconds>' on rows of probes "
                       + ", ".join(sorted(retries)),
         },
+        "probe2_502_s": {**_spread(sorted(probe2_502)),
+                         "source": "probe 2's rows with status 502 and no x-a2-worker header "
+                                   "(probe 2 did not retry them); their client latency"},
         "lb_502_first_attempt_validation_s": None,
         "lb_502_first_attempt_validation_s_why":
             "the validation records keep only the indices of retried requests "
@@ -353,6 +445,66 @@ def load_balancer_section(inputs: list) -> dict:
 
 
 # --- host speed -----------------------------------------------------------------------
+
+
+def _hosts_in_records(inputs: list) -> dict[str, set]:
+    """Host ids per HOST_RECORD_SOURCES entry, read from every record that names one."""
+    hosts: dict[str, set] = {}
+    for line in (REPO / A2 / "service-sweep.jsonl").read_text().splitlines():
+        hosts.setdefault("service-sweep", set()).add(json.loads(line)["host"]["host_id"])
+    for setting in ("maxseqs128", "maxseqs256"):
+        for line in (REPO / EXPLORATORY / f"{setting}.jsonl").read_text().splitlines():
+            hosts.setdefault("exploratory", set()).add(json.loads(line)["host"]["host_id"])
+    for name in ("validation", "validation-engine", "validation-calibrated"):
+        for path in sorted((REPO / A2 / name).glob("repeat-*.json.gz")):  # void ones too
+            inputs.append(A2 / name / path.name)
+            hosts.setdefault(name, set()).update(_read_gz_json(A2 / name / path.name)["host_ids"])
+    if set(hosts) != set(HOST_RECORD_SOURCES):
+        raise SystemExit(f"host sources {sorted(hosts)} are not {sorted(HOST_RECORD_SOURCES)}; "
+                         "the post's host count would cover a different set of records")
+    return hosts
+
+
+def _interpolate(points: dict[int, float], at: float) -> float:
+    """Linear interpolation between the two measured levels that bracket `at`."""
+    levels = sorted(points)
+    lo = max(lv for lv in levels if lv <= at)
+    hi = min(lv for lv in levels if lv >= at)
+    if lo == hi:
+        return points[lo]
+    return points[lo] + (points[hi] - points[lo]) * (at - lo) / (hi - lo)
+
+
+def _attempt1_at_band(latency: dict, maxseqs128: dict) -> dict:
+    """Attempt 1's host at about 100 in flight, against the re-measured host and the curve.
+
+    Attempt 1's host was never measured closed-loop. Its records still show its speed at
+    one load: pooled over the three repeats, the median server latency of the requests that
+    arrived with IN_FLIGHT_BAND in flight on the engine (the engine_occupancy count). The
+    references are linearly interpolated to the band's middle between their measured levels.
+    Rejected: a mean in-flight from Little's law, which is not a count at any arrival.
+    """
+    lats, hosts = [], set()
+    lo, hi = IN_FLIGHT_BAND
+    for k in (1, 2, 3):
+        rec = _read_gz_json(ATTEMPTS["engine"] / f"repeat-{k}.json.gz")
+        hosts.update(rec["host_ids"])
+        lats.extend(lat for _, n, lat in engine_occupancy(rec) if lo <= n <= hi)
+    mid = (lo + hi) / 2
+    return {
+        "host": _only(hosts, "hosts of attempt 1's repeats",
+                      "the latency would describe a mix of machines under one host id"),
+        "band": [lo, hi], "requests": len(lats),
+        "median_server_latency_s": statistics.median(lats),
+        "maxseqs128_interpolated_s": _interpolate(maxseqs128, mid),
+        "curve_interpolated_s": _interpolate(latency, mid),
+        "definition": f"pooled over attempt 1's three repeats: median server latency of 200s "
+                      f"that arrived with {lo}..{hi} in flight on the engine, the arriving one "
+                      f"included; references are the curve's and the maxseqs128 host's median "
+                      f"latencies, linearly interpolated to {mid:g} between measured levels",
+    }
+
+
 
 
 def host_speed_section(curve, inputs: list) -> dict:
@@ -389,6 +541,11 @@ def host_speed_section(curve, inputs: list) -> dict:
                                 "ratio_max": max(spread[(host, level)])}
                    for level, row in levels.items()}
             for host, levels in host_speed_table(runs, latency).items()}
+    versions = {json.loads(line)["engine"]["vllm_version"]
+                for path in (store, EXPLORATORY / "maxseqs128.jsonl", EXPLORATORY / "maxseqs256.jsonl")
+                for line in (REPO / path).read_text().splitlines()}
+    engine_version = _only(versions, "vLLM versions in the curve and re-measurement stores",
+                           "the post names one engine version for runs that recorded several")
     calibrated: dict[str, dict[str, list[float]]] = {}
     for k in (1, 2, 3):
         rec = _read_gz_json(ATTEMPTS["calibrated"] / f"repeat-{k}.json.gz")
@@ -397,7 +554,24 @@ def host_speed_section(curve, inputs: list) -> dict:
                      "the post's per-host ratio would describe a mix of machines")
         for level, entry in rec["calibration"]["levels"].items():
             calibrated.setdefault(host, {}).setdefault(level, []).append(entry["ratio"])
+    hosts = _hosts_in_records(inputs)
+    measured = (hosts["service-sweep"] | hosts["exploratory"] | set(calibrated))
+    (only128,) = tables["maxseqs128"].values()
     return {
+        "hosts_in_records": {
+            "count": len(set().union(*hosts.values())),
+            "per_source": {k: len(v) for k, v in sorted(hosts.items())},
+            "measured_for_speed": len(measured),
+            "definition": "distinct host ids across the curve's runs (service-sweep), the host "
+                          "re-measurement (exploratory) and every validation repeat, void ones "
+                          "included; measured_for_speed counts those with a closed-loop "
+                          "latency: the curve's host, the re-measured host and the calibrated "
+                          "attempt's host"},
+        "engine_version": engine_version,
+        "engine_version_source": f"engine.vllm_version of every record in {store} and "
+                                 f"{EXPLORATORY}/maxseqs*.jsonl; the validation records carry none",
+        "attempt1_at_100_in_flight": _attempt1_at_band(
+            latency, {int(lv): row["median_s"] for lv, row in only128.items()}),
         "curve_latency_s": {str(c): latency[c] for c in sorted(latency)},
         "curve_hosts": {level: sorted(h) for level, h in curve_hosts.items()},
         "curve_hosts_source": str(store) + " (ok runs; the curve file names no host)",
@@ -605,6 +779,11 @@ def _cold_start(inputs: list) -> dict:
     return out
 
 
+def _campaign_runs() -> int:
+    """Records in artifact 1's store, every arm, before any exclusion."""
+    return sum(1 for line in (REPO / CAMPAIGN).read_text().splitlines() if line.strip())
+
+
 def simulator_section(curve, inputs: list) -> dict:
     sources, _swept, gaps1, raw = render._load(REPO / SWEEP)
     inputs.append(SWEEP)
@@ -660,6 +839,8 @@ def simulator_section(curve, inputs: list) -> dict:
     return {
         "label": UNVALIDATED,
         "cold_start": _cold_start(inputs),
+        "campaign_runs": _campaign_runs(),
+        "campaign_runs_definition": f"records in {CAMPAIGN}, every arm, before any exclusion",
         "gaps": gaps,
         "h3": h3,
         "sweeps": sweeps,
@@ -683,8 +864,8 @@ def simulator_section(curve, inputs: list) -> dict:
 
 
 def money_section(lb: dict, sim: dict, inputs: list) -> dict:
-    """Two money statements: the load balancer's default cap (measured), the signal choice
-    (UNVALIDATED).
+    """Two money statements: the load balancer's default cap (measured throughput at the
+    reported rate), the signal choice (UNVALIDATED).
 
     The rate is RunPod's reported `costPerHr` for one worker, read from
     data/a2/gpu-rate.json; the source string there names the endpoint and is not
@@ -693,15 +874,17 @@ def money_section(lb: dict, sim: dict, inputs: list) -> dict:
     """
     inputs.append(GPU_RATE)
     rate = _read_json(GPU_RATE)
-    if rate.get("provenance") != "measured":
-        raise SystemExit(f"{GPU_RATE} is marked {rate.get('provenance')!r}, not 'measured'; "
-                         "the post would label an unmeasured rate as measured")
+    if rate.get("provenance") != "reported":
+        raise SystemExit(f"{GPU_RATE} is marked {rate.get('provenance')!r}, not 'reported'; "
+                         "the post labels the rate as RunPod's reported costPerHr, and a "
+                         "different provenance needs different words")
     a = Assumptions(gpu_hourly_rate=rate["gpu_hourly_rate"], spikes_per_day=SPIKES_PER_DAY)
 
     p1, p3 = lb["probes"]["1"], lb["probes"]["3"]
     workers = _only({p1["workers"], p3["workers"]}, "worker counts across probes 1 and 3",
-                    "the same two workers are priced at both scaler values, so a different "
-                    "count would make the ratio compare different fleets")
+                    "two workers are priced at both scaler values (a different pair in each "
+                    "probe), so a different count would make the ratio compare fleets of "
+                    "different sizes")
     ceiling = statistics.median(s["delivered_rate_rps"] for s in p1["steps"].values())
     at_300 = p3["steps"]["300"]["delivered_rate_rps"]
 
@@ -719,6 +902,12 @@ def money_section(lb: dict, sim: dict, inputs: list) -> dict:
         "gpu_rate_provenance": a.provenance["gpu_hourly_rate"],
         "gpu_rate_caveat": rate["caveat"],
         "gpu_rate_source_file": str(GPU_RATE),
+        "list_price_hourly": rate["list_price_hourly"],
+        "list_price_source": rate["list_price_source"],
+        "list_price_read_on": rate["list_price_read_on"],
+        "list_over_reported": rate["list_price_hourly"] / a.gpu_hourly_rate,
+        "list_over_reported_definition": "the pricing page's serverless rate over the reported "
+                                         "costPerHr; every dollar figure scales by it",
         "spikes_per_day": a.spikes_per_day,
         "spikes_per_day_provenance": a.provenance["spikes_per_day"],
         "load_balancer_cap": {

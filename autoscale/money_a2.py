@@ -61,8 +61,12 @@ class Assumptions:
 
     @property
     def provenance(self) -> dict[str, str]:
-        """Where each assumption comes from; the post's table prints these verbatim."""
-        return {"gpu_hourly_rate": "measured", "spikes_per_day": "illustrative"}
+        """Where each assumption comes from; the post's table prints these verbatim.
+
+        The rate is "reported", not "measured": it is the `costPerHr` RunPod's API
+        reports for a worker, and nothing in this repository measured a bill.
+        """
+        return {"gpu_hourly_rate": "reported", "spikes_per_day": "illustrative"}
 
 
 def dollars_per_million_requests(assumptions: Assumptions, *, workers: int, rate: float) -> float:

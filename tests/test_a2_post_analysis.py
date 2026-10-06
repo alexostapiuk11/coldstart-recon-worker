@@ -216,7 +216,7 @@ def test_the_money_section_prices_the_default_cap_at_the_committed_rate():
     m = a["money"]
     rate = json.loads((REPO / "data" / "a2" / "gpu-rate.json").read_text())
     assert m["gpu_hourly_rate"] == rate["gpu_hourly_rate"] == 0.74
-    assert m["gpu_rate_provenance"] == "measured"
+    assert m["gpu_rate_provenance"] == "reported"
     assert m["spikes_per_day"] == 24.0 and m["spikes_per_day_provenance"] == "illustrative"
     assert "billing" in m["gpu_rate_caveat"]
     cap = m["load_balancer_cap"]
@@ -252,3 +252,88 @@ def test_the_rate_file_is_a_listed_input_and_the_endpoint_id_is_not_republished(
     a = _analysis()
     assert "data/a2/gpu-rate.json" in a["_provenance"]["inputs"]
     assert "un0lhqt51q1bvp" not in A.read_text()
+
+
+def test_the_engine_held_more_than_its_128_cap_in_both_attempts():
+    """The load balancer's bursts pushed the engine past --max-num-seqs 128."""
+    v = _analysis()["validation"]
+    for name in ("engine", "calibrated"):
+        occ = v[name]["engine_in_flight"]
+        assert occ["cap"] == 128
+        assert [r["repeat"] for r in occ["per_repeat"]] == [1, 2, 3]
+    first = [r for r in v["engine"]["engine_in_flight"]["per_repeat"]]
+    assert [round(r["share_of_arrivals_over_cap"], 2) for r in first] == [0.45, 0.59, 0.33]
+    assert {r["max_in_flight"] for r in first} == {512}
+    second = v["calibrated"]["engine_in_flight"]["per_repeat"]
+    assert [round(r["share_of_arrivals_over_cap"], 2) for r in second] == [0.17, 0.13, 0.06]
+    assert [r["max_in_flight"] for r in second] == [452, 503, 487]
+
+
+def test_attempt_1s_raw_residuals_reach_minus_six_seconds():
+    v = _analysis()["validation"]["engine"]
+    assert v["residual_min_s"] == pytest.approx(-6.198, abs=1e-3)
+    assert v["residual_min_s"] == min(y for rep in v["residuals"] for _, y in rep if y is not None)
+
+
+def test_attempt_1s_void_repeat_lacked_the_stamp_on_every_200():
+    d = _analysis()["validation"]["engine"]["void_repeat_detail"]
+    assert d == [{"repeat": 1, "responses_200": 64784,
+                  "responses_200_without_engine_arrival": 64784}]
+
+
+def test_probes_1_to_3_each_ran_on_a_different_pair_of_workers():
+    lb = _analysis()["load_balancer"]
+    assert lb["probes_1_to_3_distinct_workers"] == 6
+    for n in ("1", "2", "3"):
+        assert lb["probes"][n]["workers"] == 2
+        assert lb["probes"][n]["workers_seen_in_other_probes"] == 0
+
+
+def test_the_stall_share_is_split_into_outside_the_engine_and_engine_backlog():
+    reps = _analysis()["load_balancer"]["stall_share"]["repeats"]
+    assert [round(r["share_client_minus_server_over_threshold"], 3) for r in reps] == [
+        0.156, 0.186, 0.105]
+    assert [round(r["share_of_over_threshold_with_server_over"], 2) for r in reps] == [
+        0.75, 0.90, 0.77]
+    assert reps[0]["non_200_status"] == {"400": 2}
+    assert [r["refused_for_send_jitter"] for r in reps] == [False, True, True]
+
+
+def test_the_502_first_attempts_are_split_into_fast_and_slow():
+    f = _analysis()["load_balancer"]["lb_502_first_attempt_s"]
+    assert f["fast"]["count"] == 17 and f["slow"]["count"] == 20
+    assert f["fast"]["count"] + f["slow"]["count"] == f["count"]
+    assert round(f["fast"]["max"], 2) == 0.40 and round(f["slow"]["min"], 2) == 2.50
+    p2 = _analysis()["load_balancer"]["probe2_502_s"]
+    assert p2["count"] == 13 and 0.12 <= p2["min"] <= p2["max"] <= 0.29
+
+
+def test_six_hosts_ran_the_curve_and_validation_records_three_measured():
+    h = _analysis()["host_speed"]
+    assert h["hosts_in_records"]["count"] == 6
+    assert h["hosts_in_records"]["measured_for_speed"] == 3
+    assert h["engine_version"] == "0.27.1"
+
+
+def test_attempt_1s_host_at_about_100_in_flight_matches_the_re_measured_host():
+    a = _analysis()["host_speed"]["attempt1_at_100_in_flight"]
+    assert a["host"] == "ku80i8usxw3st5"
+    assert a["band"] == [90, 110] and a["requests"] > 1000
+    assert a["median_server_latency_s"] == pytest.approx(0.494, abs=0.002)
+    assert a["maxseqs128_interpolated_s"] == pytest.approx(0.487, abs=0.002)
+    assert a["curve_interpolated_s"] == pytest.approx(0.533, abs=0.002)
+
+
+def test_the_cold_start_counts_come_from_the_campaign():
+    sim = _analysis()["simulator"]
+    cs = sim["cold_start"]
+    assert (cs["A"]["n"], cs["C"]["n"], sim["campaign_runs"]) == (99, 100, 300)
+
+
+def test_the_money_section_carries_the_list_price_beside_the_reported_rate():
+    m = _analysis()["money"]
+    rate = json.loads((REPO / "data" / "a2" / "gpu-rate.json").read_text())
+    assert m["list_price_hourly"] == rate["list_price_hourly"] == 1.10
+    assert m["list_price_source"] == "https://www.runpod.io/pricing"
+    assert m["list_price_read_on"] == "2026-10-05"
+    assert m["list_over_reported"] == pytest.approx(1.10 / 0.74)

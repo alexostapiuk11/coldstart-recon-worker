@@ -58,6 +58,18 @@
   "script": "scripts/a2_post_analysis.py"
  },
  "host_speed": {
+  "attempt1_at_100_in_flight": {
+   "band": [
+    90,
+    110
+   ],
+   "curve_interpolated_s": 0.5329015761890332,
+   "definition": "pooled over attempt 1's three repeats: median server latency of 200s that arrived with 90..110 in flight on the engine, the arriving one included; references are the curve's and the maxseqs128 host's median latencies, linearly interpolated to 100 between measured levels",
+   "host": "ku80i8usxw3st5",
+   "maxseqs128_interpolated_s": 0.48679275326503557,
+   "median_server_latency_s": 0.493996,
+   "requests": 25699
+  },
   "calibrated_ratios_by_host": {
    "sef5s24viyecyr": {
     "128": [
@@ -90,6 +102,8 @@
    "32": 0.37574920791666955,
    "64": 0.43883609015028924
   },
+  "engine_version": "0.27.1",
+  "engine_version_source": "engine.vllm_version of every record in data/a2/service-sweep.jsonl and data/a2/exploratory/maxseqs*.jsonl; the validation records carry none",
   "exploratory": {
    "maxseqs128": {
     "daps3haubwrzbn": {
@@ -142,11 +156,29 @@
     }
    }
   },
+  "hosts_in_records": {
+   "count": 6,
+   "definition": "distinct host ids across the curve's runs (service-sweep), the host re-measurement (exploratory) and every validation repeat, void ones included; measured_for_speed counts those with a closed-loop latency: the curve's host, the re-measured host and the calibrated attempt's host",
+   "measured_for_speed": 3,
+   "per_source": {
+    "exploratory": 1,
+    "service-sweep": 1,
+    "validation": 2,
+    "validation-calibrated": 1,
+    "validation-engine": 2
+   }
+  },
   "note": "hosts are the RunPod worker ids the findings doc already names; host ids are published, probe worker ids are not"
  },
  "load_balancer": {
   "lb_502_first_attempt_s": {
    "count": 37,
+   "fast": {
+    "count": 17,
+    "max": 0.399,
+    "min": 0.109
+   },
+   "fast_threshold_s": 1.0,
    "max": 14.091,
    "median": 2.642,
    "min": 0.109,
@@ -209,12 +241,23 @@
      ]
     }
    },
+   "slow": {
+    "count": 20,
+    "max": 14.091,
+    "min": 2.497
+   },
    "source": "the a2-driver-lb-retry header value '502:<seconds>' on rows of probes 3, 4, 5"
   },
   "lb_502_first_attempt_validation_s": null,
   "lb_502_first_attempt_validation_s_why": "the validation records keep only the indices of retried requests (lb_502_retried), not the retry header's value, so the first attempt's duration was not recorded for any validation repeat",
   "per_worker_concurrency_note": "server intervals reconstructed: each ends return_leg_s before the client saw the response and lasts the stamped server latency (autoscale.a2_evidence)",
   "per_worker_concurrency_return_leg_s": 0.1,
+  "probe2_502_s": {
+   "count": 13,
+   "max": 0.28351874998770654,
+   "min": 0.12384112499421462,
+   "source": "probe 2's rows with status 502 and no x-a2-worker header (probe 2 did not retry them); their client latency"
+  },
   "probes": {
    "1": {
     "status": "stopped: RuntimeError: can't start new thread",
@@ -301,7 +344,8 @@
       }
      }
     },
-    "workers": 2
+    "workers": 2,
+    "workers_seen_in_other_probes": 0
    },
    "2": {
     "status": "complete",
@@ -451,7 +495,8 @@
       }
      }
     },
-    "workers": 2
+    "workers": 2,
+    "workers_seen_in_other_probes": 0
    },
    "3": {
     "status": "complete",
@@ -607,7 +652,8 @@
       }
      }
     },
-    "workers": 2
+    "workers": 2,
+    "workers_seen_in_other_probes": 0
    },
    "4": {
     "status": "complete",
@@ -715,7 +761,8 @@
       }
      }
     },
-    "workers": 1
+    "workers": 1,
+    "workers_seen_in_other_probes": 0
    },
    "5": {
     "status": "complete",
@@ -823,14 +870,25 @@
       }
      }
     },
-    "workers": 1
+    "workers": 1,
+    "workers_seen_in_other_probes": 0
    }
   },
+  "probes_1_to_3_distinct_workers": 6,
+  "probes_1_to_3_distinct_workers_note": "x-a2-worker ids across the steps and summary of probes 1, 2 and 3, counted; the ids are not published",
   "stall_share": {
+   "definition": "share_over_threshold: completed requests over threshold_s client-side; share_client_minus_server_over_threshold: client minus server latency over threshold_s (time outside the engine); share_of_over_threshold_with_server_over: of the requests over threshold_s client-side, those whose server latency is over server_backlog_s (time inside the engine)",
    "repeats": [
     {
      "completed": 64782,
+     "max_send_jitter_s": 0.44058677245047306,
+     "non_200_status": {
+      "400": 2
+     },
+     "refused_for_send_jitter": false,
      "repeat": 1,
+     "share_client_minus_server_over_threshold": 0.1564940878639128,
+     "share_of_over_threshold_with_server_over": 0.7512154630617811,
      "share_over_threshold": 0.2603500972492359,
      "void": [
       "2 requests without a 200 (0 of them transport errors)"
@@ -838,17 +896,29 @@
     },
     {
      "completed": 64784,
+     "max_send_jitter_s": 0.591413303302744,
+     "non_200_status": {},
+     "refused_for_send_jitter": true,
      "repeat": 2,
+     "share_client_minus_server_over_threshold": 0.18623425537169672,
+     "share_of_over_threshold_with_server_over": 0.8967612240339513,
      "share_over_threshold": 0.3455328476166955,
      "void": []
     },
     {
      "completed": 64784,
+     "max_send_jitter_s": 0.8058686039894951,
+     "non_200_status": {},
+     "refused_for_send_jitter": true,
      "repeat": 3,
+     "share_client_minus_server_over_threshold": 0.10497962459866633,
+     "share_of_over_threshold_with_server_over": 0.768208516886931,
      "share_over_threshold": 0.21023709557915535,
      "void": []
     }
    ],
+   "send_jitter_limit_s": 0.5,
+   "server_backlog_s": 1.5,
    "source": "data/a2/validation (one-replica repeats, client latency)",
    "threshold_s": 2.0
   }
@@ -857,8 +927,13 @@
   "gpu": "NVIDIA GeForce RTX 4090",
   "gpu_hourly_rate": 0.74,
   "gpu_rate_caveat": "RunPod's reported rate for that worker, not cross-checked against billing; artifact 4's recon (docs/recon-a4.md) implied $1.106/h for a flex serverless RTX 4090 worker, so the billed rate may differ; the spend record (docs/spend-a2.md) is the billing",
-  "gpu_rate_provenance": "measured",
+  "gpu_rate_provenance": "reported",
   "gpu_rate_source_file": "data/a2/gpu-rate.json",
+  "list_over_reported": 1.4864864864864866,
+  "list_over_reported_definition": "the pricing page's serverless rate over the reported costPerHr; every dollar figure scales by it",
+  "list_price_hourly": 1.1,
+  "list_price_read_on": "2026-10-05",
+  "list_price_source": "https://www.runpod.io/pricing",
   "load_balancer_cap": {
    "ratio": 17.582791490948527,
    "ratio_definition": "scaler 128's delivered rate over scaler 4's, which is also scaler 4's cost per request over scaler 128's (same workers, same hourly rate)",
@@ -901,6 +976,8 @@
   "spikes_per_day_provenance": "illustrative"
  },
  "simulator": {
+  "campaign_runs": 300,
+  "campaign_runs_definition": "records in data/campaign.jsonl, every arm, before any exclusion",
   "cold_start": {
    "A": {
     "median": 81.07123090312962,
@@ -1452,6 +1529,30 @@
    "agreeing": 0,
    "compared": 37,
    "detail": "37 of 37 judged bins miss, more than the 0.5 allowed; largest miss 0.0596 s; 3 excluded (0 unstable); 0 both censored (agreement, not judged)",
+   "engine_in_flight": {
+    "cap": 128,
+    "definition": "each stamped 200 occupies the engine over [server_received_s, server_received_s + server_latency_s]; at each arrival, the requests in flight on the engine, the arriving one included (autoscale.a2_evidence.engine_occupancy); share of arrivals with more than cap in flight, and the most in flight",
+    "per_repeat": [
+     {
+      "arrivals": 64783,
+      "max_in_flight": 452,
+      "repeat": 1,
+      "share_of_arrivals_over_cap": 0.1735640522976707
+     },
+     {
+      "arrivals": 64781,
+      "max_in_flight": 503,
+      "repeat": 2,
+      "share_of_arrivals_over_cap": 0.12611722572976644
+     },
+     {
+      "arrivals": 64778,
+      "max_in_flight": 487,
+      "repeat": 3,
+      "share_of_arrivals_over_cap": 0.062382290283738304
+     }
+    ]
+   },
    "max_miss_is_censoring": false,
    "max_miss_seconds": 0.059562679687503506,
    "misses": 37,
@@ -1500,6 +1601,8 @@
      "server_p50_s": 0.4580065
     }
    ],
+   "residual_max_s": 1.290291910354609,
+   "residual_min_s": 0.01747830849715093,
    "residuals": [
     [
      [
@@ -1999,12 +2102,37 @@
      1.1600519010895705
     ]
    },
+   "void_repeat_detail": [],
    "void_repeats": 0
   },
   "engine": {
    "agreeing": 3,
    "compared": 37,
    "detail": "34 of 37 judged bins miss, more than the 0.5 allowed; largest miss 2.59 s; 3 excluded (0 unstable); 0 both censored (agreement, not judged)",
+   "engine_in_flight": {
+    "cap": 128,
+    "definition": "each stamped 200 occupies the engine over [server_received_s, server_received_s + server_latency_s]; at each arrival, the requests in flight on the engine, the arriving one included (autoscale.a2_evidence.engine_occupancy); share of arrivals with more than cap in flight, and the most in flight",
+    "per_repeat": [
+     {
+      "arrivals": 64784,
+      "max_in_flight": 512,
+      "repeat": 1,
+      "share_of_arrivals_over_cap": 0.454093603358854
+     },
+     {
+      "arrivals": 64781,
+      "max_in_flight": 512,
+      "repeat": 2,
+      "share_of_arrivals_over_cap": 0.5939550176749355
+     },
+     {
+      "arrivals": 64784,
+      "max_in_flight": 512,
+      "repeat": 3,
+      "share_of_arrivals_over_cap": 0.33216534946900467
+     }
+    ]
+   },
    "max_miss_is_censoring": false,
    "max_miss_seconds": 2.590930274972247,
    "misses": 34,
@@ -2041,6 +2169,8 @@
      "server_p50_s": 0.49173449999999996
     }
    ],
+   "residual_max_s": 0.0499339824690237,
+   "residual_min_s": -6.19773868202845,
    "residuals": [
     [
      [
@@ -2540,6 +2670,13 @@
      0.9545971584324286
     ]
    },
+   "void_repeat_detail": [
+    {
+     "repeat": 1,
+     "responses_200": 64784,
+     "responses_200_without_engine_arrival": 64784
+    }
+   ],
    "void_repeats": 1
   }
  }

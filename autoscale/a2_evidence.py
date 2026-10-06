@@ -6,10 +6,12 @@ here is pre-registered: these are the evidence behind the post's findings
 about RunPod's load balancer and host speed, and the post says so.
 """
 
+import bisect
 import statistics
 from collections import defaultdict
 
-__all__ = ["delivered_rate", "host_speed_table", "per_worker_concurrency", "stall_share"]
+__all__ = ["delivered_rate", "engine_occupancy", "host_speed_table", "per_worker_concurrency",
+           "stall_breakdown", "stall_share"]
 
 WORKER = "x-a2-worker"
 SERVER_LATENCY = "x-a2-server-latency-ms"
@@ -77,6 +79,61 @@ def stall_share(record, *, threshold_s: float) -> float:
     if not lat:
         raise ValueError("no completed requests; a share of nothing is not zero")
     return sum(1 for x in lat if x > threshold_s) / len(lat)
+
+
+def stall_breakdown(record, *, threshold_s: float, server_backlog_s: float) -> dict:
+    """How much of a completed request's client-side delay was spent outside the engine.
+
+    A request can take over `threshold_s` client-side for two reasons: it waited
+    outside the engine (in the load balancer, or on the way), or it waited inside
+    the engine behind a burst the load balancer had just released. The first is
+    client minus server latency; the second shows as a long server latency.
+    Returns, over completed (200) requests with both latencies: the share over
+    `threshold_s` client-side (as `stall_share`), the share whose client minus
+    server latency is over `threshold_s`, and, of the requests over `threshold_s`
+    client-side, the share whose server latency is over `server_backlog_s`.
+    Rejected: reporting the client-side share alone as "held by the load
+    balancer", which counts engine backlog as load-balancer time.
+    """
+    rows = [(c, s) for c, s, st in zip(record["client_latency_s"], record["server_latency_s"],
+                                       record["status"], strict=True)
+            if st == 200 and c is not None and s is not None]
+    if not rows:
+        raise ValueError("no completed request carries both latencies; a share of nothing "
+                         "is not zero")
+    slow = [(c, s) for c, s in rows if c > threshold_s]
+    return {
+        "completed": len(rows),
+        "share_client_over": len(slow) / len(rows),
+        "share_client_minus_server_over": sum(1 for c, s in rows if c - s > threshold_s)
+        / len(rows),
+        "share_of_slow_with_server_over": (sum(1 for _, s in slow if s > server_backlog_s)
+                                           / len(slow)) if slow else None,
+    }
+
+
+def engine_occupancy(record) -> list[tuple[float, int, float]]:
+    """(engine arrival, requests in flight on the engine at that arrival, server latency).
+
+    Each stamped request (a 200 with an engine-arrival stamp and a server
+    latency) occupies the engine over [received, received + server latency].
+    At each arrival, the count is the requests that have arrived by then (the
+    arriving one included) minus those that have finished by then; a request
+    finishing exactly at an arrival has finished. "In flight" here is what the
+    engine holds, running or queued behind its own `--max-num-seqs`, which is
+    what lets the count exceed that cap. Sorted by arrival.
+    """
+    rows = sorted((t, lat) for t, lat, st in zip(record["server_received_s"],
+                                                 record["server_latency_s"],
+                                                 record["status"], strict=True)
+                  if st == 200 and t is not None and lat is not None)
+    if not rows:
+        raise ValueError("no 200 carries an engine-arrival stamp and a server latency, so "
+                         "there is no occupancy to reconstruct")
+    starts = [t for t, _ in rows]
+    ends = sorted(t + lat for t, lat in rows)
+    return [(t, bisect.bisect_right(starts, t) - bisect.bisect_right(ends, t), lat)
+            for t, lat in rows]
 
 
 def host_speed_table(runs, curve_latency: dict) -> dict:

@@ -98,3 +98,42 @@ def test_per_worker_concurrency_mean_is_the_time_weighted_level():
     got = ev.per_worker_concurrency(rows, return_leg_s=0.0)
     assert got["w1"]["max"] == 2
     assert got["w1"]["mean"] == pytest.approx(4 / 3)
+
+
+def _validation_record(received, latency, status=None, client=None):
+    n = len(received)
+    return {"server_received_s": received, "server_latency_s": latency,
+            "status": status or [200] * n, "client_latency_s": client or [None] * n}
+
+
+def test_engine_occupancy_counts_requests_in_flight_at_each_arrival_including_itself():
+    # intervals [0, 2], [1, 2], [1.5, 3.5], [2, 3]: at 2.0 the first two have ended
+    rec = _validation_record([0.0, 1.0, 1.5, 2.0], [2.0, 1.0, 2.0, 1.0])
+    got = ev.engine_occupancy(rec)
+    assert [(t, n) for t, n, _ in got] == [(0.0, 1), (1.0, 2), (1.5, 3), (2.0, 2)]
+    assert [lat for _, _, lat in got] == [2.0, 1.0, 2.0, 1.0]
+
+
+def test_engine_occupancy_skips_requests_without_a_stamp_or_a_200():
+    rec = _validation_record([0.0, None, 0.5, 0.6], [1.0, 1.0, None, 1.0],
+                             status=[200, 200, 200, 400])
+    assert [(t, n) for t, n, _ in ev.engine_occupancy(rec)] == [(0.0, 1)]
+
+
+def test_engine_occupancy_refuses_a_record_with_no_stamped_request():
+    with pytest.raises(ValueError, match="stamp"):
+        ev.engine_occupancy(_validation_record([None], [0.3]))
+
+
+def test_stall_breakdown_separates_time_outside_the_engine_from_engine_backlog():
+    # client latencies 0.5, 2.5, 3.0, 4.0; server 0.3, 2.0, 0.5, 1.6
+    rec = {"client_latency_s": [0.5, 2.5, 3.0, 4.0, None],
+           "server_latency_s": [0.3, 2.0, 0.5, 1.6, None],
+           "status": [200, 200, 200, 200, 502]}
+    got = ev.stall_breakdown(rec, threshold_s=2.0, server_backlog_s=1.5)
+    assert got["completed"] == 4
+    assert got["share_client_over"] == pytest.approx(3 / 4)
+    # client - server: 0.2, 0.5, 2.5, 2.4 -> two over 2 s
+    assert got["share_client_minus_server_over"] == pytest.approx(2 / 4)
+    # of the three over 2 s client-side, server 2.0 and 1.6 exceed 1.5
+    assert got["share_of_slow_with_server_over"] == pytest.approx(2 / 3)

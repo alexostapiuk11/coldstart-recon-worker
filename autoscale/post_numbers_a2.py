@@ -40,9 +40,9 @@ def _secs(x: float) -> str:
 
     0.9996 rounds to 1.000 at three decimals, which would print as "1.000" and
     break the one-format-per-magnitude rule. Rejected: choosing the decimals
-    from the unrounded value.
+    from the unrounded value. The magnitude decides, so -6.198 prints like 6.198.
     """
-    return f"{x:.3f}" if round(x, 3) < 1 else f"{x:.2f}"
+    return f"{x:.3f}" if abs(round(x, 3)) < 1 else f"{x:.2f}"
 
 
 def _s(x: float) -> str:
@@ -91,6 +91,23 @@ def _span(values: list[float], spec: str) -> str:
     """
     lo, hi = f"{min(values):{spec}}", f"{max(values):{spec}}"
     return lo if lo == hi else f"{lo}–{hi}"
+
+
+def _count_span(values, unit: str = "") -> str:
+    """Counts as min–max, one value when both ends format alike, then the unit once."""
+    lo, hi = _count(min(values)), _count(max(values))
+    return (lo if lo == hi else f"{lo}–{hi}") + (f" {unit}" if unit else "")
+
+
+def _pct_span(values) -> str:
+    """Whole percentages as min–max, the stall-share range's format ('21%–35%')."""
+    lo, hi = _pct(min(values)), _pct(max(values))
+    return lo if lo == hi else f"{lo}–{hi}"
+
+
+def _and(items: list[str]) -> str:
+    """'a', 'a and b', 'a, b and c'."""
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
 
 
 def _ms_signed(x: float) -> str:
@@ -172,6 +189,8 @@ def _money(m: dict) -> dict[str, str]:
         "money_per_million_scaler4": _dollars(cap["scaler_4"]["dollars_per_million"]),
         "money_per_million_scaler128": _dollars(cap["scaler_128"]["dollars_per_million"]),
         "money_scaler_ratio": f"{round(cap['ratio'])}×",
+        "money_list_rate": f"{_dollars(m['list_price_hourly'])}/h",
+        "money_list_ratio": f"{m['list_over_reported']:.1f}×",
     }
     sig = m["signal_choice"]
     if "UNVALIDATED" not in sig["label"]:
@@ -197,10 +216,18 @@ def _validation(v: dict) -> dict[str, str]:
         out[f"{tag}_misses"] = f"{attempt['misses']} of {attempt['compared']} judged bins"
         out[f"{tag}_max_miss"] = _s(attempt["max_miss_seconds"])
         out[f"{tag}_void_repeats"] = str(attempt["void_repeats"])
+        occ = attempt["engine_in_flight"]["per_repeat"]
+        out[f"{tag}_engine_over_cap_range"] = _pct_span(
+            [r["share_of_arrivals_over_cap"] for r in occ])
+        out[f"{tag}_engine_max_in_flight"] = _count_span([r["max_in_flight"] for r in occ])
     # The ratio is real / predicted latency: the first attempt's real latency was
     # BELOW the prediction (ratio < 1), the calibrated attempt's ABOVE it (ratio > 1).
     # One "percent off" key would hide that the two misses point opposite ways, and
     # "faster"/"slower" would call a latency ratio a speed (see `_below_pct`).
+    out["attempt1_min_residual"] = _s(v["engine"]["residual_min_s"])
+    void = _only(v["engine"]["void_repeat_detail"], "void repeats in attempt 1",
+                 "the post's count of unstamped responses names one void repeat")
+    out["attempt1_void_200_without_stamp"] = _count(void["responses_200_without_engine_arrival"])
     out["attempt1_latency_below_prediction_pct"] = _below_pct(
         v["engine"]["typical_residual"]["median_ratio_real_over_predicted"], "attempt 1")
     out["attempt2_latency_above_prediction_pct"] = _above_pct(
@@ -224,6 +251,14 @@ def _calibrated_host(host_speed: dict) -> dict[str, str]:
 
 def _host_speed(h: dict) -> dict[str, str]:
     out = _calibrated_host(h)
+    out["hosts_in_records"] = _count(h["hosts_in_records"]["count"])
+    out["hosts_measured_for_speed"] = _count(h["hosts_in_records"]["measured_for_speed"])
+    out["engine_version"] = f"vLLM {h['engine_version']}"
+    band = h["attempt1_at_100_in_flight"]
+    out["attempt1_in_flight_band"] = f"{band['band'][0]} to {band['band'][1]}"
+    out["attempt1_latency_at_100"] = _s(band["median_server_latency_s"])
+    out["maxseqs128_latency_at_100"] = _s(band["maxseqs128_interpolated_s"])
+    out["curve_latency_at_100"] = _s(band["curve_interpolated_s"])
     hosts = sorted({x for ids in h["curve_hosts"].values() for x in ids})
     out["curve_host_id"] = ", ".join(hosts)
     for store, by_host in h["exploratory"].items():
@@ -302,17 +337,39 @@ def _load_balancer(lb: dict) -> dict[str, str]:
     out["stall_share_range"] = f"{_pct(min(shares))}–{_pct(max(shares))}"
     for r in lb["stall_share"]["repeats"]:
         out[f"stall_share_repeat_{r['repeat']}"] = _pct(r["share_over_threshold"])
-    # The range deliberately includes the void repeat (2 requests without a 200): dropping
-    # it would narrow 26%-35%-21% to two repeats and hide that one was void; the post says
-    # which it did.
-    voids = [f"repeat {r['repeat']} (void: {'; '.join(r['void'])})"
-             for r in lb["stall_share"]["repeats"] if r["void"]]
-    out["stall_share_includes_void_repeat"] = (
-        "yes, " + ", ".join(voids) if voids else "no, every repeat is complete")
+    # The range deliberately includes the void repeat: dropping it would narrow the range to
+    # two repeats and hide that one was void; the post says which, and what voided it.
+    stall = lb["stall_share"]
+    voids = [f"repeat {r['repeat']} was void: " + _and(
+                 [f"{c} requests got {s}s" for s, c in sorted(r["non_200_status"].items())])
+             for r in stall["repeats"] if r["void"]]
+    out["stall_share_includes_void_repeat"] = "; ".join(voids) if voids else "no repeat was void"
+    refused = [r for r in stall["repeats"] if r["refused_for_send_jitter"]]
+    if refused:
+        out["stall_jitter_refused"] = (
+            f"repeat{'s' if len(refused) > 1 else ''} "
+            f"{_and([str(r['repeat']) for r in refused])} "
+            f"{'were' if len(refused) > 1 else 'was'} refused for send jitter "
+            f"({_and([_s(r['max_send_jitter_s']) for r in refused])})")
+    out["stall_server_backlog_s"] = _s(stall["server_backlog_s"])
+    for r in stall["repeats"]:
+        out[f"stall_outside_engine_share_repeat_{r['repeat']}"] = _pct(
+            r["share_client_minus_server_over_threshold"])
+        out[f"stall_engine_backlog_share_repeat_{r['repeat']}"] = _pct(
+            r["share_of_over_threshold_with_server_over"])
+    out["probes_1_to_3_distinct_workers"] = _count(lb["probes_1_to_3_distinct_workers"])
     f = lb["lb_502_first_attempt_s"]
     out["lb_502_first_attempt_count"] = _count(f["count"])
     out["lb_502_first_attempt_median"] = _s(f["median"])
     out["lb_502_first_attempt_max"] = _s(f["max"])
+    for speed in ("fast", "slow"):
+        out[f"lb_502_{speed}_count"] = _count(f[speed]["count"])
+        out[f"lb_502_{speed}_span"] = _s_span(f[speed]["min"], f[speed]["max"])
+    p2 = lb["probe2_502_s"]
+    if _count(p2["count"]) != out["probe2_non_200_total"]:
+        raise ValueError(f"probe 2 has {p2['count']} load-balancer 502s but {out['probe2_non_200_total']} "
+                         "non-200s; the post calls every probe-2 failure such a 502")
+    out["probe2_502_span"] = _s_span(p2["min"], p2["max"])
     return out
 
 
@@ -378,6 +435,8 @@ def _simulator(sim: dict) -> dict[str, str]:
                 out[f"gap_{fk}_{_sweep_key(sweep)}_interval"] = _s_span(g["lo"], g["hi"])
     for arm in ("A", "C"):
         out[f"cold_start_median_{arm.lower()}"] = _s(sim["cold_start"][arm]["median"])
+        out[f"cold_start_n_{arm.lower()}"] = _count(sim["cold_start"][arm]["n"])
+    out["campaign_runs"] = _count(sim["campaign_runs"])
     out["h1"] = _verdict(sim["h1"]["overall"])
     out["h2"] = _verdict(sim["h2"]["overall"])
     out.update(_h3(sim["h3"]))
@@ -396,6 +455,11 @@ def _simulator(sim: dict) -> dict[str, str]:
             r = s["reached"][signal]
             out[f"reached_{_sweep_key(sweep)}_{signal}_p99"] = _s(r["p99_s"])
             out[f"reached_{_sweep_key(sweep)}_{signal}_cost"] = _replica_s(r["cost_replica_s"])
+    costs = {s: [sw["reached"][s]["cost_replica_s"] for sw in sim["sweeps"].values()]
+             for s in _SIGNALS}
+    out["queue_depth_cost_span"] = _count_span(costs["queue_depth"], "replica-seconds")
+    out["others_cost_span"] = _count_span(
+        costs["in_flight_concurrency"] + costs["utilization"], "replica-seconds")
     out.update(_censoring(sim["h2_censoring"]))
     out.update(_h2_noise(sim["h2_noise"]))
     out["repetitions"] = str(sim["identity"]["repetitions"])
