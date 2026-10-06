@@ -298,8 +298,9 @@ def _worker_labels(steps: dict, summary_workers) -> dict:
     """Raw RunPod worker id -> "worker N", numbered by first request.
 
     Steps in ascending offered rate, rows in file order; a worker named only in
-    the summary is numbered after those. The raw ids are not published:
-    they name live RunPod workers and add nothing a reader can use.
+    the summary is numbered after those. The raw ids are committed in the probe
+    files but not quoted here: they name RunPod workers and add nothing a reader
+    can use.
     """
     labels: dict[str, str] = {}
     for rate in sorted(steps, key=float):
@@ -407,8 +408,9 @@ def load_balancer_section(inputs: list) -> dict:
                                        "stamped server latency (autoscale.a2_evidence)",
         "probes_1_to_3_distinct_workers": len(set().union(*(seen[n] for n in CONCURRENCY_PROBES))),
         "probes_1_to_3_distinct_workers_note": "x-a2-worker ids across the steps and summary of "
-                                               "probes 1, 2 and 3, counted; the ids are not "
-                                               "published",
+                                               "probes 1, 2 and 3, counted; the ids are in "
+                                               "the committed probe files and not quoted "
+                                               "here",
         "stall_share": {"threshold_s": STALL_THRESHOLD_S,
                         "server_backlog_s": SERVER_BACKLOG_S,
                         "send_jitter_limit_s": MAX_SEND_JITTER_SECONDS,

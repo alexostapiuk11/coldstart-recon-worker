@@ -219,6 +219,9 @@ def test_the_money_section_prices_the_default_cap_at_the_committed_rate():
     assert m["gpu_rate_provenance"] == "reported"
     assert m["spikes_per_day"] == 24.0 and m["spikes_per_day_provenance"] == "illustrative"
     assert "billing" in m["gpu_rate_caveat"]
+    # docs/spend-a2.md does not exist until the owner reads the console; the caveat must
+    # say so rather than cite it as a file a reader could open today.
+    assert "written from the RunPod console before publication" in m["gpu_rate_caveat"]
     cap = m["load_balancer_cap"]
     probes = a["load_balancer"]["probes"]
     assert cap["workers"] == probes["1"]["workers"] == probes["3"]["workers"] == 2
@@ -337,3 +340,10 @@ def test_the_money_section_carries_the_list_price_beside_the_reported_rate():
     assert m["list_price_source"] == "https://www.runpod.io/pricing"
     assert m["list_price_read_on"] == "2026-10-05"
     assert m["list_over_reported"] == pytest.approx(1.10 / 0.74)
+
+
+def test_the_worker_id_note_does_not_claim_the_ids_are_unpublished():
+    # The ids are in the committed probe files (`headers.x-a2-worker`, summary `workers`);
+    # the analysis only declines to quote them.
+    note = _analysis()["load_balancer"]["probes_1_to_3_distinct_workers_note"]
+    assert "not quoted here" in note and "not published" not in note

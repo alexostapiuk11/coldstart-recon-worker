@@ -63,7 +63,12 @@ Notes on each:
 The endpoint's scaler value, worker count and image are RunPod settings, not
 code. They are recorded here from the run notes in
 `docs/runbook-a2-validation.md` and the session that ran them; the files
-themselves do not contain them. The endpoint ids are not in the files and are not recorded here.
+themselves do not contain them. One endpoint id does appear in the files: in
+probe 1's `step-100.jsonl.gz`, the `error` strings of the 449 rows that ended in
+a `ReadTimeout` name the endpoint's hostname, `lybvnpnt2m327y.api.runpod.ai`,
+probe 1's endpoint, since retired. An endpoint id is an identifier, not a
+secret; the runbook names this one (`docs/runbook-a2-validation.md`). No other
+row or summary names an endpoint.
 
 The endpoint settings of probes 1-3 (2 workers) cannot be recreated by the
 current scripts: `VALIDATION_REPLICAS` in `autoscale/validation_schedule.py` is
@@ -114,5 +119,6 @@ sweep with the four gaps and arm C's 3.955.
 
 Before copying, every file was scanned for `rpa_`, `SECRET`, `API_KEY`,
 `Authorization`, `Bearer` and `token`, case-insensitively. There were no hits.
-The only request headers in the rows are `x-a2-worker`, `x-a2-server-latency-ms`,
-`x-a2-server-received` and `a2-driver-lb-retry`.
+The only headers in the rows are the response headers `x-a2-worker`,
+`x-a2-server-latency-ms` and `x-a2-server-received`, plus the driver's retry mark
+`a2-driver-lb-retry`.
