@@ -494,8 +494,8 @@ def simulator_answer(analysis: dict, path, *, return_figure=False):
                for _f, label, color, style, marker, _dx, width in ENGINE_SPEEDS]
     handles.append(Line2D([], [], color=CENSOR_COLOR, marker="<", markersize=9,
                           markerfacecolor="none", markeredgewidth=2, linestyle="none",
-                          label="H3 needed at arm C: half of arm A's"))
-    fig.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, 0.325), ncol=2,
+                          label="H3 needed at arm C: half of arm A's x1.00 gap"))
+    fig.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.535, 0.325), ncol=2,
                fontsize=_pt(PX_LEGEND), frameon=False, borderaxespad=0.0,
                columnspacing=1.2, handlelength=2.4)
     budget = sim["sweeps"]["arm A"]["budget_replica_s"]
