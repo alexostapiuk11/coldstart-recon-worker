@@ -74,9 +74,14 @@ never reached it. `--judge` draws `validation_residuals.png`.
   requests in flight per worker: the first probe (2026-10-05) delivered ~17 req/s whatever was
   offered, client p50 rose to 52 s while server p50 stayed 0.31 s, and the 100 req/s step had
   449 timeouts. With 128 (the engine's `--max-num-seqs`), the second probe ran every step with
-  client p50 under 1 s. Measured on this endpoint only; RunPod does not document the limit.
-- Created 2026-10-05 through the GraphQL API (`saveEndpoint` with `type: "LB"`, undocumented;
-  the REST create has no type field) as `lybvnpnt2m327y`, recorded in `.env`.
+  client p50 under 1 s. Measured on this endpoint only; RunPod does not document that the
+  scaler value caps the requests in flight per worker (its docs describe it only as an
+  autoscaling setting, as of 2026-10-05).
+- Created 2026-10-05 through the GraphQL API (`saveEndpoint` with `type: "LB"`, which
+  RunPod's GraphQL reference documents as of 2026-10-05; the REST create has no type field)
+  as `lybvnpnt2m327y`, recorded in `.env`. Corrected 2026-10-05: this line first called
+  `type: "LB"` undocumented; the GraphQL reference (docs.runpod.io/sdks/graphql/manage-endpoints)
+  lists it.
 - Record its id in `.env` as `RUNPOD_A2_LB_ENDPOINT_ID`.
 - The queue endpoints `a8261k5opy1ldl` and `7h0aglrmsjovyc` stay as they are.
 

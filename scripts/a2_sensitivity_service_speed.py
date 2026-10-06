@@ -5,6 +5,8 @@ found the simulator predicting the engine about 12% too slow, the second, after
 host calibration, about 12% too fast (docs/findings-a2-validation-host-speed.md,
 data/a2/validation-*/verdict.json). Its output is reported as a sensitivity
 check on an unvalidated simulator, never as a validated result.
+(The post's analysis, data/a2/post-analysis.json, later put the two misses at a
+median 14% and 13% over the judged bins; the 12% above is the estimate this was run on.)
 
 What changes is the ENGINE only. The traffic -- the spike's absolute rates --
 stays the committed curve's (`traffic.spike_shape` of the committed curve), and
