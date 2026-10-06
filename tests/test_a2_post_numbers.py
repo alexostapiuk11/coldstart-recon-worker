@@ -36,6 +36,10 @@ def test_seconds_use_three_decimals_below_one_and_two_from_one_up():
     assert post_numbers_a2._s(0.0596) == "0.060 s"
     assert post_numbers_a2._s(0.999) == "0.999 s"
     assert post_numbers_a2._s(1.0) == "1.00 s"
+    # rounded first, then the decimals chosen: 0.9996 is "1.00", never "1.000"
+    assert post_numbers_a2._s(0.9996) == "1.00 s"
+    assert post_numbers_a2._s(0.9994) == "0.999 s"
+    assert post_numbers_a2._s_span(0.9996, 1.5) == "1.00–1.50 s"
     assert post_numbers_a2._s(14.4406) == "14.44 s"
 
 
@@ -62,8 +66,25 @@ def test_a_range_collapses_when_both_ends_format_alike():
 
 def test_engine_and_calibrated_residuals_are_stated_in_their_own_direction():
     n = numbers(A)
-    assert n["attempt1_engine_faster_pct"] == "14%"
-    assert n["attempt2_engine_slower_pct"] == "13%"
+    # a latency ratio below 1 is how much LOWER the latency was, not a speed-up
+    assert n["attempt1_latency_below_prediction_pct"] == "14%"
+    assert n["attempt2_latency_above_prediction_pct"] == "13%"
+    assert not [k for k in n if "faster" in k or "slower" in k]
+
+
+def test_a_latency_ratio_on_the_wrong_side_of_one_is_refused_not_printed_negative():
+    a = copy.deepcopy(A)
+    a["validation"]["engine"]["typical_residual"]["median_ratio_real_over_predicted"] = 1.05
+    with pytest.raises(ValueError, match="negative percentage"):
+        numbers(a)
+    a = copy.deepcopy(A)
+    a["validation"]["calibrated"]["typical_residual"]["median_ratio_real_over_predicted"] = 0.9
+    with pytest.raises(ValueError, match="negative percentage"):
+        numbers(a)
+    a = copy.deepcopy(A)
+    a["host_speed"]["exploratory"]["maxseqs128"]["daps3haubwrzbn"]["32"]["ratio"] = 1.02
+    with pytest.raises(ValueError, match="negative percentage"):
+        numbers(a)
 
 
 def test_void_repeats_and_calibrated_host_ratios_are_stated():
@@ -73,12 +94,24 @@ def test_void_repeats_and_calibrated_host_ratios_are_stated():
     assert n["attempt2_host_ratio_128"] == "0.82–0.84"
 
 
-def test_probe_1_peaks_use_the_typical_value_not_the_reconstruction_artifact():
+def test_probe_1_peaks_publish_the_typical_value_and_the_maximum():
     n = numbers(A)
     # step 100 worker 2 reads 5, every other reading is 4
     assert n["probe1_peak_per_worker"] == "4"
+    assert n["probe1_peak_per_worker_max"] == "5"
+    assert n["probe1_errors_100"] == "449"
     assert n["probe1_client_p50_100"] == "52.00 s"
     assert n["probe1_server_p50_100"] == "0.311 s"
+
+
+def test_a_tie_for_the_most_common_peak_is_refused_not_picked():
+    a = copy.deepcopy(A)
+    steps = a["load_balancer"]["probes"]["1"]["steps"]
+    for step, peaks in {"25": (6, 6), "50": (6, 4), "100": (4, 4)}.items():
+        for w, peak in zip(("worker 1", "worker 2"), peaks, strict=True):
+            steps[step]["per_worker_concurrency"][w]["max"] = peak  # three 6s, three 4s
+    with pytest.raises(ValueError, match="tie"):
+        numbers(a)
 
 
 def test_probes_2_and_3_are_stated_against_what_was_offered():
@@ -107,12 +140,23 @@ def test_the_stall_share_is_a_range_over_the_three_repeats():
     assert [n[f"stall_share_repeat_{i}"] for i in (1, 2, 3)] == ["26%", "35%", "21%"]
 
 
-def test_the_host_speed_ratios_are_stated_as_ratios_and_as_percent_faster():
+def test_the_stall_share_range_says_it_includes_the_void_repeat():
+    n = numbers(A)
+    assert n["stall_share_includes_void_repeat"].startswith("yes, repeat 1 (void: 2 requests")
+    a = copy.deepcopy(A)
+    for r in a["load_balancer"]["stall_share"]["repeats"]:
+        r["void"] = []
+    assert numbers(a)["stall_share_includes_void_repeat"].startswith("no")
+
+
+def test_the_host_speed_ratios_are_stated_as_ratios_and_as_percent_below_the_curve():
     n = numbers(A)
     assert n["curve_host_id"] == "ozhetwnhompob9"
     assert n["maxseqs128_host_id"] == "daps3haubwrzbn"
     assert [n[f"maxseqs128_ratio_{c}"] for c in (32, 64, 128)] == ["0.93", "0.94", "0.90"]
-    assert [n[f"maxseqs128_faster_pct_{c}"] for c in (32, 64, 128)] == ["7%", "6%", "10%"]
+    assert [n[f"maxseqs128_latency_below_curve_pct_{c}"] for c in (32, 64, 128)] == [
+        "7%", "6%", "10%"]
+    assert not [k for k in n if "_faster_pct_" in k]
     assert [n[f"maxseqs256_ratio_{c}"] for c in (32, 64, 128)] == ["0.96", "0.93", "0.90"]
     assert n["host_sef5s24viyecyr_ratio_64"] == "0.87"
     assert n["host_sef5s24viyecyr_ratio_128"] == "0.82–0.84"
@@ -174,4 +218,42 @@ def test_a_recorded_spend_is_refused_until_task_13_defines_its_keys():
     a = copy.deepcopy(A)
     a["spend"] = {"total_usd": 1.0}
     with pytest.raises(NotImplementedError, match="Task 13"):
+        numbers(a)
+
+
+def test_the_h2_margin_is_signed_milliseconds_and_the_spread_is_a_range():
+    n = numbers(A)
+    assert n["h2_margin_step_a"] == "+43 ms"
+    assert n["h2_margin_vs_best_other_step_a"] == "+82 ms"
+    assert n["h2_margin_step_c"].startswith("-3,955")
+    assert n["utilization_at_cap_p99_spread_step_a"] == "14.53–15.52 s"
+    assert n["utilization_at_cap_p99_median_step_a"] == "14.73 s"
+    assert n["utilization_at_cap_policies_step_a"] == "19"
+    assert n["utilization_at_cap_p99_spread_ramp_c"] == "0.554–0.568 s"
+
+
+def test_the_iso_cost_slice_is_stated_per_sweep_with_the_others_highest_cost():
+    n = numbers(A)
+    for sweep in ("step_a", "step_c", "ramp_a", "ramp_c"):
+        assert n[f"iso_cost_slice_constrains_others_{sweep}"] == "no"
+    assert n["iso_cost_slice_constrains_others"] == "no"
+    assert n["others_highest_frontier_cost_ramp_a"] == "2,875 replica-seconds"
+    a = copy.deepcopy(A)
+    a["simulator"]["h2_noise"]["per_sweep"]["arm C"]["iso_cost_slice_constrains_others"] = True
+    n = numbers(a)
+    assert n["iso_cost_slice_constrains_others_step_c"] == "yes"
+    assert n["iso_cost_slice_constrains_others"] == "yes, in step_c"
+
+
+def test_a_missing_calibrated_host_names_what_it_would_mislabel():
+    a = copy.deepcopy(A)
+    a["host_speed"]["calibrated_ratios_by_host"]["second_host"] = {}
+    with pytest.raises(ValueError, match="host"):
+        numbers(a)
+
+
+def test_an_unknown_sweep_name_is_refused_with_its_consequence():
+    a = copy.deepcopy(A)
+    a["simulator"]["h2"]["per_sweep"]["arm Z"] = True
+    with pytest.raises(ValueError, match="arm Z"):
         numbers(a)

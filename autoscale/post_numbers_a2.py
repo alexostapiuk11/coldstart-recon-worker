@@ -19,20 +19,26 @@ UNVALIDATED, because the simulator failed validation twice. The key names carry
 no such flag; the post's prose does.
 """
 
-from statistics import median, mode
+from statistics import median, multimode
 
 __all__ = ["numbers"]
 
 # The analysis names a sweep "arm A" (step shape) or "ramp arm A" (ramp shape);
 # the post's keys read step_a / ramp_c. The mapping lives here so a renamed
-# sweep in the analysis fails loudly (KeyError) rather than silently dropping
+# sweep in the analysis fails loudly (`_sweep_key`) rather than silently dropping
 # its numbers.
 _SWEEP_KEY = {"arm A": "step_a", "arm C": "step_c", "ramp arm A": "ramp_a", "ramp arm C": "ramp_c"}
 _SIGNALS = ("queue_depth", "in_flight_concurrency", "utilization")
 
 
 def _secs(x: float) -> str:
-    return f"{x:.3f}" if x < 1 else f"{x:.2f}"
+    """Three decimals below one second, two from there up, chosen AFTER rounding.
+
+    0.9996 rounds to 1.000 at three decimals, which would print as "1.000" and
+    break the one-format-per-magnitude rule. Rejected: choosing the decimals
+    from the unrounded value.
+    """
+    return f"{x:.3f}" if round(x, 3) < 1 else f"{x:.2f}"
 
 
 def _s(x: float) -> str:
@@ -70,6 +76,59 @@ def _span(values: list[float], spec: str) -> str:
     return lo if lo == hi else f"{lo}–{hi}"
 
 
+def _ms_signed(x: float) -> str:
+    """Seconds as signed whole milliseconds: '+43 ms', '-3,955 ms'."""
+    return f"{x * 1000:+,.0f} ms"
+
+
+def _only(items, what: str, consequence: str):
+    """The one element of `items`, or a ValueError naming what was found and what breaks.
+
+    Rejected: `(x,) = items`, whose "too many values to unpack" names neither the
+    analysis' content nor the number that would have been mislabelled.
+    """
+    items = list(items)
+    if len(items) != 1:
+        raise ValueError(f"expected exactly one of {what}, found {len(items)} ({items!r}); "
+                         f"{consequence}")
+    return items[0]
+
+
+def _sweep_key(sweep: str) -> str:
+    if sweep not in _SWEEP_KEY:
+        raise ValueError(
+            f"the analysis names a sweep {sweep!r} that has no post key (known: "
+            f"{sorted(_SWEEP_KEY)}); its numbers would be dropped from the post without "
+            "notice, so the mapping must be extended first")
+    return _SWEEP_KEY[sweep]
+
+
+def _below_pct(ratio: float, what: str) -> str:
+    """How much LOWER a latency was than its reference: 1 - ratio, ratio < 1 only.
+
+    A latency ratio is not a speed: 0.86 of the latency is 14% lower latency, not
+    "14% faster" (which would be 1/0.86 - 1 = 16%). The key says "below" so the
+    number states what it is. A ratio at or above 1 would print a zero or negative
+    percentage under a "below" label, so it is refused.
+    """
+    if not ratio < 1:
+        raise ValueError(
+            f"{what}: latency ratio {ratio:.4f} is not below 1, so 1 - ratio is not "
+            "'percent below' and would print a zero or negative percentage under a "
+            "'below' label; the key for the other direction is the one to use")
+    return _pct(1 - ratio)
+
+
+def _above_pct(ratio: float, what: str) -> str:
+    """How much HIGHER a latency was than its reference: ratio - 1, ratio > 1 only."""
+    if not ratio > 1:
+        raise ValueError(
+            f"{what}: latency ratio {ratio:.4f} is not above 1, so ratio - 1 is not "
+            "'percent above' and would print a zero or negative percentage under an "
+            "'above' label; the key for the other direction is the one to use")
+    return _pct(ratio - 1)
+
+
 def _verdict(holds: bool) -> str:
     return "holds" if holds else "fails"
 
@@ -93,19 +152,23 @@ def _validation(v: dict) -> dict[str, str]:
         out[f"{tag}_misses"] = f"{attempt['misses']} of {attempt['compared']} judged bins"
         out[f"{tag}_max_miss"] = _s(attempt["max_miss_seconds"])
         out[f"{tag}_void_repeats"] = str(attempt["void_repeats"])
-    # The ratio is real / predicted: the engine's first attempt ran FASTER than
-    # the prediction (ratio < 1), the calibrated attempt SLOWER (ratio > 1).
-    # One "percent off" key would hide that the two misses point opposite ways.
-    out["attempt1_engine_faster_pct"] = _pct(
-        1 - v["engine"]["typical_residual"]["median_ratio_real_over_predicted"])
-    out["attempt2_engine_slower_pct"] = _pct(
-        v["calibrated"]["typical_residual"]["median_ratio_real_over_predicted"] - 1)
+    # The ratio is real / predicted latency: the first attempt's real latency was
+    # BELOW the prediction (ratio < 1), the calibrated attempt's ABOVE it (ratio > 1).
+    # One "percent off" key would hide that the two misses point opposite ways, and
+    # "faster"/"slower" would call a latency ratio a speed (see `_below_pct`).
+    out["attempt1_latency_below_prediction_pct"] = _below_pct(
+        v["engine"]["typical_residual"]["median_ratio_real_over_predicted"], "attempt 1")
+    out["attempt2_latency_above_prediction_pct"] = _above_pct(
+        v["calibrated"]["typical_residual"]["median_ratio_real_over_predicted"], "attempt 2")
     return out
 
 
 def _calibrated_host(host_speed: dict) -> dict[str, str]:
     out: dict[str, str] = {}
-    (host, by_level), = host_speed["calibrated_ratios_by_host"].items()
+    host, by_level = _only(host_speed["calibrated_ratios_by_host"].items(),
+                           "hosts with calibrated ratios",
+                           "attempt 2's per-host ratio would describe a mix of machines "
+                           "under one host id")
     out["attempt2_host_id"] = host
     for level, ratios in by_level.items():
         out[f"attempt2_host_ratio_{level}"] = _span(ratios, ".2f")
@@ -118,11 +181,14 @@ def _host_speed(h: dict) -> dict[str, str]:
     hosts = sorted({x for ids in h["curve_hosts"].values() for x in ids})
     out["curve_host_id"] = ", ".join(hosts)
     for store, by_host in h["exploratory"].items():
-        (host, by_level), = by_host.items()
+        host, by_level = _only(by_host.items(), f"hosts in the {store} store",
+                               f"the {store} ratios would describe a mix of machines under "
+                               "one host id")
         out[f"{store}_host_id"] = host
         for level, r in by_level.items():
             out[f"{store}_ratio_{level}"] = f"{r['ratio']:.2f}"
-            out[f"{store}_faster_pct_{level}"] = _pct(1 - r["ratio"])
+            out[f"{store}_latency_below_curve_pct_{level}"] = _below_pct(
+                r["ratio"], f"{store} at concurrency {level}")
     return out
 
 
@@ -142,12 +208,26 @@ def _probe1(probe: dict) -> dict[str, str]:
     # boundary-adjacent pair can overlap by one; the mode is the honest figure
     # and the post should not claim the lone 5 as a property of the worker.
     peaks = [w["max"] for s in steps.values() for w in s["per_worker_concurrency"].values()]
-    out["probe1_peak_per_worker"] = str(mode(peaks))
+    modes = multimode(peaks)
+    if len(modes) != 1:
+        raise ValueError(
+            f"probe 1's per-worker peaks have a tie for the most common value ({sorted(modes)}); "
+            "picking one would present an arbitrary reading as the typical peak, so the key is "
+            "refused until the analysis settles which is typical")
+    out["probe1_peak_per_worker"] = str(modes[0])
+    out["probe1_peak_per_worker_max"] = str(max(peaks))
+    # The 100 req/s step ended on client-side errors (the driver could not start a new
+    # thread); the post has to say the step is incomplete.
+    out["probe1_errors_100"] = _count(steps["100"]["errors"])
     return out
 
 
 def _probes_2_to_5(probes: dict) -> dict[str, str]:
     out: dict[str, str] = {}
+    absent = [k for k in ("2", "3", "4", "5") if k not in probes]
+    if absent:
+        raise ValueError(f"the analysis has no probe(s) {absent}; the deliveries and routing "
+                         "the post quotes from them would be missing, not zero")
     p2, p3, p4, p5 = (probes[k]["steps"] for k in ("2", "3", "4", "5"))
     out["probe2_non_200_total"] = str(sum(s["non_200"] for s in p2.values()))
     for step in ("300", "450"):
@@ -157,6 +237,9 @@ def _probes_2_to_5(probes: dict) -> dict[str, str]:
     for step in sorted(p3, key=int):
         out[f"probe3_worker1_share_{step}"] = _pct(p3[step]["worker_share"]["worker 1"])
     conc = p3["450"]["per_worker_concurrency"]
+    if not {"worker 1", "worker 2"} <= set(conc):
+        raise ValueError(f"probe 3 step 450 names workers {sorted(conc)}, not 'worker 1' and "
+                         "'worker 2'; the two peaks the post compares would be the wrong pair")
     out["probe3_peak_worker1_450"] = str(conc["worker 1"]["max"])
     out["probe3_peak_worker2_450"] = str(conc["worker 2"]["max"])
     for step in ("150", "180"):
@@ -173,6 +256,13 @@ def _load_balancer(lb: dict) -> dict[str, str]:
     out["stall_share_range"] = f"{_pct(min(shares))}–{_pct(max(shares))}"
     for r in lb["stall_share"]["repeats"]:
         out[f"stall_share_repeat_{r['repeat']}"] = _pct(r["share_over_threshold"])
+    # The range deliberately includes the void repeat (2 requests without a 200): dropping
+    # it would narrow 26%-35%-21% to two repeats and hide that one was void; the post says
+    # which it did.
+    voids = [f"repeat {r['repeat']} (void: {'; '.join(r['void'])})"
+             for r in lb["stall_share"]["repeats"] if r["void"]]
+    out["stall_share_includes_void_repeat"] = (
+        "yes, " + ", ".join(voids) if voids else "no, every repeat is complete")
     f = lb["lb_502_first_attempt_s"]
     out["lb_502_first_attempt_count"] = _count(f["count"])
     out["lb_502_first_attempt_median"] = _s(f["median"])
@@ -209,21 +299,44 @@ def _censoring(c: dict) -> dict[str, str]:
     }
 
 
+def _h2_noise(noise: dict) -> dict[str, str]:
+    """The margins H2 rests on, beside the spread of utilisation's own identical-fleet runs."""
+    out: dict[str, str] = {}
+    constrained = []
+    for sweep, n in noise["per_sweep"].items():
+        k = _sweep_key(sweep)
+        spread = n["at_cap_policy_p99_s"]
+        out[f"h2_margin_{k}"] = _ms_signed(n["h2_margin_s"])
+        out[f"h2_margin_vs_best_other_{k}"] = _ms_signed(n["margin_vs_best_other_s"])
+        out[f"utilization_at_cap_policies_{k}"] = _count(spread["count"])
+        out[f"utilization_at_cap_p99_spread_{k}"] = _s_span(spread["min"], spread["max"])
+        out[f"utilization_at_cap_p99_median_{k}"] = _s(spread["median"])
+        out[f"others_highest_frontier_cost_{k}"] = _replica_s(
+            n["others_highest_frontier_cost_replica_s"])
+        out[f"iso_cost_slice_constrains_others_{k}"] = (
+            "yes" if n["iso_cost_slice_constrains_others"] else "no")
+        if n["iso_cost_slice_constrains_others"]:
+            constrained.append(k)
+    out["iso_cost_slice_constrains_others"] = (
+        "yes, in " + ", ".join(constrained) if constrained else "no")
+    return out
+
+
 def _simulator(sim: dict) -> dict[str, str]:
     out: dict[str, str] = {}
     for factor, by_sweep in sim["gaps"].items():
         fk = f"x{factor.replace('.', '')}"
         for sweep, g in by_sweep.items():
-            out[f"gap_{fk}_{_SWEEP_KEY[sweep]}"] = _s(g["point"])
+            out[f"gap_{fk}_{_sweep_key(sweep)}"] = _s(g["point"])
             if factor == "1":
-                out[f"gap_{fk}_{_SWEEP_KEY[sweep]}_interval"] = _s_span(g["lo"], g["hi"])
+                out[f"gap_{fk}_{_sweep_key(sweep)}_interval"] = _s_span(g["lo"], g["hi"])
     out["h1"] = _verdict(sim["h1"]["overall"])
     out["h2"] = _verdict(sim["h2"]["overall"])
     out.update(_h3(sim["h3"]))
     out["h4"] = _verdict(sim["h4"]["overall"])
     out["h2_sensitivity"] = _verdict(sim["h2_sensitivity"]["overall"])
     for sweep, held in sim["h2"]["per_sweep"].items():
-        out[f"h2_{_SWEEP_KEY[sweep]}"] = _verdict(held)
+        out[f"h2_{_sweep_key(sweep)}"] = _verdict(held)
     budgets = {_count(s["budget_replica_s"]) for s in sim["sweeps"].values()}
     if len(budgets) != 1:
         raise ValueError(
@@ -233,9 +346,10 @@ def _simulator(sim: dict) -> dict[str, str]:
     for sweep, s in sim["sweeps"].items():
         for signal in _SIGNALS:
             r = s["reached"][signal]
-            out[f"reached_{_SWEEP_KEY[sweep]}_{signal}_p99"] = _s(r["p99_s"])
-            out[f"reached_{_SWEEP_KEY[sweep]}_{signal}_cost"] = _replica_s(r["cost_replica_s"])
+            out[f"reached_{_sweep_key(sweep)}_{signal}_p99"] = _s(r["p99_s"])
+            out[f"reached_{_sweep_key(sweep)}_{signal}_cost"] = _replica_s(r["cost_replica_s"])
     out.update(_censoring(sim["h2_censoring"]))
+    out.update(_h2_noise(sim["h2_noise"]))
     out["repetitions"] = str(sim["identity"]["repetitions"])
     out["max_replicas"] = str(sim["identity"]["max_replicas"])
     return out
