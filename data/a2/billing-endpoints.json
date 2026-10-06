@@ -1,0 +1,106 @@
+{
+ "account_daily_serverless_from_console_csv": {
+  "2026-10-04": 2.368,
+  "2026-10-05": 18.593,
+  "_source": "the owner's RunPod console export runpod-billing-summary-daily-2026-09-06_2026-10-05.csv, column Serverless; account-wide, shared with artifacts 4 and 5 on these days, so a cross-check of the API's scale only"
+ },
+ "artifact_1_endpoint": {
+  "ka5mryakkxumew": "artifact 1's endpoint (docs/experiment.md), which also served artifact 1's reconnaissance"
+ },
+ "artifact_1_rows": [
+  {
+   "amount": 0.46623541609733365,
+   "diskSpaceBilledGB": 660,
+   "endpointId": "ka5mryakkxumew",
+   "time": "2026-08-28 00:00:00",
+   "timeBilledMs": 1512225
+  },
+  {
+   "amount": 1.2315500621916726,
+   "diskSpaceBilledGB": 1020,
+   "endpointId": "ka5mryakkxumew",
+   "time": "2026-08-29 00:00:00",
+   "timeBilledMs": 4000982
+  },
+  {
+   "amount": 0.8418915738584474,
+   "diskSpaceBilledGB": 720,
+   "endpointId": "ka5mryakkxumew",
+   "time": "2026-08-30 00:00:00",
+   "timeBilledMs": 2734827
+  },
+  {
+   "amount": 22.676107043620505,
+   "diskSpaceBilledGB": 15300,
+   "endpointId": "ka5mryakkxumew",
+   "time": "2026-09-01 00:00:00",
+   "timeBilledMs": 73653623
+  },
+  {
+   "amount": 7.776470374315977,
+   "diskSpaceBilledGB": 5400,
+   "endpointId": "ka5mryakkxumew",
+   "time": "2026-09-02 00:00:00",
+   "timeBilledMs": 25263903
+  },
+  {
+   "amount": 4.128393433638848,
+   "diskSpaceBilledGB": 2760,
+   "endpointId": "ka5mryakkxumew",
+   "time": "2026-09-03 00:00:00",
+   "timeBilledMs": 13408833
+  },
+  {
+   "amount": 0.044013445265591145,
+   "diskSpaceBilledGB": 60,
+   "endpointId": "ka5mryakkxumew",
+   "time": "2026-09-04 00:00:00",
+   "timeBilledMs": 144044
+  }
+ ],
+ "artifact_2_endpoints": {
+  "7h0aglrmsjovyc": "artifact 2 reconnaissance capture endpoint (RUNPOD_A2_ENDPOINT_ID)",
+  "a8261k5opy1ldl": "service-curve sweep endpoint, also the exploratory host re-measurement (RUNPOD_SWEEP_ENDPOINT_ID)",
+  "lybvnpnt2m327y": "first load-balancing endpoint (retired; RUNPOD_A2_LB_ENDPOINT_ID before it was replaced)",
+  "un0lhqt51q1bvp": "second load-balancing endpoint, created with the rebuilt image (RUNPOD_A2_LB_ENDPOINT_ID)"
+ },
+ "artifact_2_rows": [
+  {
+   "amount": 0.5680816699750721,
+   "diskSpaceBilledGB": 660,
+   "endpointId": "7h0aglrmsjovyc",
+   "time": "2026-10-04 00:00:00",
+   "timeBilledMs": 1845540
+  },
+  {
+   "amount": 1.817786531348247,
+   "diskSpaceBilledGB": 1320,
+   "endpointId": "a8261k5opy1ldl",
+   "time": "2026-10-04 00:00:00",
+   "timeBilledMs": 5903665
+  },
+  {
+   "amount": 0.43180428142659366,
+   "diskSpaceBilledGB": 360,
+   "endpointId": "a8261k5opy1ldl",
+   "time": "2026-10-05 00:00:00",
+   "timeBilledMs": 1401814
+  },
+  {
+   "amount": 2.1147205902452697,
+   "diskSpaceBilledGB": 2040,
+   "endpointId": "lybvnpnt2m327y",
+   "time": "2026-10-05 00:00:00",
+   "timeBilledMs": 6868631
+  },
+  {
+   "amount": 1.141386723087635,
+   "diskSpaceBilledGB": 960,
+   "endpointId": "un0lhqt51q1bvp",
+   "time": "2026-10-05 00:00:00",
+   "timeBilledMs": 3705902
+  }
+ ],
+ "read_on": "2026-10-05",
+ "source": "RunPod billing API, GET https://rest.runpod.io/v1/billing/endpoints, bucketSize=day, grouping=endpointId; day buckets as the API reports them"
+}

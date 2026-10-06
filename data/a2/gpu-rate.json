@@ -1,12 +1,13 @@
 {
- "caveat": "RunPod's reported rate for that worker, not cross-checked against billing; artifact 4's recon (docs/recon-a4.md) implied $1.106/h for a flex serverless RTX 4090 worker, so the billed rate may differ; the spend record (docs/spend-a2.md, written from the RunPod console before publication) is the billing",
+ "billed_rate": "not stored here: scripts/a2_post_analysis.py derives it from data/a2/billing-endpoints.json (artifact_2_rows' total amount over their total time billed), and every dollar figure in the post uses it",
  "gpu": "NVIDIA GeForce RTX 4090",
- "gpu_hourly_rate": 0.74,
  "list_price_hourly": 1.1,
  "list_price_label": "Serverless, 24 GB 4090 PRO, $1.10 /hr (the page's default view; it does not label the figure flex or active)",
  "list_price_note": "the same page lists $0.74 /hr for an on-demand RTX 4090 Pod, which equals the reported costPerHr",
  "list_price_read_on": "2026-10-05",
  "list_price_source": "https://www.runpod.io/pricing",
- "provenance": "reported",
- "source": "the costPerHr field of the RunPod worker record of load-balancing endpoint un0lhqt51q1bvp, read through the RunPod API on 2026-10-05"
+ "reported_cost_per_hr": 0.74,
+ "reported_cost_per_hr_note": "context, not the rate: it equals RunPod's on-demand RTX 4090 Pod price on the pricing page, and it is not what serverless billed these endpoints; the billed rate comes from RunPod's billing API (data/a2/billing-endpoints.json)",
+ "reported_cost_per_hr_provenance": "reported",
+ "reported_cost_per_hr_source": "the costPerHr field of the RunPod worker record of load-balancing endpoint un0lhqt51q1bvp, read through the RunPod API on 2026-10-05"
 }

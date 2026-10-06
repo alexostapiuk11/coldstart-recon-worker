@@ -11,8 +11,12 @@ rounded to cents:
 - `dollars_per_spike`: replica-seconds (what the simulator's policies cost) at the
   hourly rate.
 
-The rate is RunPod's reported `costPerHr` for a worker (data/a2/gpu-rate.json),
-not a billed amount. `spikes_per_day` is illustrative and says so.
+The rate is what RunPod billed artifact 2's endpoints, measured from its billing
+API's rows (`billed_hourly_rate` over data/a2/billing-endpoints.json): total
+dollars over total time billed. Rejected: the worker record's `costPerHr`
+($0.74/h), which the analysis first used; it is RunPod's on-demand Pod price for
+an RTX 4090, and serverless billed these endpoints about 1.5 times that.
+`spikes_per_day` is illustrative and says so.
 """
 
 import math
@@ -21,6 +25,7 @@ from dataclasses import dataclass
 __all__ = [
     "SECONDS_PER_HOUR",
     "Assumptions",
+    "billed_hourly_rate",
     "dollars_per_day",
     "dollars_per_million_requests",
     "dollars_per_spike",
@@ -63,10 +68,32 @@ class Assumptions:
     def provenance(self) -> dict[str, str]:
         """Where each assumption comes from; the post's table prints these verbatim.
 
-        The rate is "reported", not "measured": it is the `costPerHr` RunPod's API
-        reports for a worker, and nothing in this repository measured a bill.
+        The rate is "measured: billed": dollars over time billed, from RunPod's
+        billing API for these endpoints (`billed_hourly_rate`). Rejected: "reported",
+        the label of the worker record's `costPerHr`, which serverless did not bill.
         """
-        return {"gpu_hourly_rate": "reported", "spikes_per_day": "illustrative"}
+        return {"gpu_hourly_rate": "measured: billed", "spikes_per_day": "illustrative"}
+
+
+def billed_hourly_rate(rows: list[dict]) -> float:
+    """Dollars per hour billed: the rows' total `amount` over their total `timeBilledMs`.
+
+    `rows` are RunPod billing API rows (`GET /v1/billing/endpoints`). Pooled, so a
+    long row weighs by its hours. Rejected: the mean of each row's own rate, which
+    would let a 144-second day count as much as a 20-hour one.
+    """
+    if not rows:
+        raise ValueError("no billed rows: an hourly rate needs at least one billed amount, "
+                         "and without one every dollar figure would rest on nothing")
+    for r in rows:
+        _finite_positive(r["amount"], "a billed row's amount",
+                         "a free or negative billed row is a misread bill, and it would "
+                         "lower the rate every dollar figure uses")
+        _finite_positive(r["timeBilledMs"], "a billed row's timeBilledMs",
+                         "a row with no time billed has no hourly rate")
+    dollars = math.fsum(r["amount"] for r in rows)
+    seconds = math.fsum(r["timeBilledMs"] for r in rows) / 1000
+    return dollars / seconds * SECONDS_PER_HOUR
 
 
 def dollars_per_million_requests(assumptions: Assumptions, *, workers: int, rate: float) -> float:

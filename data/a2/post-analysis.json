@@ -1,6 +1,7 @@
 {
  "_provenance": {
   "inputs": [
+   "data/a2/billing-endpoints.json",
    "data/a2/exploratory/maxseqs128.jsonl",
    "data/a2/exploratory/maxseqs256.jsonl",
    "data/a2/exploratory/sensitivity-service-speed.json",
@@ -924,13 +925,12 @@
   }
  },
  "money": {
+  "billed_over_list": 1.00771957039175,
+  "billed_over_list_definition": "the billed rate over the pricing page's serverless 24 GB 4090 PRO rate",
   "gpu": "NVIDIA GeForce RTX 4090",
-  "gpu_hourly_rate": 0.74,
-  "gpu_rate_caveat": "RunPod's reported rate for that worker, not cross-checked against billing; artifact 4's recon (docs/recon-a4.md) implied $1.106/h for a flex serverless RTX 4090 worker, so the billed rate may differ; the spend record (docs/spend-a2.md, written from the RunPod console before publication) is the billing",
-  "gpu_rate_provenance": "reported",
-  "gpu_rate_source_file": "data/a2/gpu-rate.json",
-  "list_over_reported": 1.4864864864864866,
-  "list_over_reported_definition": "the pricing page's serverless rate over the reported costPerHr; every dollar figure scales by it",
+  "gpu_hourly_rate": 1.1084915274309253,
+  "gpu_rate_provenance": "measured: billed",
+  "gpu_rate_source_file": "data/a2/billing-endpoints.json",
   "list_price_hourly": 1.1,
   "list_price_read_on": "2026-10-05",
   "list_price_source": "https://www.runpod.io/pricing",
@@ -939,34 +939,36 @@
    "ratio_definition": "scaler 128's delivered rate over scaler 4's, which is also scaler 4's cost per request over scaler 128's (same workers, same hourly rate)",
    "scaler_128": {
     "delivered_rate_rps": 300.6505087759198,
-    "dollars_per_million": 1.37
+    "dollars_per_million": 2.05
    },
    "scaler_128_source": "probe 3 (scaler value 128), delivered rate at the 300 req/s step",
    "scaler_4": {
     "delivered_rate_rps": 17.099134055630024,
-    "dollars_per_million": 24.04
+    "dollars_per_million": 36.02
    },
    "scaler_4_source": "probe 1 (scaler value 4), median of its steps' delivered rates; the 100 req/s step ended on client-side errors",
    "workers": 2
   },
+  "reported_cost_per_hr": 0.74,
+  "reported_cost_per_hr_note": "context, not the rate: it equals RunPod's on-demand RTX 4090 Pod price on the pricing page, and it is not what serverless billed these endpoints; the billed rate comes from RunPod's billing API (data/a2/billing-endpoints.json)",
   "signal_choice": {
    "label": "UNVALIDATED: simulator failed validation twice; p99s differ by 82 ms",
    "p99_spread_definition": "highest minus lowest reached p99 over the three signals on this sweep",
    "p99_spread_s": 0.0820652509890909,
    "per_signal": {
     "in_flight_concurrency": {
-     "dollars_per_day": 12.51,
-     "dollars_per_spike": 0.52,
+     "dollars_per_day": 18.73,
+     "dollars_per_spike": 0.78,
      "replica_seconds": 2535.000000000001
     },
     "queue_depth": {
-     "dollars_per_day": 4.34,
-     "dollars_per_spike": 0.18,
+     "dollars_per_day": 6.5,
+     "dollars_per_spike": 0.27,
      "replica_seconds": 880.0000000000014
     },
     "utilization": {
-     "dollars_per_day": 15.27,
-     "dollars_per_spike": 0.64,
+     "dollars_per_day": 22.87,
+     "dollars_per_spike": 0.95,
      "replica_seconds": 3094.9999999999936
     }
    },
@@ -1522,8 +1524,87 @@
    }
   }
  },
- "spend": null,
- "spend_why": "measured spend is not in the committed evidence; its keys are defined by Task 13 of the publication plan, which has not landed",
+ "spend": {
+  "artifact_1": {
+   "endpoint_id": "ka5mryakkxumew",
+   "first_day": "2026-08-28",
+   "last_day": "2026-09-04",
+   "seconds_billed": 120718.437,
+   "total_usd": 37.164661348988375,
+   "what": "artifact 1's endpoint (docs/experiment.md), which also served artifact 1's reconnaissance"
+  },
+  "billed_rate_definition": "total amount over total time billed across artifact 2's rows, per hour",
+  "billed_rate_hourly": 1.1084915274309253,
+  "console_cross_check": {
+   "api_artifact_2_usd": {
+    "2026-10-04": 2.3858682013233192,
+    "2026-10-05": 3.6879115947594983
+   },
+   "console_account_serverless_usd": {
+    "2026-10-04": 2.368,
+    "2026-10-05": 18.593
+   },
+   "note": "the console's days are account-wide (artifacts 4 and 5 shared the account) and need not share the API's day boundaries, so they check artifact 2's days in scale only, not to the cent"
+  },
+  "per_endpoint": {
+   "7h0aglrmsjovyc": {
+    "seconds_billed": 1845.54,
+    "usd": 0.5680816699750721,
+    "what": "artifact 2 reconnaissance capture endpoint (RUNPOD_A2_ENDPOINT_ID)"
+   },
+   "a8261k5opy1ldl": {
+    "seconds_billed": 7305.479,
+    "usd": 2.2495908127748407,
+    "what": "service-curve sweep endpoint, also the exploratory host re-measurement (RUNPOD_SWEEP_ENDPOINT_ID)"
+   },
+   "lybvnpnt2m327y": {
+    "seconds_billed": 6868.631,
+    "usd": 2.1147205902452697,
+    "what": "first load-balancing endpoint (retired; RUNPOD_A2_LB_ENDPOINT_ID before it was replaced)"
+   },
+   "un0lhqt51q1bvp": {
+    "seconds_billed": 3705.902,
+    "usd": 1.141386723087635,
+    "what": "second load-balancing endpoint, created with the rebuilt image (RUNPOD_A2_LB_ENDPOINT_ID)"
+   }
+  },
+  "read_on": "2026-10-05",
+  "rows": [
+   {
+    "day": "2026-10-04",
+    "endpoint_id": "7h0aglrmsjovyc",
+    "seconds_billed": 1845.54,
+    "usd": 0.5680816699750721
+   },
+   {
+    "day": "2026-10-04",
+    "endpoint_id": "a8261k5opy1ldl",
+    "seconds_billed": 5903.665,
+    "usd": 1.817786531348247
+   },
+   {
+    "day": "2026-10-05",
+    "endpoint_id": "a8261k5opy1ldl",
+    "seconds_billed": 1401.814,
+    "usd": 0.43180428142659366
+   },
+   {
+    "day": "2026-10-05",
+    "endpoint_id": "lybvnpnt2m327y",
+    "seconds_billed": 6868.631,
+    "usd": 2.1147205902452697
+   },
+   {
+    "day": "2026-10-05",
+    "endpoint_id": "un0lhqt51q1bvp",
+    "seconds_billed": 3705.902,
+    "usd": 1.141386723087635
+   }
+  ],
+  "source": "RunPod billing API, GET https://rest.runpod.io/v1/billing/endpoints, bucketSize=day, grouping=endpointId; day buckets as the API reports them",
+  "total_seconds_billed": 19725.552,
+  "total_usd": 6.0737797960828175
+ },
  "validation": {
   "calibrated": {
    "agreeing": 0,

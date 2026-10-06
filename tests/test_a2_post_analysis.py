@@ -61,7 +61,7 @@ def test_the_analysis_has_every_section_the_post_cites():
     assert a["validation"]["engine"]["outcome"] == "failed"
     assert a["validation"]["calibrated"]["outcome"] == "failed"
     assert set(a["simulator"]["h3"]) == {"0.88", "1", "1.12"}
-    assert a["spend"] is None
+    assert a["spend"] is not None
     assert "UNVALIDATED" in a["_provenance"]["label"]
 
 
@@ -112,10 +112,52 @@ def test_the_signed_hypotheses_come_out_as_computed():
     assert all(s["h3"][f]["holds"] is False for f in ("0.88", "1", "1.12"))
 
 
-def test_spend_is_null_beside_a_reason():
+def _billing() -> dict:
+    return json.loads((REPO / "data" / "a2" / "billing-endpoints.json").read_text())
+
+
+def test_the_spend_is_the_billing_api_rows_for_artifact_2():
     a = _analysis()
-    assert a["spend"] is None
-    assert "Task 13" in a["spend_why"]
+    spend, rows = a["spend"], _billing()["artifact_2_rows"]
+    assert "spend_why" not in a
+    assert len(spend["rows"]) == len(rows) == 5
+    assert spend["total_usd"] == pytest.approx(sum(r["amount"] for r in rows))
+    assert spend["total_usd"] == pytest.approx(6.0738, abs=5e-5)
+    assert spend["total_seconds_billed"] == pytest.approx(19725.552)
+    assert spend["billed_rate_hourly"] == pytest.approx(
+        spend["total_usd"] / spend["total_seconds_billed"] * 3600)
+    assert set(spend["per_endpoint"]) == {"7h0aglrmsjovyc", "a8261k5opy1ldl",
+                                          "lybvnpnt2m327y", "un0lhqt51q1bvp"}
+    assert spend["per_endpoint"]["a8261k5opy1ldl"]["usd"] == pytest.approx(
+        1.817786531348247 + 0.43180428142659366)
+    assert sum(e["usd"] for e in spend["per_endpoint"].values()) == pytest.approx(
+        spend["total_usd"])
+    assert {r["day"] for r in spend["rows"]} == {"2026-10-04", "2026-10-05"}
+    assert spend["read_on"] == "2026-10-05"
+    assert "data/a2/billing-endpoints.json" in a["_provenance"]["inputs"]
+
+
+def test_the_spend_carries_artifact_1s_endpoint_for_the_record():
+    a1 = _analysis()["spend"]["artifact_1"]
+    assert a1["endpoint_id"] == "ka5mryakkxumew"
+    assert a1["total_usd"] == pytest.approx(37.1647, abs=5e-5)
+    assert (a1["first_day"], a1["last_day"]) == ("2026-08-28", "2026-09-04")
+
+
+def test_the_console_cross_check_is_carried_beside_the_api_days():
+    check = _analysis()["spend"]["console_cross_check"]
+    assert check["console_account_serverless_usd"] == {"2026-10-04": 2.368,
+                                                       "2026-10-05": 18.593}
+    assert check["api_artifact_2_usd"]["2026-10-04"] == pytest.approx(2.3859, abs=5e-5)
+
+
+def test_the_spend_record_quotes_the_analysis():
+    doc = (REPO / "docs" / "spend-a2.md").read_text()
+    spend = _analysis()["spend"]
+    for r in spend["rows"]:
+        assert f"${r['usd']:.2f}" in doc and f"{r['seconds_billed']:,.0f} s" in doc, r
+    assert f"${spend['total_usd']:.2f}" in doc
+    assert f"${spend['artifact_1']['total_usd']:.2f}" in doc
 
 
 def test_the_default_output_path_does_not_depend_on_the_working_directory():
@@ -211,24 +253,22 @@ def test_the_arms_measured_cold_starts_are_recorded_and_arm_a_is_slower_than_arm
     assert "data/campaign.jsonl" in _analysis()["_provenance"]["inputs"]
 
 
-def test_the_money_section_prices_the_default_cap_at_the_committed_rate():
+def test_the_money_section_prices_the_default_cap_at_the_billed_rate():
     a = _analysis()
     m = a["money"]
-    rate = json.loads((REPO / "data" / "a2" / "gpu-rate.json").read_text())
-    assert m["gpu_hourly_rate"] == rate["gpu_hourly_rate"] == 0.74
-    assert m["gpu_rate_provenance"] == "reported"
+    rows = _billing()["artifact_2_rows"]
+    billed = sum(r["amount"] for r in rows) / sum(r["timeBilledMs"] for r in rows) * 3.6e6
+    assert m["gpu_hourly_rate"] == pytest.approx(billed) == a["spend"]["billed_rate_hourly"]
+    assert m["gpu_rate_provenance"] == "measured: billed"
     assert m["spikes_per_day"] == 24.0 and m["spikes_per_day_provenance"] == "illustrative"
-    assert "billing" in m["gpu_rate_caveat"]
-    # docs/spend-a2.md does not exist until the owner reads the console; the caveat must
-    # say so rather than cite it as a file a reader could open today.
-    assert "written from the RunPod console before publication" in m["gpu_rate_caveat"]
+    rate = m["gpu_hourly_rate"]
     cap = m["load_balancer_cap"]
     probes = a["load_balancer"]["probes"]
     assert cap["workers"] == probes["1"]["workers"] == probes["3"]["workers"] == 2
     assert cap["scaler_4"]["delivered_rate_rps"] == pytest.approx(17.1, abs=0.05)
     assert cap["scaler_128"]["delivered_rate_rps"] == probes["3"]["steps"]["300"][
         "delivered_rate_rps"]
-    assert cap["scaler_4"]["dollars_per_million"] == round(2 * 0.74 / (
+    assert cap["scaler_4"]["dollars_per_million"] == round(2 * rate / (
         cap["scaler_4"]["delivered_rate_rps"] * 3600) * 1e6, 2)
     assert cap["scaler_4"]["dollars_per_million"] > 10 * cap["scaler_128"]["dollars_per_million"]
     assert cap["ratio"] == pytest.approx(cap["scaler_128"]["delivered_rate_rps"]
@@ -247,14 +287,17 @@ def test_the_money_section_prices_the_signals_on_arm_a_and_labels_them_unvalidat
     assert sig["p99_spread_s"] == max(p99s) - min(p99s)
     assert sig["label"] == ("UNVALIDATED: simulator failed validation twice; "
                             f"p99s differ by {spread_ms} ms")
-    assert sig["per_signal"]["queue_depth"]["dollars_per_spike"] == 0.18
-    assert sig["per_signal"]["utilization"]["dollars_per_day"] == pytest.approx(15.27, abs=0.01)
+    rate = a["money"]["gpu_hourly_rate"]
+    for v in sig["per_signal"].values():
+        assert v["dollars_per_spike"] == round(v["replica_seconds"] / 3600 * rate, 2)
+        assert v["dollars_per_day"] == round(v["replica_seconds"] * 24 / 3600 * rate, 2)
 
 
-def test_the_rate_file_is_a_listed_input_and_the_endpoint_id_is_not_republished():
+def test_the_rate_file_is_a_listed_input_and_its_source_string_is_not_republished():
     a = _analysis()
     assert "data/a2/gpu-rate.json" in a["_provenance"]["inputs"]
-    assert "un0lhqt51q1bvp" not in A.read_text()
+    # The endpoint ids belong to the spend's billed rows; the money section names none.
+    assert "un0lhqt51q1bvp" not in json.dumps(a["money"])
 
 
 def test_the_engine_held_more_than_its_128_cap_in_both_attempts():
@@ -333,13 +376,16 @@ def test_the_cold_start_counts_come_from_the_campaign():
     assert (cs["A"]["n"], cs["C"]["n"], sim["campaign_runs"]) == (99, 100, 300)
 
 
-def test_the_money_section_carries_the_list_price_beside_the_reported_rate():
+def test_the_money_section_carries_the_list_price_and_the_reported_rate_as_context():
     m = _analysis()["money"]
     rate = json.loads((REPO / "data" / "a2" / "gpu-rate.json").read_text())
     assert m["list_price_hourly"] == rate["list_price_hourly"] == 1.10
     assert m["list_price_source"] == "https://www.runpod.io/pricing"
     assert m["list_price_read_on"] == "2026-10-05"
-    assert m["list_over_reported"] == pytest.approx(1.10 / 0.74)
+    assert m["billed_over_list"] == pytest.approx(m["gpu_hourly_rate"] / 1.10)
+    assert m["reported_cost_per_hr"] == rate["reported_cost_per_hr"] == 0.74
+    assert "on-demand" in m["reported_cost_per_hr_note"]
+    assert "list_over_reported" not in m and "gpu_rate_caveat" not in m
 
 
 def test_the_worker_id_note_does_not_claim_the_ids_are_unpublished():

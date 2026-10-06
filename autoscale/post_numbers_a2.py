@@ -190,21 +190,35 @@ def _sweep_label(sweep: str) -> str:
 
 
 def _spend_numbers(spend: dict) -> dict[str, str]:
-    """Hook for the measured-spend keys, which Task 13 defines.
+    """What artifact 2 cost, as RunPod's billing API reported it: the total, the hours of
+    worker time billed, and the number of endpoints they were billed on.
 
-    Raising rather than returning {} is deliberate: an empty return would let
-    the post be written and pass its number test while quoting no dollar figure
-    for money that was actually spent.
+    The per-endpoint and per-day rows are not keys: the post links docs/spend-a2.md for
+    them, and artifact 1's endpoint, which that file records too, is not in the post.
+    Rejected: a key per row, which would put five more dollar amounts in a post that
+    quotes one.
     """
-    raise NotImplementedError(
-        "analysis['spend'] is set but its keys are defined by Task 13 of the publication "
-        "plan, which has not landed: post_numbers_a2 would otherwise emit no spend numbers "
-        "and the post would omit the cost of the experiment")
+    return {
+        "spend_total_a2": _dollars(spend["total_usd"]),
+        "spend_hours_a2": f"{spend['total_seconds_billed'] / 3600:.1f} hours of worker time",
+        "spend_endpoints_a2": f"{len(spend['per_endpoint'])} endpoints",
+    }
 
 
 def _money(m: dict) -> dict[str, str]:
-    """The default cap's cost (measured rate and throughput) and the signal choice's (UNVALIDATED)."""
+    """The default cap's cost (billed rate, measured throughput) and the signal choice's
+    (UNVALIDATED), with the list price and the worker record's costPerHr as context.
+
+    The billed rate is "1% above" the list price, a phrase rather than a ratio: the
+    sentence it belongs to says how close the two are. Rejected: the earlier "1.5x at
+    list price", which priced everything at the worker record's $0.74/h and offered the
+    list price as the alternative; the bill settled which rate applies.
+    """
     cap = m["load_balancer_cap"]
+    if not m["billed_over_list"] > 1:
+        raise ValueError(f"the billed rate is {m['billed_over_list']:.4f} of the list price, "
+                         "not above it; the post's 'above the list price' would state the "
+                         "wrong direction")
     out = {
         "money_rate": f"{_dollars(m['gpu_hourly_rate'])}/h",
         "spikes_per_day": f"{_count(m['spikes_per_day'])} per day",
@@ -212,7 +226,8 @@ def _money(m: dict) -> dict[str, str]:
         "money_per_million_scaler128": _dollars(cap["scaler_128"]["dollars_per_million"]),
         "money_scaler_ratio": f"{round(cap['ratio'])}×",
         "money_list_rate": f"{_dollars(m['list_price_hourly'])}/h",
-        "money_list_ratio": f"{m['list_over_reported']:.1f}×",
+        "money_reported_rate": f"{_dollars(m['reported_cost_per_hr'])}/h",
+        "money_billed_above_list": f"{_pct(m['billed_over_list'] - 1)} above",
     }
     sig = m["signal_choice"]
     if "UNVALIDATED" not in sig["label"]:
@@ -544,6 +559,12 @@ def numbers(analysis: dict) -> dict[str, str]:
     out.update(_host_speed(analysis["host_speed"]))
     out.update(_simulator(analysis["simulator"]))
     out.update(_money(analysis["money"]))
-    if analysis["spend"] is not None:
-        out.update(_spend_numbers(analysis["spend"]))
+    spend = analysis["spend"]
+    if spend is not None:
+        if analysis["money"]["gpu_hourly_rate"] != spend["billed_rate_hourly"]:
+            raise ValueError(
+                f"the money section prices at {analysis['money']['gpu_hourly_rate']!r}/h but "
+                f"the spend's billed rate is {spend['billed_rate_hourly']!r}/h; the post calls "
+                "its rate the billed one, so every dollar figure would be mislabelled")
+        out.update(_spend_numbers(spend))
     return out

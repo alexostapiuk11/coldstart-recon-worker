@@ -10,8 +10,9 @@ roundings of one number, or the same name for two different numbers.
 Inputs are committed files only (listed in the output's `_provenance`): the two
 validation attempts' verdicts and records, the earlier one-replica repeats, the
 five load-balancer probes, the exploratory host-speed stores and service-speed
-sensitivity, the headline x1.00 frontier sweep, and the committed service curve
-with its source store. Nothing is re-swept and nothing is bootstrapped: the
+sensitivity, the headline x1.00 frontier sweep, the committed service curve
+with its source store, and RunPod's billing rows for the spend and the hourly
+rate. Nothing is re-swept and nothing is bootstrapped: the
 sweep and its gap intervals are read from their caches, and the only replays
 are the validation gate's own (`autoscale.validation.engine_trajectories`, one
 fixed-capacity run per repeat), which take under a second. Where the committed
@@ -59,6 +60,7 @@ from autoscale.frontier import (
 from autoscale.measured_curve import load_measured_curve
 from autoscale.money_a2 import (
     Assumptions,
+    billed_hourly_rate,
     dollars_per_day,
     dollars_per_million_requests,
     dollars_per_spike,
@@ -86,6 +88,7 @@ CAMPAIGN = Path("data/campaign.jsonl")
 SENSITIVITY = EXPLORATORY / "sensitivity-service-speed.json"
 CURVE = A2 / "service-curve.json"
 GPU_RATE = A2 / "gpu-rate.json"
+BILLING = A2 / "billing-endpoints.json"
 # Illustrative: one spike an hour. The post says so wherever it multiplies by it.
 SPIKES_PER_DAY = 24.0
 HOST_LEVELS = (32, 64, 128)
@@ -865,22 +868,95 @@ def simulator_section(curve, inputs: list) -> dict:
     }
 
 
-def money_section(lb: dict, sim: dict, inputs: list) -> dict:
-    """Two money statements: the load balancer's default cap (measured throughput at the
-    reported rate), the signal choice (UNVALIDATED).
+def _day(row: dict) -> str:
+    """'2026-10-04' from the API's '2026-10-04 00:00:00': the bucket as the API names it."""
+    return row["time"][:10]
 
-    The rate is RunPod's reported `costPerHr` for one worker, read from
-    data/a2/gpu-rate.json; the source string there names the endpoint and is not
-    republished here (the file is the input). Rejected: a rate typed into this script,
-    which would drift from the file the post's assumptions table cites.
+
+def _sum_by_day(rows: list[dict]) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for r in rows:
+        out[_day(r)] = out.get(_day(r), 0.0) + r["amount"]
+    return out
+
+
+def spend_section(inputs: list) -> dict:
+    """What RunPod billed artifact 2's four endpoints, from its billing API's day buckets.
+
+    Read from data/a2/billing-endpoints.json, which holds the API's rows as returned.
+    The billed hourly rate (total dollars over total time billed) is computed here
+    and is the rate the money section uses. Artifact 1's endpoint is carried for
+    the record (docs/spend-a2.md), not quoted by the post. The console's account-wide
+    serverless days are carried beside the API's artifact 2 days as a check of scale
+    only: artifacts 4 and 5 used the same account on those days. Rejected: dollar
+    figures typed into docs/spend-a2.md, which a test could not hold to the bill.
+    """
+    inputs.append(BILLING)
+    bill = _read_json(BILLING)
+    rows, what = bill["artifact_2_rows"], bill["artifact_2_endpoints"]
+    unnamed = sorted({r["endpointId"] for r in rows} - set(what))
+    if unnamed:
+        raise SystemExit(f"{BILLING}: billed rows for endpoint(s) {unnamed} have no entry in "
+                         "artifact_2_endpoints; the spend record would bill an item it cannot "
+                         "name")
+    a1_ids = {r["endpointId"] for r in bill["artifact_1_rows"]}
+    a1_id = _only(a1_ids, "endpoints among artifact 1's rows",
+                  "artifact 1's total would mix endpoints under one id")
+    per_endpoint: dict[str, dict] = {}
+    for r in rows:
+        e = per_endpoint.setdefault(r["endpointId"], {"usd": 0.0, "seconds_billed": 0.0,
+                                                      "what": what[r["endpointId"]]})
+        e["usd"] += r["amount"]
+        e["seconds_billed"] += r["timeBilledMs"] / 1000
+    a1_days = sorted(_day(r) for r in bill["artifact_1_rows"])
+    console = bill["account_daily_serverless_from_console_csv"]
+    return {
+        "source": bill["source"],
+        "read_on": bill["read_on"],
+        "rows": [{"endpoint_id": r["endpointId"], "day": _day(r),
+                  "seconds_billed": r["timeBilledMs"] / 1000, "usd": r["amount"]}
+                 for r in sorted(rows, key=lambda r: (_day(r), r["endpointId"]))],
+        "per_endpoint": per_endpoint,
+        "total_usd": math.fsum(r["amount"] for r in rows),
+        "total_seconds_billed": math.fsum(r["timeBilledMs"] for r in rows) / 1000,
+        "billed_rate_hourly": billed_hourly_rate(rows),
+        "billed_rate_definition": "total amount over total time billed across artifact 2's "
+                                  "rows, per hour",
+        "artifact_1": {"endpoint_id": a1_id,
+                       "what": bill["artifact_1_endpoint"][a1_id],
+                       "total_usd": math.fsum(r["amount"] for r in bill["artifact_1_rows"]),
+                       "seconds_billed": math.fsum(
+                           r["timeBilledMs"] for r in bill["artifact_1_rows"]) / 1000,
+                       "first_day": a1_days[0], "last_day": a1_days[-1]},
+        "console_cross_check": {
+            "console_account_serverless_usd": {k: v for k, v in console.items()
+                                               if not k.startswith("_")},
+            "api_artifact_2_usd": _sum_by_day(rows),
+            "note": "the console's days are account-wide (artifacts 4 and 5 shared the "
+                    "account) and need not share the API's day boundaries, so they check "
+                    "artifact 2's days in scale only, not to the cent",
+        },
+    }
+
+
+def money_section(lb: dict, sim: dict, spend: dict, inputs: list) -> dict:
+    """Two money statements: the load balancer's default cap (measured throughput at the
+    billed rate), the signal choice (UNVALIDATED).
+
+    The rate is what RunPod billed artifact 2's endpoints per hour, from the spend
+    section (the billing API's rows). data/a2/gpu-rate.json supplies context only:
+    the worker record's `costPerHr` and the pricing page's list price; its source
+    string names an endpoint and is not republished here. Rejected: the `costPerHr`
+    ($0.74/h) as the rate, which the first version used; it is the on-demand Pod
+    price, and serverless billed about 1.5 times it.
     """
     inputs.append(GPU_RATE)
     rate = _read_json(GPU_RATE)
-    if rate.get("provenance") != "reported":
-        raise SystemExit(f"{GPU_RATE} is marked {rate.get('provenance')!r}, not 'reported'; "
-                         "the post labels the rate as RunPod's reported costPerHr, and a "
-                         "different provenance needs different words")
-    a = Assumptions(gpu_hourly_rate=rate["gpu_hourly_rate"], spikes_per_day=SPIKES_PER_DAY)
+    if "gpu_hourly_rate" in rate:
+        raise SystemExit(f"{GPU_RATE} carries a typed gpu_hourly_rate; the rate comes from "
+                         f"the billing rows ({BILLING}), and two rates in two files would "
+                         "drift apart")
+    a = Assumptions(gpu_hourly_rate=spend["billed_rate_hourly"], spikes_per_day=SPIKES_PER_DAY)
 
     p1, p3 = lb["probes"]["1"], lb["probes"]["3"]
     workers = _only({p1["workers"], p3["workers"]}, "worker counts across probes 1 and 3",
@@ -902,14 +978,15 @@ def money_section(lb: dict, sim: dict, inputs: list) -> dict:
         "gpu": rate["gpu"],
         "gpu_hourly_rate": a.gpu_hourly_rate,
         "gpu_rate_provenance": a.provenance["gpu_hourly_rate"],
-        "gpu_rate_caveat": rate["caveat"],
-        "gpu_rate_source_file": str(GPU_RATE),
+        "gpu_rate_source_file": str(BILLING),
         "list_price_hourly": rate["list_price_hourly"],
         "list_price_source": rate["list_price_source"],
         "list_price_read_on": rate["list_price_read_on"],
-        "list_over_reported": rate["list_price_hourly"] / a.gpu_hourly_rate,
-        "list_over_reported_definition": "the pricing page's serverless rate over the reported "
-                                         "costPerHr; every dollar figure scales by it",
+        "billed_over_list": a.gpu_hourly_rate / rate["list_price_hourly"],
+        "billed_over_list_definition": "the billed rate over the pricing page's serverless "
+                                       "24 GB 4090 PRO rate",
+        "reported_cost_per_hr": rate["reported_cost_per_hr"],
+        "reported_cost_per_hr_note": rate["reported_cost_per_hr_note"],
         "spikes_per_day": a.spikes_per_day,
         "spikes_per_day_provenance": a.provenance["spikes_per_day"],
         "load_balancer_cap": {
@@ -950,11 +1027,10 @@ def build() -> dict:
         "load_balancer": load_balancer_section(inputs),
         "host_speed": host_speed_section(curve, inputs),
         "simulator": simulator_section(curve, inputs),
-        "spend": None,
-        "spend_why": "measured spend is not in the committed evidence; its keys are defined by "
-                     "Task 13 of the publication plan, which has not landed",
+        "spend": spend_section(inputs),
     }
-    analysis["money"] = money_section(analysis["load_balancer"], analysis["simulator"], inputs)
+    analysis["money"] = money_section(analysis["load_balancer"], analysis["simulator"],
+                                      analysis["spend"], inputs)
     analysis["_provenance"] = {"inputs": sorted(set(_rel(inputs))), "label": UNVALIDATED,
                                "script": "scripts/a2_post_analysis.py"}
     return analysis

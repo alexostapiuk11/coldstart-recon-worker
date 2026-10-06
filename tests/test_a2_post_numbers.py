@@ -258,14 +258,22 @@ def test_a_utilization_run_below_the_cap_is_refused_not_miscounted():
 
 
 def test_with_no_spend_no_spend_key_is_emitted():
-    assert A["spend"] is None
-    assert not [k for k in numbers(A) if k.startswith("spend")]
-
-
-def test_a_recorded_spend_is_refused_until_task_13_defines_its_keys():
     a = copy.deepcopy(A)
-    a["spend"] = {"total_usd": 1.0}
-    with pytest.raises(NotImplementedError, match="Task 13"):
+    a["spend"] = None
+    assert not [k for k in numbers(a) if k.startswith("spend")]
+
+
+def test_the_spend_is_stated_in_dollars_hours_and_endpoints():
+    n = numbers(A)
+    assert n["spend_total_a2"] == "$6.07"
+    assert n["spend_hours_a2"] == "5.5 hours of worker time"
+    assert n["spend_endpoints_a2"] == "4 endpoints"
+
+
+def test_a_money_rate_other_than_the_billed_one_is_refused():
+    a = copy.deepcopy(A)
+    a["money"]["gpu_hourly_rate"] = 0.74
+    with pytest.raises(ValueError, match="billed"):
         numbers(a)
 
 
@@ -319,23 +327,24 @@ def test_the_arms_cold_start_medians_are_stated_in_seconds():
 
 def test_the_rate_and_the_default_cap_are_stated_in_dollars():
     n = numbers(A)
-    assert n["money_rate"] == "$0.74/h"
+    assert n["money_rate"] == "$1.11/h"
     assert n["spikes_per_day"] == "24 per day"
     cap = A["money"]["load_balancer_cap"]
     assert n["money_per_million_scaler4"] == f"${cap['scaler_4']['dollars_per_million']:.2f}"
     assert n["money_per_million_scaler128"] == f"${cap['scaler_128']['dollars_per_million']:.2f}"
     assert n["money_scaler_ratio"] == f"{round(cap['ratio'])}×"
     assert n["money_scaler_ratio"] == "18×"
-    assert n["money_per_million_scaler4"] == "$24.04"
+    assert n["money_per_million_scaler4"] == "$36.02"
+    assert n["money_per_million_scaler128"] == "$2.05"
 
 
 def test_the_signal_choice_is_stated_per_spike_and_per_day_with_its_label():
     n = numbers(A)
-    assert n["money_spike_queue_depth_step_a"] == "$0.18"
-    assert n["money_spike_in_flight_step_a"] == "$0.52"
-    assert n["money_spike_utilization_step_a"] == "$0.64"
-    assert n["money_day_queue_depth_step_a"] == "$4.34"
-    assert n["money_day_utilization_step_a"] == "$15.27"
+    assert n["money_spike_queue_depth_step_a"] == "$0.27"
+    assert n["money_spike_in_flight_step_a"] == "$0.78"
+    assert n["money_spike_utilization_step_a"] == "$0.95"
+    assert n["money_day_queue_depth_step_a"] == "$6.50"
+    assert n["money_day_utilization_step_a"] == "$22.87"
     assert n["money_signal_label"] == ("UNVALIDATED: simulator failed validation twice; "
                                        "p99s differ by 82 ms")
 
@@ -419,7 +428,17 @@ def test_the_simulator_identity_reads_as_phrases():
     assert n["money_p99_spread_step_a"] == "reached p99s are within 82 ms of each other"
 
 
-def test_the_list_price_and_its_ratio_to_the_reported_rate():
+def test_the_list_price_and_the_reported_cost_per_hour_are_context():
     n = numbers(A)
     assert n["money_list_rate"] == "$1.10/h"
-    assert n["money_list_ratio"] == "1.5×"
+    assert n["money_reported_rate"] == "$0.74/h"
+    assert n["money_billed_above_list"] == "1% above"
+    # The 1.5x framing priced everything at the reported rate; it is gone with that rate.
+    assert "money_list_ratio" not in n
+
+
+def test_a_billed_rate_at_or_below_the_list_price_is_not_called_above_it():
+    a = copy.deepcopy(A)
+    a["money"]["billed_over_list"] = 0.99
+    with pytest.raises(ValueError, match="above"):
+        numbers(a)

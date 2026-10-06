@@ -8,6 +8,7 @@ import pytest
 
 from autoscale.money_a2 import (
     Assumptions,
+    billed_hourly_rate,
     dollars_per_day,
     dollars_per_million_requests,
     dollars_per_spike,
@@ -68,18 +69,43 @@ def test_spike_cost_refuses_bad_replica_seconds(bad):
 
 
 def test_each_assumption_carries_its_provenance():
-    a = Assumptions(gpu_hourly_rate=0.74, spikes_per_day=24.0)
-    # RunPod reports the rate through its API; nothing here measured a bill.
-    assert a.provenance == {"gpu_hourly_rate": "reported", "spikes_per_day": "illustrative"}
+    a = Assumptions(gpu_hourly_rate=1.1, spikes_per_day=24.0)
+    # The rate is what RunPod billed, measured from its billing API's rows.
+    assert a.provenance == {"gpu_hourly_rate": "measured: billed",
+                            "spikes_per_day": "illustrative"}
 
 
-def test_the_committed_rate_file_is_what_the_analysis_will_read():
+def test_the_billed_rate_is_total_dollars_over_total_time_billed():
+    rows = [{"amount": 1.0, "timeBilledMs": 3_600_000},
+            {"amount": 0.5, "timeBilledMs": 1_800_000},
+            {"amount": 0.2, "timeBilledMs": 360_000}]
+    # $1.70 over 5,760 s; not the mean of the rows' own rates ($1.00, $1.00, $2.00)
+    assert billed_hourly_rate(rows) == pytest.approx(1.7 / 5760 * 3600)
+
+
+@pytest.mark.parametrize("rows", [[], [{"amount": 1.0, "timeBilledMs": 0}],
+                                  [{"amount": 0.0, "timeBilledMs": 1000}],
+                                  [{"amount": -1.0, "timeBilledMs": 1000}],
+                                  [{"amount": math.nan, "timeBilledMs": 1000}]])
+def test_the_billed_rate_refuses_rows_that_cannot_price_an_hour(rows):
+    with pytest.raises(ValueError, match="billed"):
+        billed_hourly_rate(rows)
+
+
+def test_the_committed_billing_rows_bill_about_1_108_an_hour():
+    rec = json.loads((REPO / "data" / "a2" / "billing-endpoints.json").read_text())
+    assert billed_hourly_rate(rec["artifact_2_rows"]) == pytest.approx(1.1085, abs=5e-5)
+
+
+def test_the_rate_file_holds_context_not_the_rate():
     rec = json.loads((REPO / "data" / "a2" / "gpu-rate.json").read_text())
-    assert rec["gpu_hourly_rate"] == 0.74
-    assert rec["provenance"] == "reported"
+    # No typed rate: the analysis derives it from the billing rows.
+    assert "gpu_hourly_rate" not in rec
     assert rec["gpu"] == "NVIDIA GeForce RTX 4090"
-    # the billing record is named as the authority over this rate
-    assert "billing" in rec["caveat"] and "1.106" in rec["caveat"]
+    assert rec["reported_cost_per_hr"] == 0.74
+    assert rec["reported_cost_per_hr_provenance"] == "reported"
+    assert "on-demand" in rec["reported_cost_per_hr_note"]
+    assert "billing-endpoints.json" in rec["billed_rate"]
 
 
 def test_a_positive_cost_below_a_cent_is_not_rounded_to_zero():
@@ -106,4 +132,4 @@ def test_the_rate_file_carries_the_list_price_it_was_checked_against():
     assert rec["list_price_hourly"] == 1.10
     assert rec["list_price_source"] == "https://www.runpod.io/pricing"
     assert rec["list_price_read_on"] == "2026-10-05"
-    assert rec["list_price_hourly"] > rec["gpu_hourly_rate"]
+    assert rec["list_price_hourly"] > rec["reported_cost_per_hr"]
