@@ -53,3 +53,48 @@ reliable way to discover what is not actually understood — which is exactly wh
 happened during module 0, in both directions: it found the interval
 misconception, and it caught a claim in the teaching material that the data
 contradicted.
+
+---
+
+# Learning plan — artifact 2, the autoscaling signal
+
+**The material:** the post, [`docs/post-a2.md`](../post-a2.md), and its five
+figures; the concepts behind it are in the design spec's learning guide
+(`docs/superpowers/specs/2026-08-17-autoscaling-signal-comparison-design.md`,
+§13b). The pass criterion and the rule on failed checkpoints are the same as
+above: state it unaided, survive one follow-up, and on a miss change the
+representation, not the volume.
+
+**Adapted to what the artifact found, not what it set out to find.** §13b was
+written before the build and teaches the simulator's answer as if it would be
+trusted. The simulator failed its validation twice, so the weight moves to what
+was measured: the service curve, the load balancer, host speed and the gate
+itself. Two of §13b's modules are merged into others, integrated excess is
+dropped because the published metric is p99, and the load balancer, which
+§13b does not mention, gets its own module.
+
+## The modules
+
+| # | module | material | min | checkpoint |
+|---|---|---|---|---|
+| 0 | diagnostic | — | 10 | answer §13b's self-checks 1, 2, 3, 7 and 8 cold; record what is solid and what is not |
+| 1 | continuous batching and the service curve | the post's "The service curve" and its figure; §13b modules 1–2 | 12 | from the figure, say why latency rises gently from 1 to 128 in flight while throughput bends, and what stopped the curve at 128 |
+| 2 | **Little's Law, checked on real data** | the load-balancer section, finding 1; §13b module 3 | 15 | probe 1 at 50 req/s offered: two workers held 2.62 and 2.65 requests on average and delivered 17.10 req/s. Compute each request's time in the engine and compare it with the measured server p50 (0.310 s). Then say why a cap of 4 per worker does not deliver 8 ÷ 0.31 ≈ 26 req/s, and what would have to be measured to know |
+| 3 | why GPU utilisation is blind | the service curve's bottom panel; §13b module 4 | 10 | say why it reads 1.0 from one request upward, predict what an autoscaler driven by it does, and connect that to why the iso-cost budget stopped constraining the other two signals |
+| 4 | dead time and cooldowns | the simulator figure; §13b modules 5–6 | 10 | §13b's self-checks 5 and 6; then predict, before looking, whether a faster cold start should make the signal choice matter more or less, and say why the simulator's answer to that is not evidence |
+| 5 | frontiers, dominance and the iso-cost slice | the post's "(a)" and "(b)"; §13b modules 7–8 | 15 | §13b's self-check 7; then explain how 19 policies with the same fleet produce a spread of p99s, and why that spread decides what can and cannot be ranked |
+| 6 | **the validation gate, and why it failed** | the post's attempts one and two, the `attempts` and `host_speed` figures; §13b module 9 | 20 | §13b's self-check 8; then explain how one host-speed factor can make every bin miss on the same side, and propose the test that would settle why the calibration over-corrected |
+| 7 | what could not be concluded | the post's Limits | 8 | §13b's self-check 10 against what was actually validated (one replica, below capacity); name a limit the post states about itself |
+| 8 | **teach it back** | the whole post | 30+ | draft the LinkedIn version; Claude plays someone who does not know the material and pushes on every hand-wave |
+
+About two hours, held to the same control as above: if a module overruns, cut it.
+
+**The gate sits at position 6, after the concepts it uses.** It needs Little's
+Law (module 2) to read the in-flight counts and the frontier (module 5) to see
+what was at stake, and it is the part of the artifact most worth teaching:
+a pre-registered test that the author's own model failed, twice.
+
+**Module 2's last question is open on purpose.** Nothing in the repository
+explains why the workers averaged about 2.6 in flight under a cap of 4, so
+the checkpoint is to say what measurement would answer it, not to know the
+answer.

@@ -56,3 +56,33 @@ Verdicts: `solid` | `fuzzy` | `not_attempted`.
 ## Modules 1–8
 
 `not_attempted`.
+
+---
+
+# Artifact 2 — the autoscaling signal
+
+The modules are in `plan.md`, under "Learning plan — artifact 2".
+
+**Before the build, nothing was recorded.** The design spec's definition of
+done asked for §13b's modules to be worked through before each build stage;
+this file has no record that they were, so the build is treated as having run
+first. The modules are now placed before publication instead: module 8's
+teach-back is the post's last check, after the owner's own read.
+
+| # | module | verdict | attempted |
+|---|---|---|---|
+| 0 | diagnostic | `not_attempted` | — |
+| 1 | continuous batching and the service curve | `not_attempted` | — |
+| 2 | Little's Law, checked on real data | `not_attempted` | — |
+| 3 | why GPU utilisation is blind | `not_attempted` | — |
+| 4 | dead time and cooldowns | `not_attempted` | — |
+| 5 | frontiers, dominance and the iso-cost slice | `not_attempted` | — |
+| 6 | the validation gate, and why it failed | `not_attempted` | — |
+| 7 | what could not be concluded | `not_attempted` | — |
+| 8 | teach it back | `not_attempted` | — |
+
+**Carried over from artifact 1's module 0:** intervals were the largest gap,
+and the controlled test (same clusters, different split) is what fixed it.
+Artifact 2's post leans on bootstrap intervals in the H3 table and in the
+iso-cost argument, so module 5 should open by checking that the fix held,
+not by re-teaching it.
