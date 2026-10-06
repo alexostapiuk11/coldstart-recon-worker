@@ -25,6 +25,15 @@ def test_every_computed_number_is_quoted_verbatim():
     assert not missing, missing
 
 
+def test_no_short_number_can_hide_in_the_post():
+    # A value like "0" or "fails" occurs dozens of times in any post, so the verbatim check
+    # above passes for it whatever the post says. Each value is therefore either long enough
+    # to be specific, or occurs exactly once, in the sentence that quotes it.
+    hidden = {k: (v, POST.count(v)) for k, v in numbers(A).items()
+              if len(v) < 6 and POST.count(v) != 1}
+    assert not hidden, hidden
+
+
 def test_the_header_has_the_permanent_slug_byline_and_repo_link():
     assert "Permanent slug: /experiments/autoscaling-signal-and-cold-start" in POST
     # The date is set at the pre-publish gate; until then the placeholder stands.
