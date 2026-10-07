@@ -570,8 +570,9 @@ heterogeneity cost moves throughput, and memory does not.
 
 The results come from two committed stores and one committed file from
 artifact 4. That file, `data/a4/cost_per_tenant.json`, is a byte-identical copy
-of the file at artifact 4's commit d7cf0c3, which at the time of writing exists
-in artifact 4's local repository and is not on origin. The pilot gate,
+of the file at commit d7cf0c3 of this same repository, artifact 4's cost file as
+it stood when this analysis was run, so the analysis re-derives from files in
+this repository alone. The pilot gate,
 reconnaissance and billing figures are recorded, with their sources, in
 `docs/experiment-a5.md` and `docs/recon-a5.md`. No GPU is needed for any step
 below:
