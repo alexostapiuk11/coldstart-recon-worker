@@ -1,0 +1,405 @@
+{
+ "campaign_swap_median_s": 37.78,
+ "replay_swap_seconds": [
+  [
+   25.4,
+   27.3,
+   27.5,
+   25.1,
+   23.4,
+   22.5,
+   23.0,
+   27.4,
+   25.7,
+   27.7
+  ],
+  [
+   22.1,
+   23.2,
+   23.3,
+   22.8,
+   22.1,
+   24.3,
+   24.9,
+   28.1,
+   27.4,
+   25.4
+  ],
+  [
+   22.5,
+   23.9,
+   25.1,
+   25.6,
+   24.4,
+   22.1,
+   25.7,
+   28.2,
+   24.9,
+   26.9
+  ]
+ ],
+ "replay_swap_median_s": [
+  25.51,
+  23.81,
+  25.0
+ ],
+ "replay_pods": [
+  "7db5ue5kw9yfjf",
+  "7db5ue5kw9yfjf",
+  "7db5ue5kw9yfjf"
+ ],
+ "solo_curve_pods": [
+  "2vobcb310fgy1k",
+  "lmhp8rvl4z1boc"
+ ],
+ "as_gated": {
+  "agreeing": 3,
+  "compared": 13,
+  "max_miss_s": 67.8,
+  "latency": "failed",
+  "swaps_predicted": 11,
+  "swaps_real": [
+   10,
+   10,
+   10
+  ]
+ },
+ "curve_speed": {
+  "1.00": {
+   "agreeing": 3,
+   "compared": 13,
+   "max_miss_s": 67.8,
+   "latency": "failed",
+   "swaps_predicted": 11,
+   "swaps_real": [
+    10,
+    10,
+    10
+   ]
+  },
+  "1.05": {
+   "agreeing": 2,
+   "compared": 13,
+   "max_miss_s": 64.5,
+   "latency": "failed",
+   "swaps_predicted": 11,
+   "swaps_real": [
+    10,
+    10,
+    10
+   ]
+  },
+  "1.10": {
+   "agreeing": 0,
+   "compared": 13,
+   "max_miss_s": 61.6,
+   "latency": "failed",
+   "swaps_predicted": 11,
+   "swaps_real": [
+    10,
+    10,
+    10
+   ]
+  },
+  "1.20": {
+   "agreeing": 1,
+   "compared": 13,
+   "max_miss_s": 54.9,
+   "latency": "failed",
+   "swaps_predicted": 10,
+   "swaps_real": [
+    10,
+    10,
+    10
+   ]
+  },
+  "1.30": {
+   "agreeing": 1,
+   "compared": 13,
+   "max_miss_s": 50.5,
+   "latency": "failed",
+   "swaps_predicted": 10,
+   "swaps_real": [
+    10,
+    10,
+    10
+   ]
+  }
+ },
+ "swap_cost": {
+  "38": {
+   "agreeing": 2,
+   "compared": 13,
+   "max_miss_s": 69.2,
+   "latency": "failed",
+   "swaps_predicted": 11,
+   "swaps_real": [
+    10,
+    10,
+    10
+   ]
+  },
+  "33": {
+   "agreeing": 4,
+   "compared": 13,
+   "max_miss_s": 37.7,
+   "latency": "failed",
+   "swaps_predicted": 10,
+   "swaps_real": [
+    10,
+    10,
+    10
+   ]
+  },
+  "30": {
+   "agreeing": 2,
+   "compared": 13,
+   "max_miss_s": 19.7,
+   "latency": "failed",
+   "swaps_predicted": 10,
+   "swaps_real": [
+    10,
+    10,
+    10
+   ]
+  },
+  "28": {
+   "agreeing": 6,
+   "compared": 13,
+   "max_miss_s": 7.7,
+   "latency": "failed",
+   "swaps_predicted": 10,
+   "swaps_real": [
+    10,
+    10,
+    10
+   ]
+  },
+  "26": {
+   "agreeing": 4,
+   "compared": 13,
+   "max_miss_s": 9.3,
+   "latency": "failed",
+   "swaps_predicted": 10,
+   "swaps_real": [
+    10,
+    10,
+    10
+   ]
+  },
+  "25": {
+   "agreeing": 2,
+   "compared": 13,
+   "max_miss_s": 10.4,
+   "latency": "failed",
+   "swaps_predicted": 10,
+   "swaps_real": [
+    10,
+    10,
+    10
+   ]
+  },
+  "24": {
+   "agreeing": 1,
+   "compared": 13,
+   "max_miss_s": 11.3,
+   "latency": "failed",
+   "swaps_predicted": 10,
+   "swaps_real": [
+    10,
+    10,
+    10
+   ]
+  },
+  "22": {
+   "agreeing": 1,
+   "compared": 13,
+   "max_miss_s": 20.1,
+   "latency": "failed",
+   "swaps_predicted": 10,
+   "swaps_real": [
+    10,
+    10,
+    10
+   ]
+  }
+ },
+ "per_repeat_calibrated": {
+  "outcome": "failed",
+  "compared": 13,
+  "agreeing": 1,
+  "max_miss_s": 10.4,
+  "detail": "12 of 13 judged bins miss, more than the 0.5 allowed; largest miss 10.4 s; 16 excluded (0 unstable); 1 both censored (agreement, not judged)"
+ },
+ "per_repeat_bins": [
+  {
+   "start": 0.0,
+   "real_p50": [
+    24.18,
+    19.5,
+    20.15
+   ],
+   "predicted_p50": [
+    18.37,
+    16.67,
+    17.86
+   ]
+  },
+  {
+   "start": 30.0,
+   "real_p50": [
+    2.27,
+    2.02,
+    2.04
+   ],
+   "predicted_p50": [
+    2.25,
+    2.25,
+    2.25
+   ]
+  },
+  {
+   "start": 60.0,
+   "real_p50": [
+    52.85,
+    44.43,
+    46.51
+   ],
+   "predicted_p50": [
+    43.55,
+    39.57,
+    42.21
+   ]
+  },
+  {
+   "start": 90.0,
+   "real_p50": [
+    64.53,
+    54.94,
+    60.39
+   ],
+   "predicted_p50": [
+    52.82,
+    48.22,
+    51.34
+   ]
+  },
+  {
+   "start": 120.0,
+   "real_p50": [
+    80.36,
+    67.28,
+    75.24
+   ],
+   "predicted_p50": [
+    69.97,
+    61.91,
+    67.61
+   ]
+  },
+  {
+   "start": 150.0,
+   "real_p50": [
+    88.54,
+    84.65,
+    88.46
+   ],
+   "predicted_p50": [
+    81.15,
+    76.54,
+    79.02
+   ]
+  },
+  {
+   "start": 180.0,
+   "real_p50": [
+    98.34,
+    90.18,
+    96.22
+   ],
+   "predicted_p50": [
+    91.12,
+    80.9,
+    88.05
+   ]
+  },
+  {
+   "start": 330.0,
+   "real_p50": [
+    27.09,
+    28.18,
+    28.25
+   ],
+   "predicted_p50": [
+    20.44,
+    18.73,
+    19.92
+   ]
+  },
+  {
+   "start": 360.0,
+   "real_p50": [
+    4.81,
+    5.41,
+    5.51
+   ],
+   "predicted_p50": [
+    2.97,
+    2.45,
+    2.69
+   ]
+  },
+  {
+   "start": 690.0,
+   "real_p50": [
+    29.3,
+    30.95,
+    28.49
+   ],
+   "predicted_p50": [
+    21.37,
+    19.67,
+    20.86
+   ]
+  },
+  {
+   "start": 720.0,
+   "real_p50": [
+    21.23,
+    22.95,
+    20.46
+   ],
+   "predicted_p50": [
+    10.6,
+    8.92,
+    10.08
+   ]
+  },
+  {
+   "start": 750.0,
+   "real_p50": [
+    14.18,
+    16.03,
+    12.96
+   ],
+   "predicted_p50": [
+    4.16,
+    3.49,
+    3.78
+   ]
+  },
+  {
+   "start": 780.0,
+   "real_p50": [
+    5.2,
+    8.22,
+    3.89
+   ],
+   "predicted_p50": [
+    3.59,
+    3.59,
+    3.59
+   ]
+  }
+ ]
+}
