@@ -169,8 +169,9 @@ inside the kernel.
 `specialize_active_lora = False`, one dimension of the LoRA kernels' launch grid
 is `max_loras + 1`, whatever the batch holds. Slices for empty slots exit early
 but are still launched: at 64 slots a concentrated batch launches 65 slices per
-LoRA operation, against 2 at 1 slot. So the concentrated regime's change with N
-is not memory. I call it the **registered-slot cost**.
+LoRA operation, against 2 at 1 slot. The concentrated regime's change with N is
+also not KV capacity, which never binds at this request shape (the section on
+memory says why). I call it the **registered-slot cost**.
 
 | slots | heterogeneity cost (tokens/s) | registered-slot cost (tokens/s) |
 |---:|---|---|
@@ -202,7 +203,8 @@ configuration. I cut the diagnostic before the first measured run, and its
 hypothesis, H4, was withdrawn with it. So the −450 tokens/s is reported
 unsplit. I do not know how much of it is the launch grid and how much is
 host-side bookkeeping or anything else that scales with slots. I do know it is
-not memory.
+not KV capacity: the KV cache never binds at this request shape, as the section
+on memory shows.
 
 **The gauge has a cost of its own, and it is small.** The running-adapters
 gauge in vLLM 0.27.1 creates a new label series on every stats record, and the
@@ -318,8 +320,11 @@ and the verdict is inconclusive, not pass.
 +0.19% [−0.23%, +0.42%], resolution −0.29% [−0.92%, +0.07%]. The TTFT
 resolution check passes by 0.05 points. Its interval also sits above zero: the
 second phase over the same real adapters ran about 2% slower in TTFT p50 than
-the first, which is a drift between single phases rather than a difference
-between adapter sets, and it is inside the margin.
+the first. That is an order effect between the first and second phase over the
+same real adapters, and I did not investigate its cause; in the pilot the
+median single-phase TTFT p50 showed no trend with phase position, but that was
+a different, smaller sample. It cannot be a difference between adapter sets,
+because both phases use the same adapters, and it is inside the margin.
 
 **How it got to 137, told in order**, because it did not go as registered:
 
@@ -362,7 +367,7 @@ above, not on a measurement at each point.
 
 ## Method
 
-**Fixed.** Image `ghcr.io/alexostapiuk11/coldstart-recon-worker@sha256:39e967e9…`
+**Fixed.** Image `ghcr.io/alexostapiuk11/coldstart-recon-worker@sha256:39e967e984962d5c355616b6ce27fa309a0895df41c61652c857a9b43a001b7a`
 (vLLM 0.27.1), model `Qwen/Qwen3-4B` at revision
 `1cfa9a7208912126459214e8b04321603b3df60c`, one NVIDIA RTX 4090 (24 GB) on
 RunPod serverless, `--max-model-len 8192`, `max_lora_rank` 16 on `q_proj,
@@ -494,9 +499,9 @@ cache holds 1,478 such requests at once, against the 64 the load generator
 keeps in flight; during reconnaissance the engine at 64 slots logged its KV
 usage at 4.7% with 64 requests running. The scheduler never waits for KV, so a
 memory effect on TTFT or throughput at fixed concurrency is zero by
-construction, and none of the slowdown in the main chart is memory. That is
-also why the concentrated regime's change is called the registered-slot cost
-and never memory.
+construction, and none of the slowdown in the main chart is KV capacity. That
+is also why the concentrated regime's change is called the registered-slot cost
+and never a KV-capacity cost.
 
 Memory matters as **capacity**: how many requests the GPU can hold, which
 becomes tenants. Little's law says that, in steady state, the number of
