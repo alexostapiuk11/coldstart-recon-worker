@@ -5,6 +5,7 @@ One JSON-able dict, written by `scripts/a5_analyse.py` to
 it, so a published number can always be traced back to the records.
 """
 
+import copy
 from dataclasses import asdict
 
 from harness.publish import discard_table, failure_rate_by_group
@@ -30,6 +31,44 @@ def gate_verdict(gate_records, prereg, iterations=10000, seed=0) -> dict:
             f"needs {MIN_BOOTSTRAP_SAMPLES}",
         }
     return verdict(rows.publishable, prereg.equivalence_margin, iterations, seed)
+
+
+# The fields of artifact 4's `validation` that travel with its costs, copied
+# as given: nothing derived, nothing renamed.
+A4_VALIDATION_FIELDS = {
+    "latency": ("compared", "agreeing"),
+    "held_out_cells": ("passed", "total"),
+    "swaps": ("predicted", "real", "agree"),
+}
+
+
+def a4_context(a4: dict | None) -> dict | None:
+    """Artifact 4's model class and validation outcome, when its cost file
+    carries them (from its d7cf0c3 on). A file without either key -- the
+    older shape -- gives None; a file with only one of them is refused rather
+    than half-described."""
+    if a4 is None:
+        return None
+    present = [k for k in ("model", "validation") if k in a4]
+    if not present:
+        return None
+    if len(present) == 1:
+        raise ValueError(
+            f"artifact 4's cost file has {present[0]!r} without the other of 'model' and "
+            "'validation'; the two travel together"
+        )
+    validation = a4["validation"]
+    return copy.deepcopy({
+        "model": a4["model"],
+        "validation": {
+            "outcome": validation["outcome"],
+            **{
+                part: {field: validation[part][field] for field in fields}
+                for part, fields in A4_VALIDATION_FIELDS.items()
+            },
+            "note": validation["note"],
+        },
+    })
 
 
 def analyse(records, gate_records, prereg, a4: dict | None = None, iterations=10000, seed=0) -> dict:
@@ -64,4 +103,7 @@ def analyse(records, gate_records, prereg, a4: dict | None = None, iterations=10
     out["tenants"] = tenants
     if a4 is not None and tenants["feasible"]:
         out["cost_table"] = three_way_table(tenants["tenants"], prereg, a4)
+    context = a4_context(a4)
+    if context is not None:
+        out["a4_context"] = context
     return out

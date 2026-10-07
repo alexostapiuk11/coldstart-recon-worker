@@ -164,10 +164,45 @@ def equivalence(analysis: dict, out_path):
     return fig
 
 
+# The base model this artifact served (the post's Method); artifact 4's comes
+# from its cost file, through `a4_context`.
+ADAPTER_MODEL = "Qwen3-4B"
+
+
+def a4_bins_missed(context: dict) -> int:
+    """Judged latency bins outside the band of real repeats: compared minus
+    agreeing. Derived here; artifact 4's file stores only the two counts."""
+    latency = context["validation"]["latency"]
+    return latency["compared"] - latency["agreeing"]
+
+
+def a4_note(context: dict) -> str:
+    """The lines the cost figure adds under its axis when artifact 4's file
+    carries its model class and validation outcome. Written for a failed
+    validation; any other outcome needs its own wording, so it is refused."""
+    validation = context["validation"]
+    if validation["outcome"] != "failed":
+        raise ValueError(
+            f"artifact 4's validation outcome is {validation['outcome']!r}; the cost "
+            "figure's note is written for 'failed' only"
+        )
+    a4_model = context["model"]["id"].split("/")[-1]
+    return (
+        f"dedicated and swapped: artifact 4's simulator, {a4_model}; adapter: {ADAPTER_MODEL}\n"
+        f"the simulator failed its validation ({a4_bins_missed(context)} of "
+        f"{validation['latency']['compared']} bins missed); none of its numbers is validated"
+    )
+
+
 def cost_per_tenant(analysis: dict, out_path):
     rows = validate_rows(analysis["cost_table"])
     prereg = analysis["prereg"]
-    fig, ax = plt.subplots(figsize=(WIDTH_IN, 4.6))
+    context = analysis.get("a4_context")
+    extra = "" if context is None else "\n" + a4_note(context)
+    # Two more note lines need more room under the axis; without them the
+    # canvas is exactly what it was before artifact 4's context existed.
+    height, bottom = (4.6, 0.14) if context is None else (5.3, 0.19)
+    fig, ax = plt.subplots(figsize=(WIDTH_IN, height))
     labels = [r["strategy"] for r in rows]
     costs = [r["cost"] for r in rows]
     bars = ax.barh(labels, costs, color=[STRATEGY_COLOR[s] for s in labels])
@@ -182,7 +217,8 @@ def cost_per_tenant(analysis: dict, out_path):
     fig.text(
         0.02, 0.02,
         f"${prereg['gpu_hourly_rate']}/GPU-hour · {prereg['requests_per_tenant_month']:,.0f} "
-        "requests/tenant/month\nadapter bar: tenants are a lower bound, so its cost is an upper bound",
+        "requests/tenant/month\nadapter bar: tenants are a lower bound, so its cost is an upper bound"
+        + extra,
         fontsize=_pt(PX_TEXT * 0.9),
     )
     _style(ax)
@@ -190,7 +226,7 @@ def cost_per_tenant(analysis: dict, out_path):
         f"Cost per tenant per month · adapter: {analysis['tenants']['tenants']} tenants per GPU",
         fontsize=_pt(PX_TITLE),
     )
-    fig.tight_layout(rect=(0, 0.14, 1, 1))
+    fig.tight_layout(rect=(0, bottom, 1, 1))
     fig.savefig(out_path, dpi=150)
     return fig
 
