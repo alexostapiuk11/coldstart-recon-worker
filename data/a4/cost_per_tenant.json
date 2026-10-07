@@ -92,5 +92,9 @@
    "sleep_mode_cost_per_tenant_month": null
   }
  ],
- "source": "artifact 4, data/a4/analysis.json; process-level swap arm"
+ "source": "artifact 4, data/a4/analysis.json; process-level swap arm",
+ "model": {
+  "id": "Qwen/Qwen3-1.7B",
+  "revision": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e"
+ }
 }

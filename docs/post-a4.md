@@ -250,7 +250,9 @@ that the models are variants of a shared base, which most fleets of twenty disti
 models are not, and "serve twenty models" is a different business situation from
 "serve twenty variants of one". Artifact 5 measures it on the same hardware, and
 artifact 5 reads this experiment's cost per tenant (`data/a4/cost_per_tenant.json`),
-which carries the validation caveat above.
+which comes from the same simulator, so the validation caveat above applies to it. The
+file names its model, Qwen3-1.7B, because artifact 5's adapter bar is on Qwen3-4B and
+the two are not the same size.
 
 ## Limits
 

@@ -12,7 +12,12 @@ the reference row has no dedicated or no swapped cost, or if the rate differs
 from its own. `build` refuses the first two itself, so a file artifact 5 would
 refuse is never written; the rate is artifact 5's to check, since it reads
 artifact 4's committed rate (its plan 2).
+
+`model` names the checkpoint every cost in the file was measured on, with its pinned
+revision. It is an addition to the agreed format: no existing key or value changed.
 """
+
+from placement_measure.prereg import CANDIDATES
 
 __all__ = ["build"]
 
@@ -45,6 +50,10 @@ def build(analysis: dict) -> dict:
                 "evaluable); artifact 5 would refuse the file. This is a finding for the "
                 "owner, not a gap to fill"
             )
+    model = analysis["inputs"]["model"]
+    if model not in CANDIDATES:
+        raise ValueError(f"{model!r} is not a registered checkpoint, so it has no pinned revision "
+                         "to name in the file")
     return {
         "gpu_hourly_rate": analysis["rate"]["gpu_hourly_rate"],
         "rate_provenance": analysis["rate"]["provenance"],
@@ -52,4 +61,7 @@ def build(analysis: dict) -> dict:
         "reference": dict(ref),
         "rows": rows,
         "source": "artifact 4, data/a4/analysis.json; process-level swap arm",
+        # Added 2026-10-07 at artifact 5's request: its figure sets an adapter bar on a
+        # different model beside these bars, and the file is what says which model these are.
+        "model": {"id": model, "revision": CANDIDATES[model]},
     }

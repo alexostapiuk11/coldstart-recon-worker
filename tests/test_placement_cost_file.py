@@ -20,8 +20,10 @@ REFERENCE = {"regime": "bursty", "s": 1.0}
 
 
 def _analysis(evaluations=None, reference=REFERENCE):
-    return analyse(evaluations or sweep(), DESIGN, total_rate=5.0, output_len=256, rate=RATE,
-                   reference=reference)
+    result = analyse(evaluations or sweep(), DESIGN, total_rate=5.0, output_len=256, rate=RATE,
+                     reference=reference)
+    # `scripts/a4_analyse.py` adds `inputs` after `analyse`; the cost file reads the model from it.
+    return {**result, "inputs": {"model": "Qwen/Qwen3-1.7B"}}
 
 
 def _artifact_5_reads(a4: dict) -> dict:
@@ -60,3 +62,23 @@ def test_the_script_writes_the_file(tmp_path):
     out = tmp_path / "cost.json"
     module.main(["--analysis", str(analysis), "--out", str(out)])
     _artifact_5_reads(json.loads(out.read_text()))
+
+
+def test_the_file_names_the_model_class_it_was_measured_on():
+    """Artifact 5's figure sets its adapter bar (Qwen3-4B) beside this file's bars, so the
+    file says which model they are (artifact 5's request, 2026-10-07)."""
+    result = build(_analysis())
+    assert result["model"] == {"id": "Qwen/Qwen3-1.7B",
+                               "revision": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e"}
+
+
+def test_an_unregistered_model_is_refused_not_written_without_a_revision():
+    analysis = {**_analysis(), "inputs": {"model": "Qwen/Not-A-Registered-Model"}}
+    with pytest.raises(ValueError, match="not a registered checkpoint"):
+        build(analysis)
+
+
+def test_adding_the_model_changed_no_existing_value():
+    result = build(_analysis())
+    assert set(result) == {"gpu_hourly_rate", "rate_provenance", "n_models", "reference", "rows",
+                           "source", "model"}
