@@ -115,8 +115,18 @@ def crossover(analysis: dict, path, *, return_figure: bool = False):
             bottom.errorbar(xs, lats, yerr=[los, his], capsize=2, **style)
         for p in points:
             if not p["evaluable"]:
-                top.annotate("not\nevaluable", (p["s"], 0), ha="center", va="bottom",
-                             fontsize=_pt(PX_NOTE), color=NOTE_COLOR)
+                # Anchored on the inside, at the frame's own edge: centred on the first
+                # or last skew it would straddle the frame and run over the tick
+                # labels, and started at the skew it would run into the validated line.
+                if p["s"] == skews[0]:
+                    where = {"xy": (0.02, 0.02), "xycoords": "axes fraction", "ha": "left"}
+                elif p["s"] == skews[-1]:
+                    where = {"xy": (0.98, 0.02), "xycoords": "axes fraction", "ha": "right"}
+                else:
+                    where = {"xy": (p["s"], 0), "xytext": (0, 4), "textcoords": "offset points",
+                             "ha": "center"}
+                top.annotate("not\nevaluable", va="bottom", fontsize=_pt(PX_NOTE),
+                             color=NOTE_COLOR, **where)
                 continue
             dominated = [s for s in STRATEGIES if p["strategies"].get(s) is None]
             for k, strategy in enumerate(dominated):
@@ -199,11 +209,18 @@ def deciles(analysis: dict, path, *, return_figure: bool = False):
                     marker="o", markerfacecolor="white", markersize=5, linewidth=1.2,
                     label=f"swap sized on aggregate, {agg['m']} GPUs")
         ax.axhline(slo, color="#555555", linewidth=1.0, linestyle=":")
-        ax.annotate(f"SLO {slo:.0f} s", (1, slo), xytext=(2, 3), textcoords="offset points",
-                    fontsize=_pt(PX_NOTE), color=NOTE_COLOR)
-        ax.set_ylim(bottom=0)
+        # Headroom above the highest curve and the SLO line, so the note has room
+        # inside the frame; at the right end because the aggregate-sized curve is
+        # highest at the left.
+        top_y = max([slo, *(max(line.get_ydata()) for line in ax.lines if len(line.get_xdata()) >= 3)])
+        ax.set_ylim(0, top_y * 1.14)
+        ax.annotate(f"SLO {slo:.0f} s", (xs[-1], slo), xytext=(-2, 3), textcoords="offset points",
+                    ha="right", fontsize=_pt(PX_NOTE), color=NOTE_COLOR)
         ax.set_ylabel("p99 (s)", fontsize=_pt(PX_LABEL))
-        ax.legend(fontsize=_pt(PX_NOTE), frameon=False, loc="center left")
+        # Two columns in the empty band between the dedicate/colocate curves near
+        # zero and the swap curves, not on any curve.
+        ax.legend(fontsize=_pt(PX_NOTE), frameon=False, loc="center", ncol=2,
+                  bbox_to_anchor=(0.5, 0.30))
         _style(ax)
     axes[-1][0].set_xticks(xs, ["1\nhottest", *map(str, range(2, 10)), "10\ncoldest"])
     axes[-1][0].set_xlabel("popularity decile", fontsize=_pt(PX_LABEL))
@@ -334,7 +351,7 @@ def swap_stages(analysis: dict, path, *, return_figure: bool = False):
              ha="center", fontsize=_pt(PX_NOTE), color=NOTE_COLOR)
     fig.text(0.5, 0.012, "hatched: in one bar only. The 8B bar is a reference, not a baseline",
              ha="center", fontsize=_pt(PX_NOTE), color=NOTE_COLOR)
-    fig.subplots_adjust(left=0.2, right=0.97, top=0.97, bottom=0.40)
+    fig.subplots_adjust(left=0.27, right=0.97, top=0.97, bottom=0.40)
     return _finish(fig, path, return_figure)
 
 
