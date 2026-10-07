@@ -94,10 +94,13 @@ def campaign_schedule(prereg: Preregistration) -> list[ScheduledRun]:
 
 
 def gate_schedule(prereg: Preregistration) -> list[ScheduledRun]:
-    """The gate runs first and alone (August §8), so it has its own schedule
-    and its own store. Its seed is offset so it never shares a stream with the
-    campaign's."""
-    return build_schedule([GATE], prereg.instances_per_condition, prereg.schedule_seed + 1)
+    """The gate runs first and alone (August §8), so it has its own schedule,
+    its own store and its own size, `gate_instances` (amendment 1). Its seed is
+    offset so it never shares a stream with the campaign's. With a single
+    condition the seed offset orders nothing: each instance's phase order comes
+    from phase_plan(run_index), so a larger gate's first instances repeat a
+    smaller gate's."""
+    return build_schedule([GATE], prereg.gate_instances, prereg.schedule_seed + 1)
 
 
 def registered_adapters(condition: Condition, prereg: Preregistration) -> tuple[str, ...]:

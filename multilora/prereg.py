@@ -42,6 +42,7 @@ class Preregistration:
     phases_per_regime: int = 2
     diagnostic_points: tuple[int, ...] = (1, 16, 64)
     control_point: int = 64
+    gate_instances: int = 24  # Amendment 1: the gate's own size
 
     def __post_init__(self) -> None:
         positive_ints = {
@@ -100,6 +101,12 @@ class Preregistration:
             raise ValueError(
                 f"instances_per_condition {self.instances_per_condition} is below the "
                 f"bootstrap floor {MIN_BOOTSTRAP_SAMPLES}"
+            )
+        gate_n = self.gate_instances
+        if isinstance(gate_n, bool) or not isinstance(gate_n, int) or gate_n < MIN_BOOTSTRAP_SAMPLES:
+            raise ValueError(
+                f"gate_instances must be an int at or above the bootstrap floor "
+                f"{MIN_BOOTSTRAP_SAMPLES}, got {gate_n!r}"
             )
         if not set(self.diagnostic_points) <= set(self.sweep):
             raise ValueError("diagnostic_points must be sweep points")

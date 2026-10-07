@@ -30,6 +30,24 @@ def test_too_few_instances_for_a_bootstrap_are_refused():
         example_prereg(instances_per_condition=19)
 
 
+def test_the_gate_size_defaults_to_the_campaign_size(prereg):
+    assert prereg.gate_instances == 24
+
+
+def test_too_few_gate_instances_for_a_bootstrap_are_refused():
+    from harness.stats import MIN_BOOTSTRAP_SAMPLES
+
+    with pytest.raises(ValueError, match="gate_instances must be an int at or above the bootstrap floor"):
+        example_prereg(gate_instances=MIN_BOOTSTRAP_SAMPLES - 1)
+    assert example_prereg(gate_instances=MIN_BOOTSTRAP_SAMPLES).gate_instances == MIN_BOOTSTRAP_SAMPLES
+
+
+@pytest.mark.parametrize("bad", [True, 144.0, "144", None])
+def test_the_gate_size_must_be_a_real_int(bad):
+    with pytest.raises(ValueError, match="gate_instances must be an int at or above the bootstrap floor"):
+        example_prereg(gate_instances=bad)
+
+
 @pytest.mark.parametrize("tau", [0.0, 1.0, -0.1])
 def test_the_knee_threshold_must_be_a_fraction(tau):
     with pytest.raises(ValueError, match="knee_threshold"):

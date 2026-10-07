@@ -41,7 +41,8 @@ def estimate(prereg, timings, *, cold_startup_s: dict[int, float], cap_usd: floa
         seconds = 0.0
         for name in campaign_conditions(p) + [GATE]:
             cond = parse_condition(name, p)
-            seconds += p.instances_per_condition * instance_seconds(cond.n_slots, p, timings)
+            count = p.gate_instances if name == GATE else p.instances_per_condition
+            seconds += count * instance_seconds(cond.n_slots, p, timings)
         seconds += sum(_interp(cold_startup_s, n) + _interp(
             {k: v["warm_startup_s"] for k, v in timings.items()}, n) for n in p.sweep)
         return seconds / 3600.0
