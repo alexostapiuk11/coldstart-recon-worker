@@ -19,11 +19,24 @@ REPO = Path(__file__).resolve().parents[1]
 REFERENCE = {"regime": "bursty", "s": 1.0}
 
 
+# The blocks `scripts/a4_analyse.py` writes (placement.validation.validate and held_out_check),
+# as the committed analysis has them.
+VALIDATION = {
+    "outcome": "failed",
+    "latency": {"outcome": "failed", "compared": 13, "agreeing": 3, "max_miss_seconds": 67.78,
+                "detail": "10 of 13 judged bins miss, more than the 0.5 allowed; largest miss 67.8 s"},
+    "swaps": {"predicted": 11, "real": [10, 10, 10], "agree": True},
+    "swap_median_s": 37.8, "hosts": ["h"], "requests": 1562, "bins": [], "point": {},
+}
+HELD_OUT = [{"cell": "pair:o24:n48", "passed": True}, {"cell": "pair:o48:n24", "passed": False}]
+
+
 def _analysis(evaluations=None, reference=REFERENCE):
     result = analyse(evaluations or sweep(), DESIGN, total_rate=5.0, output_len=256, rate=RATE,
                      reference=reference)
     # `scripts/a4_analyse.py` adds `inputs` after `analyse`; the cost file reads the model from it.
-    return {**result, "inputs": {"model": "Qwen/Qwen3-1.7B"}}
+    return {**result, "inputs": {"model": "Qwen/Qwen3-1.7B"}, "validation": VALIDATION,
+            "held_out": HELD_OUT}
 
 
 def _artifact_5_reads(a4: dict) -> dict:
@@ -81,4 +94,22 @@ def test_an_unregistered_model_is_refused_not_written_without_a_revision():
 def test_adding_the_model_changed_no_existing_value():
     result = build(_analysis())
     assert set(result) == {"gpu_hourly_rate", "rate_provenance", "n_models", "reference", "rows",
-                           "source", "model"}
+                           "source", "model", "validation"}
+
+
+def test_the_file_carries_the_validation_outcome_as_the_analysis_has_it():
+    """Artifact 5's figure sets its adapter bar beside these costs, so the file says the simulator
+    they come from failed its pre-registered gate (artifact 5's request, 2026-10-07). The fields
+    are the analysis's own, copied and not renamed or derived."""
+    v = build(_analysis())["validation"]
+    assert v["outcome"] == "failed"
+    assert v["latency"] == VALIDATION["latency"]          # compared, agreeing, max_miss_seconds, detail
+    assert v["swaps"] == VALIDATION["swaps"]
+    assert v["held_out_cells"] == {"passed": 1, "total": 2}
+    assert "failed" in v["note"] and "\n" not in v["note"]
+
+
+def test_a_validation_that_was_not_evaluable_is_carried_as_that():
+    analysis = {**_analysis(), "validation": {"outcome": "not_evaluable"}}
+    v = build(analysis)["validation"]
+    assert v["outcome"] == "not_evaluable" and "latency" not in v and "swaps" not in v

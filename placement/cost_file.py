@@ -14,7 +14,8 @@ refuse is never written; the rate is artifact 5's to check, since it reads
 artifact 4's committed rate (its plan 2).
 
 `model` names the checkpoint every cost in the file was measured on, with its pinned
-revision. It is an addition to the agreed format: no existing key or value changed.
+revision, and `validation` the simulator's validation outcome. Both are additions to the
+agreed format: no existing key or value changed.
 """
 
 from placement_measure.prereg import CANDIDATES
@@ -27,6 +28,35 @@ def _cost(point: dict, strategy: str) -> float | None:
         return None
     view = point["strategies"][strategy]
     return None if view is None else view["cost_per_tenant_month"]
+
+
+def _validation(analysis: dict) -> dict:
+    """The simulator's validation outcome, in the analysis's own fields.
+
+    `outcome`, `latency` and `swaps` are copied from `analysis["validation"]` and not renamed
+    or derived; the held-out counts are counted from `analysis["held_out"]`, as the post's
+    numbers are. `note` is one line saying what the post says, with the numbers from those
+    fields. A gate that could not be evaluated carries only its outcome and the held-out
+    counts."""
+    v = analysis["validation"]
+    held = analysis["held_out"]
+    out = {"outcome": v["outcome"]}
+    passed = sum(1 for c in held if c["passed"])
+    if "latency" in v:
+        out["latency"] = dict(v["latency"])
+        out["swaps"] = dict(v["swaps"])
+    out["held_out_cells"] = {"passed": passed, "total": len(held)}
+    note = f"Validation outcome: {v['outcome']}."
+    if "latency" in v:
+        lat, sw = v["latency"], v["swaps"]
+        note += (f" {lat['compared'] - lat['agreeing']} of {lat['compared']} judged bins missed the"
+                 f" band of three real repeats (largest miss {lat['max_miss_seconds']:.1f} s); the"
+                 f" swap count {'agreed' if sw['agree'] else 'did not agree'} ({sw['predicted']}"
+                 f" predicted, real {sw['real']}).")
+    note += (f" {passed} of {len(held)} held-out interference cells passed. These costs come from"
+             " that simulator; see docs/post-a4.md and docs/findings-a4-validation-swap-cost.md.")
+    out["note"] = note
+    return out
 
 
 def build(analysis: dict) -> dict:
@@ -64,4 +94,7 @@ def build(analysis: dict) -> dict:
         # Added 2026-10-07 at artifact 5's request: its figure sets an adapter bar on a
         # different model beside these bars, and the file is what says which model these are.
         "model": {"id": model, "revision": CANDIDATES[model]},
+        # Added 2026-10-07 at artifact 5's request: the costs come from a simulator that failed
+        # its pre-registered validation gate, and a figure using them has to say so.
+        "validation": _validation(analysis),
     }
