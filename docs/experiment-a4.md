@@ -350,3 +350,10 @@ timed out waiting for a worker while the endpoint had none for several hours
 runs). `data/a4/designs/cells-ramp-1d.json` runs that cell twice more with the
 same 360 s window, into `data/a4/cells-ramp-1d.jsonl`. Design 1c, which had
 not produced a run, is run as committed.
+
+The first attempts at designs 1c and 1d produced only failed records
+(`data/a4/cells-ramp-1c.jsonl`, `data/a4/cells-ramp-1d.jsonl`): the endpoint had
+no worker because the RunPod account balance had reached zero, and every job
+timed out in the queue after 90 minutes. Those stores are kept as evidence and
+do not count. After the balance was restored, the same two designs were run again
+into `data/a4/cells-ramp-1c-retry.jsonl` and `data/a4/cells-ramp-1d-retry.jsonl`.
