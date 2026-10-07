@@ -357,3 +357,9 @@ no worker because the RunPod account balance had reached zero, and every job
 timed out in the queue after 90 minutes. Those stores are kept as evidence and
 do not count. After the balance was restored, the same two designs were run again
 into `data/a4/cells-ramp-1c-retry.jsonl` and `data/a4/cells-ramp-1d-retry.jsonl`.
+
+A second top-up of the re-run, committed before it runs: after designs 1a to 1d,
+`pair:o1:n32` has two valid repeats (its first run in design 1b was the first job
+on a fresh worker and compiled, and its last timed out in the queue).
+`data/a4/designs/cells-ramp-1e.json` runs it twice more with the same 360 s
+window, into `data/a4/cells-ramp-1e.jsonl`.
