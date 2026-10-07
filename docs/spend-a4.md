@@ -2,8 +2,9 @@
 
 **Drafted 2026-10-07 for the owner to confirm.** Every dollar figure comes from
 RunPod's billing API (`GET /v1/billing/endpoints` for endpoint `nnypnh9drkq5ux`,
-hourly buckets, read 2026-10-07), not from the console; the owner confirms the
-total against the console before publication. Job counts and execution times come
+hourly buckets, last read 2026-10-07 08:16 UTC, two hours after the final job), not
+from the console; the owner confirms the total against the console before
+publication. Job counts and execution times come
 from the committed stores. Scope amendment section 12 requires this artifact's own
 spend recorded.
 
@@ -20,9 +21,12 @@ spend recorded.
   registered $1.1095 per hour from an earlier partial read of the same record
   (`placement/registered.py`); the difference is 0.1% and the registered value was
   not changed.
-- The newest hourly buckets can still fill in (the billing record lags by about an
-  hour), so the total can rise slightly. A last read after the final job is the one
-  to quote.
+- **This is the final figure.** It was read at 08:16 UTC, after the last job (the
+  validation replays, finished about 06:17 UTC; the newest bucket is 06:00 UTC), and
+  it equals the read taken at the end of the replays: $25.2311 for 81,956 s. No
+  hourly bucket has been added since, so no later billing is expected from this
+  endpoint's jobs. The endpoint's health still lists one idle worker, which has
+  accrued no billing.
 - Reconnaissance alone was read separately on 2026-10-05, before any campaign
   started: $0.4988 for 1,623 s (`docs/recon-a4.md`, section 1).
 
