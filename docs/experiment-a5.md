@@ -635,3 +635,69 @@ The earlier tables stay as the record. This is the table the code now runs on:
 | `gate_instances` | `196` |
 | `equivalence_margin` (derived) | `0.05` |
 | `requests_per_phase` (derived) | `640` |
+
+## Actual spend (read 2026-10-07)
+
+This section is an appended record. It was written after the campaign had
+finished and the billing record had been read. No value above it was changed.
+
+The billing record is RunPod's billing API (`GET /v1/billing/endpoints`,
+grouped by `endpointId`, daily buckets), read on 2026-10-07 for the period
+starting 2026-10-04. The table gives the returned `amount` (USD) and
+`timeBilledMs`, with billed hours as `timeBilledMs / 3.6e6`.
+
+| date (UTC) | endpoint | USD | billed hours |
+|---|---|---|---|
+| 2026-10-05 | measurement `2ilkjkm9ob4qvo` (artifact5-measure) | 8.05 | 7.26 |
+| 2026-10-06 | measurement `2ilkjkm9ob4qvo` (artifact5-measure) | 0.44 | 0.39 |
+| 2026-10-07 | measurement `2ilkjkm9ob4qvo` (artifact5-measure) | 5.31 | 4.79 |
+| 2026-10-05 | reconnaissance `hwtia288shbztb` (artifact5-recon) | 0.68 | 0.61 |
+
+The exact returned values were: 8.04911638086196 USD and 26140290 ms
+(2026-10-05), 0.4363682254916057 USD and 1421296 ms (2026-10-06),
+5.312057421775535 USD and 17253097 ms (2026-10-07) for the measurement
+endpoint, and 0.6816014961805195 USD and 2212514 ms (2026-10-05) for the
+reconnaissance endpoint. A Python computation from those values printed:
+
+| quantity | USD | billed hours | implied rate (USD per hour) | difference from $1.1095 |
+|---|---|---|---|---|
+| measurement endpoint, total | 13.80 | 12.45 | 1.1084 | -0.10% |
+| reconnaissance endpoint, total | 0.68 | 0.61 | 1.1090 | -0.04% |
+| grand total | 14.48 | 13.06 | 1.1084 | -0.10% |
+
+The implied rate is total USD divided by billed hours. The registered rate is
+$1.1095 per GPU-hour (Amendment 2). Unrounded: measurement 13.7975 USD over
+12.4485 h, reconnaissance 0.6816 USD over 0.6146 h, grand total 14.4791 USD
+over 13.0631 h. The per-day implied rates ran from 1.1053 to 1.1090.
+
+What the figures say:
+
+1. The grand total, $14.48, is under the $20 cap by about $5.52 ($5.5209
+   unrounded).
+2. It is also below the Amendment 2 estimate of about $19.96 (17.99
+   GPU-hours), and below Amendment 3's revised estimate of about $19.53
+   (17.60 GPU-hours), by about $5.48 and $5.05. The main reason is the campaign
+   instance time. Computed from `data/a5/campaign.jsonl`, `clock_A`
+   (`t_result - t_submit`) over the 191 `ok` records (of 192), an instance took
+   a mean of 108.0 s of wall time (median 104.1 s). The estimates assumed 166 s
+   per instance, taken from the gate (Amendment 3 used 166.4 s). The campaign
+   estimate was 192 x 166.4 s = 8.88 hours, and the campaign instances took
+   about 65% of that time each.
+3. The figures do not include network-volume storage, which is billed
+   separately and was not read, or any spend on other endpoints or other
+   artifacts. They cover only the two endpoints named above.
+4. The billing buckets are per endpoint per UTC day, so the spend cannot be
+   split exactly between priming, the pilot gate, the larger gate, the
+   replacements and the campaign. As a rough allocation by UTC day, 2026-10-05
+   and 2026-10-06 correspond to everything up to the end of the gate
+   replacements (the reconnaissance endpoint's spend was also billed on
+   2026-10-05), which is $8.49 on the measurement endpoint, and 2026-10-07 is
+   the campaign, $5.31. The campaign ran 06:50 to 12:36 UTC on 2026-10-07, and
+   to the best of the record nothing else ran on the measurement endpoint that
+   day. The records in `data/a5/campaign.jsonl` carry no wall-clock UTC
+   timestamps (`clock_A` is a monotonic clock), so the run window and that
+   claim could not be checked from the data store.
+5. The billed hours (13.06 h in total) are lower than the sum of wall-clock
+   times in Amendment 3's budget arithmetic (17.60 h) because billing counts
+   active worker time, not queue or controller wait, and `clock_A` runs from
+   submission to result.
