@@ -439,18 +439,25 @@ three models on one GPU. 10 of 13 judged bins fell outside the band of three
 real repeats, the largest miss was 67.8 s, and 1 of 2 held-out interference
 cells passed; the swap count agreed, 11 predicted against 10 real in all three
 repeats. The failure does not touch the two bars the same way. The swapped bar
-depends on the model that failed, since the gate tested exactly the swap path,
-and the direction of the model's error on it is not known. The dedicated bar was
-not tested by that gate, so it is neither validated nor shown wrong. By artifact
-4's pre-registered sizing rule, as I read it, the dedicated fleet is fixed by
-construction, one GPU per model plus pinned GPUs for hot models, sized from
-measured saturation rather than from the simulated latencies; the gate did not
-check that reading. Nothing in the file is validated, at this point or any
-other. Artifact 4 says the ordering is wide, "dedicating costs about twice the
-cheapest option", and that it did not test whether the model's error is small
-enough to leave the ordering unchanged. The adapter bar is this artifact's own
-measurement, but placed beside the swapped bar it inherits that caveat: the
-comparison between adapters and swapping is only as firm as the swapped bar.
+depends on the model that failed, since the gate tested exactly the swap path.
+At the swap time the simulator charged, the swap campaign's 37.8 s, it
+predicted latency higher than the real engine's in every missed bin, always on
+the same side; charged instead at the roughly 25 s that the swaps inside the
+replays took, on a different pod, it predicted lower in every bin that still
+missed. So the validation does not say which way the swapped cost errs.
+Artifact 4 says no single fixed swap cost matches the real system, and that it
+cannot say how the failure splits between the host and a gap in the model. The
+dedicated bar was not tested by that gate, so it is neither validated nor shown
+wrong. By artifact 4's pre-registered sizing rule, as I read it, the dedicated
+fleet is fixed by construction, one GPU per model plus pinned GPUs for hot
+models, sized from measured saturation rather than from the simulated
+latencies; the gate did not check that reading. Nothing in the file is
+validated, at this point or any other. Artifact 4 says the ordering is wide,
+"dedicating costs about twice the cheapest option", and that it did not test
+whether the model's error is small enough to leave the ordering unchanged. The
+adapter bar is this artifact's own measurement, but placed beside the swapped
+bar it inherits that caveat: the comparison between adapters and swapping is
+only as firm as the swapped bar.
 
 **This is not a like-for-like comparison, and I do not present it as one.**
 Artifact 4's costs come from a simulated fleet of 20 Qwen3-1.7B models with
@@ -539,8 +546,10 @@ heterogeneity cost moves throughput, and memory does not.
 - **Artifact 4's costs come from a simulator that failed its validation.** At
   the bursty, s = 1.0 point used here, 10 of 13 judged bins missed the band of
   three real repeats and 1 of 2 held-out cells passed. The swapped bar depends
-  on the failed model, in a direction not known; the dedicated bar was not
-  tested by the gate. Nothing in artifact 4's file is validated, and the adapter
+  on the failed model, and the validation does not say which way it errs: at
+  the 37.8 s swap time the simulator charged, it predicted latency higher than
+  real; at the replays' roughly 25 s, lower. The dedicated bar was not tested by
+  the gate. Nothing in artifact 4's file is validated, and the adapter
   bar, set beside the swapped bar, inherits that.
 - **The cost comparison crosses model sizes.** Artifact 4's reference point was
   measured on Qwen3-1.7B, this artifact on Qwen3-4B.
