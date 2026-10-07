@@ -250,17 +250,29 @@ is about 115 requests a second, against about 7.3 a second for 64 tenants at
 peak under these assumptions. A product could run past the knee and still meet
 the SLO; it would pay for that in throughput per GPU.
 
-![Horizontal bars of cost per tenant per month in US dollars, all at 1.1095 dollars per GPU-hour. Dedicated, 850 dollars, and swapped, 405 dollars, are artifact 4's simulated fleet of Qwen3-1.7B models at its bursty regime with Zipf skew 1.0. Adapter, 101 dollars, is this artifact's Qwen3-4B at 8 tenants per GPU, drawn hatched because it is an upper bound: tenants are a lower bound. The two sides use different model sizes, so the bars are not a like-for-like comparison.](figures/a5/cost_per_tenant.png)
+![Horizontal bars of cost per tenant per month in US dollars, all at 1.1095 dollars per GPU-hour. Dedicated, 850 dollars, and swapped, 405 dollars, come from artifact 4's simulator of a fleet of Qwen3-1.7B models at its bursty regime with Zipf skew 1.0. Adapter, 101 dollars, is this artifact's Qwen3-4B at 8 tenants per GPU, drawn hatched because it is an upper bound: tenants are a lower bound. A note under the axis gives the GPU rate and the requests per tenant, says the adapter bar is an upper bound, names the model classes (dedicated and swapped from artifact 4's simulator on Qwen3-1.7B, adapter on Qwen3-4B), and says the simulator failed its validation, with 10 of 13 bins missed, so none of its numbers is validated. The two sides use different model sizes, so the bars are not a like-for-like comparison.](figures/a5/cost_per_tenant.png)
 
 | strategy | tenants per GPU | cost per tenant per month | source |
 |---|---|---:|---|
-| dedicated | artifact 4's sizing | $850.43 | artifact 4, bursty regime, s = 1.0, Qwen3-1.7B |
-| swapped | artifact 4's sizing | $404.97 | artifact 4, bursty regime, s = 1.0, Qwen3-1.7B |
+| dedicated | artifact 4's sizing | $850.43 | artifact 4's simulator, bursty regime, s = 1.0, Qwen3-1.7B; not validated |
+| swapped | artifact 4's sizing | $404.97 | artifact 4's simulator, bursty regime, s = 1.0, Qwen3-1.7B; not validated |
 | adapter | 8, a lower bound | $101.24, an upper bound | this artifact, Qwen3-4B |
 
 The adapter cost is the GPU's monthly cost, $1.1095 × 730 hours, divided by 8
 tenants. The section on swapping models says why the first two rows and the
 third are not like-for-like.
+
+**The first two rows come from a simulator that failed its own test.** Artifact
+4's costs come from a simulator fed with measured inputs, and artifact 4
+pre-registered a test the simulator had to pass before it was trusted:
+reproduce a real one-GPU, three-model replay at its bursty regime, s = 1.0.
+That operating point is the reference row used here. The validation outcome is
+failed: 10 of 13 judged bins were outside the band of three real repeats (3
+agreed), the largest miss was 67.8 s, and 1 of 2 held-out interference cells
+passed. The swap count agreed: 11 predicted, 10 real in all three repeats.
+Nothing in artifact 4's cost file is validated, at the reference point or
+anywhere else. The section on swapping models says what that means for each
+bar.
 
 ---
 
@@ -421,6 +433,25 @@ file names the reference point this comparison uses, the bursty regime at Zipf
 skew s = 1.0, where its dedicated strategy costs $850.43 per tenant per month
 and its swapped strategy $404.97, at the same $1.1095 per GPU-hour.
 
+**Both of those numbers come from artifact 4's simulator, which failed its
+pre-registered validation**, at exactly this operating point: bursty, s = 1.0,
+three models on one GPU. 10 of 13 judged bins fell outside the band of three
+real repeats, the largest miss was 67.8 s, and 1 of 2 held-out interference
+cells passed; the swap count agreed, 11 predicted against 10 real in all three
+repeats. The failure does not touch the two bars the same way. The swapped bar
+depends on the model that failed, since the gate tested exactly the swap path,
+and the direction of the model's error on it is not known. The dedicated bar was
+not tested by that gate, so it is neither validated nor shown wrong. By artifact
+4's pre-registered sizing rule, as I read it, the dedicated fleet is fixed by
+construction, one GPU per model plus pinned GPUs for hot models, sized from
+measured saturation rather than from the simulated latencies; the gate did not
+check that reading. Nothing in the file is validated, at this point or any
+other. Artifact 4 says the ordering is wide, "dedicating costs about twice the
+cheapest option", and that it did not test whether the model's error is small
+enough to leave the ordering unchanged. The adapter bar is this artifact's own
+measurement, but placed beside the swapped bar it inherits that caveat: the
+comparison between adapters and swapping is only as firm as the swapped bar.
+
 **This is not a like-for-like comparison, and I do not present it as one.**
 Artifact 4's costs come from a simulated fleet of 20 Qwen3-1.7B models with
 256-token outputs, under its own traffic model, offered load and SLO. Artifact
@@ -505,6 +536,12 @@ heterogeneity cost moves throughput, and memory does not.
   sample on artifact 4's endpoint. This artifact's own billing implied $1.1084
   on the measurement endpoint and $1.1090 on the reconnaissance endpoint. The
   $14.48 spend covers those two endpoints and not network-volume storage.
+- **Artifact 4's costs come from a simulator that failed its validation.** At
+  the bursty, s = 1.0 point used here, 10 of 13 judged bins missed the band of
+  three real repeats and 1 of 2 held-out cells passed. The swapped bar depends
+  on the failed model, in a direction not known; the dedicated bar was not
+  tested by the gate. Nothing in artifact 4's file is validated, and the adapter
+  bar, set beside the swapped bar, inherits that.
 - **The cost comparison crosses model sizes.** Artifact 4's reference point was
   measured on Qwen3-1.7B, this artifact on Qwen3-4B.
 - **The gate was extended after its result was seen**, twice, and the knee's
@@ -518,9 +555,12 @@ heterogeneity cost moves throughput, and memory does not.
 ## Reproduce it
 
 The results come from two committed stores and one committed file from
-artifact 4. The pilot gate, reconnaissance and billing figures are recorded,
-with their sources, in `docs/experiment-a5.md` and `docs/recon-a5.md`. No GPU
-is needed for any step below:
+artifact 4. That file, `data/a4/cost_per_tenant.json`, is a byte-identical copy
+of the file at artifact 4's commit d7cf0c3, which at the time of writing exists
+in artifact 4's local repository and is not on origin. The pilot gate,
+reconnaissance and billing figures are recorded, with their sources, in
+`docs/experiment-a5.md` and `docs/recon-a5.md`. No GPU is needed for any step
+below:
 
 ```bash
 git clone https://github.com/alexostapiuk11/coldstart-recon-worker

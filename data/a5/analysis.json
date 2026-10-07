@@ -1,4 +1,31 @@
 {
+ "a4_context": {
+  "model": {
+   "id": "Qwen/Qwen3-1.7B",
+   "revision": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e"
+  },
+  "validation": {
+   "held_out_cells": {
+    "passed": 1,
+    "total": 2
+   },
+   "latency": {
+    "agreeing": 3,
+    "compared": 13
+   },
+   "note": "Validation outcome: failed. 10 of 13 judged bins missed the band of three real repeats (largest miss 67.8 s); the swap count agreed (11 predicted, real [10, 10, 10]). 1 of 2 held-out interference cells passed. These costs come from that simulator; see docs/post-a4.md and docs/findings-a4-validation-swap-cost.md.",
+   "outcome": "failed",
+   "swaps": {
+    "agree": true,
+    "predicted": 11,
+    "real": [
+     10,
+     10,
+     10
+    ]
+   }
+  }
+ },
  "cost_table": [
   {
    "cost": 850.43175,
