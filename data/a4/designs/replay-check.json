@@ -1,0 +1,29 @@
+{
+ "swap_s": 37.77522280195262,
+ "checks": [
+  {
+   "seed": 4104,
+   "requests": 551,
+   "predicted_swaps": 2,
+   "predicted_last_done_s": 902.1197836084757,
+   "ok_bins": 6,
+   "feasible": false
+  },
+  {
+   "seed": 4105,
+   "requests": 638,
+   "predicted_swaps": 3,
+   "predicted_last_done_s": 518.6164605890658,
+   "ok_bins": 8,
+   "feasible": false
+  },
+  {
+   "seed": 4106,
+   "requests": 1562,
+   "predicted_swaps": 11,
+   "predicted_last_done_s": 924.7268248854973,
+   "ok_bins": 13,
+   "feasible": true
+  }
+ ]
+}
