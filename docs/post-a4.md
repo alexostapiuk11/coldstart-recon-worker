@@ -17,8 +17,9 @@ DRAFT for the owner's review. Every headline number below is rendered by
 
 **Oleksii Ostapiuk** · PUBLICATION-DATE · `/experiments/multi-model-placement`
 
-For twenty small models on rented RTX 4090s, the cheapest placement depends on how
-the traffic arrives, not on how skewed it is. When each model's requests are spread
+For twenty small models on rented RTX 4090s, at the latency target and swap time I
+measured, the cheapest placement depends on how the traffic arrives, not on how skewed
+it is. When each model's requests are spread
 across time, **co-locate two models per GPU**. When each model's requests come in
 bursts with long gaps between them, **swap models in and out of a GPU**. As a rule over
 the Zipf skew s that I swept, it reads: spread arrivals, s = 0.6–2.0: colocate; bursty
@@ -28,7 +29,10 @@ s = 1.0), dedicating needs 21 GPUs and costs $850.43 per tenant per month, which
 $2.84 per million tokens; swapping needs 10 GPUs, $404.97 per tenant per month, $1.35
 per million tokens; co-locating needs 12 GPUs, $485.96, $1.62. For twenty tenants,
 dedicating costs $8,909.28 more per month than the cheapest option. The price of a
-GPU-hour is $1.11, derived from RunPod's billing API.
+GPU-hour is $1.11, derived from RunPod's billing API for a serverless RTX 4090 worker.
+Dollars assume every GPU runs all month (730 hours); per million tokens counts output
+tokens only, 256 per request, at the offered load. Substitute your own rate and
+utilisation: cost scales with both.
 
 **Read those numbers as a simulator's, because the simulator failed its test.** The
 placement comparison runs in a simulator fed with measured inputs, and it was to be
@@ -38,7 +42,8 @@ judged bins outside the band of three real repeats, and one of two held-out
 interference cells missed. The ordering is wide (dedicating costs about twice
 the cheapest option), but the gate measures latency, and I did not test whether the
 model's error is small enough to leave the ordering unchanged; the exact GPU counts
-are not validated. Below: the answer, then what was measured, then the failure and what
+are not validated. The gate replays one GPU with the swap strategy; it never exercises
+co-location, which is checked only by two held-out interference cells. Below: the answer, then what was measured, then the failure and what
 I know about it.
 
 Harness, raw data, analysis and figure code:
@@ -64,7 +69,9 @@ p99. The bottom row is the aggregate p99 that fleet delivers.
   more GPUs at s = 1.25 than at s = 0.6.
 - **Bursty arrivals** (a model is active for a burst of about 120 s, about a fifth of
   the time): s = 0.8–2.0: swap. Swapping needs 9 to 13 GPUs, co-locating 12 to 16,
-  dedicating 21 to 25. The bursty regime has one gap, s = 0.6: not evaluable. At that
+  dedicating 21 to 25 (more than one per model because a hot model gets replicas: a
+  model whose load in a burst exceeds 0.7 of a GPU is given as many GPUs as keep each
+  below that). The bursty regime has one gap, s = 0.6: not evaluable. At that
   skew some popularity decile did not receive enough requests, in some repetition,
   to compute a p99, and the pre-registered rule is to publish no number there, not to
   fill it from the repetitions that did.
@@ -75,7 +82,7 @@ p99. The bottom row is the aggregate p99 that fleet delivers.
   does and does not show.
 
 The SLO matters, and a screen I pre-registered chose it. It is 2 times the median swap,
-75.6 s, and the offered load is 1 GPUs of the measured solo saturation (8.89 requests
+75.6 s, and the offered load is 1 GPU's worth of the measured solo saturation (8.89 requests
 per second) spread over twenty models. Dedicating and co-locating deliver a p99 of 4 to 5 s at the
 reference point; swapping delivers about 45 s. Swapping is cheapest here at an SLO loose
 enough to absorb a swap. A tighter SLO would need a larger swap fleet and could remove its
@@ -89,13 +96,13 @@ The obvious way to size a fleet is to find the smallest one whose **aggregate p9
 over all requests, meets the SLO. With twenty models and Zipf-shaped popularity, the
 aggregate p99 is largely the p99 of the popular models' requests, because they send
 most of them. At the reference point, sizing the swap fleet that way gives 9 GPUs, not 10.
-With 9 GPUs the aggregate looks fine, but the hottest decile of models has a p99 of
-87.7 s against the SLO of 75.6 s. The right sizing meets the SLO for every popularity
+With 9 GPUs the aggregate looks fine, but the two hottest deciles of models have a p99 of
+87.7 s and 77.2 s against the SLO of 75.6 s. The right sizing meets the SLO for every popularity
 decile, and costs a GPU more.
 
 I expected the opposite failure: that the cold tenants, whose models are evicted most
 often, would be the ones to suffer. At this point they are not. The coldest decile
-breaches the SLO by 0% at 9 GPUs; it is the hottest that does. I have not measured
+breaches the SLO by 0% at 9 GPUs; it is the two hottest that breach it. I have not measured
 why, and I do not claim an explanation.
 
 ## The three primitives, measured
@@ -139,9 +146,22 @@ idle neighbour a model is as fast as alone. With a busy neighbour its latency is
 2.0 to 2.4 times higher at every concurrency I measured (own concurrency 16: 2.83 s
 alone, 6.13 s with a neighbour at 16, about 6.4 s at 32 or 64; own concurrency 64:
 8.63 s, 18.0 s, about 18.7 s). That is slightly worse than half the card, not better,
-so co-located models do not get their share for free when both are busy. My reading of
-why co-locating still halves the fleet in the simulation is that the per-model load is
-low, so a pair seldom has both models at high concurrency at once; I did not test it.
+so co-located models do not get their share for free when both are busy, and the cost
+does not grow with the model's own load: even a single request is slowed by about
+2.3 times. I did not measure the mechanism.
+
+Why co-locating still halves the fleet in the simulation is not that load is low. The
+grid has no neighbour between 0 and 16 and the simulator interpolates linearly there,
+so I re-sized the reference skew with the worst reading, any busy neighbour costing what
+16 costs: the fleets did not change (10 GPUs spread, 12 bursty). The reason is the SLO.
+Co-located latency is about 3 to 6 s against 75.6 s. Multiplying every busy-neighbour latency
+by 4 gives 12 GPUs in the spread regime, one fewer than swapping's 13, and 20 in the
+bursty regime, where swapping needs 10; at 8 times, co-locating loses to swapping in
+the spread regime too (16 against 13). So in the spread regime co-locating survives a
+penalty four times the measured one by a single GPU and fails at eight times, and in
+the bursty regime it fails by four times. This is an exploratory run, one skew and 6
+repetitions, in
+`docs/findings-a4-interference-sensitivity.md`.
 
 Neighbour levels of 32 and 64 give the same latency because the neighbour is then at
 its ceiling, 26 to 28 requests running, with the rest queued. The interference surface
@@ -156,7 +176,10 @@ of 26 requests of this shape (1,792 input and 256 output tokens) against 82 requ
 shrinks by a factor of 3.1 while the memory share shrinks by 2.0, because the weights
 and graph buffers are a fixed cost that comes out of the smaller budget first. That
 is why a shrunken KV budget hurts more than proportionally. A model co-located with
-a neighbour can hold fewer than a third of the requests in flight that it could alone.
+a neighbour can hold fewer than a third of the requests in flight that it could alone,
+so a burst that one engine would absorb at once queues behind the ceiling on a split
+one. I measured the ceilings and the latency per concurrency, not a burst against
+each, so the burst effect is an inference from them.
 
 ## Method
 
@@ -208,7 +231,10 @@ The test: three tenants of the measured model on one GPU, a 900 s bursty trace o
 1,562 requests, real swaps, replayed three times; the simulator replays the same
 trace and its per-30 s median latency is held to the band of the three real repeats.
 At most half the judged bins may miss. The operating point that was to be validated
-is bursty, s = 1.0, three models, one GPU.
+is bursty, s = 1.0, three models, one GPU. It is not the swept bursty regime: the
+gate's bursts are 180 s at a duty of 0.25, offered at 0.3 of one GPU's saturation,
+where the sweep's are 120 s at 0.2. The crossover figure marks it at s = 1.0 in the
+bursty column.
 
 It failed: 10 of 13 judged bins missed, the largest by 67.8 s, always on the same side,
 the simulator predicting the engine slower than it was. The swap count agreed:
@@ -222,8 +248,8 @@ exploratory, run after the verdict was known:
   replays took about 25 s, on a different pod. Swap time differs by pod by about 50%
   across the pods I saw.
 - Charged at the replays' own swap time, the simulator predicts latency **lower** than
-  real in every bin that still misses, by about 10% in the busiest bins and by half or
-  more in the bins after the last burst, and holding each repeat to its own prediction
+  real in every bin that still misses, by about 10% in the busiest bins and by about half
+  in the bins after the last burst, and holding each repeat to its own prediction
   still fails: 12 of 13 bins. No single fixed swap cost matches the real system. The
   model has no term for what a swap costs the requests around it, and I did not
   measure that.
@@ -238,8 +264,9 @@ spread, swapping when it is bursty. It does not show where, between the two regi
 I built, the winner changes, because I built only the two. The bursty regime used
 bursts of about 120 s at a duty of 0.2; a different burst length or duty would move
 the boundary, and swap time is one of the numbers it depends on. A fleet whose swap
-took 25 s, as it did on one pod, would probably find swapping cheaper than I report; I
-did not simulate it. The 75.6 s SLO sets how much swap latency a fleet may spend; I did
+took 25 s, as it did on one pod, would give the simulator a shorter stall to price, but
+at that cost the simulator already predicts latency lower than the real system's, so I
+do not read it as a cheaper swap fleet; I did not simulate it. The 75.6 s SLO sets how much swap latency a fleet may spend; I did
 not sweep it, so I cannot say how the boundary moves with it.
 
 ## The excluded option
@@ -257,7 +284,9 @@ the two are not the same size.
 ## Limits
 
 - **The validation failed**, and the decision rule is a simulator's. The GPU counts are
-  not validated at the operating point I tested, and I did not test other points.
+  not validated anywhere: the gate failed at the one point it tested, one GPU with three
+  tenants and swapping only, while the fleets here are 10 to 25 GPUs. Co-location has two
+  held-out cells and no replay.
 - **A small-model regime.** Qwen3-1.7B, not the pre-registered 4B; 3.8 GiB of weights.
   Swap and co-location costs scale with model size.
 - **Homogeneous sizes.** Twenty models of one size and one request shape (1,792 input

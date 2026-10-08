@@ -23,6 +23,10 @@ def _s(x: float) -> str:
     return f"{x:.1f} s"
 
 
+def _gpus(n: float) -> str:
+    return f"{n:g} GPU" if n == 1 else f"{n:g} GPUs"
+
+
 def _rule(segments: list[dict]) -> str:
     parts = []
     for seg in segments:
@@ -35,7 +39,7 @@ def _rule(segments: list[dict]) -> str:
 def numbers(analysis: dict) -> dict[str, str]:
     out: dict[str, str] = {
         "slo": _s(analysis["design"]["slo_seconds"]),
-        "offered_gpus": f"{analysis['design']['offered_gpus']:g} GPUs",
+        "offered_gpus": _gpus(analysis["design"]["offered_gpus"]),
         "gpu_hourly_rate": _usd(analysis["rate"]["gpu_hourly_rate"]),
         "repetitions": str(analysis["design"]["repetitions"]),
     }

@@ -1,0 +1,80 @@
+{
+ "point": {
+  "s": 1.0
+ },
+ "repetitions": 6,
+ "rows": [
+  {
+   "variant": "registered",
+   "regime": "bursty",
+   "sized": {
+    "dedicate": 21,
+    "swap": 10,
+    "colocate": 12
+   }
+  },
+  {
+   "variant": "registered",
+   "regime": "spread",
+   "sized": {
+    "dedicate": 20,
+    "swap": 13,
+    "colocate": 10
+   }
+  },
+  {
+   "variant": "step",
+   "regime": "bursty",
+   "sized": {
+    "dedicate": 21,
+    "swap": 10,
+    "colocate": 12
+   }
+  },
+  {
+   "variant": "step",
+   "regime": "spread",
+   "sized": {
+    "dedicate": 20,
+    "swap": 13,
+    "colocate": 10
+   }
+  },
+  {
+   "variant": "x4",
+   "regime": "bursty",
+   "sized": {
+    "dedicate": 21,
+    "swap": 10,
+    "colocate": 20
+   }
+  },
+  {
+   "variant": "x4",
+   "regime": "spread",
+   "sized": {
+    "dedicate": 20,
+    "swap": 13,
+    "colocate": 12
+   }
+  },
+  {
+   "variant": "x8",
+   "regime": "bursty",
+   "sized": {
+    "dedicate": 21,
+    "swap": 10,
+    "colocate": 21
+   }
+  },
+  {
+   "variant": "x8",
+   "regime": "spread",
+   "sized": {
+    "dedicate": 20,
+    "swap": 13,
+    "colocate": 16
+   }
+  }
+ ]
+}
