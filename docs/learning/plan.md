@@ -98,3 +98,66 @@ a pre-registered test that the author's own model failed, twice.
 explains why the workers averaged about 2.6 in flight under a cap of 4, so
 the checkpoint is to say what measurement would answer it, not to know the
 answer.
+
+---
+
+# Learning plan — artifact 5, how many LoRA adapters fit on one GPU
+
+**The material:** the post, [`docs/post-a5.md`](../post-a5.md), and its four
+figures (`docs/figures/a5/`, each with a phone-width variant); the concepts
+behind it are in the design spec's
+learning guide (`docs/superpowers/specs/2026-08-17-multi-lora-serving-design.md`,
+§12b), and the pre-registration and its three amendments are in
+[`docs/experiment-a5.md`](../experiment-a5.md). The pass criterion and the rule
+on failed checkpoints are the same as above: state it unaided, survive one
+follow-up, and on a miss change the representation, not the volume.
+
+**Adapted to what the artifact found, not what it set out to find.** §12b was
+written before the build and expects the curve to be flat to some count and then
+rise. The measured curve does not wait: spread-regime throughput loses 10.7% by
+8 to 16 adapters, and the pre-registered knee is there. Four of its answers
+change:
+
+- **Self-check 6, "the equivalence check fails, what do you do?",** had two
+  outcomes. The run produced a third, *inconclusive*, twice, and the answer
+  became an amendment. The gate gets a module of its own.
+- **Self-check 8, "flat to 32 then sharp",** is a prediction the data
+  contradicts. Use it as the diagnostic: the recorded answer is what was
+  predicted, and the module that follows checks it against the main chart.
+- **Self-check 9, "combine with artifact 4's answer",** inherits a simulator
+  that failed its own validation. The post's cost bars are not like-for-like.
+- **Rank (self-checks 2 and 7)** is fixed at 16 and never varied. §12b's
+  modules 1–2 are merged into one.
+
+## The modules
+
+| # | module | material | min | checkpoint |
+|---|---|---|---|---|
+| 0 | diagnostic | — | 10 | answer §12b's self-checks 1, 3, 4, 5 and 8 cold; record what is solid and what is not. Self-check 8 is written down as a prediction, to be checked in module 2 |
+| 1 | what an adapter is, and what rank sets | the post's "Synthetic adapters" argument paragraph; §12b modules 1–2 | 10 | say why an adapter is megabytes beside a gigabytes model, why serving cost depends on shapes and not on values, and what that licenses (serving cost of any rank-16 adapter on this base) and does not license (quality, other ranks) |
+| 2 | **registered is not active** | "Registered is not active"; the main chart; §12b modules 3–4 | 15 | before looking at the chart, predict at 64 slots whether the concentrated line and the spread line are close, which is lower, and by roughly what fraction. Then say which line's slope is the registered-slot cost and which gap is the heterogeneity cost, and why `max_loras` being both the slot count and the in-batch cap forces the regimes to separate them by traffic |
+| 3 | **spread vs interval, then the knee** | the main chart's bars; "Headline"; the decomposition table | 15 | open by checking the artifact 1 fix held: the post says the bars show where the median would land on a re-run and not where one start lands. State that without the post, then say why pairing within a start lets the heterogeneity cost cancel start-to-start variation but the registered-slot cost cannot. Then read the knee: 10.7% [9.2%, 11.5%] from 8 to 16 straddles 10%, so is the knee at 8 resolved, and what happens to the dollars if it is really 16 |
+| 4 | Little's law and the three bounds | "Tenants per GPU" and "Memory is a capacity question" | 12 | from 64 in flight, about 204 requests a second, one tenant's peak of 0.114 requests a second and 9 requests of KV room at 8,192 tokens, reproduce the 0.31 s, the 0.036 requests in system per tenant and the 250. Then say why KV capacity cannot move TTFT at 29-token requests and still sets a tenant bound. Last, the post says 42,864 tokens hold 1,478 requests in the same paragraph that counts 2,048 tokens for 64 requests in 16-token blocks: recompute and say which it is (see the note below) |
+| 5 | **the equivalence gate, and the amendments** | "Synthetic adapters, and how I know they are valid here"; `docs/experiment-a5.md` Amendments 1 and 3; §12b module 6 | 25 | state the rule (the statistic, the ±5% margin as half the knee threshold, 90% intervals, the resolution check) and why it has three verdicts. Then from the 88-start result, TTFT p50 −1.16% [−2.54%, +0.75%] with a resolution check of +2.24% [−0.11%, +5.81%], give the verdict and why. Then say what separates Amendment 3 from a forking path, what the reader should still discount, and why the stop-on-repeated-failure guard exists |
+| 6 | the cost bars, and what cannot be concluded | "Adapters versus swapping models" and "Limits" | 12 | §12b's self-check 9 against what was validated: say which of the three bars rest on a failed simulator, which way each is known to err (neither, for the swapped bar), why the model sizes differ, and why the adapter bar is an upper bound. Name three limits the post states about itself |
+| 7 | **teach it back** | the whole post | 30+ | draft the LinkedIn version; Claude plays someone who does not know the material and pushes on every hand-wave |
+
+About two hours, held to the same control as above: if a module overruns, cut it.
+
+**The statistics return in modules 3 and 5, not in a module of their own.**
+Artifact 1's diagnostic found intervals the largest gap, and artifact 2's
+modules that lean on them have no recorded attempt. Module 3 opens by testing
+the fix before it builds on it, and module 5 is the first place in the
+portfolio where an interval's *failure to settle a question* is the content:
+the resolution check is a 90% interval compared against a margin.
+
+**Module 4's last question is a real discrepancy, not a trap.** It was found
+while writing this plan. The conclusion does not move: either figure is more
+than twenty times the 64 requests in flight. The post's published text is not
+edited; a correction would be appended as a dated note.
+
+**Module 5 is the part most worth teaching.** A rule fixed before the data,
+whose own check could not resolve its margin, and an extension decided after
+seeing the interim verdict, with the order of events kept in git. A teach-back
+that gets this right shows the difference between a result and the process that
+made it trustworthy.

@@ -86,3 +86,57 @@ and the controlled test (same clusters, different split) is what fixed it.
 Artifact 2's post leans on bootstrap intervals in the H3 table and in the
 iso-cost argument, so module 5 should open by checking that the fix held,
 not by re-teaching it.
+
+---
+
+# Artifact 5 — how many LoRA adapters fit on one GPU
+
+The modules are in `plan.md`, under "Learning plan — artifact 5".
+
+**Before the build, nothing was recorded.** The design spec's definition of
+done asked for §12b's modules to be worked through before each build stage;
+this file has no record that they were, so the build is treated as having run
+first, as for artifact 2. The modules are placed before the post is published:
+module 7's teach-back is the post's last check, after the owner's own read.
+Nothing below is a verdict. Every row is `not_attempted` until a checkpoint is
+run and its answer recorded here.
+
+| # | module | verdict | attempted |
+|---|---|---|---|
+| 0 | diagnostic | `not_attempted` | — |
+| 1 | what an adapter is, and what rank sets | `not_attempted` | — |
+| 2 | registered is not active | `not_attempted` | — |
+| 3 | spread vs interval, then the knee | `not_attempted` | — |
+| 4 | Little's law and the three bounds | `not_attempted` | — |
+| 5 | the equivalence gate, and the amendments | `not_attempted` | — |
+| 6 | the cost bars, and what cannot be concluded | `not_attempted` | — |
+| 7 | teach it back | `not_attempted` | — |
+
+**Carried over, and what is and is not known:**
+
+- **Intervals.** Artifact 1's module 0 found them the largest gap, and the
+  controlled test fixed it there. Nothing since has checked that it held:
+  artifact 2's modules, which lean on intervals, are all `not_attempted`.
+  Module 3 opens by testing it, on the post's own sentence that the bars say
+  where the median would land and not where one start lands.
+- **Little's law.** Artifact 2's module 2 teaches it on real data and has no
+  recorded attempt. Module 4 here cannot assume it. If artifact 2's module 2 is
+  run first, module 4 shortens; if not, module 4 is the first time it is
+  taught.
+- **The validation gate.** Artifact 2's module 6 is the same shape as module 5
+  here (a pre-registered test, a failure to pass it, amendments). If they are
+  both run, do artifact 2's first and open module 5 by asking what differs: a
+  gate that came back *inconclusive* is not a gate that failed.
+- **Self-check 8 is the diagnostic's prediction.** §12b's "flat to 32 and then
+  sharp" is contradicted by the data (the knee is between 8 and 16 and the
+  spread line is already falling at 2 and 4 slots). Record the answer given
+  before the chart is shown; module 2 then checks it.
+
+**One open item found while writing the plan, not yet resolved.** The post's
+memory section says 42,864 tokens of KV hold 1,478 requests of 29 tokens, in the
+same paragraph that counts 2,048 tokens for 64 such requests "in 16-token
+blocks", which is 32 tokens each. In blocks the figure is 42,864 ÷ 32 = 1,339.
+The conclusion (KV never binds at this shape; either figure is over twenty times
+the 64 in flight) is unchanged. Module 4's last question asks for the
+recomputation. If the post is corrected, the correction is appended as a dated
+note and this item is closed here.
