@@ -141,3 +141,46 @@ owner published it, so there is no dated note; the commit is the record. The
 conclusion (KV never binds at this shape; either figure is over twenty times the
 64 in flight) did not change. Module 4's last question still asks for the
 recomputation.
+
+---
+
+# Artifact 4 — dedicate, swap or share
+
+The modules are in `plan.md`, under "Learning plan — artifact 4".
+
+**Before the build, nothing was recorded.** The design spec's definition of
+done asked for §12b's modules to be worked through before each build stage;
+this file has no record that they were, so the build is treated as having run
+first, as for artifacts 2 and 5. The modules are placed before the post is
+published: module 8's teach-back is the post's last check, after the owner's
+own read. Nothing below is a verdict. Every row is `not_attempted` until a
+checkpoint is run and its answer recorded here.
+
+| # | module | verdict | attempted |
+|---|---|---|---|
+| 0 | diagnostic | `not_attempted` | — |
+| 1 | a swap is a cold start minus the expensive parts | `not_attempted` | — |
+| 2 | sharing a GPU: interference and the KV split | `not_attempted` | — |
+| 3 | Zipf, locality and the two regimes | `not_attempted` | — |
+| 4 | averages hide tenants | `not_attempted` | — |
+| 5 | the decision rule, and what carries it | `not_attempted` | — |
+| 6 | the validation gate, and why it failed | `not_attempted` | — |
+| 7 | what could not be concluded | `not_attempted` | — |
+| 8 | teach it back | `not_attempted` | — |
+
+**Carried over, and what is and is not known:**
+
+- **Intervals.** Artifact 1's module 0 found them the largest gap. The a4 post
+  leans on them less than artifacts 2 and 5 do (the held-out cells and the
+  swap count, not a headline interval), so no module here opens with them. If
+  an answer needs one, check it there.
+- **The validation gate.** Artifact 2's module 6 and artifact 5's module 5 are
+  the same shape (a pre-registered test the author's work did not simply pass).
+  If either has been run, open module 6 here by asking what differs.
+- **Self-checks 6 and 8 are the diagnostic's predictions.** §12b expects cold
+  tenants to suffer and a crossover along skew. The data shows the hot deciles
+  breach and no crossover along skew. Record each answer given before the
+  figure is shown; modules 4 and 5 check them.
+- **Module 5 depends on a finding written after the analysis.** The sensitivity
+  numbers come from an exploratory run (one skew, 6 repetitions), not from
+  `data/a4/analysis.json`. A checkpoint answer should say so.

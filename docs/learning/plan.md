@@ -162,3 +162,71 @@ whose own check could not resolve its margin, and an extension decided after
 seeing the interim verdict, with the order of events kept in git. A teach-back
 that gets this right shows the difference between a result and the process that
 made it trustworthy.
+
+---
+
+# Learning plan — artifact 4, dedicate, swap or share
+
+**The material:** the post, [`docs/post-a4.md`](../post-a4.md), and its four
+figures (`docs/figures/a4/`, each with a phone-width variant); the concepts
+behind it are in the design spec's learning guide
+(`docs/superpowers/specs/2026-08-17-multi-model-serving-economics-design.md`,
+§12b); the pre-registration and its amendments are in
+[`docs/experiment-a4.md`](../experiment-a4.md), the validation failure's
+diagnosis in
+[`docs/findings-a4-validation-swap-cost.md`](../findings-a4-validation-swap-cost.md),
+and the interference sensitivity in
+[`docs/findings-a4-interference-sensitivity.md`](../findings-a4-interference-sensitivity.md).
+The pass criterion and the rule on failed checkpoints are the same as above:
+state it unaided, survive one follow-up, and on a miss change the
+representation, not the volume.
+
+**Adapted to what the artifact found, not what it set out to find.** §12b was
+written before the build and teaches a crossover along the skew axis whose
+simulator would be trusted. The simulator failed its validation and the
+crossover is between the regimes. Four of its answers change:
+
+- **Self-check 6, "aggregate p99 is fine, why a problem?",** expects the cold
+  tenants to suffer. At the reference point the opposite happened: the two
+  hottest deciles breach at 9 GPUs and the coldest does not. Use it as a
+  diagnostic prediction, recorded before the deciles figure is shown.
+- **Self-check 8, "the crossover moves between bursty and spread",** is a
+  prediction the data answers differently: no crossover along skew in either
+  regime; the winner changes between the regimes (co-locate when spread, swap
+  when bursty). Record the answer given before the crossover figure is shown.
+- **Self-check 5, thrashing "at the low-skew end",** is not what the sweep
+  shows. In the spread regime at s = 1.0 swapping has a hit rate of 0 and about
+  1,095 swaps an hour, and its fleet is not monotone in skew (13, 13, 13, 18,
+  17, 15). The post says it did not diagnose why.
+- **Self-check 9, "cut cost 40%, bottom decile outside SLO",** is the
+  aggregate-rule view: 9 GPUs instead of 10 at the reference point, cheaper and
+  wrong. §12b's modules 3–5 are merged into one because the sweep's two regimes
+  carry them together.
+
+## The modules
+
+| # | module | material | min | checkpoint |
+|---|---|---|---|---|
+| 0 | diagnostic | — | 10 | answer §12b's self-checks 1, 3, 4, 5, 6 and 8 cold; record what is solid and what is not. Self-checks 6 and 8 are written down as predictions, to be checked in modules 4 and 5 |
+| 1 | **a swap is a cold start minus the expensive parts** | "A swap" and its stage table, the swap-stages figure; §12b module 1 | 12 | from the table say which stages a swap pays (27.8 s of 37.8 s is process start, imports and health) and which it skips, and why a 1.7B swap is about as long as artifact 1's 8B cold start. Then say why the 8B bar is a reference and not a baseline, and what sleep mode's 5.0 s avoids and what the post says it cannot price |
+| 2 | **sharing a GPU: interference and the KV split** | "Co-location" and "The KV split", the interference figure; §12b module 2 | 15 | before looking, predict whether a busy neighbour's cost grows with the model's own load. Then from the figure: latency about 2.2 times at every own concurrency, even one request about 2.3 times. Reproduce 168,464 ÷ 55,104 ≈ 3.1 against 0.92 ÷ 0.45 ≈ 2.0, and the ceilings of 82 and 26 requests, and say why the memory share and the cache shrink by different factors. Say what the post did and did not measure about the mechanism |
+| 3 | Zipf, locality and the two regimes | "The crossover" and "Method"; §12b modules 3–5 | 15 | explain Zipf skew to someone who has not seen it; say why spread and bursty arrivals with the same long-run rate per model behave differently for swapping; read the spread column of the crossover figure and say what a hit rate of 0 and 1,095 swaps an hour mean. Say why LRU is held fixed rather than compared |
+| 4 | **averages hide tenants** | "Why the naive answer is wrong", the deciles figure; §12b module 6, self-checks 6 and 9 | 12 | check the prediction recorded in module 0 against the figure. Then say why sizing the swap fleet on the aggregate p99 gives 9 GPUs, which deciles breach, and why that answers self-check 9: is a fleet that is cheaper and outside the SLO for a tenth of the models cheaper |
+| 5 | **the decision rule, and what carries it** | the lead, "The crossover", "Where the boundary moves"; the sensitivity finding; §12b module 7, self-check 8 | 18 | check the prediction recorded in module 0. State the rule, and why there is no crossover along skew. Then say what the 75.6 s SLO does to the answer (it favours swapping, and co-located latency of 3 to 6 s leaves wide room) and use the sensitivity table: at what multiple of the measured penalty co-locating stops winning, in which regime first, and why that run is exploratory. Say why dedicating needs 21 to 25 GPUs for twenty models |
+| 6 | **the validation gate, and why it failed** | "The validation, and its failure", the validation findings, `docs/experiment-a4.md` "The validation gate" and the amendments; §12b self-check 8 of artifact 2's module 6 for the shape | 25 | state the gate (three repeats, a band widened by 0.001 s, at most half the bins may miss, swap count within one) and its verdict, 10 of 13 bins. Then explain how a swap charge of 37.8 s against about 25 s makes every miss fall on the same side, why charging each repeat its own swap time still fails but with the sign flipped, and what the gate did not cover (co-location). Last, propose the measurement that would say how much of the failure is the host and how much the model, and say why a calibrated re-run would not rescue the result |
+| 7 | what could not be concluded | "Limits" and the amendments | 8 | name three limits the post states about itself, and say which one makes the others matter most (the failed validation). Say what separates an amendment made before the data it governs from a forking path, using the git order of events |
+| 8 | **teach it back** | the whole post | 30+ | draft the LinkedIn version; Claude plays someone who does not know the material and pushes on every hand-wave |
+
+About two hours, held to the same control as above: if a module overruns, cut it.
+
+**Module 6 is the part most worth teaching, as module 5 is for artifact 5.**
+A rule fixed before the data, and the author's own model failing it: the
+teach-back that gets it right shows that a published failure with a diagnosis
+is a result. If artifact 2's module 6 has been run, open this one by asking
+what differs: that gate failed on host speed; this one failed mostly on the
+swap charge, and the part that remains is a term the model does not have.
+
+**Module 5 is where the post's wording changed most during review.** The
+sensitivity result replaced an explanation the author had given without testing
+it ("per-model load is low"). A good checkpoint answer says what carries the
+result and does not repeat the replaced explanation.
