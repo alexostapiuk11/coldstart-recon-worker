@@ -132,11 +132,12 @@ run and its answer recorded here.
   spread line is already falling at 2 and 4 slots). Record the answer given
   before the chart is shown; module 2 then checks it.
 
-**One open item found while writing the plan, not yet resolved.** The post's
-memory section says 42,864 tokens of KV hold 1,478 requests of 29 tokens, in the
+**One slip found while writing the plan, and fixed (2026-10-07).** The post's
+memory section said 42,864 tokens of KV hold 1,478 requests of 29 tokens, in the
 same paragraph that counts 2,048 tokens for 64 such requests "in 16-token
-blocks", which is 32 tokens each. In blocks the figure is 42,864 ÷ 32 = 1,339.
-The conclusion (KV never binds at this shape; either figure is over twenty times
-the 64 in flight) is unchanged. Module 4's last question asks for the
-recomputation. If the post is corrected, the correction is appended as a dated
-note and this item is closed here.
+blocks", which is 32 tokens each. In blocks the figure is 42,864 ÷ 32 = 1,339,
+and the logged 4.7% usage agrees. The post was corrected in place, before the
+owner published it, so there is no dated note; the commit is the record. The
+conclusion (KV never binds at this shape; either figure is over twenty times the
+64 in flight) did not change. Module 4's last question still asks for the
+recomputation.

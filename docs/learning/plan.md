@@ -137,7 +137,7 @@ change:
 | 1 | what an adapter is, and what rank sets | the post's "Synthetic adapters" argument paragraph; §12b modules 1–2 | 10 | say why an adapter is megabytes beside a gigabytes model, why serving cost depends on shapes and not on values, and what that licenses (serving cost of any rank-16 adapter on this base) and does not license (quality, other ranks) |
 | 2 | **registered is not active** | "Registered is not active"; the main chart; §12b modules 3–4 | 15 | before looking at the chart, predict at 64 slots whether the concentrated line and the spread line are close, which is lower, and by roughly what fraction. Then say which line's slope is the registered-slot cost and which gap is the heterogeneity cost, and why `max_loras` being both the slot count and the in-batch cap forces the regimes to separate them by traffic |
 | 3 | **spread vs interval, then the knee** | the main chart's bars; "Headline"; the decomposition table | 15 | open by checking the artifact 1 fix held: the post says the bars show where the median would land on a re-run and not where one start lands. State that without the post, then say why pairing within a start lets the heterogeneity cost cancel start-to-start variation but the registered-slot cost cannot. Then read the knee: 10.7% [9.2%, 11.5%] from 8 to 16 straddles 10%, so is the knee at 8 resolved, and what happens to the dollars if it is really 16 |
-| 4 | Little's law and the three bounds | "Tenants per GPU" and "Memory is a capacity question" | 12 | from 64 in flight, about 204 requests a second, one tenant's peak of 0.114 requests a second and 9 requests of KV room at 8,192 tokens, reproduce the 0.31 s, the 0.036 requests in system per tenant and the 250. Then say why KV capacity cannot move TTFT at 29-token requests and still sets a tenant bound. Last, the post says 42,864 tokens hold 1,478 requests in the same paragraph that counts 2,048 tokens for 64 requests in 16-token blocks: recompute and say which it is (see the note below) |
+| 4 | Little's law and the three bounds | "Tenants per GPU" and "Memory is a capacity question" | 12 | from 64 in flight, about 204 requests a second, one tenant's peak of 0.114 requests a second and 9 requests of KV room at 8,192 tokens, reproduce the 0.31 s, the 0.036 requests in system per tenant and the 250. Then say why KV capacity cannot move TTFT at 29-token requests and still sets a tenant bound. Last, recompute how many requests the 42,864-token cache holds at 64 slots, counting in 16-token blocks, and check it against the 4.7% usage the engine logged with 64 running (see the note below) |
 | 5 | **the equivalence gate, and the amendments** | "Synthetic adapters, and how I know they are valid here"; `docs/experiment-a5.md` Amendments 1 and 3; §12b module 6 | 25 | state the rule (the statistic, the ±5% margin as half the knee threshold, 90% intervals, the resolution check) and why it has three verdicts. Then from the 88-start result, TTFT p50 −1.16% [−2.54%, +0.75%] with a resolution check of +2.24% [−0.11%, +5.81%], give the verdict and why. Then say what separates Amendment 3 from a forking path, what the reader should still discount, and why the stop-on-repeated-failure guard exists |
 | 6 | the cost bars, and what cannot be concluded | "Adapters versus swapping models" and "Limits" | 12 | §12b's self-check 9 against what was validated: say which of the three bars rest on a failed simulator, which way each is known to err (neither, for the swapped bar), why the model sizes differ, and why the adapter bar is an upper bound. Name three limits the post states about itself |
 | 7 | **teach it back** | the whole post | 30+ | draft the LinkedIn version; Claude plays someone who does not know the material and pushes on every hand-wave |
@@ -151,10 +151,11 @@ the fix before it builds on it, and module 5 is the first place in the
 portfolio where an interval's *failure to settle a question* is the content:
 the resolution check is a 90% interval compared against a margin.
 
-**Module 4's last question is a real discrepancy, not a trap.** It was found
-while writing this plan. The conclusion does not move: either figure is more
-than twenty times the 64 requests in flight. The post's published text is not
-edited; a correction would be appended as a dated note.
+**Module 4's last question is a check on a slip that was fixed.** The post first
+said 1,478 requests, dividing by 29 tokens and ignoring block rounding; it now
+says 1,339 (42,864 ÷ 32). The 4.7% the engine logged agrees with the blocks:
+64 × 32 = 2,048 of 42,864 tokens. The conclusion never moved: either figure is
+more than twenty times the 64 requests in flight.
 
 **Module 5 is the part most worth teaching.** A rule fixed before the data,
 whose own check could not resolve its margin, and an extension decided after
