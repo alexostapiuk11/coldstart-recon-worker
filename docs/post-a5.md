@@ -494,8 +494,9 @@ memory.
 
 **At this request shape that memory cannot move latency or throughput.** A
 request here holds 29 tokens: 13 of prompt, 16 of output. 64 of them in flight
-need about 2,048 tokens of KV, in vLLM's 16-token blocks. Even at 64 slots the
-cache holds 1,478 such requests at once, against the 64 the load generator
+need about 2,048 tokens of KV, in vLLM's 16-token blocks: two blocks, 32
+tokens, per request. Even at 64 slots the cache holds 1,339 such requests at
+once (42,864 ÷ 32), against the 64 the load generator
 keeps in flight; during reconnaissance the engine at 64 slots logged its KV
 usage at 4.7% with 64 requests running. The scheduler never waits for KV, so a
 memory effect on TTFT or throughput at fixed concurrency is zero by
