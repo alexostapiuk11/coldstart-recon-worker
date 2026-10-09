@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from toolcall.budget import Line, effective_n, icc, reps_for, table, total
-from toolcall.costs import _retry, _single, break_even, cost_per_success
+from toolcall.costs import _retry, _single, _units, break_even, cost_per_success
 from toolcall.formulation import CELLS
 
 
@@ -70,3 +70,10 @@ def test_the_budget_table_adds_up():
     lines = [Line("a", 100, 0.01), Line("b", 10, 0.5)]
     assert total(lines) == pytest.approx(6.0)
     assert "**6.00**" in table(lines) and "7.50" in table(lines)
+
+
+def test_a_graded_call_with_no_metered_cost_is_refused_by_name():
+    recs = [SimpleNamespace(run_index=7, scenario_id="s00", cell="low-terse-loose",
+                            block_index=0, cost_usd=None, grade={"category": "CORRECT"})]
+    with pytest.raises(ValueError, match="run 7 is graded CORRECT but carries no cost"):
+        _units(recs)

@@ -31,6 +31,9 @@ def _units(records):
     for r in records:
         if r.grade["category"] in EXCLUDED:
             continue
+        if r.cost_usd is None:
+            raise ValueError(f"run {r.run_index} is graded {r.grade['category']} but "
+                             "carries no cost; graded calls are always metered")
         out[r.scenario_id][r.cell].append(
             (r.block_index, r.cost_usd, r.grade["category"] == "CORRECT"))
     return {s: {c: sorted(v) for c, v in cells.items()} for s, cells in out.items()}
