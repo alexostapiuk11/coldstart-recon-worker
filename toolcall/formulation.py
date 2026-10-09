@@ -3,7 +3,8 @@
 The three factors (August §5, amendment §4a and §4c):
 
 - count: `low` is the scenario's own 2-4 tools; `high` is exactly 20 tools,
-  the low set plus its confusables plus filler from the domain's library.
+  the low set plus its confusables plus filler, drawn per scenario (seeded)
+  from the scenario's own domain first, then from the other domains.
 - richness: `terse` or `rich` descriptions, for the tool and every parameter.
 - strictness: `strict` renders enums, patterns, every required parameter and
   `additionalProperties: false`; `loose` renders bare types and keeps only
@@ -77,9 +78,10 @@ def tool_names(scenario: Scenario, library: Library, count: str) -> list[str]:
     if count == "high":
         names += list(scenario.confusables)
         same = [t.name for t in library.domain(scenario.domain)]
-        other = sorted(
-            (t.name for t in library.tools.values() if t.domain != scenario.domain),
-        )
+        other = sorted(t.name for t in library.tools.values() if t.domain != scenario.domain)
+        rng = random.Random(f"{scenario.id}:filler")
+        rng.shuffle(same)
+        rng.shuffle(other)
         for name in same + other:
             if len(names) == HIGH_COUNT:
                 break
