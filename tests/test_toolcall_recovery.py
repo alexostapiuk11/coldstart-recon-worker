@@ -102,3 +102,24 @@ def test_a_scenario_without_a_recovery_block_is_refused():
 
     with pytest.raises(ValueError, match="no recovery block"):
         converse(_script(), scenario(FLIGHT), LIB, CELL, "opaque")
+
+
+def test_a_failed_provider_status_is_excluded_as_api_error():
+    failed = {**openai_text("partial"), "status": "failed"}
+    c = converse(_script(failed), SC, LIB, CELL, "opaque")
+    assert c.excluded == "API_ERROR"
+
+
+def test_every_call_in_a_multi_call_response_gets_a_tool_result():
+    first = openai_call("search_flights", FIRST)
+    second = openai_call("search_flights", FIXED)
+    ids = [first["output"][0]["call_id"], second["output"][0]["call_id"]]
+    first["output"].append(second["output"][0])
+    client = _script(first, openai_text("Sorry, the search failed."))
+    c = converse(client, SC, LIB, CELL, "opaque")
+    outputs = [i for i in client.sent[-1]["input"] if i.get("type") == "function_call_output"]
+    assert [o["call_id"] for o in outputs] == ids
+    assert outputs[0]["output"] == "Error: invalid request."
+    assert outputs[1]["output"] == "Not executed: make one tool call per turn."
+    assert c.turns[0]["extra_calls_answered"] == 1
+    assert c.injected and c.gave_up and c.excluded is None

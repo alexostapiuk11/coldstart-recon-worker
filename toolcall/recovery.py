@@ -30,6 +30,7 @@ from toolcall.scenarios import Scenario
 from toolcall.tools import Library
 
 TURN_BUDGET = 3
+NOT_EXECUTED = "Not executed: make one tool call per turn."
 
 
 @dataclass
@@ -82,8 +83,9 @@ def converse(client, scenario: Scenario, library: Library, formulation: Formulat
         turns.append(turn)
         if attempt == 0:
             out["first_grade"] = grade(parsed, scenario, library, rendered).to_dict()
-        if parsed.finish in ("refused", "truncated"):
-            out["excluded"] = "REFUSED" if parsed.finish == "refused" else "TRUNCATED"
+        if parsed.finish in ("refused", "truncated", "error"):
+            out["excluded"] = {"refused": "REFUSED", "truncated": "TRUNCATED",
+                               "error": "API_ERROR"}[parsed.finish]
             break
         if not parsed.calls:
             if attempt > 0:
@@ -115,6 +117,14 @@ def converse(client, scenario: Scenario, library: Library, formulation: Formulat
             {"role": "tool", "call_id": call.call_id, "content": r.content,
              "is_error": r.is_error},
         ]
+        # Grading and the mock reply use the first call only, but the provider
+        # rejects a request in which any call_id lacks a result.
+        extra = parsed.calls[1:]
+        for other in extra:
+            transcript.append({"role": "tool", "call_id": other.call_id,
+                               "content": NOT_EXECUTED, "is_error": True})
+        if extra:
+            turn["extra_calls_answered"] = len(extra)
     else:
         out["budget_exhausted"] = True
     return Conversation(turns=turns, **out)
