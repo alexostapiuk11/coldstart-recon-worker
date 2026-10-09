@@ -80,8 +80,14 @@ def single_turn(schedule_, client, scenarios, library, store, *, phase: str,
         request = (outcome.payload or outcome.diagnostics or {}).get("request")
         if outcome.payload is not None:
             response = outcome.payload["response"]
-            parsed = PARSE[provider](response)
-            if parsed.model != model:
+            try:
+                parsed = PARSE[provider](response)
+            except SpendCapReached:
+                raise
+            except Exception as e:  # noqa: BLE001 -- a malformed response is data, not a crash
+                # The guard has already charged the call, so the spend is counted.
+                error = f"unparseable response: {type(e).__name__}: {e}"
+            if parsed is not None and parsed.model != model:
                 error = f"model mismatch: asked for {model}, response names {parsed.model}"
         g = grade(parsed, by_id[sid], library, names, error=error)
         usage = parsed.usage if parsed else None

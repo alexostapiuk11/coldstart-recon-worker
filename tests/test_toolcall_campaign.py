@@ -96,11 +96,28 @@ def test_the_spend_guard_stops_the_campaign_and_keeps_what_ran(tmp_path):
 
 
 def test_check_estimate_needs_an_approval_that_covers_it():
-    with pytest.raises(SpendCapReached, match="no spend approved"):
+    with pytest.raises(SpendCapReached, match="finite positive"):
         check_estimate(1.0, 0.0)
     with pytest.raises(SpendCapReached, match="exceeds"):
         check_estimate(2.0, 1.0)
     check_estimate(1.0, 1.0)
+
+
+def test_an_unreadable_response_is_a_recorded_api_error_and_the_campaign_goes_on(tmp_path):
+    def unreadable(body):
+        return {**openai_text("x"), "output": [{"type": "function_call"}]}
+
+    store = JsonlStore(tmp_path / "c.jsonl", CallRecord)
+    sched = campaign.schedule(CELLS[:1], SCS[:2], 1, 1)
+    campaign.single_turn(sched, ScriptedClient(MINI, unreadable), SCS, LIB, store,
+                         phase="campaign")
+    records = store.read_all()
+    assert len(records) == len(sched) == 2
+    for r in records:
+        assert r.grade["category"] == "API_ERROR"
+        assert r.error.startswith("unparseable response: KeyError")
+        assert r.response is not None and r.request is not None
+        assert r.returned_model is None and r.usage is None
 
 
 def test_recovery_runs_store_every_turn(tmp_path):
