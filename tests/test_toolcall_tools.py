@@ -27,6 +27,12 @@ def test_the_canonical_schema_is_the_strict_form_without_descriptions():
     ({"enum": ("a",), "pattern": "^a$"}, "not both"),
     ({"rich": " "}, "both descriptions"),
     ({"name": "Bad-Name"}, "snake_case"),
+    ({"name": "foo\n"}, "snake_case"),
+    ({"required": "yes"}, "must be a boolean"),
+    ({"required": 1}, "must be a boolean"),
+    ({"enum": ("a", "A")}, "repeat"),
+    ({"enum": ("a", 1)}, "must be strings"),
+    ({"pattern": "("}, "is invalid"),
 ])
 def test_parameters_outside_the_closed_subset_are_refused(kw, match):
     with pytest.raises(ValueError, match=match):
@@ -58,3 +64,8 @@ def test_load_library_reads_every_domain_and_refuses_duplicates(tmp_path):
 def test_a_draft_tool_is_refused():
     with pytest.raises(ValueError, match="draft"):
         tool_from_dict({**TRAVEL["tools"][0], "draft": True}, "travel")
+
+
+def test_a_tool_name_with_a_trailing_newline_is_refused():
+    with pytest.raises(ValueError, match="snake_case"):
+        ToolSpec("t\n", "d", "T.", "The t.", (_p(),))

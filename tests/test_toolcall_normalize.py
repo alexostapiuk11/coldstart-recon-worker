@@ -8,9 +8,11 @@ from toolcall.normalize import (
     call_key,
     call_matches,
     conformance,
+    strip_nulls,
     value_matches,
     value_violations,
 )
+from toolcall.tools import ParamSpec, ToolSpec
 
 FLIGHTS = library().get("search_flights")
 OK = {"origin": "JFK", "destination": "SFO", "date": "2026-11-03"}
@@ -19,7 +21,7 @@ ACCEPT = {"tool": "search_flights", "args": dict(OK),
 
 
 def test_the_rules_are_numbered_and_published():
-    assert [r[0] for r in RULES] == [f"R{i}" for i in range(1, 9)]
+    assert [r[0] for r in RULES] == [f"R{i}" for i in range(1, 10)]
 
 
 def test_r1_enum_values_compare_case_insensitively():
@@ -91,3 +93,64 @@ def test_call_key_treats_enum_case_and_whitespace_as_the_same_call():
 @pytest.mark.parametrize("args", [{**OK, "cabin": "first"}, {**OK, "origin": "JFKX"}])
 def test_value_violations_name_the_constraint(args):
     assert value_violations(args, FLIGHTS)
+
+
+def test_r9_a_matching_specification_cannot_override_the_canonical_schema():
+    loose = {"tool": "search_flights", "args": {**OK, "cabin": "first"}}
+    assert not call_matches({**OK, "cabin": "first"}, loose, FLIGHTS)
+    pattern_spec = {"tool": "search_flights",
+                    "args": {**OK, "origin": {"pattern": "jfkx", "example": "JFKX"}}}
+    assert not call_matches({**OK, "origin": "JFKX"}, pattern_spec, FLIGHTS)
+
+
+def test_r9_a_structurally_wrong_call_never_matches():
+    assert not call_matches({**OK, "passengers": "2"}, ACCEPT, FLIGHTS)
+
+
+def test_r5_a_null_on_an_unknown_key_is_kept_and_is_a_wrong_parameter():
+    args = {**OK, "seat": None}
+    assert strip_nulls(args, FLIGHTS) == args
+    assert not call_matches(args, ACCEPT, FLIGHTS)
+    assert value_violations(args, FLIGHTS) == ["unknown key 'seat'"]
+    assert conformance(args, FLIGHTS) is None
+
+
+def test_r5_a_null_on_a_known_key_is_still_dropped():
+    assert "cabin" not in strip_nulls({**OK, "cabin": None}, FLIGHTS)
+
+
+def _number_tool():
+    return ToolSpec("t", "d", "T.", "The t.", (
+        ParamSpec("n", "number", True, "N.", "The n."),
+        ParamSpec("k", "integer", False, "K.", "The k."),
+    ))
+
+
+def test_r3_a_huge_integer_is_a_valid_number_and_does_not_crash():
+    tool = _number_tool()
+    huge = 10 ** 400
+    assert conformance({"n": huge}, tool) is None
+    assert conformance({"n": huge, "k": huge}, tool) is None
+    acceptable = {"tool": "t", "args": {"n": huge}}
+    assert call_matches({"n": huge}, acceptable, tool)
+    assert not call_matches({"n": huge + 1}, acceptable, tool)
+    assert not call_matches({"n": 1.5}, acceptable, tool)
+    assert not call_matches({"n": huge}, {"tool": "t", "args": {"n": 1.5}}, tool)
+
+
+def test_r3_infinite_and_nan_floats_are_still_not_numbers():
+    tool = _number_tool()
+    assert conformance({"n": float("inf")}, tool) is not None
+    assert conformance({"n": float("nan")}, tool) is not None
+
+
+def test_call_key_normalizes_array_elements_like_scalars():
+    tool = ToolSpec("t", "d", "T.", "The t.", (
+        ParamSpec("tags", "array", True, "T.", "Tags.", items="string"),
+        ParamSpec("sizes", "array", False, "S.", "Sizes.", items="number"),
+    ))
+    a = call_key("t", {"tags": ["a  b", " c"], "sizes": [2.0, 1.5]}, tool)
+    b = call_key("t", {"tags": ["a b", "c"], "sizes": [2, 1.5]}, tool)
+    assert a == b
+    assert a != call_key("t", {"tags": ["c", "a b"], "sizes": [2, 1.5]}, tool)
+    assert a != call_key("t", {"tags": ["A b", "c"], "sizes": [2, 1.5]}, tool)

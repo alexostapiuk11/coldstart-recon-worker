@@ -34,7 +34,7 @@ class ParamSpec:
     pattern: str | None = None
 
     def __post_init__(self) -> None:
-        if not _NAME.match(self.name):
+        if not _NAME.fullmatch(self.name):
             raise ValueError(f"parameter name {self.name!r} is not snake_case")
         if self.type not in PRIMITIVES + ("array",):
             raise ValueError(f"{self.name}: type {self.type!r} is outside the closed subset")
@@ -46,8 +46,20 @@ class ParamSpec:
             raise ValueError(f"{self.name}: enum and pattern apply to strings only")
         if self.enum and self.pattern:
             raise ValueError(f"{self.name}: give an enum or a pattern, not both")
+        if not isinstance(self.required, bool):
+            raise ValueError(  # noqa: TRY004 -- bad data, like every other check here
+                f"{self.name}: `required` must be a boolean, got {self.required!r}")
+        if not all(isinstance(e, str) for e in self.enum):
+            raise ValueError(f"{self.name}: enum members must be strings")
+        if len({e.casefold() for e in self.enum}) != len(self.enum):
+            # R1 compares enum values case-insensitively, so two members that
+            # differ only in case could not be told apart.
+            raise ValueError(f"{self.name}: enum members repeat (compared case-insensitively)")
         if self.pattern is not None:
-            re.compile(self.pattern)
+            try:
+                re.compile(self.pattern)
+            except re.error as e:
+                raise ValueError(f"{self.name}: pattern {self.pattern!r} is invalid: {e}") from e
         if not self.terse.strip() or not self.rich.strip():
             raise ValueError(f"{self.name}: both descriptions are required")
 
@@ -61,7 +73,7 @@ class ToolSpec:
     params: tuple[ParamSpec, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
-        if not _NAME.match(self.name):
+        if not _NAME.fullmatch(self.name):
             raise ValueError(f"tool name {self.name!r} is not snake_case")
         if not self.terse.strip() or not self.rich.strip():
             raise ValueError(f"{self.name}: both descriptions are required")

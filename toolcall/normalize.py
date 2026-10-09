@@ -10,6 +10,8 @@ under two versions.
 The split that matters most (amendment §4b): a call that is structurally
 wrong is MALFORMED; a call that is well-formed but carries a wrong value is
 WRONG_PARAMS. `conformance` decides the first, `call_matches` the second.
+`call_matches` is true only for a call that conforms, breaks none of the
+canonical schema's value constraints (R9), and matches an acceptable call.
 """
 
 import json
@@ -27,7 +29,7 @@ RULES = (
     ("R2", (
         "Strings are trimmed and internal whitespace runs collapse to one space before "
         "any comparison. Free-text values compare case-sensitively; enum values and "
-        "pattern specifications compare case-insensitively."
+        "pattern specifications compare case-insensitively, but never override R9."
     )),
     ("R3", (
         "Numbers compare numerically within an absolute tolerance of 1e-9, so 3 equals "
@@ -47,6 +49,11 @@ RULES = (
         "not a structural failure and not ignored as harmless."
     )),
     ("R8", "Arrays compare element by element, in order."),
+    ("R9", (
+        "A value counts as correct only if it also satisfies the canonical schema's enum "
+        "and pattern; a scenario's acceptable values are checked against them when it "
+        "loads."
+    )),
 )
 
 TOLERANCE = 1e-9
@@ -57,9 +64,10 @@ def collapse(s: str) -> str:
 
 
 def strip_nulls(args: dict, tool: ToolSpec) -> dict:
-    """R5: drop explicit nulls on optional parameters. A null on a required
-    parameter is dropped too, so it then reads as missing."""
-    return {k: v for k, v in args.items() if v is not None}
+    """R5: drop explicit nulls on known parameters. A null on a required
+    parameter is dropped too, so it then reads as missing. A null on a key the
+    schema does not define stays, so R7 makes it a wrong parameter."""
+    return {k: v for k, v in args.items() if v is not None or tool.param(k) is None}
 
 
 def _type_ok(value, type_: str) -> bool:
@@ -72,7 +80,9 @@ def _type_ok(value, type_: str) -> bool:
     if type_ == "integer":
         return isinstance(value, int) or (isinstance(value, float) and value.is_integer())
     if type_ == "number":
-        return isinstance(value, int | float) and math.isfinite(value)
+        if isinstance(value, int):
+            return True  # an arbitrarily large int is a valid number; isfinite would overflow
+        return isinstance(value, float) and math.isfinite(value)
     raise ValueError(f"unknown type {type_!r}")
 
 
@@ -108,7 +118,12 @@ def _scalar_equal(a, b, p_type: str, enum: bool) -> bool:
         return a.casefold() == b.casefold() if enum else a == b
     if p_type == "boolean":
         return a is b
-    return abs(float(a) - float(b)) <= TOLERANCE
+    if isinstance(a, int) and isinstance(b, int):
+        return a == b  # exact, so integers beyond float range compare without overflow
+    try:
+        return abs(float(a) - float(b)) <= TOLERANCE
+    except OverflowError:
+        return False
 
 
 def _literal_equal(spec, value, p: ParamSpec) -> bool:
@@ -136,9 +151,12 @@ def value_matches(spec, value, p: ParamSpec) -> bool:
 
 
 def call_matches(args: dict, acceptable: dict, tool: ToolSpec) -> bool:
-    """Whether well-formed `args` match one acceptable call: every key in
-    `acceptable["args"]` present and matching, any other key present only if
+    """Whether `args` match one acceptable call. They must conform and break no
+    canonical value constraint (R9); then every key in `acceptable["args"]` must
+    be present and matching, and any other key may be present only if
     `acceptable["may_include"]` allows it with a matching value (R7)."""
+    if conformance(args, tool) is not None or value_violations(args, tool):
+        return False  # R9: one definition of a valid value
     present = strip_nulls(args, tool)
     required = acceptable.get("args", {})
     optional = acceptable.get("may_include", {})
@@ -177,11 +195,19 @@ def call_key(name: str, args: dict, tool: ToolSpec | None) -> str:
     norm = {}
     for key, value in (strip_nulls(args, tool) if tool else args).items():
         p = tool.param(key) if tool else None
-        if isinstance(value, str):
-            value = collapse(value)
-            if p is not None and p.enum:
-                value = value.casefold()
-        elif isinstance(value, float) and value.is_integer():
-            value = int(value)
-        norm[key] = value
+        norm[key] = _normalized(value, p is not None and bool(p.enum))
     return json.dumps([name, norm], sort_keys=True)
+
+
+def _normalized(value, enum: bool):
+    """One value in its comparison form, recursively, so array elements get the
+    same treatment as scalars: whitespace collapsed, an integral float as an int,
+    an enum string case-folded."""
+    if isinstance(value, str):
+        value = collapse(value)
+        return value.casefold() if enum else value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, list):
+        return [_normalized(v, False) for v in value]
+    return value
