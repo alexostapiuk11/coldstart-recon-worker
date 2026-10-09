@@ -54,6 +54,10 @@ RULES = (
         "and pattern; a scenario's acceptable values are checked against them when it "
         "loads."
     )),
+    ("R10", (
+        "Duplicate keys in a call's arguments resolve last-wins, as JSON parsers do; "
+        "the grade sees only the surviving value."
+    )),
 )
 
 TOLERANCE = 1e-9

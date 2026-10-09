@@ -11,7 +11,7 @@ import pytest
 
 from tests.a3_examples import FLIGHT, SMALLTALK, library, scenario
 from toolcall.formulation import tool_names
-from toolcall.grader import CATEGORIES, EXCLUDED, grade
+from toolcall.grader import CATEGORIES, EXCLUDED, Grade, grade, parse_arguments
 from toolcall.providers import anthropic_parse, openai_parse
 from toolcall.responses import (
     anthropic_call,
@@ -149,3 +149,79 @@ def test_the_grade_does_not_depend_on_the_rendered_schema():
         "parsed", "scenario", "library", "rendered", "error"]
     r = openai_parse(openai_call("search_flights", {**OK, "cabin": "first"}))
     assert grade(r, FLIGHT_S, LIB, tool_names(FLIGHT_S, LIB, "low")).category == "WRONG_PARAMS"
+
+
+def test_arguments_that_make_the_json_parser_raise_are_malformed():
+    huge = '{"origin": ' + "9" * 5000 + "}"
+    deep = "[" * 100000
+    for raw in (huge, deep):
+        r = openai_call("search_flights", None, raw_arguments=raw)
+        assert grade(openai_parse(r), FLIGHT_S, LIB, HIGH).category == "MALFORMED"
+    assert parse_arguments(huge) is None and parse_arguments(deep) is None
+
+
+def test_an_empty_answer_is_flagged_but_graded_by_the_same_rules():
+    g = grade(openai_parse(openai_text("  \n")), NOCALL_S, LIB, NOCALL_HIGH)
+    assert g.category == "CORRECT" and g.empty_response
+    m = grade(openai_parse(openai_text("")), FLIGHT_S, LIB, HIGH)
+    assert m.category == "MISSING" and m.empty_response
+    spoken = grade(openai_parse(openai_text("hi")), NOCALL_S, LIB, NOCALL_HIGH)
+    assert not spoken.empty_response
+    called = grade(openai_parse(openai_call("search_flights", OK)), FLIGHT_S, LIB, HIGH)
+    assert not called.empty_response
+
+
+def test_text_looks_like_call_respects_word_boundaries():
+    def flagged(text):
+        return grade(openai_parse(openai_text(text)), FLIGHT_S, LIB, HIGH).text_looks_like_call
+
+    assert flagged('search_flights(origin="JFK")')
+    assert flagged("search_flights (origin)")
+    assert flagged('{"name": "search_flights"}')
+    assert not flagged("xsearch_flights(origin)")
+    assert not flagged("api.search_flights(origin)")
+    assert not flagged("I would search flights for you")
+
+
+def test_refusal_and_truncation_win_even_when_a_call_is_present():
+    refused = openai_refusal()
+    refused["output"].append(openai_call("search_flights", OK)["output"][0])
+    assert grade(openai_parse(refused), FLIGHT_S, LIB, HIGH).category == "REFUSED"
+    assert grade(openai_parse(openai_truncated()), FLIGHT_S, LIB, HIGH).category == "TRUNCATED"
+
+
+def test_an_api_error_wins_over_a_refusal():
+    g = grade(openai_parse(openai_refusal()), FLIGHT_S, LIB, HIGH, error="timeout")
+    assert g.category == "API_ERROR"
+
+
+@pytest.mark.parametrize("raw", ["null", ""])
+def test_null_or_empty_raw_arguments_are_malformed(raw):
+    r = openai_call("search_flights", None, raw_arguments=raw)
+    assert grade(openai_parse(r), FLIGHT_S, LIB, HIGH).category == "MALFORMED"
+
+
+def test_null_values_follow_r5_through_the_grader():
+    optional = openai_call("search_flights", {**OK, "cabin": None})
+    assert grade(openai_parse(optional), FLIGHT_S, LIB, HIGH).category == "CORRECT"
+    required = openai_call("search_flights", {**OK, "origin": None})
+    assert grade(openai_parse(required), FLIGHT_S, LIB, HIGH).category == "MALFORMED"
+
+
+def test_duplicate_keys_resolve_last_wins():
+    raw = '{"origin": "LAX", "origin": "JFK", "destination": "SFO", "date": "2026-11-03"}'
+    r = openai_call("search_flights", None, raw_arguments=raw)
+    assert grade(openai_parse(r), FLIGHT_S, LIB, HIGH).category == "CORRECT"
+
+
+def test_two_calls_whose_first_is_bad_are_malformed_and_flagged():
+    r = openai_call("search_flights", {"origin": "JFK"})
+    r["output"].append({**r["output"][0], "arguments": json.dumps(OK)})
+    g = grade(openai_parse(r), FLIGHT_S, LIB, HIGH)
+    assert g.category == "MALFORMED" and g.multiple_calls
+
+
+def test_a_grade_round_trips_through_a_dict():
+    g = grade(openai_parse(openai_text('search_flights(origin="JFK")')), FLIGHT_S, LIB, HIGH)
+    assert g.text_looks_like_call and g.empty_response is False
+    assert Grade.from_dict(g.to_dict()) == g

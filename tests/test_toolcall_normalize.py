@@ -21,7 +21,7 @@ ACCEPT = {"tool": "search_flights", "args": dict(OK),
 
 
 def test_the_rules_are_numbered_and_published():
-    assert [r[0] for r in RULES] == [f"R{i}" for i in range(1, 10)]
+    assert [r[0] for r in RULES] == [f"R{i}" for i in range(1, 11)]
 
 
 def test_r1_enum_values_compare_case_insensitively():

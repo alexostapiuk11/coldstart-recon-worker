@@ -18,12 +18,15 @@ The ordered procedure (August §4, with amendment §4b's canonical schema and
 No call at all is never MALFORMED: a direct answer is MISSING or, where no call
 was expected, CORRECT. A tool call written into the text instead of a call
 block is flagged (`text_looks_like_call`) but graded by the same rules, so the
-flag is descriptive only.
+flag is descriptive only. So is `empty_response`, true when there is no call and
+the text is empty or blank: it is still CORRECT where no call was expected and
+MISSING otherwise.
 
 A response with more than one call is graded on its first and flagged.
 """
 
 import json
+import re
 from dataclasses import dataclass
 
 from toolcall import NORMALIZER_VERSION
@@ -43,6 +46,7 @@ class Grade:
     detail: str
     multiple_calls: bool = False
     text_looks_like_call: bool = False
+    empty_response: bool = False
     wrong_tool_kind: str | None = None  # "confusable" | "filler" | "low_set"
     normalizer_version: int = NORMALIZER_VERSION
 
@@ -57,12 +61,15 @@ class Grade:
 def parse_arguments(raw: str):
     try:
         return json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
+    except (ValueError, TypeError, RecursionError):  # ValueError covers JSONDecodeError
         return None
 
 
 def _looks_like_call(text: str, rendered: list[str]) -> bool:
-    return any(f"{name}(" in text or f'"{name}"' in text for name in rendered)
+    return any(
+        re.search(rf"(?<![\w.]){re.escape(name)}\s*\(", text) or f'"{name}"' in text
+        for name in rendered
+    )
 
 
 def grade(parsed: Parsed | None, scenario: Scenario, library: Library, rendered: list[str],
@@ -78,6 +85,7 @@ def grade(parsed: Parsed | None, scenario: Scenario, library: Library, rendered:
     flags = {
         "multiple_calls": len(parsed.calls) > 1,
         "text_looks_like_call": not parsed.calls and _looks_like_call(parsed.text, rendered),
+        "empty_response": not parsed.calls and not parsed.text.strip(),
     }
     if parsed.calls:
         call = parsed.calls[0]
