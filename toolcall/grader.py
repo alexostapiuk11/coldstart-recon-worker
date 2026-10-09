@@ -3,8 +3,9 @@
 The ordered procedure (August §4, with amendment §4b's canonical schema and
 §4g's provider-side outcomes ahead of it):
 
-    0. Provider-side: the request failed, the model refused, or the output
-       hit the cap                                -> API_ERROR / REFUSED / TRUNCATED
+    0. Provider-side: the request failed, the provider reported an unrecognised
+       terminal state or no usage, the model refused, or the output hit the cap
+                                                  -> API_ERROR / REFUSED / TRUNCATED
        (excluded before any rate is computed, counted per cell)
     1. A call was made but is not a parseable call to a rendered tool that
        conforms structurally to the canonical schema    -> MALFORMED
@@ -68,6 +69,8 @@ def grade(parsed: Parsed | None, scenario: Scenario, library: Library, rendered:
           error: str | None = None) -> Grade:
     if error is not None or parsed is None:
         return Grade("API_ERROR", error or "no response")
+    if parsed.finish == "error":
+        return Grade("API_ERROR", "provider reported an unrecognised terminal state or no usage")
     if parsed.finish == "refused":
         return Grade("REFUSED", "provider reported a refusal")
     if parsed.finish == "truncated":

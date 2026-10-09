@@ -86,6 +86,16 @@ def test_a_provider_error_is_api_error():
     assert grade(None, FLIGHT_S, LIB, HIGH, error="RateLimitError: 429").category == "API_ERROR"
 
 
+def test_a_provider_error_state_is_api_error():
+    failed = openai_call("search_flights", OK)
+    failed["status"] = "failed"
+    no_usage = openai_call("search_flights", OK)
+    del no_usage["usage"]
+    for r in (failed, no_usage):
+        g = grade(openai_parse(r), FLIGHT_S, LIB, HIGH)
+        assert g.category == "API_ERROR" and "unrecognised terminal state" in g.detail
+
+
 def test_a_tool_not_rendered_in_this_cell_is_malformed():
     low = tool_names(FLIGHT_S, LIB, "low")
     r = openai_call("flight_prices", {"origin": "JFK", "destination": "SFO", "month": "2026-11"})
