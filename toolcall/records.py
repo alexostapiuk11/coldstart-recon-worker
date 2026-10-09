@@ -9,10 +9,12 @@ under a new normalizer version needs no new call.
 
 Two notes on evidence:
 
-- The stored `request` is semantically equal to the body that was sent, but the
-  store sorts keys when it writes, so its bytes are not the sent bytes.
-  `request_sha256` is the hash of `json.dumps(body)` exactly as built (no
-  `sort_keys`), which pins the exact request.
+- The store writes keys sorted, so the stored `request` has the key order of the
+  store, not of the body as built. `request_sha256` is the hash of the
+  canonical form, `json.dumps(body, sort_keys=True)`, which is the form the
+  store writes: `sha256(json.dumps(record.request, sort_keys=True))` reproduces
+  it from a stored record. It pins the request's content; the key order is
+  canonical.
 - A call whose usage is missing is `unmetered`: `usage` and `cost_usd` are None,
   not zero, because a response with no usage is not a measurement of a free
   call. The spend guard charged those calls its per-call bound, so the spend

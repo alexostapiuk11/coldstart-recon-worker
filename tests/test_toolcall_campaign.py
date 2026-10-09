@@ -176,13 +176,16 @@ def test_a_stored_call_regrades_to_the_same_grade_from_its_stored_response(tmp_p
         assert again.to_dict() == r.grade
 
 
-def test_the_request_hash_pins_the_bytes_that_were_sent(tmp_path):
+def test_the_request_hash_can_be_checked_against_the_stored_record(tmp_path):
     store = JsonlStore(tmp_path / "c.jsonl", CallRecord)
     client = _stub_client()
     campaign.single_turn(campaign.schedule(CELLS[:1], SCS[:1], 1, 1), client, SCS, LIB, store,
                          phase="campaign")
     r = store.read_all()[0]
-    assert r.request_sha256 == hashlib.sha256(json.dumps(client.sent[0]).encode()).hexdigest()
+    canonical = json.dumps(client.sent[0], sort_keys=True).encode()
+    assert r.request_sha256 == hashlib.sha256(canonical).hexdigest()
+    recomputed = hashlib.sha256(json.dumps(r.request, sort_keys=True).encode()).hexdigest()
+    assert recomputed == r.request_sha256
 
 
 def test_missing_usage_is_unmetered_not_free(tmp_path):

@@ -68,6 +68,9 @@ class StubModel:
         the strict cell through `additionalProperties` and a longer `required`,
         for a scenario whose tools carry no enum or pattern.
         """
+        # Under constrained decoding a strict cell whose tools carry no enum or
+        # pattern reads as loose here. The synthetic suite always has one, so
+        # the stub stays correct for it.
         for t in tools:
             if any("enum" in p or "pattern" in p for p in t["parameters"]["properties"].values()):
                 return True

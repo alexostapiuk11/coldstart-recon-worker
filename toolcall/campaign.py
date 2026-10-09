@@ -174,7 +174,7 @@ def single_turn(schedule_, client, scenarios, library, store, *, phase: str,
             response=response, error=error, clock_A=outcome.clock_A, grade=g.to_dict(),
             usage=usage, cost_usd=cost_usd(model, usage) if usage else None,
             rendered_tools=names, unmetered=unmetered,
-            request_sha256=(hashlib.sha256(json.dumps(request).encode()).hexdigest()
+            request_sha256=(hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
                             if request is not None else None),
         )
 
