@@ -9,6 +9,7 @@ import pytest
 from tests.a3_examples import library, scenario
 from toolcall.formulation import SYSTEM_PROMPT, Formulation, render
 from toolcall.providers import (
+    Client,
     ModelSettings,
     ScriptedClient,
     anthropic_parse,
@@ -16,7 +17,12 @@ from toolcall.providers import (
     openai_parse,
     openai_request,
 )
-from toolcall.responses import openai_text
+from toolcall.responses import (
+    anthropic_text,
+    openai_refusal,
+    openai_text,
+    openai_truncated,
+)
 
 FIX = Path(__file__).parent / "fixtures" / "a3"
 MINI = ModelSettings("openai", "gpt-5.4-mini-2026-03-17", 0.0, reasoning_effort="none")
@@ -138,3 +144,180 @@ def test_the_scripted_client_builds_the_real_body_and_records_it():
     body, response = client.send(_tools(), [{"role": "user", "text": "x"}])
     assert client.sent == [body]
     assert openai_parse(response).text == "ok"
+
+
+# --- review fixes -----------------------------------------------------------
+
+USAGE_OA = {"input_tokens": 10, "output_tokens": 2}
+USAGE_AN = {"input_tokens": 10, "output_tokens": 2}
+
+
+class _Dumpable:
+    def __init__(self, payload):
+        self.payload = payload
+        self.dump_kwargs = None
+
+    def model_dump(self, **kwargs):
+        self.dump_kwargs = kwargs
+        return self.payload
+
+
+class _Endpoint:
+    def __init__(self, payload):
+        self.result = _Dumpable(payload)
+        self.received = None
+
+    def create(self, **body):
+        self.received = body
+        return self.result
+
+
+class _FakeSdk:
+    def __init__(self, payload):
+        self.responses = _Endpoint(payload)
+        self.messages = _Endpoint(payload)
+
+
+def test_post_passes_the_body_through_and_asks_for_no_null_fields():
+    for settings, endpoint in ((MINI, "responses"), (SONNET, "messages")):
+        payload = {"id": "x", "output": [], "content": []}
+        sdk = _FakeSdk(payload)
+        client = Client(settings, sdk=sdk)
+        body = client.request(_tools(), [{"role": "user", "text": "x"}])
+        before = json.dumps(body, sort_keys=True)
+        assert client.post(body) is payload
+        ep = getattr(sdk, endpoint)
+        assert json.dumps(ep.received, sort_keys=True) == before
+        assert ep.result.dump_kwargs == {"exclude_none": True}
+
+
+def test_each_setting_the_amendment_fixes_is_required():
+    with pytest.raises(ValueError, match="§3"):
+        ModelSettings("openai", "gpt-5.4-mini-2026-03-17", 0.0)
+    with pytest.raises(ValueError, match="§3"):
+        ModelSettings("anthropic", "claude-sonnet-5-5", None)
+    with pytest.raises(ValueError, match="§3"):
+        ModelSettings("anthropic", "claude-sonnet-5-5", 0.0, thinking="between_tools")
+
+
+def _two_results():
+    return [
+        {"role": "user", "text": "go"},
+        {"role": "assistant", "raw": [
+            {"type": "function_call", "call_id": "c1", "name": "a", "arguments": "{}"},
+            {"type": "function_call", "call_id": "c2", "name": "b", "arguments": "{}"}]},
+        {"role": "tool", "call_id": "c1", "content": "one", "is_error": False},
+        {"role": "tool", "call_id": "c2", "content": "two", "is_error": True},
+    ]
+
+
+def test_every_call_is_answered_in_one_anthropic_message():
+    transcript = _two_results()
+    transcript[1] = {"role": "assistant", "raw": [
+        {"type": "tool_use", "id": "c1", "name": "a", "input": {}},
+        {"type": "tool_use", "id": "c2", "name": "b", "input": {}}]}
+    messages = anthropic_request(SONNET, _tools(), transcript)["messages"]
+    assert len(messages) == 3
+    assert messages[-1] == {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "c1", "content": "one", "is_error": False},
+        {"type": "tool_result", "tool_use_id": "c2", "content": "two", "is_error": True}]}
+
+
+def test_every_call_gets_its_own_openai_output_in_order():
+    items = openai_request(MINI, _tools(), _two_results())["input"]
+    assert items[-2:] == [
+        {"type": "function_call_output", "call_id": "c1", "output": "one"},
+        {"type": "function_call_output", "call_id": "c2", "output": "two"}]
+
+
+def test_the_assistants_raw_output_is_echoed_unchanged():
+    oa_raw = [{"type": "reasoning", "id": "rs_1", "summary": []},
+              {"type": "function_call", "call_id": "c1", "name": "a", "arguments": "{}"}]
+    an_raw = [{"type": "thinking", "thinking": "", "signature": "sig"},
+              {"type": "tool_use", "id": "c1", "name": "a", "input": {}}]
+    t = [{"role": "user", "text": "go"}]
+    oa = openai_request(MINI, _tools(), t + [{"role": "assistant", "raw": oa_raw}])["input"]
+    assert oa[1:] == oa_raw
+    an = anthropic_request(SONNET, _tools(), t + [{"role": "assistant", "raw": an_raw}])
+    assert an["messages"][1] == {"role": "assistant", "content": an_raw}
+
+
+def test_the_output_cap_is_1024_for_both_providers():
+    t = [{"role": "user", "text": "x"}]
+    assert openai_request(MINI, _tools(), t)["max_output_tokens"] == 1024
+    assert anthropic_request(SONNET, _tools(), t)["max_tokens"] == 1024
+
+
+def test_two_formulations_of_one_scenario_differ_only_in_the_tools():
+    t = [{"role": "user", "text": "x"}]
+    for settings, build in ((MINI, openai_request), (SONNET, anthropic_request)):
+        a = build(settings, render(scenario(), library(), Formulation("low", "terse", "loose")), t)
+        b = build(settings, render(scenario(), library(), Formulation("high", "rich", "strict")), t)
+        assert a["tools"] != b["tools"]
+        a.pop("tools")
+        b.pop("tools")
+        assert a == b
+
+
+def test_openai_refusals_truncation_and_failures():
+    assert openai_parse(openai_refusal()).finish == "refused"
+    filtered = {"status": "incomplete", "incomplete_details": {"reason": "content_filter"},
+                "output": [], "usage": USAGE_OA}
+    assert openai_parse(filtered).finish == "refused"
+    assert openai_parse(openai_truncated()).finish == "truncated"
+    other = {"status": "incomplete", "incomplete_details": {"reason": "something_new"},
+             "output": [], "usage": USAGE_OA}
+    assert openai_parse(other).finish == "error"
+    for status in ("failed", "cancelled"):
+        assert openai_parse({"status": status, "output": [], "usage": USAGE_OA}
+                            ).finish == "error"
+
+
+def test_anthropic_max_tokens_and_unknown_stops():
+    assert anthropic_parse(anthropic_text("cut", stop_reason="max_tokens")).finish == "truncated"
+    for stop in ("pause_turn", "model_context_window_exceeded", None):
+        assert anthropic_parse(anthropic_text("x", stop_reason=stop)).finish == "error"
+    assert anthropic_parse(anthropic_text("x", stop_reason="stop_sequence")).finish == "stop"
+
+
+def test_a_response_without_usage_is_an_error_with_zero_usage():
+    zero = {"input": 0, "cached": 0, "cache_write": 0, "output": 0, "reasoning": 0}
+    for usage in (None, {}):
+        oa = {"status": "completed", "output": [], "model": "m"}
+        an = {"stop_reason": "end_turn", "content": [], "model": "m"}
+        if usage is not None:
+            oa["usage"] = usage
+            an["usage"] = usage
+        assert openai_parse(oa).finish == "error" and openai_parse(oa).usage == zero
+        assert anthropic_parse(an).finish == "error" and anthropic_parse(an).usage == zero
+    oa_null = {"status": "completed", "output": [], "usage": None}
+    assert openai_parse(oa_null).finish == "error"
+
+
+def test_text_and_a_call_together_and_two_calls_keep_everything_in_order():
+    oa = {"status": "completed", "usage": USAGE_OA, "output": [
+        {"type": "reasoning", "id": "rs_1", "summary": []},
+        {"type": "message", "role": "assistant", "content": [
+            {"type": "output_text", "text": "Looking.", "annotations": []}]},
+        {"type": "function_call", "call_id": "c1", "name": "a", "arguments": "{}"},
+        {"type": "function_call", "call_id": "c2", "name": "b", "arguments": "{}"}]}
+    p = openai_parse(oa)
+    assert p.finish == "tool_call" and p.text == "Looking."
+    assert [c.call_id for c in p.calls] == ["c1", "c2"]
+    assert p.raw_output == oa["output"] and p.raw_output[0]["type"] == "reasoning"
+    an = {"stop_reason": "tool_use", "usage": USAGE_AN, "content": [
+        {"type": "text", "text": "Looking."},
+        {"type": "tool_use", "id": "t1", "name": "a", "input": {}},
+        {"type": "tool_use", "id": "t2", "name": "b", "input": {"x": 1}}]}
+    p = anthropic_parse(an)
+    assert p.finish == "tool_call" and p.text == "Looking."
+    assert [c.call_id for c in p.calls] == ["t1", "t2"]
+    assert p.raw_output == an["content"]
+
+
+def test_anthropic_cache_writes_count_as_input_and_as_cache_write():
+    r = anthropic_text("x")
+    r["usage"] = {"input_tokens": 100, "cache_creation_input_tokens": 300,
+                  "cache_read_input_tokens": 50, "output_tokens": 7}
+    u = anthropic_parse(r).usage
+    assert u["input"] == 450 and u["cache_write"] == 300 and u["cached"] == 50

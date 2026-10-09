@@ -6,6 +6,10 @@ response parsers are pure functions over plain dicts in each provider's
 documented JSON shape, so they are tested against hand-authored responses with
 no SDK installed and no network. The SDKs are imported only inside `send`.
 
+A response whose terminal state is not one of the documented clean ones (a
+failed or cancelled OpenAI response, an Anthropic `pause_turn`, a response with
+no usage) parses to finish "error", never to a silent "stop".
+
 Every call keeps the exact request body it sent. That body is the evidence the
 rendering was the only thing that differed between cells (August §4).
 
@@ -43,6 +47,12 @@ class ModelSettings:
             raise ValueError("reasoning_effort is an OpenAI setting")
         if self.provider == OPENAI and self.thinking is not None:
             raise ValueError("thinking is an Anthropic setting")
+        if self.provider == OPENAI and self.reasoning_effort is None:
+            raise ValueError("amendment §3: an OpenAI setting must set reasoning_effort")
+        if self.provider == ANTHROPIC and self.thinking is None:
+            raise ValueError("amendment §3: an Anthropic setting must set thinking")
+        if self.provider == ANTHROPIC and self.temperature is not None:
+            raise ValueError("amendment §3: Sonnet 5.5 refuses a temperature; use None")
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -59,7 +69,9 @@ class ToolCall:
 class Parsed:
     calls: tuple[ToolCall, ...]
     text: str
-    finish: str  # "tool_call" | "stop" | "refused" | "truncated"
+    # "tool_call" | "stop" | "refused" | "truncated" | "error"; "error" is any
+    # terminal state not listed above, or a response with no usage
+    finish: str
     usage: dict  # {"input", "cached", "cache_write", "output", "reasoning"}
     model: str
     raw_output: list = field(default_factory=list)
@@ -137,14 +149,19 @@ def openai_parse(response: dict) -> Parsed:
                 elif part.get("type") == "refusal":
                     refused = True
     reason = (response.get("incomplete_details") or {}).get("reason")
+    status = response.get("status")
     if refused or reason == "content_filter":
         finish = "refused"
-    elif response.get("status") == "incomplete" and reason == "max_output_tokens":
+    elif status == "incomplete" and reason == "max_output_tokens":
         finish = "truncated"
+    elif status in ("failed", "cancelled") or status == "incomplete":
+        finish = "error"
     elif calls:
         finish = "tool_call"
     else:
         finish = "stop"
+    if not response.get("usage"):
+        finish = "error"
     u = response.get("usage") or {}
     usage = {
         "input": u.get("input_tokens", 0),
@@ -162,16 +179,22 @@ def openai_parse(response: dict) -> Parsed:
 
 def anthropic_request(settings: ModelSettings, tools: list[dict], transcript: list[dict]) -> dict:
     messages: list = []
+    open_results: list | None = None  # tool_results of the message being filled
     for turn in transcript:
+        if turn["role"] != "tool":
+            open_results = None
         if turn["role"] == "user":
             messages.append({"role": "user", "content": turn["text"]})
         elif turn["role"] == "assistant":
             messages.append({"role": "assistant", "content": turn["raw"]})
         elif turn["role"] == "tool":
-            messages.append({"role": "user", "content": [
-                {"type": "tool_result", "tool_use_id": turn["call_id"],
-                 "content": turn["content"], "is_error": turn["is_error"]}
-            ]})
+            result = {"type": "tool_result", "tool_use_id": turn["call_id"],
+                      "content": turn["content"], "is_error": turn["is_error"]}
+            if open_results is not None:  # one message answers every call
+                open_results.append(result)
+            else:
+                open_results = [result]
+                messages.append({"role": "user", "content": open_results})
         else:
             raise ValueError(f"unknown transcript role {turn['role']!r}")
     rendered = []
@@ -208,10 +231,14 @@ def anthropic_parse(response: dict) -> Parsed:
         finish = "refused"
     elif stop == "max_tokens":
         finish = "truncated"
+    elif stop not in ("end_turn", "tool_use", "stop_sequence"):
+        finish = "error"
     elif calls:
         finish = "tool_call"
     else:
         finish = "stop"
+    if not response.get("usage"):
+        finish = "error"
     u = response.get("usage") or {}
     read = u.get("cache_read_input_tokens") or 0
     write = u.get("cache_creation_input_tokens") or 0
@@ -256,8 +283,8 @@ class Client:
 
                 self._sdk = Anthropic()
         if self.settings.provider == OPENAI:
-            return self._sdk.responses.create(**body).model_dump()
-        return self._sdk.messages.create(**body).model_dump()
+            return self._sdk.responses.create(**body).model_dump(exclude_none=True)
+        return self._sdk.messages.create(**body).model_dump(exclude_none=True)
 
     def send(self, tools: list[dict], transcript: list[dict]) -> tuple[dict, dict]:
         body = self.request(tools, transcript)
