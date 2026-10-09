@@ -173,3 +173,11 @@ def test_a_timeout_scenario_with_an_identical_retry_is_recovered_by_it():
                  "opaque")
     assert c.injected and c.identical_retry is True
     assert c.recovered and c.turns_to_recovery == 1
+
+
+def test_an_unreadable_response_excludes_the_conversation_and_keeps_the_evidence():
+    bad = {**openai_text("x"), "output": [{"type": "function_call"}]}
+    c = converse(_script(bad), SC, LIB, CELL, "opaque")
+    assert c.excluded == "API_ERROR" and len(c.turns) == 1
+    assert c.turns[0]["response"] == bad and "input" in c.turns[0]["request"]
+    assert c.turns[0]["error"].startswith("unparseable response: KeyError")

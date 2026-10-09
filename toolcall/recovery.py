@@ -78,7 +78,16 @@ def converse(client, scenario: Scenario, library: Library, formulation: Formulat
             turns.append({"request": body, "error": f"{type(e).__name__}: {e}"})
             out["excluded"] = "API_ERROR"
             break
-        parsed = PARSE[client.settings.provider](response)
+        try:
+            parsed = PARSE[client.settings.provider](response)
+        except SpendCapReached:
+            raise
+        except Exception as e:  # noqa: BLE001 -- a malformed response is data, not a crash
+            # The guard has already charged the call, so the spend is counted.
+            turns.append({"request": body, "response": response,
+                          "error": f"unparseable response: {type(e).__name__}: {e}"})
+            out["excluded"] = "API_ERROR"
+            break
         turn = {"request": body, "response": response, "parsed": _summary(parsed),
                 "seconds": time.monotonic() - t0}
         turns.append(turn)
