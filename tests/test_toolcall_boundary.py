@@ -8,6 +8,7 @@ imported in a fresh interpreter and `sys.modules` is inspected. A fresh
 subprocess per module, because pytest shares `sys.modules` across the session.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -18,14 +19,14 @@ PACKAGE = REPO / "toolcall"
 BANNED = ("coldstart", "autoscale", "placement", "placement_measure", "multilora")
 
 _PROBE = (
-    "import importlib, sys; importlib.import_module({name!r}); "
-    "print(sorted({{m.split('.')[0] for m in sys.modules}} & {banned!r}))"
+    "import importlib, json, sys; importlib.import_module({name!r}); "
+    "print(json.dumps(sorted({{m.split('.')[0] for m in sys.modules}} & {names!r})))"
 )
 
 
-def _banned_loaded(module: str) -> list[str]:
+def _loaded(module: str, names: set[str]) -> list[str]:
     result = subprocess.run(
-        [sys.executable, "-c", _PROBE.format(name=module, banned=set(BANNED))],
+        [sys.executable, "-c", _PROBE.format(name=module, names=set(names))],
         cwd=REPO,
         capture_output=True,
         text=True,
@@ -33,7 +34,11 @@ def _banned_loaded(module: str) -> list[str]:
         check=False,
     )
     assert result.returncode == 0, f"importing {module} failed:\n{result.stderr}"
-    return eval(result.stdout.strip())  # a printed list of str, from our own probe
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def _banned_loaded(module: str) -> list[str]:
+    return _loaded(module, set(BANNED))
 
 
 def _module_name(path: Path) -> str:
@@ -65,9 +70,9 @@ def test_the_probe_sees_a_transitive_import():
 
 
 def test_the_harness_never_loads_toolcall():
-    offenders = [
-        _module_name(p)
+    offenders = {
+        _module_name(p): loaded
         for p in sorted((REPO / "harness").rglob("*.py"))
-        if "toolcall" in (Path(p).read_text())
-    ]
-    assert offenders == []
+        if (loaded := _loaded(_module_name(p), {"toolcall"}))
+    }
+    assert offenders == {}
