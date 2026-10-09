@@ -70,6 +70,19 @@ def test_constrained_decoding_is_a_setting_not_a_rendering():
         t for t in _tools() if t["name"] == "search_flights")["parameters"]
 
 
+def test_strict_mode_nullable_enums_carry_null_and_the_input_is_untouched():
+    tools = _tools()
+    before = json.dumps(tools, sort_keys=True)
+    on = ModelSettings("openai", "gpt-5.4-mini-2026-03-17", 0.0, reasoning_effort="none",
+                       constrained=True)
+    body = openai_request(on, tools, [{"role": "user", "text": "x"}])
+    cabin = next(t for t in body["tools"] if t["name"] == "search_flights")[
+        "parameters"]["properties"]["cabin"]
+    assert cabin["type"] == ["string", "null"]
+    assert cabin["enum"] == ["economy", "premium", "business", None]
+    assert json.dumps(tools, sort_keys=True) == before
+
+
 def test_a_transcript_round_trips_tool_results_in_each_shape():
     transcript = [
         {"role": "user", "text": "go"},

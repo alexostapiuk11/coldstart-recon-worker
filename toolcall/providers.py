@@ -80,6 +80,8 @@ def openai_strict_parameters(schema: dict) -> dict:
         prop = dict(prop)
         if name not in required:
             prop["type"] = [prop["type"], "null"]
+            if "enum" in prop:  # strict mode wants null among the values too
+                prop["enum"] = [*prop["enum"], None]
         props[name] = prop
     return {"type": "object", "properties": props, "required": list(props),
             "additionalProperties": False}
