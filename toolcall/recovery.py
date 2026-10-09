@@ -69,12 +69,13 @@ def converse(client, scenario: Scenario, library: Library, formulation: Formulat
     failing_key = None
     for attempt in range(TURN_BUDGET + 1):
         t0 = time.monotonic()
+        body = client.request(tools, transcript)  # kept even if the post raises
         try:
-            body, response = client.send(tools, transcript)
+            response = client.post(body)
         except SpendCapReached:
             raise
         except Exception as e:  # noqa: BLE001 -- every provider failure is data here
-            turns.append({"error": f"{type(e).__name__}: {e}"})
+            turns.append({"request": body, "error": f"{type(e).__name__}: {e}"})
             out["excluded"] = "API_ERROR"
             break
         parsed = PARSE[client.settings.provider](response)
@@ -92,7 +93,7 @@ def converse(client, scenario: Scenario, library: Library, formulation: Formulat
                 claims = re.search(rec.success_claim_pattern, parsed.text, re.IGNORECASE)
                 out["hallucinated_success"] = bool(claims)
                 out["gave_up"] = not claims
-                if out["identical_retry"] is None:
+                if attempt == 1:  # stopped without any further call: not a retry
                     out["identical_retry"] = False
             break
         call = parsed.calls[0]

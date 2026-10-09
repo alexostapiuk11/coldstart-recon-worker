@@ -155,17 +155,20 @@ def _recovery_from_dict(
         raise ValueError(f"{sid}: contradicting_result must be an object")
     if d["error_kind"] == "contradicting_result" and not contradicting:
         raise ValueError(f"{sid}: contradicting_result kind needs a contradicting_result")
-    if d["error_kind"] == "invalid_parameter" and first_call is not None:
+    if d["error_kind"] in PERSISTENT_KINDS and first_call is not None:
         # The error is injected when the model's first call matches the first
         # acceptable call. If that call also counted as a recovery, the error
-        # could never be injected (amendment §14 item 4).
+        # could never be injected (amendment §14 item 4). A contradicted call
+        # that already matched would also let an identical retry "recover",
+        # which is exactly the behaviour H4 measures, so it counts here too.
         literal = _literal_args(first_call)
         for c in calls:
             if c["tool"] == first_call["tool"] and call_matches(
                 literal, c, library.get(c["tool"])
             ):
                 raise ValueError(f"{sid}: the first acceptable call already matches a recovery "
-                                 "call, so the injected error could never occur")
+                                 f"call, so the injected {d['error_kind']} could never occur "
+                                 "and an identical retry would count as recovery")
     return Recovery(
         error_kind=d["error_kind"],
         param=d["param"],

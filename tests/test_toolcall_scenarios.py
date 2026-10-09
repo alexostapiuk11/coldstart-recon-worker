@@ -163,7 +163,7 @@ def test_a_recovery_call_that_the_first_call_already_satisfies_is_refused_via_on
         scenario_from_dict(d, library())
 
 
-def test_a_contradicting_result_recovery_may_share_the_first_call():
+def test_a_contradicting_result_recovery_matching_the_first_call_is_refused():
     d = _recovery_with(
         error_kind="contradicting_result",
         contradicting_result={"offers": []},
@@ -171,4 +171,10 @@ def test_a_contradicting_result_recovery_may_share_the_first_call():
             "tool": "search_flights",
             "args": {"origin": "BOS", "destination": "ORD", "date": "2026-12-01"}}],
     )
+    with pytest.raises(ValueError, match="could never occur"):
+        scenario_from_dict(d, library())
+
+
+def test_a_contradicting_result_recovery_that_differs_from_the_first_call_loads():
+    d = _recovery_with(error_kind="contradicting_result", contradicting_result={"offers": []})
     assert scenario_from_dict(d, library()).recovery.error_kind == "contradicting_result"

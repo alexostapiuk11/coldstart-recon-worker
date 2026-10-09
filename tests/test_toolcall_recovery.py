@@ -5,10 +5,11 @@ import pytest
 
 from tests.a3_examples import RECOVERY, library, scenario
 from toolcall.formulation import Formulation
+from toolcall.guard import GuardedClient, SpendGuard, SpendGuardError
 from toolcall.mock_tools import error_text, reply
-from toolcall.providers import ModelSettings, ScriptedClient
+from toolcall.providers import PARSE, ModelSettings, ScriptedClient
 from toolcall.recovery import TURN_BUDGET, converse
-from toolcall.responses import openai_call, openai_text
+from toolcall.responses import anthropic_call, anthropic_text, openai_call, openai_text
 
 LIB = library()
 SC = scenario(RECOVERY)
@@ -123,3 +124,52 @@ def test_every_call_in_a_multi_call_response_gets_a_tool_result():
     assert outputs[1]["output"] == "Not executed: make one tool call per turn."
     assert c.turns[0]["extra_calls_answered"] == 1
     assert c.injected and c.gave_up and c.excluded is None
+
+
+def test_a_failure_after_injection_is_excluded_and_keeps_the_request_body():
+    sent = []
+
+    def policy(body):
+        sent.append(body)
+        if len(sent) == 2:
+            raise TimeoutError("read timeout")
+        return openai_call("search_flights", FIRST)
+
+    c = converse(ScriptedClient(MINI, policy), SC, LIB, CELL, "opaque")
+    assert c.injected and c.excluded == "API_ERROR" and len(c.turns) == 2
+    assert c.turns[1]["request"] == sent[1] and "TimeoutError" in c.turns[1]["error"]
+    assert c.turns[1]["request"]["input"][-1]["type"] == "function_call_output"
+
+
+def test_an_unpriced_model_propagates_instead_of_being_recorded_as_api_error():
+    odd = ModelSettings("openai", "gpt-unpriced", 0.0, reasoning_effort="none")
+    gc = GuardedClient(ScriptedClient(odd, lambda b: openai_text("ok")), SpendGuard(1.0),
+                       PARSE["openai"])
+    with pytest.raises(SpendGuardError):
+        converse(gc, SC, LIB, CELL, "opaque")
+
+
+def test_a_recovery_conversation_runs_end_to_end_on_anthropic_settings():
+    sonnet = ModelSettings("anthropic", "claude-sonnet-5-5", None, thinking="between_tools")
+    it = iter([anthropic_call("search_flights", FIRST), anthropic_call("search_flights", FIXED)])
+    client = ScriptedClient(sonnet, lambda body: next(it))
+    c = converse(client, SC, LIB, CELL, "actionable")
+    assert c.injected and c.recovered and c.turns_to_recovery == 1
+    assert c.identical_retry is False and c.excluded is None
+    result = client.sent[1]["messages"][-1]["content"][0]
+    assert result["type"] == "tool_result" and "passengers" in result["content"]
+    it2 = iter([anthropic_call("search_flights", FIRST), anthropic_text("Sorry, it failed.")])
+    gave = converse(ScriptedClient(sonnet, lambda body: next(it2)), SC, LIB, CELL, "opaque")
+    assert gave.gave_up and gave.identical_retry is False
+
+
+def test_a_timeout_scenario_with_an_identical_retry_is_recovered_by_it():
+    rec = copy.deepcopy(RECOVERY)
+    rec["recovery"]["error_kind"] = "timeout"
+    rec["recovery"]["acceptable_recovery_calls"][0]["args"] = dict(FIRST)
+    rec["recovery"]["acceptable_recovery_calls"][0]["may_include"] = {"passengers": 1}
+    c = converse(_script(openai_call("search_flights", FIRST),
+                         openai_call("search_flights", FIRST)), scenario(rec), LIB, CELL,
+                 "opaque")
+    assert c.injected and c.identical_retry is True
+    assert c.recovered and c.turns_to_recovery == 1

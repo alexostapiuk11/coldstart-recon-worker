@@ -25,6 +25,7 @@ import json
 from dataclasses import dataclass, field
 
 from toolcall.formulation import SYSTEM_PROMPT
+from toolcall.guard import SDK_MAX_RETRIES
 
 OPENAI = "openai"
 ANTHROPIC = "anthropic"
@@ -277,11 +278,11 @@ class Client:
             if self.settings.provider == OPENAI:
                 from openai import OpenAI
 
-                self._sdk = OpenAI()
+                self._sdk = OpenAI(max_retries=SDK_MAX_RETRIES)
             else:
                 from anthropic import Anthropic
 
-                self._sdk = Anthropic()
+                self._sdk = Anthropic(max_retries=SDK_MAX_RETRIES)
         if self.settings.provider == OPENAI:
             return self._sdk.responses.create(**body).model_dump(exclude_none=True)
         return self._sdk.messages.create(**body).model_dump(exclude_none=True)
