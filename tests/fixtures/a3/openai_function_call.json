@@ -1,0 +1,26 @@
+{
+  "id": "resp_0a1b2c",
+  "object": "response",
+  "created_at": 1759900000,
+  "status": "completed",
+  "model": "gpt-5.4-mini-2026-03-17",
+  "output": [
+    {
+      "type": "function_call",
+      "id": "fc_0a1b2c",
+      "call_id": "call_9z8y7x",
+      "name": "search_flights",
+      "arguments": "{\"origin\":\"JFK\",\"destination\":\"SFO\",\"date\":\"2026-11-03\",\"passengers\":2}",
+      "status": "completed"
+    }
+  ],
+  "parallel_tool_calls": false,
+  "tool_choice": "auto",
+  "usage": {
+    "input_tokens": 1312,
+    "input_tokens_details": {"cached_tokens": 1024},
+    "output_tokens": 41,
+    "output_tokens_details": {"reasoning_tokens": 0},
+    "total_tokens": 1353
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "id": "msg_01AbCdEf",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5-5",
+  "content": [
+    {"type": "thinking", "thinking": "", "signature": "EqQBCkgIARABGAIi"},
+    {"type": "text", "text": "Searching now."},
+    {"type": "tool_use", "id": "toolu_01XyZ", "name": "search_flights", "input": {"origin": "JFK", "destination": "SFO", "date": "2026-11-03"}}
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {"input_tokens": 1500, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 200, "output_tokens": 95}
+}

@@ -1,0 +1,16 @@
+{
+  "id": "resp_3d4e5f",
+  "object": "response",
+  "status": "completed",
+  "model": "gpt-5.4-mini-2026-03-17",
+  "output": [
+    {
+      "type": "message",
+      "id": "msg_3d4e5f",
+      "role": "assistant",
+      "status": "completed",
+      "content": [{"type": "output_text", "text": "You can call search_flights(origin=\"JFK\") to do that.", "annotations": []}]
+    }
+  ],
+  "usage": {"input_tokens": 900, "input_tokens_details": {"cached_tokens": 0}, "output_tokens": 18, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 918}
+}
