@@ -31,6 +31,18 @@ from toolcall.formulation import CELLS
 from toolcall.grader import CATEGORIES, EXCLUDED
 
 FACTORS = ("count", "richness", "strictness")
+# Level words per factor: the second word is the high (+1) level.
+LEVELS = {"count": ("low", "high"), "richness": ("terse", "rich"),
+          "strictness": ("loose", "strict")}
+
+
+def _graded_reps(outcomes, sid, cell_name):
+    """The one missing-cell rule: a scenario with no graded repetitions in a
+    cell is an error, never silently averaged over the cells it does have."""
+    reps = outcomes.get(sid, {}).get(cell_name, [])
+    if not reps:
+        raise ValueError(f"scenario {sid} has no graded repetitions in {cell_name}")
+    return reps
 
 
 def wilson(k: int, n: int, z: float = 1.959963984540054) -> tuple[float, float]:
@@ -40,13 +52,26 @@ def wilson(k: int, n: int, z: float = 1.959963984540054) -> tuple[float, float]:
     denom = 1 + z * z / n
     centre = (p + z * z / (2 * n)) / denom
     half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
-    return max(0.0, centre - half), min(1.0, centre + half)
+    # Floating error would leave 5.55e-17 / 0.9999999999999999 at the extremes.
+    lo = 0.0 if k == 0 else max(0.0, centre - half)
+    hi = 1.0 if k == n else min(1.0, centre + half)
+    return lo, hi
 
 
 def graded_outcomes(records) -> dict[str, dict[str, list[tuple[int, str]]]]:
-    """{scenario: {cell: [(block_index, category), ...]}}, excluded outcomes removed."""
+    """{scenario: {cell: [(block_index, category), ...]}}, excluded outcomes
+    removed. A repeated (scenario, cell, block_index) is refused: it would
+    count one repetition twice."""
     out: dict = defaultdict(lambda: defaultdict(list))
+    seen = set()
     for r in records:
+        key = (r.scenario_id, r.cell, r.block_index)
+        if key in seen:
+            raise ValueError(
+                f"duplicate record for scenario {r.scenario_id}, cell {r.cell}, "
+                f"block {r.block_index} (run {r.run_index})"
+            )
+        seen.add(key)
         cat = r.grade["category"]
         if cat in EXCLUDED:
             continue
@@ -64,9 +89,7 @@ def rate_rows(outcomes, categories, cells=CELLS, scenarios=None) -> list[dict[st
     for sid in sorted(scenarios if scenarios is not None else outcomes):
         row = {}
         for cell in cells:
-            reps = outcomes.get(sid, {}).get(cell.name, [])
-            if not reps:
-                raise ValueError(f"scenario {sid} has no graded repetitions in {cell.name}")
+            reps = _graded_reps(outcomes, sid, cell.name)
             row[cell.name] = sum(c in cats for _, c in reps) / len(reps)
         rows.append(row)
     return rows
@@ -76,19 +99,23 @@ def weights(estimand: str) -> dict[str, float]:
     """Cell weights for `main:<factor>`, `interaction:<f>:<g>`, or
     `at:<f>:<g>:<low|high>` (the effect of f with g held at one level)."""
     parts = estimand.split(":")
-    w = {}
-    for cell in CELLS:
-        s = cell.signs
-        if parts[0] == "main":
-            w[cell.name] = s[parts[1]] / 4
-        elif parts[0] == "interaction":
-            w[cell.name] = s[parts[1]] * s[parts[2]] / 2
-        elif parts[0] == "at":
-            level = 1 if parts[3] in ("high", "rich", "strict") else -1
-            w[cell.name] = s[parts[1]] / 2 if s[parts[2]] == level else 0.0
-        else:
-            raise ValueError(f"unknown estimand {estimand!r}")
-    return w
+    kind = parts[0]
+    if kind == "main" and len(parts) == 2 and parts[1] in FACTORS:
+        def weight(s):
+            return s[parts[1]] / 4
+    elif (kind == "interaction" and len(parts) == 3 and parts[1] in FACTORS
+          and parts[2] in FACTORS and parts[1] != parts[2]):
+        def weight(s):
+            return s[parts[1]] * s[parts[2]] / 2
+    elif (kind == "at" and len(parts) == 4 and parts[1] in FACTORS and parts[2] in FACTORS
+          and parts[1] != parts[2] and parts[3] in LEVELS[parts[2]]):
+        level = 1 if parts[3] == LEVELS[parts[2]][1] else -1
+
+        def weight(s):
+            return s[parts[1]] / 2 if s[parts[2]] == level else 0.0
+    else:
+        raise ValueError(f"unknown or malformed estimand {estimand!r}")
+    return {cell.name: weight(cell.signs) for cell in CELLS}
 
 
 def contrast(row: dict[str, float], estimand: str) -> float:
@@ -99,7 +126,11 @@ def cluster_bootstrap(units: list, statistic, iterations: int = 10000, seed: int
                       alpha: float = 0.05) -> dict:
     """Percentile interval on `statistic(units)`, resampling whole units
     (scenarios) with replacement. Also returns one-sided bootstrap p-values,
-    the share of draws at or beyond zero on each side, add-one smoothed."""
+    the share of draws at or beyond zero on each side, add-one smoothed.
+    `p_le_0` (mass at or below zero) is the p-value for a claim that the
+    effect is positive; `p_ge_0` is the p-value for a claim that it is
+    negative. Draws exactly at zero count on both sides, which is
+    conservative."""
     _check_iterations_and_alpha(iterations, alpha)
     if len(units) < MIN_BOOTSTRAP_SAMPLES:
         raise ValueError(
@@ -157,8 +188,8 @@ def ever_flip_rows(outcomes, scenarios=None) -> list[float]:
     land in one category. The Noise Floor Audit's measure (amendment §4f)."""
     rows = []
     for sid in sorted(scenarios if scenarios is not None else outcomes):
-        cells = outcomes[sid]
-        flips = [len({c for _, c in reps}) > 1 for reps in cells.values()]
+        flips = [len({c for _, c in _graded_reps(outcomes, sid, cell.name)}) > 1
+                 for cell in CELLS]
         rows.append(sum(flips) / len(flips))
     return rows
 
@@ -171,7 +202,7 @@ def half_rows(outcomes, categories, scenarios=None) -> list[dict[str, float]]:
     for sid in sorted(scenarios if scenarios is not None else outcomes):
         row = {}
         for cell in CELLS:
-            reps = outcomes[sid][cell.name]
+            reps = _graded_reps(outcomes, sid, cell.name)
             even = [c for b, c in reps if b % 2 == 0]
             odd = [c for b, c in reps if b % 2 == 1]
             if not even or not odd:
@@ -186,7 +217,7 @@ def per_scenario_wilson(outcomes, categories, cell: str) -> list[dict]:
     cats = set(categories)
     out = []
     for sid in sorted(outcomes):
-        reps = outcomes[sid][cell]
+        reps = _graded_reps(outcomes, sid, cell)
         k = sum(c in cats for _, c in reps)
         lo, hi = wilson(k, len(reps))
         out.append({"scenario": sid, "k": k, "n": len(reps), "rate": k / len(reps),
