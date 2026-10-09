@@ -91,6 +91,13 @@ def converse(client, scenario: Scenario, library: Library, formulation: Formulat
         turn = {"request": body, "response": response, "parsed": _summary(parsed),
                 "seconds": time.monotonic() - t0}
         turns.append(turn)
+        if parsed.model != client.settings.model:
+            # A conversation that ran on another model measures that model, and
+            # the single-turn campaign refuses the same thing (amendment §3).
+            turn["error"] = (f"model mismatch: asked for {client.settings.model}, "
+                             f"response names {parsed.model}")
+            out["excluded"] = "API_ERROR"
+            break
         if attempt == 0:
             out["first_grade"] = grade(parsed, scenario, library, rendered).to_dict()
         if parsed.finish in ("refused", "truncated", "error"):

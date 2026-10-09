@@ -1,3 +1,5 @@
+import hashlib
+import json
 from collections import Counter
 
 import pytest
@@ -5,7 +7,8 @@ import pytest
 from harness.store import JsonlStore
 from tests.a3_examples import library, scenarios, synthetic_suite
 from toolcall import campaign
-from toolcall.formulation import CELLS, parse_cell
+from toolcall.formulation import CELLS, parse_cell, render
+from toolcall.grader import grade
 from toolcall.guard import (
     GuardedClient,
     SpendCapReached,
@@ -15,7 +18,7 @@ from toolcall.guard import (
     check_estimate,
 )
 from toolcall.prices import cost_usd
-from toolcall.providers import ModelSettings, ScriptedClient, openai_parse
+from toolcall.providers import PARSE, ModelSettings, ScriptedClient, openai_parse, openai_request
 from toolcall.records import CallRecord, RecoveryRecord
 from toolcall.responses import openai_call, openai_text
 from toolcall.stub import StubModel
@@ -148,3 +151,168 @@ def test_the_per_call_bound_is_never_below_what_a_call_costs(tmp_path):
     for r in store.read_all():
         assert bound_held(MINI, r.request, r.usage)
         assert call_bound_usd(MINI, r.request) >= r.cost_usd
+
+
+def _no_usage(body):
+    return {k: v for k, v in openai_text("x").items() if k != "usage"}
+
+
+def _rec_setup():
+    rec = [s for s in SCS if s.recovery]
+    cells = [parse_cell("low-terse-loose")]
+    return rec, cells
+
+
+def test_a_stored_call_regrades_to_the_same_grade_from_its_stored_response(tmp_path):
+    store = JsonlStore(tmp_path / "c.jsonl", CallRecord)
+    campaign.single_turn(campaign.schedule(CELLS, SCS, 1, 2), _stub_client(), SCS, LIB, store,
+                         phase="campaign")
+    by_id = {s.id: s for s in SCS}
+    records = store.read_all()
+    assert len(records) == 8 * len(SCS)
+    for r in records:
+        parsed = PARSE[MINI.provider](r.response)
+        again = grade(parsed, by_id[r.scenario_id], LIB, r.rendered_tools, error=r.error)
+        assert again.to_dict() == r.grade
+
+
+def test_the_request_hash_pins_the_bytes_that_were_sent(tmp_path):
+    store = JsonlStore(tmp_path / "c.jsonl", CallRecord)
+    client = _stub_client()
+    campaign.single_turn(campaign.schedule(CELLS[:1], SCS[:1], 1, 1), client, SCS, LIB, store,
+                         phase="campaign")
+    r = store.read_all()[0]
+    assert r.request_sha256 == hashlib.sha256(json.dumps(client.sent[0]).encode()).hexdigest()
+
+
+def test_missing_usage_is_unmetered_not_free(tmp_path):
+    store = JsonlStore(tmp_path / "c.jsonl", CallRecord)
+    campaign.single_turn(campaign.schedule(CELLS[:1], SCS[:1], 1, 1),
+                         ScriptedClient(MINI, _no_usage), SCS, LIB, store, phase="campaign")
+    r = store.read_all()[0]
+    assert r.grade["category"] == "API_ERROR"
+    assert r.unmetered and r.usage is None and r.cost_usd is None and r.response is not None
+    store2 = JsonlStore(tmp_path / "d.jsonl", CallRecord)
+    campaign.single_turn(campaign.schedule(CELLS[:1], SCS[:1], 1, 1), _stub_client(), SCS, LIB,
+                         store2, phase="campaign")
+    assert not store2.read_all()[0].unmetered
+
+
+def test_recovery_missing_usage_is_counted_as_unmetered_turns(tmp_path):
+    rec, cells = _rec_setup()
+    store = JsonlStore(tmp_path / "r.jsonl", RecoveryRecord)
+    campaign.recovery_runs(campaign.schedule(cells, rec[:1], 1, 3, formats=["opaque"]),
+                           ScriptedClient(MINI, _no_usage), rec, LIB, store)
+    r = store.read_all()[0]
+    assert r.excluded == "API_ERROR" and r.unmetered_turns == 1 and r.cost_usd == 0
+
+
+def test_recovery_provider_errors_are_unmetered_turns(tmp_path):
+    def fail(body):
+        raise ConnectionError("reset by peer")
+
+    rec, cells = _rec_setup()
+    store = JsonlStore(tmp_path / "r.jsonl", RecoveryRecord)
+    campaign.recovery_runs(campaign.schedule(cells, rec[:1], 1, 3, formats=["opaque"]),
+                           ScriptedClient(MINI, fail), rec, LIB, store)
+    r = store.read_all()[0]
+    assert r.excluded == "API_ERROR" and r.unmetered_turns == 1 and r.returned_models == []
+
+
+def test_recovery_checks_the_pin_on_every_turn(tmp_path):
+    rec, cells = _rec_setup()
+    store = JsonlStore(tmp_path / "r.jsonl", RecoveryRecord)
+    other = ScriptedClient(MINI, lambda body: openai_text("hi", model="gpt-5.4-mini"))
+    campaign.recovery_runs(campaign.schedule(cells, rec[:1], 1, 3, formats=["opaque"]),
+                           other, rec, LIB, store)
+    r = store.read_all()[0]
+    assert r.excluded == "API_ERROR" and r.returned_models == ["gpt-5.4-mini"]
+    assert "model mismatch" in r.turns[-1]["error"]
+    assert r.unmetered_turns == 0 and r.cost_usd > 0
+
+
+def test_a_recovery_record_written_before_the_new_fields_still_loads():
+    loaded = RecoveryRecord.from_dict({
+        **{k: None for k in ("first_grade", "turns_to_recovery", "identical_retry", "excluded")},
+        "run_index": 0, "block_index": 0, "condition": "c", "run_id": "r", "phase": "recovery",
+        "model": "m", "cell": "c", "scenario_id": "s", "error_kind": "e", "fmt": "opaque",
+        "settings": {}, "turns": [], "injected": False, "recovered": False, "gave_up": False,
+        "hallucinated_success": False, "budget_exhausted": False, "cost_usd": 0.0,
+    })
+    assert loaded.returned_models == [] and loaded.unmetered_turns == 0
+
+
+def _always_fails(body):
+    raise ConnectionError("401 bad key")
+
+
+def test_a_campaign_stops_after_ten_consecutive_api_errors(tmp_path):
+    store = JsonlStore(tmp_path / "c.jsonl", CallRecord)
+    sched = campaign.schedule(CELLS, SCS, 1, 1)
+    assert len(sched) > campaign.CONSECUTIVE_FAILURE_LIMIT == 10
+    with pytest.raises(campaign.SystematicFailure, match="ConnectionError: 401 bad key"):
+        campaign.single_turn(sched, ScriptedClient(MINI, _always_fails), SCS, LIB, store,
+                             phase="campaign")
+    assert len(store.read_all()) == 10
+
+
+def test_a_success_resets_the_consecutive_failure_count(tmp_path):
+    calls = {"n": 0}
+
+    def flaky(body):
+        calls["n"] += 1
+        if calls["n"] % 10 == 0:
+            return openai_text("hi")
+        raise ConnectionError("reset by peer")
+
+    store = JsonlStore(tmp_path / "c.jsonl", CallRecord)
+    sched = campaign.schedule(CELLS, SCS, 1, 1)
+    campaign.single_turn(sched, ScriptedClient(MINI, flaky), SCS, LIB, store, phase="campaign")
+    assert len(store.read_all()) == len(sched)
+
+
+def test_recovery_stops_after_ten_consecutive_api_errors(tmp_path):
+    rec, cells = _rec_setup()
+    store = JsonlStore(tmp_path / "r.jsonl", RecoveryRecord)
+    sched = campaign.schedule(cells, rec, 6, 3, formats=["actionable", "opaque"])
+    assert len(sched) > 10
+    with pytest.raises(campaign.SystematicFailure, match="401 bad key"):
+        campaign.recovery_runs(sched, ScriptedClient(MINI, _always_fails), rec, LIB, store)
+    assert len(store.read_all()) == 10
+
+
+def test_resume_refuses_a_store_made_under_other_settings_model_or_phase(tmp_path):
+    store = JsonlStore(tmp_path / "c.jsonl", CallRecord)
+    sched = campaign.schedule(CELLS, SCS, 1, 1)
+    campaign.single_turn(sched[:3], _stub_client(), SCS, LIB, store, phase="campaign")
+    warmer = ModelSettings("openai", MINI.model, 0.7, reasoning_effort="none")
+    other_model = ModelSettings("openai", "gpt-5.4-nano-2026-03-17", 0.0,
+                                reasoning_effort="none")
+    for settings, phase in ((warmer, "campaign"), (other_model, "campaign"), (MINI, "slice")):
+        client = ScriptedClient(settings, StubModel(LIB, SCS, seed=1, model=settings.model))
+        with pytest.raises(ValueError, match="resume"):
+            campaign.single_turn(sched, client, SCS, LIB, store, phase=phase, resume=True)
+    assert len(store.read_all()) == 3
+
+
+def test_recovery_resume_refuses_a_store_made_under_other_settings(tmp_path):
+    rec, cells = _rec_setup()
+    store = JsonlStore(tmp_path / "r.jsonl", RecoveryRecord)
+    sched = campaign.schedule(cells, rec, 1, 3, formats=["opaque"])
+    campaign.recovery_runs(sched[:1], _stub_client(), rec, LIB, store)
+    warmer = ModelSettings("openai", MINI.model, 0.7, reasoning_effort="none")
+    with pytest.raises(ValueError, match="resume"):
+        campaign.recovery_runs(sched, ScriptedClient(warmer, StubModel(LIB, SCS, seed=1)), rec,
+                               LIB, store, resume=True)
+
+
+@pytest.mark.parametrize("constrained", [False, True])
+def test_the_stub_reads_every_cell_back_from_its_rendering(constrained):
+    settings = ModelSettings("openai", MINI.model, 0.0, reasoning_effort="none",
+                             constrained=constrained)
+    stub = StubModel(LIB, SCS, seed=1)
+    for scenario in SCS:
+        for cell in CELLS:
+            body = openai_request(settings, render(scenario, LIB, cell),
+                                  [{"role": "user", "text": scenario.user_message}])
+            assert stub._cell(body["tools"]) == cell, (scenario.id, cell.name, constrained)

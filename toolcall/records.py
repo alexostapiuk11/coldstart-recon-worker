@@ -6,9 +6,22 @@ the exact request body, the raw response or the error, and the grade. A
 
 Records keep the raw provider response, not only the grade, so re-grading
 under a new normalizer version needs no new call.
+
+Two notes on evidence:
+
+- The stored `request` is semantically equal to the body that was sent, but the
+  store sorts keys when it writes, so its bytes are not the sent bytes.
+  `request_sha256` is the hash of `json.dumps(body)` exactly as built (no
+  `sort_keys`), which pins the exact request.
+- A call whose usage is missing is `unmetered`: `usage` and `cost_usd` are None,
+  not zero, because a response with no usage is not a measurement of a free
+  call. The spend guard charged those calls its per-call bound, so the spend
+  record, not `cost_usd`, is what reconciles them. `RecoveryRecord.unmetered_turns`
+  counts the same thing per conversation, and its `cost_usd` is the sum of the
+  metered turns only.
 """
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 from toolcall import NORMALIZER_VERSION, SCHEMA_VERSION
 
@@ -35,6 +48,8 @@ class CallRecord:
     rendered_tools: list
     schema_version: int = SCHEMA_VERSION
     normalizer_version: int = NORMALIZER_VERSION
+    unmetered: bool = False
+    request_sha256: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -70,6 +85,9 @@ class RecoveryRecord:
     cost_usd: float
     schema_version: int = SCHEMA_VERSION
     normalizer_version: int = NORMALIZER_VERSION
+    # Defaulted last so a record written before these fields still loads.
+    returned_models: list = field(default_factory=list)  # the model of every parsed turn
+    unmetered_turns: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)

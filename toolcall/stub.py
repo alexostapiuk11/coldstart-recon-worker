@@ -56,12 +56,32 @@ class StubModel:
 
     # -- reading the request -------------------------------------------------
 
+    @staticmethod
+    def _strict(tools: list[dict]) -> bool:
+        """Read strictness from what the rendering put in the schemas.
+
+        `additionalProperties` is not a safe signal: constrained decoding adds
+        it to every tool, and makes every property required, so a loose cell
+        sent with `strict: true` looks strict by those two marks. Enums and
+        patterns are only rendered in the strict cell and the constrained
+        rewrite leaves them alone. A body that is not constrained also shows
+        the strict cell through `additionalProperties` and a longer `required`,
+        for a scenario whose tools carry no enum or pattern.
+        """
+        for t in tools:
+            if any("enum" in p or "pattern" in p for p in t["parameters"]["properties"].values()):
+                return True
+        if any(t.get("strict") is True for t in tools):
+            return False
+        return any("additionalProperties" in t["parameters"] or len(t["parameters"]["required"]) > 1
+                   for t in tools)
+
     def _cell(self, tools: list[dict]) -> Formulation:
         count = "high" if len(tools) == 20 else "low"
-        strict = any("additionalProperties" in t["parameters"] for t in tools)
         first = tools[0]
         rich = first["description"] == self.library.get(first["name"]).rich
-        return Formulation(count, "rich" if rich else "terse", "strict" if strict else "loose")
+        return Formulation(count, "rich" if rich else "terse",
+                           "strict" if self._strict(tools) else "loose")
 
     def _scenario_and_turns(self, body: dict):
         items = body["input"]
