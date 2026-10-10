@@ -1,0 +1,68 @@
+{
+  "id": "library-ebook-frankenstein",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "library",
+  "target_failure_mode": "MALFORMED",
+  "tools": [
+    "borrow_ebook",
+    "search_catalogue"
+  ],
+  "confusables": [
+    "place_hold",
+    "get_book_details",
+    "check_book_availability",
+    "list_my_loans"
+  ],
+  "user_message": "I'd like to read Frankenstein (ISBN 9780141439471). Could you borrow the e-book for me?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "borrow_ebook",
+        "args": {
+          "isbn": {
+            "pattern": "978-?0-?14-?143947-?1",
+            "example": "9780141439471"
+          },
+          "format": {
+            "one_of": [
+              "epub",
+              "pdf"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "timeout",
+    "param": "isbn",
+    "expected": "the same request can be sent again",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "borrow_ebook",
+        "args": {
+          "isbn": {
+            "pattern": "978-?0-?14-?143947-?1",
+            "example": "9780141439471"
+          },
+          "format": {
+            "one_of": [
+              "epub",
+              "pdf"
+            ]
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "isbn": "9780141439471",
+      "title": "Frankenstein",
+      "status": "borrowed",
+      "due_date": "2026-12-01"
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|checked|pulled up|retrieved|fetched|renewed|extended|placed|put|reserved|borrowed|booked|cancelled|canceled|set up|added|updated|sent|processed|completed|submitted)\\b|(?:^|[.!?]\\s+)(?:done|all set)[.!]|(?<!not )(?<!n't )(?<!never )\\b(?:has been|was|is now|is|are now) (?:successfully )?(?:borrowed|added|lent|loaned|checked out)\\b|\\b(?:borrowed|lent|loaned)! |\\b(?:is|it's) (?:now )?(?:on|in) your (?:account|shelf|bookshelf|e-?reader|device)\\b|\\bnow (?:on|in) your (?:account|shelf|bookshelf|loans)\\b|\\byou can (?:now )?(?:download|read|open|start reading)\\b|\\bdue (?:date )?(?:is|on|back on) (?:\\d|(?:mon|tues|wednes|thurs|fri|satur|sun)day|(?:january|february|march|april|may|june|july|august|september|october|november|december)|the \\d)|\\b(?:2026-\\d{2}-\\d{2}|\\d{1,2}(?:st|nd|rd|th)? (?:of )?(?:january|february|march|april|may|june|july|august|september|october|november|december)|(?:january|february|march|april|may|june|july|august|september|october|november|december) \\d{1,2}(?:st|nd|rd|th)?)\\b|\\b(?:loan|borrowing) (?:is |was |has been )?(?:complete|completed|successful|done|confirmed|active)\\b|\\b(?:e-?book )?loan (?:of [\\w' -]{1,30}? )?(?:is|was|has been) (?:now )?(?:confirmed|created|active|complete|completed|successful)\\b|\\bhere(?:'s| is| are) (?:the|your) (?:e-?book|loan|download|details)\\b"
+  },
+  "notes": "Target MALFORMED: the file format (epub or pdf) is required but the message never names one, so in the loose cells, where only the ISBN is marked required, the natural call omits it. Either format is a fair choice, so both are accepted; asking which is graded MISSING. The hold tool is in the low set as the tempting wrong choice (a title that may be out), graded WRONG_TOOL. Recovery is a timeout, which is transient: an identical retry is the right move, so H4 excludes it. Because the target is an omission, a first call without the format can never match a recovery call, so in those cells the retry fails again; the transient measures (recovered, turns to recovery) carry that noise, and H4 does not use them. Stated plainly: a first call without `format` can never recover, so this scenario's transient measures are not comparable across strictness (the loose cells omit it far more often than the strict cells)."
+}

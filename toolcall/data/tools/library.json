@@ -1,0 +1,306 @@
+{
+  "domain": "library",
+  "tools": [
+    {
+      "name": "search_catalogue",
+      "terse": "Search the catalogue.",
+      "rich": "Titles in the library catalogue that match a title, an author or a subject, with author, year and ISBN. Not for the copies on a shelf and not for the full details of a title whose ISBN is already known.",
+      "params": [
+        {
+          "name": "query",
+          "type": "string",
+          "required": true,
+          "terse": "Search text.",
+          "rich": "A title, an author's name or a subject."
+        },
+        {
+          "name": "format",
+          "type": "string",
+          "required": false,
+          "terse": "Format.",
+          "rich": "Limit the results to one format: book, ebook, audiobook or dvd. All formats when omitted.",
+          "enum": [
+            "book",
+            "ebook",
+            "audiobook",
+            "dvd"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "get_book_details",
+      "terse": "Book details.",
+      "rich": "Publisher, year, edition, page count, language and a short summary for one title, by ISBN. Not for finding titles by a phrase and not for the copies on a shelf.",
+      "params": [
+        {
+          "name": "isbn",
+          "type": "string",
+          "required": true,
+          "terse": "ISBN.",
+          "rich": "The ISBN of the edition."
+        }
+      ]
+    },
+    {
+      "name": "check_book_availability",
+      "terse": "Copies on the shelf.",
+      "rich": "How many copies of one title are on the shelf and how many are out on loan at one branch today. Not for the details of the book and not for reserving a copy.",
+      "params": [
+        {
+          "name": "isbn",
+          "type": "string",
+          "required": true,
+          "terse": "ISBN.",
+          "rich": "The ISBN of the edition."
+        },
+        {
+          "name": "branch",
+          "type": "string",
+          "required": true,
+          "terse": "Branch.",
+          "rich": "The branch to check, written by its name."
+        }
+      ]
+    },
+    {
+      "name": "place_hold",
+      "terse": "Put a hold on a title.",
+      "rich": "Reserve the next free copy of one title for the patron and name the branch where it will wait for collection. Not for borrowing a digital copy.",
+      "params": [
+        {
+          "name": "isbn",
+          "type": "string",
+          "required": true,
+          "terse": "ISBN.",
+          "rich": "The ISBN of the edition."
+        },
+        {
+          "name": "pickup_branch",
+          "type": "string",
+          "required": true,
+          "terse": "Pickup branch.",
+          "rich": "The branch where the copy will wait, written by its name."
+        }
+      ]
+    },
+    {
+      "name": "cancel_hold",
+      "terse": "Cancel a hold.",
+      "rich": "Withdraw the patron's hold on one title so that they leave the waiting queue. Not for a loan that is already out.",
+      "params": [
+        {
+          "name": "isbn",
+          "type": "string",
+          "required": true,
+          "terse": "ISBN.",
+          "rich": "The ISBN of the edition."
+        }
+      ]
+    },
+    {
+      "name": "list_my_holds",
+      "terse": "My holds.",
+      "rich": "The titles the patron is waiting for, with queue position and the branch for collection. Not for items that are already borrowed.",
+      "params": [
+        {
+          "name": "status",
+          "type": "string",
+          "required": true,
+          "terse": "Which holds.",
+          "rich": "waiting (still in the queue), ready (waiting at a branch for collection) or all.",
+          "enum": [
+            "waiting",
+            "ready",
+            "all"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "list_my_loans",
+      "terse": "My loans.",
+      "rich": "The items the patron has out right now, with title, ISBN and due date; an item that is late is marked. Not for holds and not for fines.",
+      "params": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true,
+          "terse": "Kind.",
+          "rich": "print (paper items), ebook (digital loans) or all.",
+          "enum": [
+            "print",
+            "ebook",
+            "all"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "renew_loan",
+      "terse": "Extend a loan.",
+      "rich": "Give one borrowed item a new, later due date, if no other patron is waiting for it. Not for a digital loan and not for borrowing a title again once it is back on the shelf.",
+      "params": [
+        {
+          "name": "isbn",
+          "type": "string",
+          "required": true,
+          "terse": "ISBN.",
+          "rich": "The ISBN of the item on loan."
+        }
+      ]
+    },
+    {
+      "name": "check_fines",
+      "terse": "Check fines.",
+      "rich": "The late fees the patron owes, each with its item, the days it was late and the amount. Not for the items that are out and not yet late.",
+      "params": [
+        {
+          "name": "status",
+          "type": "string",
+          "required": true,
+          "terse": "Which fines.",
+          "rich": "unpaid (still owed) or all (including fines already paid).",
+          "enum": [
+            "unpaid",
+            "all"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "get_branch_hours",
+      "terse": "Opening hours.",
+      "rich": "When one branch opens and closes on one day of the week, or that it is closed that day. Not for the branch's address and not for a closure on a particular date.",
+      "params": [
+        {
+          "name": "branch",
+          "type": "string",
+          "required": true,
+          "terse": "Branch.",
+          "rich": "The branch, written by its name."
+        },
+        {
+          "name": "day",
+          "type": "string",
+          "required": true,
+          "terse": "Day.",
+          "rich": "The day of the week, spelled out in English.",
+          "enum": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "list_branches",
+      "terse": "List branches.",
+      "rich": "The library branches in one district, with street address and phone number. Not for opening hours.",
+      "params": [
+        {
+          "name": "area",
+          "type": "string",
+          "required": true,
+          "terse": "District.",
+          "rich": "A district or neighbourhood, such as the town centre or the harbour."
+        }
+      ]
+    },
+    {
+      "name": "book_reading_room",
+      "terse": "Reserve a room.",
+      "rich": "Reserve a quiet reading room at one branch for a whole number of hours on one date. Not for borrowing items.",
+      "params": [
+        {
+          "name": "branch",
+          "type": "string",
+          "required": true,
+          "terse": "Branch.",
+          "rich": "The branch, written by its name."
+        },
+        {
+          "name": "date",
+          "type": "string",
+          "required": true,
+          "terse": "Date.",
+          "rich": "The date, YYYY-MM-DD.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        {
+          "name": "start_time",
+          "type": "string",
+          "required": true,
+          "terse": "Start time.",
+          "rich": "The start time on the 24-hour clock, HH:MM.",
+          "pattern": "^\\d{2}:\\d{2}$"
+        },
+        {
+          "name": "hours",
+          "type": "integer",
+          "required": true,
+          "terse": "Hours.",
+          "rich": "Whole hours, 1 to 3; part of an hour counts as a full hour."
+        }
+      ]
+    },
+    {
+      "name": "borrow_ebook",
+      "terse": "Borrow an e-book.",
+      "rich": "Lend one digital title to the patron's account for the standard loan period, in the file format chosen. Not for a paper copy and not for a title that has to be collected at a branch.",
+      "params": [
+        {
+          "name": "isbn",
+          "type": "string",
+          "required": true,
+          "terse": "ISBN.",
+          "rich": "The ISBN of the title to borrow."
+        },
+        {
+          "name": "format",
+          "type": "string",
+          "required": true,
+          "terse": "File format.",
+          "rich": "epub or pdf.",
+          "enum": [
+            "epub",
+            "pdf"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "suggest_purchase",
+      "terse": "Suggest a title.",
+      "rich": "Ask the library to add a title it does not hold to its collection. Not for a title that is already in the catalogue.",
+      "params": [
+        {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "terse": "Title.",
+          "rich": "The title of the book."
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "required": true,
+          "terse": "Author.",
+          "rich": "The author's name."
+        },
+        {
+          "name": "isbn",
+          "type": "string",
+          "required": false,
+          "terse": "ISBN.",
+          "rich": "The ISBN, if known."
+        }
+      ]
+    }
+  ]
+}

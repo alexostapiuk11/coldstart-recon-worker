@@ -1,0 +1,23 @@
+{
+  "id": "library-thanks-no-call",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "library",
+  "target_failure_mode": "SPURIOUS",
+  "tools": [
+    "get_branch_hours",
+    "list_branches"
+  ],
+  "confusables": [
+    "book_reading_room",
+    "check_book_availability",
+    "list_my_loans",
+    "search_catalogue"
+  ],
+  "user_message": "Thanks, that's all I needed to know about when the Riverside branch opens on Saturday.",
+  "expectation": {
+    "no_call_expected": true
+  },
+  "notes": "Target SPURIOUS. The message names the branch and the day, so the tempting call (the opening-hours tool with Riverside and Saturday) is fully specifiable and would be well-formed, so a spurious call grades SPURIOUS, not MALFORMED. No recovery block, as for every no-call scenario."
+}

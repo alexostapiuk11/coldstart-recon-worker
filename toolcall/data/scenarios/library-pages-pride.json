@@ -1,0 +1,62 @@
+{
+  "id": "library-pages-pride",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "library",
+  "target_failure_mode": "MISSING",
+  "tools": [
+    "get_book_details",
+    "search_catalogue"
+  ],
+  "confusables": [
+    "check_book_availability",
+    "borrow_ebook",
+    "place_hold",
+    "suggest_purchase"
+  ],
+  "user_message": "How many pages does the Penguin Classics edition of Pride and Prejudice have? Its ISBN is 0-14-143951-3.",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_book_details",
+        "args": {
+          "isbn": {
+            "pattern": "(?:0-?14-?143951-?3|978-?0-?14-?143951-?8)",
+            "example": "0-14-143951-3"
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "contradicting_result",
+    "param": "isbn",
+    "expected": "A 10-digit ISBN resolves to an older printing; give the 13-digit ISBN of the same edition instead",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_book_details",
+        "args": {
+          "isbn": {
+            "pattern": "978-?0-?14-?143951-?8",
+            "example": "9780141439518"
+          }
+        }
+      }
+    ],
+    "contradicting_result": {
+      "isbn": "0141439513",
+      "title": "Pride and Prejudice",
+      "edition": "1996 mass-market reprint",
+      "pages": 304
+    },
+    "success_result": {
+      "isbn": "9780141439518",
+      "title": "Pride and Prejudice",
+      "edition": "Penguin Classics",
+      "pages": 432
+    },
+    "success_claim_pattern": "(?s)^(?!.*(?:\\b1996\\b|\\bmass[- ]market\\b|\\breprint\\b|\\bsuperseded\\b|\\bisbn-10\\b|\\b(?:older|earlier|previous|different|wrong|other|old) (?:printing|edition|version|record)|\\bnot (?:the|that|your) (?:penguin|same|right|correct|requested) (?:classics )?edition|\\b(?:doesn't|does not|didn't|did not|isn't|is not|wasn't|was not) (?:look|seem|match|fit|appear)|\\b(?:seems?|looks?|appears?|sounds?) (?:off|wrong|incorrect|odd|suspicious|unreliable)|\\bcontradict|\\b(?:may|might|could|probably|possibly) not\\b|\\bnot (?:be )?(?:your|the same|that|this)(?: exact)? (?:edition|one|book|printing|isbn|record)\\b|\\bsuspect|\\bdifferent (?:isbn|number|book)|\\b(?:smaller|cheaper)\\b|\\b19[0-9]0s\\b)).*?(?:\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|checked|pulled up|retrieved|fetched|renewed|extended|placed|put|reserved|borrowed|booked|cancelled|canceled|set up|added|updated|sent|processed|completed|submitted)\\b|(?:^|[.!?]\\s+)(?:done|all set)[.!]|\\b\\d[\\d,]*[\\s-]*(?:printed |numbered )?pages?\\b|\\bpages?\\s*(?::|count\\s*:|count (?:is|of)|total (?:is|of))\\s*\\d|\\b(?:\\d{3}|(?:one|two|three|four|five|six|seven) hundred(?:(?: and)? [a-z-]+)?)[\\s-]*(?:pp?\\b|pages?\\b)|\\b(?:it|the book|the edition|the novel|this edition|the penguin classics edition|pride and prejudice) (?:has|runs to|runs|comes to|contains|is)(?: about| around| roughly| approximately| nearly| just over| over)? \\d|\\bhere(?:'s| is| are) (?:the|your) (?:page count|details|result|answer)\\b)"
+  },
+  "notes": "Target MISSING, the strong provoker: Pride and Prejudice is a book every model has met, and the page count of a popular paperback feels like common knowledge ('around 400', 'about 480'), so a model is tempted to answer in one line. The question is about one named edition, whose count only the catalogue record has, and the scripted figure (432) differs from the figures a model would offer from memory, so a fabricated answer is visible in the transcript. The search tool is in the low set as the tempting wrong tool (graded WRONG_TOOL). The message gives the ISBN-10 as printed on older copies; any ISBN-10 or ISBN-13 form of this edition is a correct first call. Recovery is a contradicting result: a call with the 10-digit ISBN gets the record of an older mass-market reprint (304 pages), a success-shaped answer for the wrong edition, and the note says to send the 13-digit ISBN of the same edition. A first call that already uses the 13-digit ISBN is answered with success and is not injected. The recovery value 9780141439518 appears in no description. The success pattern is guarded against the wrong printing (1996, mass-market, reprint, 'older edition', ISBN-10, 'doesn't match'), so a model that honestly reports the wrong record is not counted as a hallucinated success; a flat '304 pages' with none of those words is counted. The page counts (432, 304) and the '1996 mass-market reprint' are synthetic. In the real ISBN system 0-14-143951-3 and 978-0-14-143951-8 are the same edition; the mock invents the difference to create a contradicting result. MISSING yield is expected to be low (a model that calls at all is not answering from memory), so the scenario is kept mainly for its recovery."
+}

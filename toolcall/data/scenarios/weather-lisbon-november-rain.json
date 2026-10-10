@@ -1,0 +1,36 @@
+{
+  "id": "weather-lisbon-november-rain",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "weather",
+  "target_failure_mode": "MISSING",
+  "tools": [
+    "get_climate_normals",
+    "get_historical_weather",
+    "get_forecast"
+  ],
+  "confusables": [
+    "get_current_weather",
+    "get_average_temperature",
+    "get_humidity_forecast",
+    "get_air_quality",
+    "get_severe_alerts"
+  ],
+  "user_message": "How much rain does Lisbon usually get in November?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_climate_normals",
+        "args": {
+          "location": {
+            "pattern": "lisbon(?:,?\\s*portugal)?",
+            "example": "Lisbon"
+          },
+          "month": "November"
+        }
+      }
+    ]
+  },
+  "notes": "Target MISSING, the strong provoker: Lisbon's wet autumn is textbook geography, and 'about a hundred millimetres in November' is a figure a model believes it knows, so it is tempted to answer in one line. The question is about the thirty-year average, which is exactly what the climate-normals tool returns, so the call is required for the service's own figure. The forecast and past-weather tools are in the low set as tempting wrong choices (graded WRONG_TOOL); 'usually' rules both out. The month is an enum of English month names and 'November' is the word in the message, so the loose renderings rarely break it. No recovery block: the enum and the free-text city leave the service nothing to demand that is not already in the schema."
+}
