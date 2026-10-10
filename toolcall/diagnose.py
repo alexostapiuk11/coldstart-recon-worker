@@ -1,13 +1,17 @@
 """Run it on your own agent: your tools, your scenarios, your failure taxonomy.
 
 The adoption path (August §7). Point it at a directory of tool-library files
-and a directory of scenario files in this repository's format, and it runs the
-baseline formulation only -- your tools as you list them, terse or rich and
-loose or strict as you choose -- and reports how the calls break down across
-the six categories. The factorial is optional; this is the easy default.
+and a directory of scenario files in this repository's format, and it runs one
+formulation of your tools -- by default your tools as the low-count, rich,
+strict-schema cell renders them, which is not the factorial's baseline cell
+(`formulation.BASELINE` is terse and loose) -- and reports how the calls break
+down across the six categories. The factorial is optional; this is the easy
+default.
 """
 
+import os
 from collections import Counter, defaultdict
+from pathlib import Path
 
 from harness.store import JsonlStore
 from toolcall import campaign
@@ -27,10 +31,22 @@ INTERVENTION = {
 }
 
 
-def diagnose(client, tools_dir, scenarios_dir, store_path, *, reps: int,
+def _is_path(x) -> bool:
+    return isinstance(x, str | os.PathLike)
+
+
+def diagnose(client, tools, scenarios, store_path, *, reps: int,
              richness: str = "rich", strictness: str = "strict", seed: int = 0) -> dict:
-    library = load_library(tools_dir)
-    scenarios = load_scenarios(scenarios_dir, library, factorial=False)
+    """`tools` and `scenarios`: a directory each, or an already-loaded Library
+    and scenario list (so a caller that estimated the cost from them runs
+    exactly them). `store_path` must not hold records: the summary is of this
+    run's calls only."""
+    library = load_library(tools) if _is_path(tools) else tools
+    if _is_path(scenarios):
+        scenarios = load_scenarios(scenarios, library, factorial=False)
+    store_path = Path(store_path)
+    if store_path.exists() and store_path.stat().st_size > 0:
+        raise ValueError(f"{store_path}: store exists; choose a new store")
     cell = Formulation("low", richness, strictness)
     store = JsonlStore(store_path, CallRecord)
     campaign.single_turn(campaign.schedule([cell], scenarios, reps, seed), client, scenarios,
@@ -53,8 +69,8 @@ def summarise(records) -> dict:
                      "pooled_wilson_lo": lo, "pooled_wilson_hi": hi,
                      "points_at": INTERVENTION.get(cat, "")})
     return {"graded": n,
-            "excluded": Counter(r.grade["category"] for r in records
-                                if r.grade["category"] in EXCLUDED),
+            "excluded": dict(Counter(r.grade["category"] for r in records
+                                     if r.grade["category"] in EXCLUDED)),
             "categories": rows,
             "by_scenario": {s: dict(c) for s, c in sorted(by_scenario.items())},
             "note": "Pooled Wilson intervals treat repetitions of one scenario as independent, "
@@ -62,10 +78,16 @@ def summarise(records) -> dict:
 
 
 def report(summary: dict) -> str:
-    lines = [f"{summary['graded']} graded calls; excluded: {dict(summary['excluded']) or 0}",
+    lines = [f"{summary['graded']} graded calls; excluded: {summary['excluded'] or 0}",
              "", "| category | calls | share | what it points at |", "|---|---|---|---|"]
     for r in summary["categories"]:
         share = "" if r["share"] is None else f"{100 * r['share']:.1f}%"
         lines.append(f"| {r['category']} | {r['calls']} | {share} | {r['points_at']} |")
+    if summary["by_scenario"]:
+        lines += ["", "| scenario | " + " | ".join(CATEGORIES) + " |",
+                  "|---|" + "---|" * len(CATEGORIES)]
+        for sid, counts in summary["by_scenario"].items():
+            lines.append(f"| {sid} | " + " | ".join(str(counts.get(c, 0)) for c in CATEGORIES)
+                         + " |")
     lines += ["", summary["note"]]
     return "\n".join(lines)
