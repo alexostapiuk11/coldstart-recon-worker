@@ -16,7 +16,8 @@ must cover the estimate plus the spend guard's headroom; every call's worst case
 is written to a durable ledger, `<store>.spend.jsonl`, whose lock is held for the
 whole run; and a --store or ledger that already holds anything is refused, so a
 second run can never spend the approval again unseen. It exits 1 if no call
-could be graded.
+could be graded, and 3 if the spend guard stopped the run (the report then covers
+the calls already made, which stay in the store and the ledger).
 """
 
 import argparse
@@ -27,11 +28,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from toolcall.diagnose import diagnose, report
+from harness.store import JsonlStore
+from toolcall.diagnose import diagnose, report, summarise
 from toolcall.formulation import Formulation
-from toolcall.guard import GuardedClient, SpendGuard, SpendLedger, check_estimate
+from toolcall.guard import (
+    GuardedClient,
+    SpendCapReached,
+    SpendGuard,
+    SpendLedger,
+    check_estimate,
+)
 from toolcall.prices import PRICES
 from toolcall.providers import PARSE, Client, ModelSettings, ScriptedClient
+from toolcall.records import CallRecord
 from toolcall.runner import plan_cost
 from toolcall.scenarios import load_scenarios
 from toolcall.stub import StubModel
@@ -88,6 +97,7 @@ def main(argv=None) -> int:
     store = args.store or Path(tempfile.mkdtemp()) / "diagnose.jsonl"
     ledger_path = store.with_name(store.name + ".spend.jsonl")
     kw = {"reps": args.reps, "richness": args.richness, "strictness": args.strictness}
+    stopped = None
     if args.dry_run:
         _refuse_reuse(store)
         dry = ModelSettings("openai", DEFAULT_MODEL["openai"], 0.0, reasoning_effort="none")
@@ -105,10 +115,21 @@ def main(argv=None) -> int:
             _refuse_reuse(store, ledger_path)  # again, now that the lock is held
             guard = SpendGuard(args.approved_usd, ledger=ledger)
             client = GuardedClient(Client(settings), guard, PARSE[settings.provider])
-            summary = diagnose(client, library, scenarios, store, **kw)
+            try:
+                summary = diagnose(client, library, scenarios, store, **kw)
+            except SpendCapReached as e:
+                # Not caught in the dry run: the stub has no guard. The records the
+                # run already stored are the evidence; summarise those.
+                stopped = e
+                print(f"stopped by the spend guard: {e}", file=sys.stderr)
+                summary = summarise(JsonlStore(store, CallRecord).read_all())
         print(f"spent ${guard.spent:.4f} of ${args.approved_usd:.2f}; ledger: {ledger_path}")
     print(report(summary))
     print(f"\nrecords: {store}")
+    if stopped is not None:
+        print("the store and the ledger hold the calls made; to run again, choose a new "
+              "--store", file=sys.stderr)
+        return 3
     if summary["graded"] == 0:
         print("no graded calls: every call was excluded (API error, refusal or truncation); "
               "see the records", file=sys.stderr)

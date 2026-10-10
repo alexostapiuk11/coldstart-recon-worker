@@ -706,6 +706,7 @@ class _FakeSDK:
         from types import SimpleNamespace
 
         self.bodies = []
+        self.input_tokens = 500
         self.responses = SimpleNamespace(create=self._openai)
         self.messages = SimpleNamespace(create=self._anthropic)
 
@@ -713,8 +714,8 @@ class _FakeSDK:
         from types import SimpleNamespace
 
         self.bodies.append(body)
-        resp = make(body["tools"][0]["name"], {}, model=body["model"], input_tokens=500,
-                    output_tokens=40)
+        resp = make(body["tools"][0]["name"], {}, model=body["model"],
+                    input_tokens=self.input_tokens, output_tokens=40)
         return SimpleNamespace(model_dump=lambda **kw: resp)
 
     def _openai(self, **body):
@@ -888,3 +889,43 @@ def test_the_script_exits_nonzero_when_nothing_was_graded(paid, tmp_path, capsys
     paid.monkeypatch.setattr(paid.script, "diagnose", lambda *a, **k: summarise([]))
     assert paid.script.main(_argv(tmp_path, "--dry-run")) == 1
     assert "no graded calls" in capsys.readouterr().err
+
+
+def test_a_guard_stop_prints_a_report_of_the_calls_made_and_exits_3(paid, tmp_path, capsys):
+    import json
+
+    from toolcall.guard import SpendLedger
+
+    _, est, headroom = _cost(tmp_path)
+    paid.sdk.input_tokens = 2_000_000  # every call costs far more than the estimate said
+    approved = est + headroom
+    assert paid.script.main(_argv(tmp_path, "--approved-usd", repr(approved))) == 3
+    out, err = capsys.readouterr()
+    k = len(paid.sdk.bodies)
+    assert 1 <= k < 6  # stopped partway, before the last call
+    assert "stopped by the spend guard:" in err and "could exceed the approved" in err
+    assert f"{k} graded calls; excluded: 0" in out  # the report covers the k stored records
+    assert "records:" in out and "ledger:" in out
+    assert "choose a new --store" in err
+    records = JsonlStore(tmp_path / "out" / "d.jsonl", CallRecord).read_all()
+    assert len(records) == k
+    lines = [json.loads(x) for x in _ledger(tmp_path).read_text().splitlines()]
+    assert {x["id"] for x in lines if "reserve" in x} == {x["id"] for x in lines if "settle" in x}
+    assert len([x for x in lines if "settle" in x]) == k  # every call made is settled
+    with SpendLedger(_ledger(tmp_path)) as held:  # the lock was released
+        assert held.total() > approved
+    with pytest.raises(ValueError, match="store exists; choose a new --store"):
+        paid.script.main(_argv(tmp_path, "--approved-usd", repr(approved)))
+
+
+def test_a_dry_run_does_not_catch_a_guard_stop(tmp_path):
+    from toolcall.guard import SpendCapReached
+
+    script = _script()
+
+    def stop(*a, **k):
+        raise SpendCapReached("no guard here")
+
+    script.diagnose = stop
+    with pytest.raises(SpendCapReached):
+        script.main(_argv(tmp_path, "--dry-run"))
