@@ -1,0 +1,67 @@
+{
+  "id": "travel-drive-time",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "travel",
+  "target_failure_mode": "WRONG_TOOL",
+  "tools": [
+    "get_driving_directions",
+    "get_driving_distance"
+  ],
+  "confusables": [
+    "get_geo_distance",
+    "get_transit_distance",
+    "search_trains",
+    "search_rental_cars",
+    "get_airport_info"
+  ],
+  "user_message": "How long will the drive from Minneapolis to Des Moines take?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_driving_directions",
+        "args": {
+          "origin": {
+            "pattern": "minneapolis(?:(?:,\\s*|\\s+)(?:mn|minnesota|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "Minneapolis"
+          },
+          "destination": {
+            "pattern": "des moines(?:(?:,\\s*|\\s+)(?:ia|iowa|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "Des Moines"
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "timeout",
+    "param": "origin",
+    "expected": "the same request can be sent again",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_driving_directions",
+        "args": {
+          "origin": {
+            "pattern": "minneapolis(?:(?:,\\s*|\\s+)(?:mn|minnesota|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "Minneapolis"
+          },
+          "destination": {
+            "pattern": "des moines(?:(?:,\\s*|\\s+)(?:ia|iowa|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "Des Moines"
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "origin": "Minneapolis, MN, USA",
+      "destination": "Des Moines, IA, USA",
+      "driving_time": "3 h 55 min",
+      "main_roads": [
+        "I-35 S"
+      ]
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|calculated|worked out|pulled up|retrieved|searched|measured|fetched)\\b|\\bhere(?:'s| is| are) (?:the|your|that|a|an) (?:route|directions|drive|journey|trip|travel time)\\b|\\b\\d+(?:\\.\\d+)?[\\s-]*(?:hours?|hrs?|h)\\b|\\b\\d+[\\s-]*(?:minutes?|mins?)\\b|\\b(?:an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?: and a half)? hours?\\b|\\ban hour\\b|\\btakes? (?:about |around |roughly |approximately |just over |just under |nearly |almost |at least )?(?:\\d|one |two |three |four |five |six |seven |eight |nine |ten )|\\b\\d[\\d,]*(?:\\.\\d+)?[\\s-]*(?:miles?|mi|kms?|kilomet(?:er|re)s?)\\b|\\b(?:hundred|thousand)[a-z -]{0,30}(?:miles?|kilomet(?:er|re)s?)\\b"
+  },
+  "notes": "Only the directions tool returns driving time; the driving-distance tool, in the low set, answers 'how far' and is the tempting wrong choice for a question about a drive between the same two cities. Its rich description says it is not for driving time, its terse one does not. Locations may be written with or without the state and country. The recovery is a timeout, which is transient: an identical retry is the right move, so H4 excludes it."
+}

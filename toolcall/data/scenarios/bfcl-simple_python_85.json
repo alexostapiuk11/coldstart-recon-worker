@@ -1,0 +1,63 @@
+{
+  "id": "bfcl-simple_python_85",
+  "source": {
+    "kind": "bfcl",
+    "id": "simple_python_85",
+    "commit": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
+  },
+  "domain": "travel",
+  "target_failure_mode": "WRONG_PARAMS",
+  "tools": [
+    "get_geo_distance",
+    "get_driving_distance"
+  ],
+  "confusables": [
+    "get_driving_directions",
+    "get_transit_distance",
+    "get_airport_info",
+    "search_flights",
+    "search_trains"
+  ],
+  "user_message": "What's the approximate distance between Boston, MA, and Washington, D.C. in mile?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_geo_distance",
+        "args": {
+          "start_location": {
+            "pattern": "boston(?:(?:,\\s*|\\s+)(?:ma|massachusetts|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "Boston, MA"
+          },
+          "end_location": {
+            "pattern": "washington(?:,\\s*|\\s+)(?:d\\.?c\\.?|district of columbia)(?:(?:,\\s*|\\s+)(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?))*",
+            "example": "Washington, D.C."
+          }
+        },
+        "may_include": {
+          "units": {
+            "pattern": "miles",
+            "example": "miles"
+          }
+        }
+      },
+      {
+        "tool": "get_driving_distance",
+        "args": {
+          "origin": {
+            "pattern": "boston(?:(?:,\\s*|\\s+)(?:ma|massachusetts|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "Boston, MA"
+          },
+          "destination": {
+            "pattern": "washington(?:,\\s*|\\s+)(?:d\\.?c\\.?|district of columbia)(?:(?:,\\s*|\\s+)(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?))*",
+            "example": "Washington, D.C."
+          },
+          "unit": {
+            "pattern": "miles",
+            "example": "miles"
+          }
+        }
+      }
+    ]
+  },
+  "notes": "BFCL geo_distance.calculate(start_location, end_location, units) became get_geo_distance with BFCL's parameters unchanged: two required strings, and units an optional free string ('miles' or 'kilometers' in the rich description, default miles). BFCL's ground truth is 'Boston, MA', 'Washington, D.C.' and units 'miles' or omitted (the locations accept formatting variants). Target WRONG_PARAMS: the message says 'in mile', so a model may copy 'mile' (or write 'mi'), which is not the ground truth; 'miles' or no units at all is correct. The message does not say how the distance is measured, and 'approximate distance between two cities' can fairly mean the road distance, so get_driving_distance is a second acceptable call (it is in the low set, because the loader requires every acceptable tool to be there). Its unit is also a free string whose default is km, so here the unit must be given as 'miles': omitting it gives kilometers, and 'kilometers' contradicts the message. No recovery block: a wrong first call cannot recover."
+}

@@ -1,0 +1,159 @@
+{
+  "id": "travel-hotel-florence",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "travel",
+  "target_failure_mode": "MALFORMED",
+  "tools": [
+    "search_hotels",
+    "get_booking"
+  ],
+  "confusables": [
+    "search_flights",
+    "search_rental_cars",
+    "get_visa_requirements",
+    "search_trains",
+    "get_airport_info"
+  ],
+  "user_message": "Which hotels in Florence have a free room from 2026-11-13?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "search_hotels",
+        "args": {
+          "city": {
+            "pattern": "(?:florence|firenze)(?:(?:,\\s*|\\s+)(?:italy|italia|it|tuscany|toscana))*",
+            "example": "Florence"
+          },
+          "check_in": "2026-11-13",
+          "nights": {
+            "one_of": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30
+            ]
+          }
+        },
+        "may_include": {
+          "guests": {
+            "one_of": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "city",
+    "expected": "give the city's name as written in its own country, for example 'Wien'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "search_hotels",
+        "args": {
+          "city": {
+            "pattern": "firenze(?:(?:,\\s*|\\s+)(?:italy|italia|it|tuscany|toscana))*",
+            "example": "Firenze"
+          },
+          "check_in": "2026-11-13",
+          "nights": {
+            "one_of": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30
+            ]
+          }
+        },
+        "may_include": {
+          "guests": {
+            "one_of": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ]
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "city": "Firenze, Italia",
+      "check_in": "2026-11-13",
+      "hotels": [
+        {
+          "name": "Hotel Esempio",
+          "price_per_night_eur": 119
+        },
+        {
+          "name": "Pensione Prova",
+          "price_per_night_eur": 84
+        }
+      ]
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|calculated|worked out|pulled up|retrieved|searched|measured|fetched)\\b|\\bhere(?:'s| is| are) (?:the|your|that|a|an) (?:hotels?|rooms?)\\b|[€$£]\\s?\\d|\\b\\d+(?:[.,]\\d+)?\\s*(?:euros?|eur|usd|dollars?|pounds?|gbp)\\b|\\b(?:i(?:'ve| have) found|found|there (?:are|is)|here (?:are|is)|i see)\\s+(?:\\d+|one|two|three|four|five|six|seven|eight|nine|ten|several|a few|some)\\s+(?:\\w+\\s+){0,2}(?:hotels?|rooms?|options|places|properties)\\b"
+  },
+  "notes": "The message gives a city and a start date but never says how many nights, and nights is required (1 to 30). The natural call omits it, which is MALFORMED, most likely in the loose renderings where only the city is required (the same shape as weather-marine-waves). Any whole number of nights in the tool's range is a fair reading, so all are accepted; guests is a harmless optional. Recovery: the natural city is the English name ('Florence', with or without Italy); the service wants the local name, 'Firenze' (a name any model knows, and no description gives). A first call that omitted nights must fix two things while the error names one; the analysis also reports recovery conditioned on a correct first call."
+}

@@ -1,0 +1,45 @@
+{
+  "id": "bfcl-simple_python_86",
+  "source": {
+    "kind": "bfcl",
+    "id": "simple_python_86",
+    "commit": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
+  },
+  "domain": "travel",
+  "target_failure_mode": "WRONG_PARAMS",
+  "tools": [
+    "get_transit_distance",
+    "search_trains"
+  ],
+  "confusables": [
+    "get_driving_distance",
+    "get_geo_distance",
+    "get_driving_directions",
+    "search_flights",
+    "search_rental_cars"
+  ],
+  "user_message": "Find the shortest distance between two cities, New York and Los Angeles, through the train and you can transfer.",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_transit_distance",
+        "args": {
+          "start_city": {
+            "pattern": "(?:new york(?: city)?|nyc)(?:(?:,\\s*|\\s+)(?:ny|new york|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "New York"
+          },
+          "end_city": {
+            "pattern": "los angeles(?:(?:,\\s*|\\s+)(?:ca|california|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "Los Angeles"
+          },
+          "transportation": {
+            "pattern": "train",
+            "example": "train"
+          },
+          "allow_transfer": true
+        }
+      }
+    ]
+  },
+  "notes": "BFCL city_distance.find_shortest(start_city, end_city, transportation, allow_transfer) became get_transit_distance with BFCL's parameters unchanged: two required strings, transportation an optional free string (default bus) and allow_transfer an optional boolean (default false); the defaults are in the rich descriptions. BFCL's ground truth is 'New York', 'Los Angeles', transportation 'train' and allow_transfer true, and none of the optionals may be omitted, because the defaults (bus, no transfer) contradict the message. Target WRONG_PARAMS: the optionals are not required, so a model may leave out transportation or allow_transfer, or write 'rail' or 'rail train' for 'the train'. The train search tool is the tempting wrong choice, but it needs a date the message does not give. No recovery block."
+}

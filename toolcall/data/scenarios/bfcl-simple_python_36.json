@@ -1,0 +1,79 @@
+{
+  "id": "bfcl-simple_python_36",
+  "source": {
+    "kind": "bfcl",
+    "id": "simple_python_36",
+    "commit": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
+  },
+  "domain": "travel",
+  "target_failure_mode": "WRONG_PARAMS",
+  "tools": [
+    "get_driving_distance",
+    "get_driving_directions"
+  ],
+  "confusables": [
+    "get_geo_distance",
+    "get_transit_distance",
+    "search_trains",
+    "search_flights",
+    "get_airport_info"
+  ],
+  "user_message": "Find the shortest driving distance between New York City and Washington D.C.",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_driving_distance",
+        "args": {
+          "origin": {
+            "pattern": "(?:new york(?: city)?|nyc)(?:(?:,\\s*|\\s+)(?:ny|new york|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "New York City"
+          },
+          "destination": {
+            "pattern": "washington(?:,\\s*|\\s+)(?:d\\.?c\\.?|district of columbia)(?:(?:,\\s*|\\s+)(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?))*",
+            "example": "Washington D.C."
+          }
+        },
+        "may_include": {
+          "unit": {
+            "pattern": "km|kms|kilomet(?:er|re)s?",
+            "example": "km"
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "origin",
+    "expected": "give the city, the two-letter state code and the country, for example 'Denver, CO, USA'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_driving_distance",
+        "args": {
+          "origin": {
+            "pattern": "new york(?: city)?,\\s*ny,?\\s*(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)",
+            "example": "New York, NY, USA"
+          },
+          "destination": {
+            "pattern": "washington(?:,\\s*|\\s+)(?:d\\.?c\\.?|district of columbia)(?:(?:,\\s*|\\s+)(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?))*",
+            "example": "Washington D.C."
+          }
+        },
+        "may_include": {
+          "unit": {
+            "pattern": "km|kms|kilomet(?:er|re)s?|miles?|mi",
+            "example": "km"
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "origin": "New York, NY, USA",
+      "destination": "Washington, DC, USA",
+      "distance_miles": 227,
+      "distance_km": 365
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|calculated|worked out|pulled up|retrieved|searched|measured|fetched)\\b|\\bhere(?:'s| is| are) (?:the|your|that|a|an) (?:distance|figure)\\b|\\b\\d[\\d,]*(?:\\.\\d+)?[\\s-]*(?:miles?|mi|kms?|kilomet(?:er|re)s?)\\b|\\b(?:hundred|thousand)[a-z -]{0,30}(?:miles?|kilomet(?:er|re)s?)\\b"
+  },
+  "notes": "BFCL get_shortest_driving_distance(origin, destination, unit) became the library tool get_driving_distance with BFCL's parameters unchanged: origin and destination required strings, unit an optional free string whose default (km) is stated in the rich description. BFCL's ground truth is origin 'New York City', destination 'Washington D.C.', unit 'km' or omitted; 'New York, NY', 'New York' and 'NYC' are accepted as formatting variants of the origin, and 'kms' or 'kilometers' of the unit. 'Washington' alone is not accepted, since it is also a state. Target WRONG_PARAMS: the message names two US cities and no unit, so a model may add unit 'miles' (or 'mi'), which is not the ground truth; omitting the unit, the commonest call, is correct. Recovery (a service behaviour, not a parameter change): the natural origin is the city name; the service wants city, state code and country. 'New York, NY' is the most common rendering and is still injected; only the full three-part form passes. The recovery calls accept any common distance unit, since the service has no reason to reject one; the first-call grade still counts 'miles' as WRONG_PARAMS, so a model that wrote 'miles' first is injected, fixes the origin, and recovers."
+}
