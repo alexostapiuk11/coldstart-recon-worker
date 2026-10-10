@@ -1,0 +1,67 @@
+{
+  "id": "retail-mouse-return",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "retail_orders",
+  "target_failure_mode": "WRONG_PARAMS",
+  "tools": [
+    "start_return",
+    "get_order_details"
+  ],
+  "confusables": [
+    "request_refund",
+    "cancel_order",
+    "get_return_policy",
+    "get_order_status",
+    "track_shipment"
+  ],
+  "user_message": "The black wireless mouse in order 731204 stopped working after two days. Please start a return for it.",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "start_return",
+        "args": {
+          "order_reference": {
+            "pattern": "(?:order\\s*)?#?(?:ord-?)?731204",
+            "example": "731204"
+          },
+          "item": {
+            "pattern": "(?:the )?(?:black )?wireless mouse(?:,?\\s*black|\\s*\\(black\\)|\\s*[-–]\\s*black)?",
+            "example": "wireless mouse"
+          },
+          "reason": "does_not_work"
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "order_reference",
+    "expected": "order references start with 'ORD-' followed by the six-digit number, for example 'ORD-104552'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "start_return",
+        "args": {
+          "order_reference": {
+            "pattern": "ord-731204",
+            "example": "ORD-731204"
+          },
+          "item": {
+            "pattern": "(?:the )?(?:black )?wireless mouse(?:,?\\s*black|\\s*\\(black\\)|\\s*[-–]\\s*black)?",
+            "example": "wireless mouse"
+          },
+          "reason": "does_not_work"
+        }
+      }
+    ],
+    "success_result": {
+      "order_reference": "ORD-731204",
+      "item": "Wireless mouse, black",
+      "return_reference": "RET-731204-1",
+      "label": "prepaid, sent by email"
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|checked|pulled up|retrieved|fetched|started|set up|opened|initiated|created|requested|submitted|processed|cancelled|canceled|placed|arranged|issued|registered)\\b|\\b(?:label|return) (?:is|has been|was) (?:ready|created|generated|attached|emailed|sent|started|set up|arranged|registered|opened|initiated|confirmed|approved)\\b|\\bhere(?:'s| is| are) (?:the|your) (?:return|prepaid|label)\\b|\\byour return (?:reference|number|id) is\\b|\\bdrop (?:it|the (?:mouse|item|parcel)) off\\b|\\b(?:return|label)(?: request)? (?:is|has been|was) (?:all set|successful|complete|completed|in progress|done)\\b|\\breturn (?:request )?(?:is |was )?(?:confirmed|successful)\\b|\\ball set\\b"
+  },
+  "notes": "Target WRONG_PARAMS: 'stopped working' is not an enum word. The reason enum is wrong_item, not_as_described, no_longer_needed, does_not_work, and the natural words ('defective', 'broken', 'stopped working', 'faulty') are all outside it. The strict renderings show the enum, so the trap bites mostly in the loose ones. The rich description paraphrases the four reasons without the literal enum values. Recovery is on order_reference, a different parameter, so a loose-cell model that wrote a wrong reason must fix two things while the error names one (the same shape as calendar-demo-maybe); the analysis also reports recovery conditioned on a correct first call. The message gives the bare number, the natural value; the service wants 'ORD-' before it, which only the error says. A first call that already writes the prefix is accepted and not injected."
+}

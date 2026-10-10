@@ -1,0 +1,80 @@
+{
+  "id": "retail-toaster-refund",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "retail_orders",
+  "target_failure_mode": "WRONG_TOOL",
+  "tools": [
+    "request_refund",
+    "start_return"
+  ],
+  "confusables": [
+    "cancel_order",
+    "get_order_details",
+    "get_order_status",
+    "get_return_policy",
+    "track_shipment"
+  ],
+  "user_message": "I already posted the red four-slice toaster from order ORD-215504 back to you. Can you refund me for it?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "request_refund",
+        "args": {
+          "order_reference": {
+            "pattern": "(?:ord-?)?215504",
+            "example": "ORD-215504"
+          },
+          "item": {
+            "pattern": "(?:the )?(?:(?:red|four[- ]slice) ){0,2}toaster(?:,\\s*red|\\s*\\(red\\)|\\s*[-–]\\s*red)?",
+            "example": "four-slice toaster"
+          }
+        },
+        "may_include": {
+          "refund_to": {
+            "one_of": [
+              "original_payment"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "item",
+    "expected": "item names are written as the product name, a comma and the colour, for example 'Desk lamp, white'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "request_refund",
+        "args": {
+          "order_reference": {
+            "pattern": "(?:ord-?)?215504",
+            "example": "ORD-215504"
+          },
+          "item": {
+            "pattern": "(?:four-slice )?toaster,\\s*red",
+            "example": "Four-slice toaster, red"
+          }
+        },
+        "may_include": {
+          "refund_to": {
+            "one_of": [
+              "original_payment"
+            ]
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "order_reference": "ORD-215504",
+      "item": "Four-slice toaster, red",
+      "status": "refund_requested",
+      "refund_amount_eur": 39.9,
+      "refund_to": "original_payment"
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|checked|pulled up|retrieved|fetched|started|set up|opened|initiated|created|requested|submitted|processed|cancelled|canceled|placed|arranged|issued|registered)\\b|\\b(?:your |the )?refund (?:has been|was|is|is now|will be|is being) (?:requested|submitted|issued|processed|approved|sent|raised|on its way|initiated)\\b|[€$£]\\s?\\d|\\b\\d+(?:[.,]\\d+)?\\s*(?:euros?|eur|usd|dollars?|pounds?|gbp)\\b|\\bwithin \\d+ (?:working |business )?days\\b|\\byou(?:'ll| will) (?:get|receive) (?:your money|a refund)\\b|\\bhere(?:'s| is| are) (?:the|your) refund\\b|\\b(?:in|within) \\d+(?: to \\d+)? (?:working |business )?days\\b|\\bmoney back\\b"
+  },
+  "notes": "The user has already sent the item back and wants the money, which is the refund tool's job. The return tool, in the low set, shares the order reference and the item and 'return' is in the user's world, so it is the tempting wrong choice; its rich description says it is not for asking for money. A model that starts a second return is wrong here. Recovery: the natural item is the name as the user wrote it ('toaster', 'red four-slice toaster'); the service wants the product name, a comma and the colour, which only the error says. refund_to is a harmless optional (original_payment only: the user said 'refund me')."
+}

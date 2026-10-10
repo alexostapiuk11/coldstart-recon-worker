@@ -1,0 +1,394 @@
+{
+  "domain": "retail_orders",
+  "tools": [
+    {
+      "name": "search_products",
+      "terse": "Search products.",
+      "rich": "Products matching a search phrase, with name, price and product number. Not for the details of one known product and not for stock in a store.",
+      "params": [
+        {
+          "name": "query",
+          "type": "string",
+          "required": true,
+          "terse": "Search.",
+          "rich": "What to look for, as a product type or a feature."
+        },
+        {
+          "name": "max_price",
+          "type": "number",
+          "required": false,
+          "terse": "Price limit.",
+          "rich": "Highest price to show, in euros. No limit by default."
+        }
+      ]
+    },
+    {
+      "name": "get_product_details",
+      "terse": "Product details.",
+      "rich": "Description, specifications, price and ratings for one product, by product number. Not for stock in a store and not for finding products by a phrase.",
+      "params": [
+        {
+          "name": "product_id",
+          "type": "string",
+          "required": true,
+          "terse": "Product.",
+          "rich": "Product number: P- then five digits.",
+          "pattern": "^P-\\d{5}$"
+        }
+      ]
+    },
+    {
+      "name": "check_store_stock",
+      "terse": "Store stock.",
+      "rich": "Units of one product on the shelves of one physical store today. Not for delivery times and not for stock available to order online.",
+      "params": [
+        {
+          "name": "product_id",
+          "type": "string",
+          "required": true,
+          "terse": "Product.",
+          "rich": "Product number: P- then five digits.",
+          "pattern": "^P-\\d{5}$"
+        },
+        {
+          "name": "store_location",
+          "type": "string",
+          "required": true,
+          "terse": "Store.",
+          "rich": "The place where the store is."
+        }
+      ]
+    },
+    {
+      "name": "place_order",
+      "terse": "Place an order.",
+      "rich": "Buy a quantity of one product, delivered to the address saved on the account. Not for changing an order that was already placed.",
+      "params": [
+        {
+          "name": "product_id",
+          "type": "string",
+          "required": true,
+          "terse": "Product.",
+          "rich": "Product number: P- then five digits.",
+          "pattern": "^P-\\d{5}$"
+        },
+        {
+          "name": "quantity",
+          "type": "integer",
+          "required": true,
+          "terse": "Quantity.",
+          "rich": "How many to buy, 1 to 10."
+        },
+        {
+          "name": "delivery_option",
+          "type": "string",
+          "required": true,
+          "terse": "Delivery.",
+          "rich": "Delivery speed, or collection from a store: standard, express or collect_in_store.",
+          "enum": [
+            "standard",
+            "express",
+            "collect_in_store"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "get_order_status",
+      "terse": "Order status.",
+      "rich": "Where one order is in its life: being prepared, shipped, delivered or cancelled. Not for what the order contains and not for the courier's scans of a parcel.",
+      "params": [
+        {
+          "name": "order_reference",
+          "type": "string",
+          "required": true,
+          "terse": "Order.",
+          "rich": "The order reference from the confirmation email."
+        }
+      ]
+    },
+    {
+      "name": "get_order_details",
+      "terse": "Order details.",
+      "rich": "What one order contains: the items, quantities, totals and the delivery address. Not for its current status and not for shipping progress.",
+      "params": [
+        {
+          "name": "order_reference",
+          "type": "string",
+          "required": true,
+          "terse": "Order.",
+          "rich": "The order reference from the confirmation email."
+        }
+      ]
+    },
+    {
+      "name": "cancel_order",
+      "terse": "Cancel an order.",
+      "rich": "Stop one order that has not shipped yet and record why. Not for sending back an item that has already arrived.",
+      "params": [
+        {
+          "name": "order_reference",
+          "type": "string",
+          "required": true,
+          "terse": "Order.",
+          "rich": "The order reference from the confirmation email."
+        },
+        {
+          "name": "reason",
+          "type": "string",
+          "required": true,
+          "terse": "Reason.",
+          "rich": "Why it is being stopped: ordered_by_mistake, found_cheaper, delivery_too_slow, no_longer_needed or other.",
+          "enum": [
+            "ordered_by_mistake",
+            "found_cheaper",
+            "delivery_too_slow",
+            "no_longer_needed",
+            "other"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "update_delivery_address",
+      "terse": "Change delivery address.",
+      "rich": "Replace the delivery address of an order that has not shipped yet. Not for changing the delivery date.",
+      "params": [
+        {
+          "name": "order_reference",
+          "type": "string",
+          "required": true,
+          "terse": "Order.",
+          "rich": "The order reference from the confirmation email."
+        },
+        {
+          "name": "new_address",
+          "type": "string",
+          "required": true,
+          "terse": "New address.",
+          "rich": "The full new address on one line."
+        }
+      ]
+    },
+    {
+      "name": "track_shipment",
+      "terse": "Track a parcel.",
+      "rich": "The courier's scans for one parcel: last scan, where it is and the expected delivery day. Not for the state of the order itself.",
+      "params": [
+        {
+          "name": "tracking_number",
+          "type": "string",
+          "required": true,
+          "terse": "Tracking number.",
+          "rich": "Courier tracking number: TRK then eight digits.",
+          "pattern": "^TRK\\d{8}$"
+        }
+      ]
+    },
+    {
+      "name": "start_return",
+      "terse": "Start a return.",
+      "rich": "Begin sending back one item from a delivered order and get a prepaid label. Not for asking for the money back, and not for an order that has not arrived.",
+      "params": [
+        {
+          "name": "order_reference",
+          "type": "string",
+          "required": true,
+          "terse": "Order.",
+          "rich": "The order reference from the confirmation email."
+        },
+        {
+          "name": "item",
+          "type": "string",
+          "required": true,
+          "terse": "Item.",
+          "rich": "Which item, by its name."
+        },
+        {
+          "name": "reason",
+          "type": "string",
+          "required": true,
+          "terse": "Reason.",
+          "rich": "Why it is going back: the wrong item arrived, it is not as described, it is no longer needed, or it does not work.",
+          "enum": [
+            "wrong_item",
+            "not_as_described",
+            "no_longer_needed",
+            "does_not_work"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "request_refund",
+      "terse": "Request a refund.",
+      "rich": "Ask for the money back for one item in an order. Not for sending the item back and not for stopping an order that has not shipped.",
+      "params": [
+        {
+          "name": "order_reference",
+          "type": "string",
+          "required": true,
+          "terse": "Order.",
+          "rich": "The order reference from the confirmation email."
+        },
+        {
+          "name": "item",
+          "type": "string",
+          "required": true,
+          "terse": "Item.",
+          "rich": "Which item, by its name."
+        },
+        {
+          "name": "refund_to",
+          "type": "string",
+          "required": false,
+          "terse": "Refund to.",
+          "rich": "Where the money goes: original_payment or store_credit. Defaults to original_payment.",
+          "enum": [
+            "original_payment",
+            "store_credit"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "list_customer_orders",
+      "terse": "List orders.",
+      "rich": "A customer's recent orders, newest first, with reference, date and total. Not for what is inside one order.",
+      "params": [
+        {
+          "name": "customer_id",
+          "type": "string",
+          "required": true,
+          "terse": "Customer.",
+          "rich": "Customer number: C- then five digits.",
+          "pattern": "^C-\\d{5}$"
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": false,
+          "terse": "Status.",
+          "rich": "Only orders in this state: open, shipped, delivered or cancelled. All by default.",
+          "enum": [
+            "open",
+            "shipped",
+            "delivered",
+            "cancelled"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "apply_discount_code",
+      "terse": "Apply a discount code.",
+      "rich": "Apply a promotional code to one order that has not shipped yet and report the new total. Not for finding out which codes exist.",
+      "params": [
+        {
+          "name": "order_reference",
+          "type": "string",
+          "required": true,
+          "terse": "Order.",
+          "rich": "The order reference from the confirmation email."
+        },
+        {
+          "name": "code",
+          "type": "string",
+          "required": true,
+          "terse": "Code.",
+          "rich": "The promotional code, 4 to 12 capital letters or digits.",
+          "pattern": "^[A-Z0-9]{4,12}$"
+        }
+      ]
+    },
+    {
+      "name": "get_delivery_time",
+      "terse": "Delivery time.",
+      "rich": "How many days delivery of one product to one place takes, with the arrival date, for one delivery speed. Not for following a parcel that was already sent.",
+      "params": [
+        {
+          "name": "product_id",
+          "type": "string",
+          "required": true,
+          "terse": "Product.",
+          "rich": "Product number: P- then five digits.",
+          "pattern": "^P-\\d{5}$"
+        },
+        {
+          "name": "destination",
+          "type": "string",
+          "required": true,
+          "terse": "Destination.",
+          "rich": "The place the product is going to."
+        },
+        {
+          "name": "delivery_option",
+          "type": "string",
+          "required": true,
+          "terse": "Speed.",
+          "rich": "Delivery speed: standard or express.",
+          "enum": [
+            "standard",
+            "express"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "get_return_policy",
+      "terse": "Return policy.",
+      "rich": "The return window in days and who pays the return postage, for one product category. Not for starting a return.",
+      "params": [
+        {
+          "name": "category",
+          "type": "string",
+          "required": true,
+          "terse": "Category.",
+          "rich": "Product category: books, clothing, electronics, home_and_garden, toys or food_and_drink.",
+          "enum": [
+            "books",
+            "clothing",
+            "electronics",
+            "home_and_garden",
+            "toys",
+            "food_and_drink"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reschedule_delivery",
+      "terse": "Reschedule delivery.",
+      "rich": "Move the delivery of an order that has not shipped to another date and time slot. Not for changing the delivery address.",
+      "params": [
+        {
+          "name": "order_reference",
+          "type": "string",
+          "required": true,
+          "terse": "Order.",
+          "rich": "The order reference from the confirmation email."
+        },
+        {
+          "name": "delivery_date",
+          "type": "string",
+          "required": true,
+          "terse": "Date.",
+          "rich": "New delivery date, YYYY-MM-DD.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        {
+          "name": "time_slot",
+          "type": "string",
+          "required": true,
+          "terse": "Time slot.",
+          "rich": "Delivery window: 08:00-12:00, 12:00-17:00 or 17:00-21:00.",
+          "enum": [
+            "08:00-12:00",
+            "12:00-17:00",
+            "17:00-21:00"
+          ]
+        }
+      ]
+    }
+  ]
+}

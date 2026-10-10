@@ -1,0 +1,72 @@
+{
+  "id": "retail-kettle-delivery",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "retail_orders",
+  "target_failure_mode": "MALFORMED",
+  "tools": [
+    "get_delivery_time",
+    "check_store_stock"
+  ],
+  "confusables": [
+    "track_shipment",
+    "get_order_status",
+    "search_products",
+    "reschedule_delivery",
+    "place_order"
+  ],
+  "user_message": "How many days would it take to deliver the 2-litre stainless kettle, product number P-20417, to me in Cardiff?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_delivery_time",
+        "args": {
+          "product_id": "P-20417",
+          "destination": {
+            "pattern": "cardiff(?:(?:,\\s*|\\s+)(?:wales|uk|u\\.k\\.|gb|great britain|united kingdom|the united kingdom))*",
+            "example": "Cardiff"
+          },
+          "delivery_option": {
+            "one_of": [
+              "standard",
+              "express"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "destination",
+    "expected": "give the city, the nation and the country, each written in full, for example 'Leeds, England, United Kingdom'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_delivery_time",
+        "args": {
+          "product_id": "P-20417",
+          "destination": {
+            "pattern": "cardiff,\\s*wales,\\s*(?:the )?united kingdom",
+            "example": "Cardiff, Wales, United Kingdom"
+          },
+          "delivery_option": {
+            "one_of": [
+              "standard",
+              "express"
+            ]
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "product_id": "P-20417",
+      "destination": "Cardiff, Wales, United Kingdom",
+      "delivery_option": "standard",
+      "delivery_days": 4,
+      "arrival_date": "2026-11-27"
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|checked|pulled up|retrieved|fetched|started|set up|opened|initiated|created|requested|submitted|processed|cancelled|canceled|placed|arranged|issued|registered)\\b|\\bhere(?:'s| is| are) (?:the|your) (?:delivery|arrival)\\b|\\b\\d+[\\s-]*(?:working |business |calendar )?days?\\b|\\b(?:two|three|four|five|six|seven|eight|nine|ten|twelve|fourteen)[\\s-]*(?:working |business |calendar )?days\\b|\\b(?:will|should) (?:arrive|be delivered|reach you|get to you)\\b|\\b(?:arrives?|delivered|arrival) (?:on|by|within|in)\\b|\\b(?:november|december) \\d{1,2}\\b|\\b\\d{1,2}(?:st|nd|rd|th)? (?:of )?(?:november|december)\\b|\\b2026-1[12]-\\d{2}\\b|\\b(?:a|one) week\\b|\\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\b"
+  },
+  "notes": "The message gives the product and the place but never the delivery speed, and delivery_option is required (standard or express). The natural call omits it, which is MALFORMED, most likely in the loose renderings where only the product is required (the same shape as travel-hotel-florence). Both speeds are fair readings, so both are accepted. Recovery: the natural destination is the city, with or without the country; the service wants city, nation and country each in full, which only the error says. 'Cardiff, Wales, UK' and 'Cardiff, UK' are injected too, and the recovery value ('Cardiff, Wales, United Kingdom') is in no description. A first call that omitted the speed must fix two things while the error names one; the analysis also reports recovery conditioned on a correct first call."
+}
