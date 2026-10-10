@@ -94,25 +94,26 @@ intervention it points at, then a per-scenario table.
 ### When the guard stops the run
 
 The guard can stop a run partway, for instance when the real token counts come
-out well above the estimate. The script then prints `stopped by the spend guard`
-with the guard's message, summarises the calls already stored, prints that
-report with the `records:` and ledger lines, and exits 3. The store and the
-ledger hold the calls that were made. They count as used, so a rerun needs a new
-`--store`. A dry run has no guard and has no such stop.
+out well above the estimate. The script then prints `INCOMPLETE: stopped by the
+spend guard after k calls` (k being the calls stored) to stdout and the guard's
+message to stderr, summarises the calls already stored, prints that report with
+the `records:` and ledger lines, and exits 3. The store and the ledger hold the
+calls that were made. They count as used, so a rerun needs a new `--store`. A
+dry run has no guard and has no such stop.
 
 Exit codes: 0 for a run that graded at least one call; 1 if no call could be
-graded (every call was excluded); 2 for a bad command line; 3 for a guard stop.
-The other refusals above (a used store, an unpriced model, a missing key, an
-approval that is too small) end with an error message before any call is made.
+graded (every call was excluded), and also when a refusal above raises an error
+before any call is made (a used store, an unpriced model, a missing key, an
+approval that is too small); 2 for a bad command line; 3 for a guard stop.
 
 ### What is being tested
 
 By default, your tools at the low count (only the tools each scenario lists),
 with rich descriptions and strict schemas. That is not the artifact's baseline
-formulation, which is terse and loose. Change it with `--richness terse|rich` and `--strictness loose|strict`.
-Strict renders enums, patterns, every required parameter and
-`additionalProperties: false`; loose renders bare types and keeps only each
-tool's first required parameter in `required`.
+formulation, which is terse and loose. Change it with `--richness terse|rich`
+and `--strictness loose|strict`. Strict renders enums, patterns, every required
+parameter and `additionalProperties: false`; loose renders bare types and keeps
+only each tool's first required parameter in `required`.
 
 Calls are always graded against the strict form of each schema, whatever the
 model was shown. Under `loose`, a model can therefore be marked wrong for a
@@ -177,11 +178,10 @@ recovery phase, and this path does not use it):
    "may_include": {"units": {"one_of": ["metric", "imperial"]}}}]}}
 ```
 
-`tools` are the tools the model is shown. Acceptable calls use only those
-tools and give every required parameter of the tool in `args`. Each acceptable
-call lists in `args`
-what must be present and match, and in `may_include` what may also appear. A
-value is a literal, `{"one_of": [...]}`, or a case-insensitive
+`tools` are the tools the model is shown. Acceptable calls use only those tools
+and give every required parameter of the tool in `args`. Each acceptable call
+lists in `args` what must be present and match, and in `may_include` what may
+also appear. A value is a literal, `{"one_of": [...]}`, or a case-insensitive
 `{"pattern": ..., "example": ...}` that must match the whole string; the
 example is one value that matches. For a request that needs no tool, write
 `"expectation": {"no_call_expected": true}` and set `target_failure_mode` to

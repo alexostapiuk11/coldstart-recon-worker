@@ -905,6 +905,9 @@ def test_a_guard_stop_prints_a_report_of_the_calls_made_and_exits_3(paid, tmp_pa
     assert 1 <= k < 6  # stopped partway, before the last call
     assert "stopped by the spend guard:" in err and "could exceed the approved" in err
     assert f"{k} graded calls; excluded: 0" in out  # the report covers the k stored records
+    # a stdout-only capture must show the run was partial, ahead of the report
+    marker = f"INCOMPLETE: stopped by the spend guard after {k} calls"
+    assert marker in out and out.index(marker) < out.index(f"{k} graded calls")
     assert "records:" in out and "ledger:" in out
     assert "choose a new --store" in err
     records = JsonlStore(tmp_path / "out" / "d.jsonl", CallRecord).read_all()

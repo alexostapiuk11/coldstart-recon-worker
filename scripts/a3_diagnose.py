@@ -122,7 +122,9 @@ def main(argv=None) -> int:
                 # run already stored are the evidence; summarise those.
                 stopped = e
                 print(f"stopped by the spend guard: {e}", file=sys.stderr)
-                summary = summarise(JsonlStore(store, CallRecord).read_all())
+                made = JsonlStore(store, CallRecord).read_all()
+                summary = summarise(made)
+                print(f"INCOMPLETE: stopped by the spend guard after {len(made)} calls")
         print(f"spent ${guard.spent:.4f} of ${args.approved_usd:.2f}; ledger: {ledger_path}")
     print(report(summary))
     print(f"\nrecords: {store}")

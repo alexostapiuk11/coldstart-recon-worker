@@ -95,3 +95,15 @@ def test_each_normalizer_rule_is_listed_once(text):
     listed = re.findall(r"^- (R\d+):", text, re.MULTILINE)
     assert listed == [rule_id for rule_id, _ in RULES]
     assert len(listed) == len(RULES)
+
+
+def test_every_exit_code_the_readme_names_is_one_the_script_produces(text):
+    para = re.search(r"Exit codes:.*?\n\n", text, re.DOTALL).group(0)
+    named = {int(c) for c in re.findall(r"\b(\d) (?:for|if)\b", para)}
+    assert named == {0, 1, 2, 3}
+    source = (ROOT / "scripts" / "a3_diagnose.py").read_text()
+    returned = {int(c) for c in re.findall(r"return (\d)\b", source)}
+    returned |= {2} if "ap.error(" in source else set()  # argparse exits 2
+    assert named <= returned
+    assert "raise ValueError" in source  # a refusal that raises out of main is exit 1
+    assert "also when a refusal" in para
