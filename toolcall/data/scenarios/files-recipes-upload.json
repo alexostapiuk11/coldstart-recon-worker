@@ -1,0 +1,72 @@
+{
+  "id": "files-recipes-upload",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "files",
+  "target_failure_mode": "MALFORMED",
+  "tools": [
+    "save_from_url",
+    "create_folder"
+  ],
+  "confusables": [
+    "copy_file",
+    "move_file",
+    "list_folder",
+    "get_file_info",
+    "search_files"
+  ],
+  "user_message": "Save https://example.com/files/pasta-menu.pdf into my recipes folder.",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "save_from_url",
+        "args": {
+          "url": "https://example.com/files/pasta-menu.pdf",
+          "destination_folder": {
+            "pattern": "(?:\\./|~/|/)?(?:documents/)?recipes/?",
+            "example": "recipes"
+          },
+          "if_exists": {
+            "one_of": [
+              "replace",
+              "keep_both",
+              "skip"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "destination_folder",
+    "expected": "there is no top-level folder with that name; the folder is at 'Documents/recipes'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "save_from_url",
+        "args": {
+          "url": "https://example.com/files/pasta-menu.pdf",
+          "destination_folder": {
+            "pattern": "(?:\\./|~/|/)?documents/recipes/?",
+            "example": "Documents/recipes"
+          },
+          "if_exists": {
+            "one_of": [
+              "replace",
+              "keep_both",
+              "skip"
+            ]
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "saved": "Documents/recipes/pasta-menu.pdf",
+      "size_mib": 2.4,
+      "status": "saved"
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|checked|pulled up|retrieved|fetched|moved|copied|renamed|shared|saved|uploaded|downloaded|set up|created|completed|processed|submitted|put|placed|stored|transferred|given|added|sent)\\b|(?<!not )(?<!n't )(?<!never )\\b(?:has been|was|is now|is) (?:successfully )?(?:saved|uploaded|downloaded|added|stored|placed|copied)\\b(?! nowhere)|\\b(?:it|file|pdf|menu|pasta-menu\\.pdf)(?:'s| is| was)(?: now)? (?:in|inside|available in|stored in|saved in|landed in) (?:your |the )?(?:documents|recipes|drive|folder)\\b|\\b(?:it|file|pdf|menu|pasta-menu\\.pdf) (?:now )?(?:landed|sits|lives) in (?:your |the )?(?:documents|recipes|drive|folder)\\b|(?<!not )(?<!n't )(?<!never )\\b(?:saved|uploaded|downloaded|added|stored|put|placed) (?:it |the file |the pdf |the menu |pasta-menu\\.pdf )?(?:to|into|in) (?:your |the )?(?:documents|recipes|folder)\\b|\\bnow (?:in|saved in|stored in|contains) |\\b(?:download|upload|save) (?:is |was )?(?:complete|completed|successful|done|finished)\\b|\\bsaved as\\b|\\bcontains pasta-menu\\.pdf\\b|(?:^|[.!?]\\s+)(?:done|all set|saved|stored)[.!]"
+  },
+  "notes": "Target MALFORMED: the message gives the address and the folder but not what to do when the folder already holds a file with that name, and if_exists is required (replace, keep_both, skip). The natural call omits it, most likely in the loose renderings where only the address is required. Any of the three is a fair choice and all are accepted. The folder-creation tool is in the low set as a tempting but unneeded step (graded WRONG_TOOL). Recovery: 'my recipes folder' is really nested inside Documents, so the top-level name is rejected and only the error says where the folder is, the way a listing would. The first call also accepts 'Documents/recipes' if a model happens to write it. A first call that omits if_exists must fix two things while the error names one; the analysis also reports recovery conditioned on a correct first call. A look-up of the folder first (search, listing) is graded WRONG_TOOL (confusable) in the high renderings and MALFORMED in the low ones, where the tool is not in context; the message states the folder, so a look-up is not expected."
+}

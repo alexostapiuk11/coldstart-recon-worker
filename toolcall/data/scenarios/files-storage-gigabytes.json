@@ -1,0 +1,31 @@
+{
+  "id": "files-storage-gigabytes",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "files",
+  "target_failure_mode": "WRONG_PARAMS",
+  "tools": [
+    "check_storage_usage",
+    "list_recent_files"
+  ],
+  "confusables": [
+    "get_file_info",
+    "list_folder",
+    "search_files",
+    "list_trash",
+    "get_retention_period"
+  ],
+  "user_message": "How much of my storage allowance have I used so far? Please give the figures in gigabytes.",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "check_storage_usage",
+        "args": {
+          "unit": "GiB"
+        }
+      }
+    ]
+  },
+  "notes": "Target WRONG_PARAMS: the unit enum is MiB, GiB, TiB (binary multiples), and the user's word is 'gigabytes'. The natural values, 'GB' and 'gigabytes', are outside the enum. The trap measures guessing in the terse-loose cells; the strict cells show the enum, so a model there picks GiB and the scenario is easy. The rich description says 'binary multiples' without spelling out the values. GiB is the only acceptable value, as the service reports in binary units. No recovery block: a WRONG_PARAMS scenario only gets a persistent one, and the unit is the only parameter"
+}

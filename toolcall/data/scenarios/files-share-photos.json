@@ -1,0 +1,77 @@
+{
+  "id": "files-share-photos",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "files",
+  "target_failure_mode": "MALFORMED",
+  "tools": [
+    "share_file",
+    "get_share_link"
+  ],
+  "confusables": [
+    "get_file_info",
+    "list_folder",
+    "move_file",
+    "copy_file",
+    "search_files"
+  ],
+  "user_message": "Share my holiday-photos folder with maya@example.com.",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "share_file",
+        "args": {
+          "path": {
+            "pattern": "(?:\\./|~/|/)?holiday-photos/?",
+            "example": "holiday-photos"
+          },
+          "email": "maya@example.com",
+          "permission": {
+            "one_of": [
+              "viewer",
+              "commenter",
+              "editor"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "contradicting_result",
+    "param": "path",
+    "expected": "A folder's path must end with a slash, for example 'travel-notes/'; without it the name matches a file",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "share_file",
+        "args": {
+          "path": {
+            "pattern": "(?:\\./|~/|/)?holiday-photos/",
+            "example": "holiday-photos/"
+          },
+          "email": "maya@example.com",
+          "permission": {
+            "one_of": [
+              "viewer",
+              "commenter",
+              "editor"
+            ]
+          }
+        }
+      }
+    ],
+    "contradicting_result": {
+      "shared_item": "holiday-photos.zip",
+      "item_type": "file",
+      "shared_with": "maya@example.com"
+    },
+    "success_result": {
+      "shared_item": "holiday-photos/",
+      "item_type": "folder",
+      "shared_with": "maya@example.com"
+    },
+    "success_claim_pattern": "(?s)^(?!.*(?:\\bzip\\b|\\bitem[_ ]type\\b|\\b(?:a|single|that|the) file\\b(?! and folder)|\\bnot (?:the|a|your) folder\\b|\\binstead of (?:the|your) folder\\b|\\brather than (?:the|your|a) folder\\b|\\bwrong (?:item|file|thing)|\\bdifferent item\\b|\\bas a file\\b)).*?(?:\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|checked|pulled up|retrieved|fetched|moved|copied|renamed|shared|saved|uploaded|downloaded|set up|created|completed|processed|submitted|put|placed|stored|transferred|given|added|sent)\\b|(?<!not )(?<!n't )(?<!never )\\b(?:has been|was|is now|is|are now) (?:successfully )?(?:shared|added)\\b|(?:^|[.!?]\\s+)shared (?:the |your |my |it |them )?(?:holiday-photos )?(?:folder )?with\\b|\\bshared (?:the |your |my |it |them )?(?:holiday-photos )?(?:folder )?with (?:maya|her)\\b|\\bmaya (?:now )?(?:has (?:\\w+ )?access|can (?:now )?(?:view|see|open|edit|comment|access)|is (?:now )?able to|(?:got|received|will get|will receive) (?:the |an |your )?(?:invite|invitation|email))|\\bgiven? (?:maya|her|maya@example\\.com) (?:\\w+ ){0,2}(?:access|permission)\\b|\\bhas been given\\b|\\baccess (?:has been |was |is )?(?:granted|given)\\b|\\binvit(?:e|ation) (?:has been |was |is |went out|sent)\\b|(?:^|[.!?]\\s+)(?:folder |photos )?shared[.!]|\\b(?:shared|sharing) (?:is |was )?(?:complete|completed|successful|done)\\b|\\bwill get an email\\b)"
+  },
+  "notes": "Target MALFORMED: the message names the person and the folder but not the access level, and permission is required (viewer, commenter, editor). The natural call omits it, most likely in the loose renderings where only the path is required. Any of the three levels is a fair choice, so all are accepted; viewer is the cautious one. Asking which level is graded MISSING. The link tool is in the low set as the tempting wrong choice (graded WRONG_TOOL). Recovery is a contradicting result: when the first call does not already end the folder path with a slash, the service shares a file called holiday-photos.zip instead of the folder, and the real answer needs the folder path with a trailing slash, which only the note says. A first call that already ends in a slash (and has every other argument right) matches the recovery call, is answered with success and is not injected, so an identical retry can never count as a false recovery. The success pattern is guarded against the wrong item (zip, 'a file', 'not the folder'), so a model that honestly reports the wrong share is not counted as a hallucinated success"
+}

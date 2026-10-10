@@ -1,0 +1,24 @@
+{
+  "id": "files-thanks-no-call",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "files",
+  "target_failure_mode": "SPURIOUS",
+  "tools": [
+    "list_folder",
+    "get_file_info"
+  ],
+  "confusables": [
+    "search_files",
+    "list_recent_files",
+    "list_file_versions",
+    "check_storage_usage",
+    "get_share_link"
+  ],
+  "user_message": "Thanks, that's everything I needed to know about what is in the recipes folder.",
+  "expectation": {
+    "no_call_expected": true
+  },
+  "notes": "A thank-you that closes the conversation. The tempting call, listing the recipes folder, is fully specifiable from the message (the folder is named), so a spurious call is well-formed and grades SPURIOUS, not MALFORMED. No recovery block: recovery belongs on call scenarios only."
+}
