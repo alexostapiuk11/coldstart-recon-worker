@@ -31,6 +31,14 @@ cannot meter rather than assuming it was free:
   record's billed-versus-metered comparison (amendment §8) is what catches them,
   which is why that comparison is a gate and not a courtesy.
 
+The spend ledger (`SpendLedger`) makes that guarantee durable. Paid turns that
+never reach a store (a conversation cut off by the cap, a crash between the post
+and the store write, a metering failure) are invisible to anything rebuilt from
+the stores, so a resume would redo and re-pay them without bound. The ledger is
+written ahead of the call: `reserve` records the worst case and is fsynced
+BEFORE the post, `settle` records what the guard charged. A reservation with no
+settle, which is what a crash leaves, counts at its worst case.
+
 `SpendCapReached` deliberately is not caught by the campaign's error handling:
 it stops the run, and the records already stored stay stored. `SpendGuardError`
 subclasses it, so a guard-internal failure (a model with no pinned price, usage
@@ -40,6 +48,8 @@ recorded as a provider error and quietly skipping the meter.
 
 import json
 import math
+import os
+from pathlib import Path
 
 from toolcall.prices import PRICES, cost_usd
 
@@ -101,10 +111,114 @@ def check_estimate(estimate_usd: float, approved_usd: float) -> None:
         )
 
 
+class SpendLedger:
+    """An append-only JSONL file of reservations and settlements, one fsynced
+    line per event, so a resumed phase can see every paid call ever started.
+
+    `reserve(usd)` writes `{"id", "reserve"}` before a post; `settle(id, usd)`
+    writes `{"id", "settle"}` once the guard knows what the call was charged.
+    `total()` is the settled amounts plus the reserved amount of every
+    reservation never settled: a crash is counted at its worst case.
+
+    A line torn by a crash mid-write can only be the last one. If it still
+    parses it is read as written; if not it is dropped when the ledger is
+    opened. That is safe both ways: a reserve is fsynced before its post starts,
+    so a torn reserve means no post was made, and a torn settle leaves its
+    reserve unsettled, which counts at worst. A malformed line anywhere else is
+    a damaged ledger and raises."""
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._drop_torn_tail()
+        reserved, settled = self._scan()
+        self._next_id = max(reserved, default=-1) + 1
+        self._open = {i for i in reserved if i not in settled}
+
+    def _drop_torn_tail(self) -> None:
+        if not self.path.exists():
+            return
+        data = self.path.read_bytes()
+        if not data or data.endswith(b"\n"):
+            return
+        head, _, tail = data.rpartition(b"\n")
+        try:
+            json.loads(tail)
+            keep = data + b"\n"  # a whole line that lost only its newline
+        except ValueError:
+            keep = head + b"\n" if head else b""
+        with self.path.open("wb") as f:
+            f.write(keep)
+            f.flush()
+            os.fsync(f.fileno())
+
+    @staticmethod
+    def _amount(value, where: str) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or not math.isfinite(value) or value < 0:
+            raise ValueError(f"{where}: amount must be a finite number >= 0, got {value!r}")
+        return float(value)
+
+    def _scan(self) -> tuple[dict, dict]:
+        reserved: dict[int, float] = {}
+        settled: dict[int, float] = {}
+        if not self.path.exists():
+            return reserved, settled
+        for lineno, line in enumerate(self.path.read_text().splitlines(), start=1):
+            where = f"{self.path}: line {lineno}"
+            try:
+                entry = json.loads(line)
+                rid = entry["id"]
+                if isinstance(rid, bool) or not isinstance(rid, int):
+                    raise ValueError("id must be an int")  # noqa: TRY004 -- caught below
+                if set(entry) == {"id", "reserve"}:
+                    if rid in reserved:
+                        raise ValueError(f"reservation {rid} is written twice")
+                    reserved[rid] = self._amount(entry["reserve"], where)
+                elif set(entry) == {"id", "settle"}:
+                    if rid not in reserved or rid in settled:
+                        raise ValueError(f"settle for reservation {rid} with no open reservation")
+                    settled[rid] = self._amount(entry["settle"], where)
+                else:
+                    raise ValueError(f"unexpected fields {sorted(entry)}")
+            except (ValueError, KeyError, TypeError) as e:
+                raise ValueError(f"{where} is not a ledger entry ({e}); the spend ledger is "
+                                 "damaged and the phase's spend cannot be trusted") from e
+        return reserved, settled
+
+    def _append(self, entry: dict) -> None:
+        with self.path.open("ab") as f:
+            f.write((json.dumps(entry, sort_keys=True) + "\n").encode())
+            f.flush()
+            os.fsync(f.fileno())
+
+    def reserve(self, usd: float) -> int:
+        self._amount(usd, "reserve")
+        rid = self._next_id
+        self._append({"id": rid, "reserve": usd})
+        self._next_id += 1
+        self._open.add(rid)
+        return rid
+
+    def settle(self, rid: int, usd: float) -> None:
+        self._amount(usd, "settle")
+        if rid not in self._open:
+            raise ValueError(f"no open reservation {rid} to settle")
+        self._append({"id": rid, "settle": usd})
+        self._open.discard(rid)
+
+    def total(self) -> float:
+        reserved, settled = self._scan()
+        return sum(settled.values()) + sum(v for i, v in reserved.items() if i not in settled)
+
+
 class SpendGuard:
-    def __init__(self, approved_usd: float, spent: float = 0.0):
-        """`spent` seeds a resumed phase with what its stored records already cost,
-        so the approved amount caps the whole phase across resumes."""
+    def __init__(self, approved_usd: float, spent: float = 0.0,
+                 ledger: "SpendLedger | None" = None):
+        """`spent` seeds a resumed phase with what it already cost, so the approved
+        amount caps the whole phase across resumes. With a `ledger`, every call
+        the guard lets through is reserved at its worst case before the post and
+        settled with what the guard charged."""
         _require_finite_positive(approved_usd, "the approved amount")
         if isinstance(spent, bool) or not math.isfinite(spent) or spent < 0:
             raise SpendCapReached(f"the seed spend must be a finite amount >= 0, got {spent!r}")
@@ -112,6 +226,9 @@ class SpendGuard:
         self.spent = spent
         self.calls = 0
         self.unmetered = 0  # calls charged at a bound because usage was unavailable
+        self.ledger = ledger
+        self._reservation: int | None = None
+        self._in_flight = False
 
     def before(self, bound_usd: float) -> None:
         if self.spent + bound_usd > self.approved:
@@ -120,6 +237,22 @@ class SpendGuard:
                 f"(up to ${bound_usd:.4f}) could exceed the approved ${self.approved:.2f}"
             )
 
+    def reserve(self, worst_usd: float) -> None:
+        """Open the in-flight call: write its worst case to the ledger first."""
+        if self.ledger is not None:
+            self._reservation = self.ledger.reserve(worst_usd)
+        self._in_flight = True
+
+    def _settle(self, usd: float) -> None:
+        self._in_flight = False
+        rid, self._reservation = self._reservation, None
+        if rid is not None:
+            self.ledger.settle(rid, usd)
+
+    def release(self) -> None:
+        """Close the in-flight call with no charge (an inner guard already charged it)."""
+        self._settle(0.0)
+
     def add(self, model: str, usage: dict) -> float:
         try:
             cost = cost_usd(model, usage)
@@ -127,6 +260,7 @@ class SpendGuard:
             raise SpendGuardError(f"cannot meter this call: {e}") from e
         self.spent += cost
         self.calls += 1
+        self._settle(cost)
         return cost
 
     def charge_unmetered(self, usd: float) -> None:
@@ -134,6 +268,12 @@ class SpendGuard:
         self.spent += usd
         self.calls += 1
         self.unmetered += 1
+        self._settle(usd)
+
+    def charge_if_in_flight(self, usd: float) -> None:
+        """Whatever left the call open (a crash, an interrupt) is charged `usd`."""
+        if self._in_flight:
+            self.charge_unmetered(usd)
 
 
 class GuardedClient:
@@ -152,9 +292,19 @@ class GuardedClient:
         bound = call_bound_usd(self.settings, body)
         worst = bound * (1 + SDK_MAX_RETRIES)
         self.guard.before(worst)
+        self.guard.reserve(worst)
+        try:
+            return self._post_reserved(body, bound, worst)
+        finally:
+            # Every branch settles; this is for what none of them caught (a
+            # KeyboardInterrupt, an error in metering): the worst case, once.
+            self.guard.charge_if_in_flight(worst)
+
+    def _post_reserved(self, body, bound, worst):
         try:
             response = self.client.post(body)
         except SpendCapReached:
+            self.guard.release()
             raise
         except Exception:
             # Unknown whether it was billed, and the SDK may have retried:

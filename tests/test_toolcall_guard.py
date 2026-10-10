@@ -1,5 +1,6 @@
 import json
 import math
+import os
 
 import pytest
 
@@ -10,6 +11,7 @@ from toolcall.guard import (
     SpendCapReached,
     SpendGuard,
     SpendGuardError,
+    SpendLedger,
     call_bound_usd,
     check_estimate,
     input_tokens_bound,
@@ -169,3 +171,193 @@ def test_a_seeded_guard_counts_prior_spend_against_the_approval():
 def test_a_bad_seed_is_refused(bad):
     with pytest.raises(SpendCapReached, match="seed"):
         SpendGuard(1.0, spent=bad)
+
+
+# --- the durable spend ledger -------------------------------------------------------
+
+
+def _ledger_lines(path):
+    return path.read_text().splitlines()
+
+
+def test_a_ledger_totals_settled_amounts_and_counts_an_unsettled_reservation_at_worst(tmp_path):
+    led = SpendLedger(tmp_path / "l.jsonl")
+    a, b = led.reserve(0.5), led.reserve(0.3)
+    assert a != b and led.total() == pytest.approx(0.8)  # a crash now costs the worst case
+    led.settle(a, 0.1)
+    assert led.total() == pytest.approx(0.4)
+    led.settle(b, 0.05)
+    assert led.total() == pytest.approx(0.15)
+
+
+def test_a_reopened_ledger_keeps_its_total_and_never_reuses_an_id(tmp_path):
+    path = tmp_path / "l.jsonl"
+    led = SpendLedger(path)
+    first = led.reserve(0.5)
+    reopened = SpendLedger(path)
+    assert reopened.total() == pytest.approx(0.5)
+    second = reopened.reserve(0.2)
+    assert second != first
+    reopened.settle(first, 0.01)  # a reservation of an earlier session can be settled
+    assert reopened.total() == pytest.approx(0.21)
+
+
+def test_every_ledger_line_is_flushed_and_fsynced(tmp_path, monkeypatch):
+    synced = []
+    real = os.fsync
+    monkeypatch.setattr(os, "fsync", lambda fd: (synced.append(fd), real(fd))[1])
+    led = SpendLedger(tmp_path / "l.jsonl")
+    led.settle(led.reserve(0.5), 0.1)
+    assert len(synced) == 2 == len(_ledger_lines(tmp_path / "l.jsonl"))
+
+
+@pytest.mark.parametrize("bad", [math.nan, math.inf, -0.1])
+def test_a_ledger_refuses_a_non_finite_or_negative_amount(tmp_path, bad):
+    led = SpendLedger(tmp_path / "l.jsonl")
+    with pytest.raises(ValueError, match="amount"):
+        led.reserve(bad)
+    rid = led.reserve(0.5)
+    with pytest.raises(ValueError, match="amount"):
+        led.settle(rid, bad)
+
+
+def test_a_ledger_refuses_to_settle_an_unknown_or_settled_reservation(tmp_path):
+    led = SpendLedger(tmp_path / "l.jsonl")
+    with pytest.raises(ValueError, match="no open reservation"):
+        led.settle(7, 0.1)
+    rid = led.reserve(0.5)
+    led.settle(rid, 0.1)
+    with pytest.raises(ValueError, match="no open reservation"):
+        led.settle(rid, 0.1)
+    assert led.total() == pytest.approx(0.1)
+
+
+def test_a_torn_last_line_is_tolerated(tmp_path):
+    path = tmp_path / "l.jsonl"
+    path.write_text('{"id": 0, "reserve": 0.5}\n{"id": 0, "settle": 0.1}\n'
+                    '{"id": 1, "reserve": 0.4}\n{"id": 1, "set')
+    led = SpendLedger(path)  # the half-written settle is lost; reservation 1 stays at worst
+    assert led.total() == pytest.approx(0.1 + 0.4)
+    rid = led.reserve(0.2)  # appending after the torn tail leaves a readable file
+    led.settle(rid, 0.05)
+    assert SpendLedger(path).total() == pytest.approx(0.1 + 0.4 + 0.05)
+
+
+def test_a_torn_reservation_that_still_parses_counts_at_worst(tmp_path):
+    path = tmp_path / "l.jsonl"
+    path.write_text('{"id": 0, "reserve": 0.5}\n{"id": 1, "reserve": 0.4}')  # no newline
+    led = SpendLedger(path)
+    assert led.total() == pytest.approx(0.9)
+    led.settle(led.reserve(0.1), 0.0)
+    assert SpendLedger(path).total() == pytest.approx(0.9)
+
+
+def test_a_malformed_line_anywhere_but_the_last_raises(tmp_path):
+    path = tmp_path / "l.jsonl"
+    path.write_text('{"id": 0, "reserve": 0.5}\n{"id": 0, "se\n{"id": 1, "reserve": 0.4}\n')
+    with pytest.raises(ValueError, match="line 2"):
+        SpendLedger(path)
+    path.write_text('{"id": 0, "reserve": 0.5}\n{"id": 5, "settle": 0.1}\n')
+    with pytest.raises(ValueError, match="line 2"):  # a settle for a reservation never made
+        SpendLedger(path)
+    path.write_text('{"id": 0, "reserve": -1}\n{"id": 1, "reserve": 0.4}\n')
+    with pytest.raises(ValueError, match="line 1"):
+        SpendLedger(path)
+
+
+def _ledgered(settings, policy, tmp_path, approved=1.0, seen=None):
+    client = ScriptedClient(settings, policy)
+    led = SpendLedger(tmp_path / "l.jsonl")
+    guard = SpendGuard(approved, ledger=led)
+    return GuardedClient(client, guard, PARSE[settings.provider]), guard, led
+
+
+def test_the_ledger_holds_the_worst_case_while_the_post_is_in_flight(tmp_path):
+    bound = call_bound_usd(MINI, BODY)
+    seen = []
+
+    def policy(body):
+        seen.append(led.total())
+        return openai_text("ok")
+
+    gc, guard, led = _ledgered(MINI, policy, tmp_path)
+    gc.post(BODY)
+    assert seen == [pytest.approx(bound * (1 + SDK_MAX_RETRIES))]
+    assert led.total() == pytest.approx(guard.spent) == pytest.approx(
+        (1000 * 0.75 + 40 * 4.50) / 1e6)
+
+
+def test_a_refused_call_reserves_nothing(tmp_path):
+    bound = call_bound_usd(MINI, BODY)
+    gc, _, led = _ledgered(MINI, lambda b: openai_text("ok"), tmp_path,
+                           approved=bound * (1 + SDK_MAX_RETRIES) * 0.99)
+    with pytest.raises(SpendCapReached):
+        gc.post(BODY)
+    assert not (tmp_path / "l.jsonl").exists() and led.total() == 0.0
+
+
+def _boom(exc):
+    def policy(body):
+        raise exc
+
+    return policy
+
+
+@pytest.mark.parametrize("policy, charge", [
+    (_boom(TimeoutError("read timeout")), "worst"),
+    (_boom(KeyboardInterrupt()), "worst"),  # a crash is the worst case, not a skipped settle
+    (_boom(SpendCapReached("inner guard")), "nothing"),  # the inner guard charged it
+    (lambda b: {**openai_text("ok"), "usage": {}}, "bound"),  # unmetered
+    (lambda b: {"output": [{"type": "function_call"}], "usage": {}}, "bound"),  # unreadable
+])
+def test_every_branch_settles_the_reservation_with_what_the_guard_charged(tmp_path, policy, charge):
+    bound = call_bound_usd(MINI, BODY)
+    gc, guard, led = _ledgered(MINI, policy, tmp_path)
+    try:
+        gc.post(BODY)
+    except BaseException:  # noqa: BLE001, S110 -- the branch under test re-raises
+        pass
+    expected = {"worst": bound * (1 + SDK_MAX_RETRIES), "bound": bound, "nothing": 0.0}[charge]
+    assert guard.spent == pytest.approx(expected)
+    assert led.total() == pytest.approx(expected)  # settled, and counted exactly once
+    assert len(_ledger_lines(tmp_path / "l.jsonl")) == 2
+
+
+def test_usage_the_price_table_cannot_cost_is_settled_at_the_bound(tmp_path):
+    bad = openai_text("ok")
+    bad["usage"]["input_tokens"] = 10
+    bad["usage"]["input_tokens_details"]["cached_tokens"] = 50
+    gc, guard, led = _ledgered(MINI, lambda b: bad, tmp_path)
+    with pytest.raises(SpendGuardError, match="cannot meter"):
+        gc.post(BODY)
+    assert led.total() == pytest.approx(guard.spent) == pytest.approx(call_bound_usd(MINI, BODY))
+
+
+def test_the_ledger_total_equals_the_guard_after_a_mixed_run(tmp_path):
+    state = {"n": 0}
+
+    def mixed(body):
+        state["n"] += 1
+        if state["n"] % 4 == 0:
+            raise ConnectionError("reset")
+        if state["n"] % 3 == 0:
+            return {**openai_text("ok"), "usage": {}}
+        return openai_text("ok")
+
+    gc, guard, led = _ledgered(MINI, mixed, tmp_path, approved=10.0)
+    for _ in range(30):
+        try:
+            gc.post(BODY)
+        except ConnectionError:
+            pass
+    assert guard.unmetered > 0
+    assert led.total() == pytest.approx(guard.spent)
+
+
+def test_a_guard_seeded_from_a_ledger_resumes_from_its_total(tmp_path):
+    bound = call_bound_usd(MINI, BODY)
+    led = SpendLedger(tmp_path / "l.jsonl")
+    led.reserve(bound * 9)  # a session that died mid-call
+    guard = SpendGuard(bound * 10, spent=led.total(), ledger=led)
+    with pytest.raises(SpendCapReached, match="stopping"):
+        guard.before(bound * 3)
