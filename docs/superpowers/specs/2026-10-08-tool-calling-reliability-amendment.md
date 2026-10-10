@@ -693,3 +693,30 @@ them.
 7. **Constrained decoding on OpenAI rewrites optional parameters.** OpenAI's strict mode needs
    every property in `required`, so optional ones become a union with `null`, in the
    exploratory slice only (`openai_strict_parameters`). The factorial's schemas are untouched.
+
+### Revised during implementation of plan 1, 2026-10-09
+
+Code review during plan 1's execution changed four statistical details before any pre-registration
+was committed. None changes a hypothesis's claim; each makes its test do what §2 says.
+
+8. **H5 also requires a real count effect.** With near-deterministic reruns, the A/A contrast is
+   about zero, so the statistic |t| − |A/A| reduces to |t|. Its one-sided p-value then collapses to
+   about 1/(B + 1) whatever the data say: a simulated null count effect was "supported" 80% of the
+   time. H5 is therefore an intersection-union test, so its p-value is the larger of two parts:
+   - the p-value that |t| − |A/A| is at most zero;
+   - a two-sided bootstrap p-value that t is not zero.
+
+   Both parts are computed on the same joint draws.
+9. **H4 pairs within recovery cells.** Identical-retry rates are computed per scenario, recovery
+   cell and format. A (scenario, cell) counts only where both formats are present. The per-cell
+   differences are averaged within a scenario before the bootstrap. Pooling conversations across
+   cells would let an unequal cell mix between the arms confound the difference.
+10. **A pre-registered scenario floor.** `min_graded_per_cell`, default 3 and at least the retry
+    cap, sets the minimum graded repetitions of a scenario in every cell. A scenario below it is
+    dropped from the whole analysis and disclosed. Every estimate uses one scenario set.
+11. **A sensitivity analysis.** It is labelled exploratory and recomputes the failure-rate
+    effects with API_ERROR, REFUSED and TRUNCATED counted as failures, because exclusions need
+    not be missing at random.
+
+The sign of each hypothesis's p-value is pinned by tests, because one of the plan's own code
+blocks had H2's backwards. With that error H2 could never have been supported.
