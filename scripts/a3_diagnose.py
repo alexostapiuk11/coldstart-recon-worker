@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from toolcall.diagnose import diagnose, report
 from toolcall.formulation import Formulation
 from toolcall.guard import GuardedClient, SpendGuard, SpendLedger, check_estimate
+from toolcall.prices import PRICES
 from toolcall.providers import PARSE, Client, ModelSettings, ScriptedClient
 from toolcall.runner import plan_cost
 from toolcall.scenarios import load_scenarios
@@ -38,8 +39,8 @@ from toolcall.tools import load_library
 
 DEFAULT_MODEL = {"openai": "gpt-5.4-mini-2026-03-17", "anthropic": "claude-sonnet-5-5"}
 API_KEY = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
-# toolcall.prices records no provider, so the model id's own prefix is the check.
-OTHER_PROVIDERS_PREFIX = {"openai": "claude-", "anthropic": "gpt-"}
+# toolcall.prices records no provider, so the pinned ids are split by their prefix.
+PREFIX = {"openai": "gpt-", "anthropic": "claude-"}
 
 
 def _refuse_reuse(*paths: Path) -> None:
@@ -48,11 +49,14 @@ def _refuse_reuse(*paths: Path) -> None:
             raise ValueError(f"{path}: store exists; choose a new --store")
 
 
+def _pinned(provider: str) -> list[str]:
+    return sorted(m for m in PRICES if m.startswith(PREFIX[provider]))
+
+
 def _settings(provider: str, model: str) -> ModelSettings:
-    if model.startswith(OTHER_PROVIDERS_PREFIX[provider]):
-        raise ValueError(f"model {model!r} is not a {provider} model: pass the --provider it "
-                         "belongs to (toolcall.prices does not record providers, so this "
-                         "checks the id's prefix)")
+    if model not in _pinned(provider):
+        raise ValueError(f"{model!r} is not a pinned model for provider {provider}; "
+                         f"pinned: {', '.join(_pinned(provider))}")
     if provider == "openai":
         return ModelSettings("openai", model, 0.0, reasoning_effort="none")
     return ModelSettings("anthropic", model, None, thinking="between_tools")

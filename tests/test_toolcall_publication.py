@@ -180,7 +180,7 @@ def test_identifiers_keys_and_nested_values_are_scanned(tmp_path, payload):
 
 @pytest.mark.parametrize("word", [
     "insures", "insuring", "reinsurance", "reinsure", "uninsured", "underinsured", "insurable",
-    "claimed", "claiming", "indemnify", "indemnification", "policy\nholder",
+    "policynumber", "POLICYNUMBER", "PolicyNumbers", "claimed", "claiming", "indemnify", "indemnification", "policy\nholder",
     "first  notice\nof loss", "claimId", "Insurance", "co-insurance", "adjustor",
 ])
 def test_inflections_and_spellings_of_the_vocabulary_are_flagged(tmp_path, word):
@@ -261,7 +261,7 @@ def test_a_missing_signoff_file_means_nothing_is_signed(tmp_path):
 def test_the_helper_prints_the_hash_and_hits_for_the_author(tmp_path, capsys):
     f = tmp_path / "bad.json"
     f.write_text(json.dumps({"m": "File a claim"}))
-    assert confidentiality.main([str(f)]) == 0
+    assert confidentiality.main(["--root", str(tmp_path), str(f)]) == 0
     entry = json.loads(capsys.readouterr().out)["bad.json"]
     assert entry["sha256"] == confidentiality.file_sha256(f) and entry["hits"] == ["claim"]
     assert entry["signed_off"] == "YYYY-MM-DD" and entry["note"] == ""
@@ -270,6 +270,31 @@ def test_the_helper_prints_the_hash_and_hits_for_the_author(tmp_path, capsys):
     signoff.write_text(json.dumps({"files": {"bad.json": entry}}))
     with pytest.raises(ValueError, match="signed_off"):
         confidentiality.unsigned(tmp_path, signoff)
+
+
+def test_the_helper_keys_are_root_relative_posix_paths_that_unsigned_accepts(tmp_path, capsys):
+    (tmp_path / "tools").mkdir()
+    f = tmp_path / "tools" / "travel.json"
+    f.write_text(json.dumps({"m": "premium cabin"}))
+    assert confidentiality.main(["--root", str(tmp_path), str(f)]) == 0
+    entry = json.loads(capsys.readouterr().out)["tools/travel.json"]
+    entry.update(signed_off="2026-10-08", note="a cabin class")
+    signoff = tmp_path / "confidentiality_signoff.json"
+    signoff.write_text(json.dumps({"files": {"tools/travel.json": entry}}))
+    assert confidentiality.unsigned(tmp_path, signoff) == {}
+
+
+def test_the_helper_refuses_a_file_outside_the_root(tmp_path, capsys):
+    root = tmp_path / "data"
+    root.mkdir()
+    outside = tmp_path / "elsewhere.json"
+    outside.write_text(json.dumps({"m": "claim"}))
+    assert confidentiality.main(["--root", str(root), str(outside)]) == 2
+    captured = capsys.readouterr()
+    assert "outside the root" in captured.err and captured.out == ""
+    # the default root is the package data directory, so the same file is outside it too
+    assert confidentiality.DEFAULT_ROOT == Path(confidentiality.__file__).parent / "data"
+    assert confidentiality.main([str(outside)]) == 2
 
 
 # --- numbers: strict markers, honest labels, values from the analysis ------------------
@@ -400,6 +425,11 @@ def test_replace_block_keeps_the_markers_and_refuses_a_block_without_them():
     for bad in ("new", f"{START}\nnew", f"new\n{END}", f"{END}\nnew\n{START}"):
         with pytest.raises(ValueError, match="start with"):
             replace_block(post, bad)
+    for bad in (f"{START}\na {START}\n{END}", f"{START}\na {END}\nb\n{END}",
+                f"{START}\n{START}\n{END}\n{END}"):
+        with pytest.raises(ValueError, match="exactly one"):
+            replace_block(post, bad)
+    assert block_in(post).count(START) == 1
 
 
 # --- diagnose ----------------------------------------------------------------------
@@ -828,12 +858,17 @@ def test_the_default_model_follows_the_provider(paid, tmp_path):
     assert {b["model"] for b in paid.sdk.bodies} == {"gpt-5.4-mini-2026-03-17"}
 
 
-@pytest.mark.parametrize("provider, model", [("anthropic", "gpt-5.4-mini-2026-03-17"),
-                                             ("openai", "claude-sonnet-5-5")])
-def test_a_model_of_the_other_provider_is_refused(paid, tmp_path, provider, model):
-    with pytest.raises(ValueError, match="provider"):
+@pytest.mark.parametrize("provider, model", [
+    ("anthropic", "gpt-5.4-mini-2026-03-17"), ("openai", "claude-sonnet-5-5"),
+    ("openai", "gpt-9-unpinned"), ("anthropic", "claude-unpinned"), ("openai", "o3"),
+    ("openai", "GPT-5.4-MINI-2026-03-17"), ("anthropic", "Claude-Sonnet-5-5"),
+    ("openai", "gpt-5.4-mini")])
+def test_a_model_that_is_not_pinned_for_the_provider_is_refused(paid, tmp_path, provider, model):
+    with pytest.raises(ValueError, match=f"not a pinned model for provider {provider}") as e:
         paid.script.main(_argv(tmp_path, "--provider", provider, "--model", model,
                                "--approved-usd", "50"))
+    pinned = "claude-sonnet-5-5" if provider == "anthropic" else "gpt-5.4-nano-2026-03-17"
+    assert pinned in str(e.value) and " a anthropic" not in str(e.value)
     assert paid.sdk.bodies == [] and not _ledger(tmp_path).exists()
 
 

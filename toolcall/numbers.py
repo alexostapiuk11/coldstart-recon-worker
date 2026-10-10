@@ -139,6 +139,9 @@ def replace_block(text: str, block: str) -> str:
     if not (block.startswith(START) and block.endswith(END)):
         raise ValueError("the new block must start with the start marker and end with the end "
                          "marker")
+    if block.count(START) != 1 or block.count(END) != 1:
+        raise ValueError("the new block must contain exactly one start marker and one end "
+                         "marker")
     old = block_in(text)
     start = text.index(old)
     return text[:start] + block + text[start + len(old):]

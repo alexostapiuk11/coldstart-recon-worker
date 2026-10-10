@@ -39,13 +39,15 @@ shape, raises ValueError rather than being read as "nothing signed".
 
 To get an entry's hash and hits, run
 
-    .venv/bin/python -m toolcall.confidentiality path/to/file.json
+    .venv/bin/python -m toolcall.confidentiality [--root DIR] path/to/file.json
 
-and paste its output into the sign-off file, filling `signed_off` and `note`
+and paste its output into the sign-off file (the key is the path relative to --root,
+default toolcall/data, e.g. tools/travel.json), filling `signed_off` and `note`
 after reading the file. The template's placeholder date is not a valid date,
 so an unfilled entry is refused.
 """
 
+import argparse
 import hashlib
 import json
 import re
@@ -70,8 +72,9 @@ VOCABULARY = (
     r"\bindemn\w*",
     r"\bsubrogat\w*",
     r"\bloss ratio\b",
-    r"\bpolicy numbers?\b",
+    r"\bpolicy ?numbers?\b",
 )
+DEFAULT_ROOT = Path(__file__).resolve().parent / "data"  # where the sign-off file lives
 _PATTERNS = [re.compile(p) for p in VOCABULARY]
 # Field names of this repository's own file formats. They are the schema, not
 # the author's content, so the key is not scanned; its value still is.
@@ -179,17 +182,25 @@ def unsigned(root, signoff_path) -> dict[str, list[str]]:
 
 
 def main(argv=None) -> int:
-    """Print a sign-off entry template (hash and hits) for each file given."""
-    args = list(sys.argv[1:] if argv is None else argv)
-    if not args:
-        print("usage: python -m toolcall.confidentiality FILE.json [FILE.json ...]",
-              file=sys.stderr)
-        return 2
-    entries = {
-        Path(a).name: {"signed_off": "YYYY-MM-DD", "note": "", "sha256": file_sha256(a),
-                       "hits": hits(Path(a))}
-        for a in args
-    }
+    """Print a sign-off entry template (hash and hits) for each file given. Keys
+    are paths relative to --root (default: toolcall/data), in posix form, which
+    is how the sign-off file and `scan` name files."""
+    ap = argparse.ArgumentParser(prog="python -m toolcall.confidentiality")
+    ap.add_argument("files", nargs="+", type=Path)
+    ap.add_argument("--root", type=Path, default=DEFAULT_ROOT,
+                    help="the directory the sign-off keys are relative to")
+    args = ap.parse_args(sys.argv[1:] if argv is None else argv)
+    root = args.root.resolve()
+    entries = {}
+    for f in args.files:
+        try:
+            key = f.resolve().relative_to(root).as_posix()
+        except ValueError:
+            print(f"{f} is outside the root {root}; a sign-off key must be relative to it "
+                  "(pass --root)", file=sys.stderr)
+            return 2
+        entries[key] = {"signed_off": "YYYY-MM-DD", "note": "", "sha256": file_sha256(f),
+                        "hits": hits(f)}
     print(json.dumps(entries, indent=2))
     return 0
 
