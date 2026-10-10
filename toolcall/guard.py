@@ -46,6 +46,7 @@ the price table cannot cost) stops the run the same way instead of being
 recorded as a provider error and quietly skipping the meter.
 """
 
+import fcntl
 import json
 import math
 import os
@@ -70,6 +71,12 @@ class SpendCapReached(RuntimeError):
 
 class SpendGuardError(SpendCapReached):
     """The guard itself failed (unpriced model, usage it cannot cost)."""
+
+
+class LedgerWriteError(SpendGuardError):
+    """The spend ledger could not be written or locked. It stops the run: an
+    OSError is not SpendCapReached, so left alone the campaign would record it
+    as an API_ERROR row and carry on spending with nothing written ahead."""
 
 
 def _require_finite_positive(amount: float, what: str) -> None:
@@ -121,19 +128,57 @@ class SpendLedger:
     reservation never settled: a crash is counted at its worst case.
 
     A line torn by a crash mid-write can only be the last one. If it still
-    parses it is read as written; if not it is dropped when the ledger is
-    opened. That is safe both ways: a reserve is fsynced before its post starts,
-    so a torn reserve means no post was made, and a torn settle leaves its
-    reserve unsettled, which counts at worst. A malformed line anywhere else is
-    a damaged ledger and raises."""
+    parses it is read as written; if not it is cut off when the ledger is
+    opened (`os.truncate`, never a rewrite of the file). That is safe both ways:
+    a reserve is fsynced before its post starts, so a torn reserve means no post
+    was made, and a torn settle leaves its reserve unsettled, which counts at
+    worst. A malformed line anywhere else is a damaged ledger and raises.
 
-    def __init__(self, path):
+    One writer at a time: opening a ledger takes an exclusive, non-blocking
+    `flock` on `<ledger>.lock` (`x.spend.jsonl` -> `x.spend.lock`) and holds it
+    until `close()`. Two runs seeding from the same total could together spend
+    twice the approval, and would collide on reservation ids. The flock is per
+    open file description, so a second open in the same process is refused the
+    same way as one from another process, and the lock dies with its process.
+    The runner holds the ledger, so the lock covers a paid phase from before it
+    reads the seed until it ends.
+
+    A write that fails (disk full, I/O error) is rolled back to the file's size
+    before the write and raised as `LedgerWriteError`, so no partial line is ever
+    left for the next append to land after."""
+
+    def __init__(self, path, label: str | None = None):
         self.path = Path(path)
+        self.lock_path = self.path.with_suffix(".lock")
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._drop_torn_tail()
-        reserved, settled = self._scan()
+        self._lock = self.lock_path.open("a")
+        try:
+            try:
+                fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as e:
+                raise LedgerWriteError(
+                    f"another run of {label or self.path.name} holds {self.lock_path}; two "
+                    "runs on one spend ledger could each spend the whole approval") from e
+            except OSError as e:
+                raise LedgerWriteError(f"cannot lock {self.lock_path}: {e}") from e
+            self._drop_torn_tail()
+            reserved, settled = self._scan()
+        except BaseException:
+            self.close()
+            raise
         self._next_id = max(reserved, default=-1) + 1
         self._open = {i for i in reserved if i not in settled}
+
+    def close(self) -> None:
+        """Release the lock. Safe to call twice."""
+        if not self._lock.closed:
+            self._lock.close()  # closing the descriptor releases the flock
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
 
     def _drop_torn_tail(self) -> None:
         if not self.path.exists():
@@ -144,13 +189,22 @@ class SpendLedger:
         head, _, tail = data.rpartition(b"\n")
         try:
             json.loads(tail)
-            keep = data + b"\n"  # a whole line that lost only its newline
         except ValueError:
-            keep = head + b"\n" if head else b""
-        with self.path.open("wb") as f:
-            f.write(keep)
+            # Cut the torn bytes off in place: a crash here loses at most them.
+            os.truncate(self.path, len(head) + 1 if head else 0)
+            self._fsync_path(os.O_WRONLY)
+            return
+        with self.path.open("ab") as f:  # a whole line that lost only its newline
+            f.write(b"\n")
             f.flush()
             os.fsync(f.fileno())
+
+    def _fsync_path(self, flags: int) -> None:
+        fd = os.open(self.path, flags)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
     @staticmethod
     def _amount(value, where: str) -> float:
@@ -188,24 +242,40 @@ class SpendLedger:
 
     def _append(self, entry: dict) -> None:
         created = not self.path.exists()
-        with self.path.open("ab") as f:
-            f.write((json.dumps(entry, sort_keys=True) + "\n").encode())
-            f.flush()
-            os.fsync(f.fileno())
-        if created:
-            # The new file's directory entry is durable only once its directory is
-            # fsynced; otherwise a power loss right after the first reserve could
-            # drop the whole file, and the spend with it.
-            fd = os.open(self.path.parent, os.O_RDONLY)
-            try:
-                os.fsync(fd)
-            finally:
-                os.close(fd)
+        size = 0 if created else self.path.stat().st_size
+        try:
+            with self.path.open("ab") as f:
+                f.write((json.dumps(entry, sort_keys=True) + "\n").encode())
+                f.flush()
+                os.fsync(f.fileno())
+            if created:
+                # The new file's directory entry is durable only once its directory
+                # is fsynced; otherwise a power loss right after the first reserve
+                # could drop the whole file, and the spend with it.
+                fd = os.open(self.path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+        except OSError:
+            try:  # leave no partial line behind for the next append to land after
+                os.truncate(self.path, size)
+            except OSError:
+                pass  # the next open cuts an unparseable tail; this error is the one to raise
+            raise
+
+    def _write(self, entry: dict) -> None:
+        try:
+            self._append(entry)
+        except OSError as e:
+            raise LedgerWriteError(
+                f"cannot write the spend ledger {self.path}: {e}; stopping, because a call "
+                "made now would be paid for with nothing recorded") from e
 
     def reserve(self, usd: float) -> int:
         self._amount(usd, "reserve")
         rid = self._next_id
-        self._append({"id": rid, "reserve": usd})
+        self._write({"id": rid, "reserve": usd})
         self._next_id += 1
         self._open.add(rid)
         return rid
@@ -214,7 +284,7 @@ class SpendLedger:
         self._amount(usd, "settle")
         if rid not in self._open:
             raise ValueError(f"no open reservation {rid} to settle")
-        self._append({"id": rid, "settle": usd})
+        self._write({"id": rid, "settle": usd})
         self._open.discard(rid)
 
     def total(self) -> float:
@@ -331,6 +401,8 @@ class GuardedClient:
             return response
         try:
             self.guard.add(self.settings.model, usage)
+        except LedgerWriteError:
+            raise  # metered and counted; only the ledger line failed, and the run stops
         except SpendGuardError:
             self.guard.charge_unmetered(bound)
             raise

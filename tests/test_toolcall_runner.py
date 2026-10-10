@@ -6,6 +6,8 @@ something with `.model_dump()`. It proves the non-stub path builds the real
 client, meters spend, writes a durable ledger, and refuses to start without an
 approval that covers its own estimate plus the guard's headroom."""
 
+import errno
+import fcntl
 import json
 from types import SimpleNamespace
 
@@ -18,6 +20,7 @@ from toolcall.formulation import BASELINE, CELLS, render
 from toolcall.guard import (
     INPUT_OVERHEAD_TOKENS,
     SDK_MAX_RETRIES,
+    LedgerWriteError,
     SpendCapReached,
     SpendGuard,
     SpendGuardError,
@@ -56,6 +59,11 @@ def _quiet(_msg):
 
 def _ledger_path(root, phase):
     return root / f"{phase}.spend.jsonl"
+
+
+def _ledger_total(root, phase):
+    with SpendLedger(_ledger_path(root, phase)) as ledger:
+        return ledger.total()
 
 
 def test_every_phase_runs_on_the_stub_in_order(tmp_path):
@@ -360,9 +368,8 @@ def test_stored_spend_and_the_ledger_both_reproduce_what_the_guard_charged(tmp_p
     assert any(getattr(r, "unmetered", False) or getattr(r, "unmetered_turns", 0)
                for r in records)
     assert stored_spend_usd(records, prereg.primary) == pytest.approx(out["spent_usd"])
-    ledger = SpendLedger(_ledger_path(tmp_path, phase))
-    assert ledger.total() == pytest.approx(out["spent_usd"])
-    assert out["ledger"] == str(ledger.path)
+    assert _ledger_total(tmp_path, phase) == pytest.approx(out["spent_usd"])
+    assert out["ledger"] == str(_ledger_path(tmp_path, phase))
 
 
 def test_a_crash_after_the_ledger_reserved_a_call_is_counted_at_its_worst_case(tmp_path):
@@ -374,8 +381,7 @@ def test_a_crash_after_the_ledger_reserved_a_call_is_counted_at_its_worst_case(t
     worst = call_bound_usd(MINI, sdk.bodies[2]) * WORST
     metered = 2 * cost_usd(MINI.model, {"input": 1000, "cached": 0, "cache_write": 0,
                                         "output": 40, "reasoning": 0})
-    assert SpendLedger(_ledger_path(tmp_path, "pilot-baseline")).total() == pytest.approx(
-        metered + worst)
+    assert _ledger_total(tmp_path, "pilot-baseline") == pytest.approx(metered + worst)
     # the stores know nothing of the third call; the ledger does
     stored = JsonlStore(tmp_path / "pilot-baseline.jsonl", CallRecord).read_all()
     assert len(stored) == 2 and stored_spend_usd(stored, MINI) == pytest.approx(metered)
@@ -386,8 +392,7 @@ def test_a_resume_after_a_crash_starts_from_the_ledger_not_from_the_stores(tmp_p
     with pytest.raises(KeyboardInterrupt):
         run_phase("pilot-baseline", prereg, LIB, SCS, tmp_path, approved_usd=20.0,
                   sdks={"openai": CrashSDK(crash_on=101)}, say=_quiet)
-    ledger = SpendLedger(_ledger_path(tmp_path, "pilot-baseline"))
-    before = ledger.total()
+    before = _ledger_total(tmp_path, "pilot-baseline")
     stored = JsonlStore(tmp_path / "pilot-baseline.jsonl", CallRecord).read_all()
     assert len(stored) == 100 and before > stored_spend_usd(stored, MINI)
     sdk, said = FakeSDK(), []
@@ -396,8 +401,8 @@ def test_a_resume_after_a_crash_starts_from_the_ledger_not_from_the_stores(tmp_p
     assert len(sdk.bodies) == out["calls_planned"] - 100  # the interrupted call is redone
     assert out["resumed_spent_usd"] == pytest.approx(before)
     assert out["spent_usd"] == pytest.approx(sdk.priced_usd())
-    assert "already spent" in said[0] and f"${before:.2f}" in said[0]
-    assert SpendLedger(_ledger_path(tmp_path, "pilot-baseline")).total() == pytest.approx(
+    assert "already charged to this phase (ledger)" in said[0] and f"${before:.2f}" in said[0]
+    assert _ledger_total(tmp_path, "pilot-baseline") == pytest.approx(
         before + sdk.priced_usd())
     assert len((tmp_path / "pilot-baseline.jsonl").read_text().splitlines()) == out[
         "calls_planned"]
@@ -414,8 +419,7 @@ def test_stored_records_with_no_ledger_seed_the_ledger_at_their_cost(tmp_path):
     out = run_phase("pilot-baseline", prereg, LIB, SCS, tmp_path, approved_usd=20.0, resume=True,
                     sdks={"openai": FakeSDK()}, say=_quiet)
     assert out["resumed_spent_usd"] == pytest.approx(seed)
-    assert SpendLedger(_ledger_path(tmp_path, "pilot-baseline")).total() == pytest.approx(
-        first["spent_usd"])
+    assert _ledger_total(tmp_path, "pilot-baseline") == pytest.approx(first["spent_usd"])
 
 
 def test_a_resumed_paid_phase_whose_stored_spend_is_near_the_approval_stops_early(tmp_path):
@@ -455,10 +459,10 @@ def test_resuming_under_one_approval_never_spends_past_it(tmp_path):
         real += sdk.priced_usd()
         assert real <= approved, f"session {session} took the real spend past the approval"
     assert tripped[0]  # the cap really did stop session 1
-    ledger = SpendLedger(_ledger_path(tmp_path / "paid", "pilot-recovery"))
-    assert ledger.total() >= real - 1e-9  # the ledger never sees less than was spent
+    total = _ledger_total(tmp_path / "paid", "pilot-recovery")
+    assert total >= real - 1e-9  # the ledger never sees less than was spent
     stored = JsonlStore(tmp_path / "paid" / "pilot-recovery.jsonl", RecoveryRecord).read_all()
-    assert ledger.total() > stored_spend_usd(stored, prereg.primary)  # the cut-off turns
+    assert total > stored_spend_usd(stored, prereg.primary)  # the cut-off turns
 
 
 # --- refusing silent reuse -----------------------------------------------------------
@@ -554,7 +558,7 @@ def test_a_paid_multi_model_phase_shares_one_guard_and_one_ledger(tmp_path, monk
                                     CallRecord).read_all(), m)
         for m in prereg.slice_models)
     assert made[0].spent == pytest.approx(out["spent_usd"]) == pytest.approx(stored)
-    assert SpendLedger(_ledger_path(tmp_path, "pilot-slice")).total() == pytest.approx(stored)
+    assert _ledger_total(tmp_path, "pilot-slice") == pytest.approx(stored)
     assert out["spent_usd"] > 10 * 0.0009  # the dearer Sonnet calls are in it too
 
 
@@ -585,6 +589,100 @@ def test_recovery_phases_refuse_a_turn_budget_the_code_does_not_run(tmp_path, ph
     assert sdk.bodies == [] and list(tmp_path.iterdir()) == []  # nothing posted, nothing written
     # the other phases never run a conversation, so they do not care
     run_phase("pilot-baseline", prereg, LIB, SCS, tmp_path, stub=True, say=_quiet)
+
+
+# --- one run at a time, and a ledger that cannot be written stops the run -------------------
+
+
+def test_a_paid_run_refuses_a_phase_whose_lock_is_held(tmp_path):
+    prereg = example_prereg()
+    sdk = FakeSDK()
+    with (tmp_path / "pilot-baseline.spend.lock").open("a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        for resume in (False, True):
+            with pytest.raises(SpendCapReached,
+                               match=r"another run of pilot-baseline holds .*pilot-baseline.spend.lock"):
+                run_phase("pilot-baseline", prereg, LIB, SCS, tmp_path, approved_usd=20.0,
+                          resume=resume, sdks={"openai": sdk}, say=_quiet)
+        # another phase's ledger is not in the way
+        run_phase("pilot-recovery", prereg, LIB, SCS, tmp_path, approved_usd=20.0,
+                  sdks={"openai": FakeSDK()}, say=_quiet)
+    assert sdk.bodies == [] and not (tmp_path / "pilot-baseline.jsonl").exists()
+    # the holder let go: the phase runs
+    run_phase("pilot-baseline", prereg, LIB, SCS, tmp_path, approved_usd=20.0,
+              sdks={"openai": sdk}, say=_quiet)
+    assert len(sdk.bodies) == len(SCS) * 10
+
+
+def test_the_lock_is_held_while_the_phase_runs_and_released_when_it_ends(tmp_path):
+    seen = []
+
+    class Probe(FakeSDK):
+        def _create(self, **body):
+            try:  # a second run, mid-phase, in the same process
+                run_phase("pilot-baseline", example_prereg(), LIB, SCS, tmp_path,
+                          approved_usd=20.0, resume=True, sdks={"openai": FakeSDK()}, say=_quiet)
+                seen.append("ran")
+            except SpendCapReached as e:
+                seen.append(str(e))
+            return super()._create(**body)
+
+    run_phase("pilot-baseline", example_prereg(), LIB, SCS, tmp_path, approved_usd=20.0,
+              sdks={"openai": Probe()}, say=_quiet)
+    assert seen and all("another run of pilot-baseline holds" in m for m in seen)
+    run_phase("pilot-baseline", example_prereg(), LIB, SCS, tmp_path, approved_usd=20.0,
+              resume=True, sdks={"openai": FakeSDK()}, say=_quiet)  # released at the end
+    # and when a phase dies, too
+    with pytest.raises(KeyboardInterrupt):
+        run_phase("pilot-cells", example_prereg(), LIB, SCS, tmp_path, approved_usd=20.0,
+                  sdks={"openai": CrashSDK(crash_on=2)}, say=_quiet)
+    run_phase("pilot-cells", example_prereg(), LIB, SCS, tmp_path, approved_usd=20.0, resume=True,
+              sdks={"openai": FakeSDK()}, say=_quiet)
+
+
+def _fail_nth(monkeypatch, key, n):
+    """Make the nth ledger line carrying `key` fail with ENOSPC."""
+    seen = {"n": 0}
+    real = SpendLedger._append
+
+    def append(self, entry):
+        if key in entry:
+            seen["n"] += 1
+            if seen["n"] == n:
+                raise OSError(errno.ENOSPC, "No space left on device")
+        return real(self, entry)
+
+    monkeypatch.setattr(SpendLedger, "_append", append)
+
+
+def test_a_ledger_that_cannot_reserve_stops_the_run_it_does_not_become_data(tmp_path,
+                                                                            monkeypatch):
+    _fail_nth(monkeypatch, "reserve", 6)
+    sdk = FakeSDK()
+    with pytest.raises(LedgerWriteError, match="No space left"):
+        run_phase("pilot-baseline", example_prereg(), LIB, SCS, tmp_path, approved_usd=20.0,
+                  sdks={"openai": sdk}, say=_quiet)
+    lines = (tmp_path / "pilot-baseline.spend.jsonl").read_text().splitlines()
+    reserved = [x for x in lines if '"reserve"' in x]
+    assert len(reserved) == 5 == len(sdk.bodies)  # a post only ever follows a written reserve
+    stored = JsonlStore(tmp_path / "pilot-baseline.jsonl", CallRecord).read_all()
+    assert len(stored) == 5 and not any(r.error for r in stored)  # no OSError row
+
+
+def test_a_ledger_that_cannot_settle_stops_the_run_and_counts_the_call_at_worst(tmp_path,
+                                                                                monkeypatch):
+    _fail_nth(monkeypatch, "settle", 4)
+    sdk = FakeSDK()
+    with pytest.raises(LedgerWriteError):
+        run_phase("pilot-baseline", example_prereg(), LIB, SCS, tmp_path, approved_usd=20.0,
+                  sdks={"openai": sdk}, say=_quiet)
+    assert len(sdk.bodies) == 4
+    stored = JsonlStore(tmp_path / "pilot-baseline.jsonl", CallRecord).read_all()
+    assert len(stored) == 3 and not any(r.error for r in stored)
+    worst = call_bound_usd(MINI, sdk.bodies[3]) * WORST
+    each = cost_usd(MINI.model, {"input": 1000, "cached": 0, "cache_write": 0, "output": 40,
+                                 "reasoning": 0})
+    assert _ledger_total(tmp_path, "pilot-baseline") == pytest.approx(3 * each + worst)
 
 
 def test_step_two_is_computed_from_the_pilot(tmp_path):

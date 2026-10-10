@@ -1,7 +1,9 @@
+import errno
 import json
 import math
 import os
 import stat
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +11,7 @@ from toolcall.guard import (
     INPUT_OVERHEAD_TOKENS,
     SDK_MAX_RETRIES,
     GuardedClient,
+    LedgerWriteError,
     SpendCapReached,
     SpendGuard,
     SpendGuardError,
@@ -195,6 +198,7 @@ def test_a_reopened_ledger_keeps_its_total_and_never_reuses_an_id(tmp_path):
     path = tmp_path / "l.jsonl"
     led = SpendLedger(path)
     first = led.reserve(0.5)
+    led.close()
     reopened = SpendLedger(path)
     assert reopened.total() == pytest.approx(0.5)
     second = reopened.reserve(0.2)
@@ -232,6 +236,7 @@ def test_the_ledgers_directory_is_fsynced_once_when_the_file_is_created(tmp_path
     led.settle(rid, 0.1)
     led.settle(led.reserve(0.2), 0.0)
     assert len(dirs) == 1 and len(files) == 4
+    led.close()
     SpendLedger(tmp_path / "sub" / "l.jsonl").reserve(0.1)  # an existing file: no new entry
     assert len(dirs) == 1
 
@@ -265,6 +270,7 @@ def test_a_torn_last_line_is_tolerated(tmp_path):
     assert led.total() == pytest.approx(0.1 + 0.4)
     rid = led.reserve(0.2)  # appending after the torn tail leaves a readable file
     led.settle(rid, 0.05)
+    led.close()
     assert SpendLedger(path).total() == pytest.approx(0.1 + 0.4 + 0.05)
 
 
@@ -274,6 +280,7 @@ def test_a_torn_reservation_that_still_parses_counts_at_worst(tmp_path):
     led = SpendLedger(path)
     assert led.total() == pytest.approx(0.9)
     led.settle(led.reserve(0.1), 0.0)
+    led.close()
     assert SpendLedger(path).total() == pytest.approx(0.9)
 
 
@@ -386,3 +393,190 @@ def test_a_guard_seeded_from_a_ledger_resumes_from_its_total(tmp_path):
     guard = SpendGuard(bound * 10, spent=led.total(), ledger=led)
     with pytest.raises(SpendCapReached, match="stopping"):
         guard.before(bound * 3)
+
+
+# --- one writer at a time ------------------------------------------------------------
+
+
+def test_a_second_open_of_the_same_ledger_is_refused_until_the_first_closes(tmp_path):
+    path = tmp_path / "x.spend.jsonl"
+    first = SpendLedger(path, label="pilot-baseline")
+    with pytest.raises(SpendGuardError, match="another run of pilot-baseline holds .*x.spend.lock"):
+        SpendLedger(path, label="pilot-baseline")
+    other = SpendLedger(tmp_path / "y.spend.jsonl")  # a different ledger is not in the way
+    other.close()
+    first.close()
+    first.close()  # closing twice is harmless
+    SpendLedger(path).close()
+
+
+def test_a_ledger_that_fails_to_open_releases_its_lock(tmp_path):
+    path = tmp_path / "x.spend.jsonl"
+    path.write_text('{"id": 0, "reserve": 0.5}\nnot json\n{"id": 1, "reserve": 0.4}\n')
+    with pytest.raises(ValueError, match="line 2"):
+        SpendLedger(path)
+    path.write_text('{"id": 0, "reserve": 0.5}\n')
+    with SpendLedger(path) as led:  # not "locked by the failed attempt"
+        assert led.total() == pytest.approx(0.5)
+
+
+def test_a_process_holding_the_lock_file_blocks_the_ledger(tmp_path):
+    import fcntl
+
+    path = tmp_path / "x.spend.jsonl"
+    with (tmp_path / "x.spend.lock").open("a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(SpendGuardError, match="holds"):
+            SpendLedger(path)
+    SpendLedger(path).close()
+
+
+# --- a failed write stops the run and leaves no partial line ---------------------------
+
+
+def test_a_failed_fsync_stops_the_run_and_the_file_is_as_it_was(tmp_path, monkeypatch):
+    path = tmp_path / "l.jsonl"
+    led = SpendLedger(path)
+    rid = led.reserve(0.5)
+    before = path.read_bytes()
+    real = os.fsync
+    state = {"fail": True}
+
+    def flaky(fd):
+        if state["fail"]:
+            raise OSError(errno.ENOSPC, "No space left on device")
+        real(fd)
+
+    monkeypatch.setattr(os, "fsync", flaky)
+    with pytest.raises(LedgerWriteError, match="No space left"):
+        led.settle(rid, 0.1)
+    assert issubclass(LedgerWriteError, SpendGuardError)
+    assert path.read_bytes() == before
+    state["fail"] = False
+    led.settle(rid, 0.1)  # the reservation was still open, and the ledger still works
+    assert led.total() == pytest.approx(0.1)
+
+
+def test_a_half_written_line_is_rolled_back_before_the_error_is_raised(tmp_path, monkeypatch):
+    path = tmp_path / "l.jsonl"
+    led = SpendLedger(path)
+    led.reserve(0.5)
+    before = path.read_bytes()
+    real_open = Path.open
+
+    class HalfWriter:
+        def __init__(self, f):
+            self.f = f
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.f.close()
+
+        def write(self, data):
+            self.f.write(data[: len(data) // 2])
+            self.f.flush()
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+    def open_(self, mode="r", *a, **k):
+        f = real_open(self, mode, *a, **k)
+        return HalfWriter(f) if self == path and mode == "ab" else f
+
+    monkeypatch.setattr(Path, "open", open_)
+    with pytest.raises(LedgerWriteError):
+        led.reserve(0.3)
+    assert path.read_bytes() == before  # nothing left for the next append to land after
+    monkeypatch.undo()
+    led.reserve(0.2)
+    assert led.total() == pytest.approx(0.7)
+    led.close()
+    assert SpendLedger(path).total() == pytest.approx(0.7)
+
+
+def test_a_failed_first_write_leaves_an_empty_file_and_a_working_ledger(tmp_path, monkeypatch):
+    path = tmp_path / "l.jsonl"
+    led = SpendLedger(path)
+    real = os.fsync
+    monkeypatch.setattr(os, "fsync", lambda fd: (_ for _ in ()).throw(OSError(errno.EIO, "io")))
+    with pytest.raises(LedgerWriteError):
+        led.reserve(0.3)
+    monkeypatch.setattr(os, "fsync", real)
+    assert path.stat().st_size == 0
+    led.reserve(0.3)
+    assert led.total() == pytest.approx(0.3)
+
+
+def test_a_settle_that_cannot_be_written_stops_the_run_without_charging_twice(tmp_path):
+    led = SpendLedger(tmp_path / "l.jsonl")
+    guard = SpendGuard(1.0, ledger=led)
+    gc = GuardedClient(ScriptedClient(MINI, lambda b: openai_text("ok")), guard,
+                       PARSE["openai"])
+    real_append = led._append
+
+    def fail_settles(entry):
+        if "settle" in entry:
+            raise OSError(errno.ENOSPC, "No space left on device")
+        real_append(entry)
+
+    led._append = fail_settles
+    with pytest.raises(LedgerWriteError):
+        gc.post(BODY)
+    metered = (1000 * 0.75 + 40 * 4.50) / 1e6
+    assert guard.spent == pytest.approx(metered) and guard.unmetered == 0  # not metered twice
+    assert led.total() == pytest.approx(call_bound_usd(MINI, BODY) * (1 + SDK_MAX_RETRIES))
+
+
+# --- repairing a torn tail never rewrites the file ------------------------------------------
+
+
+def _watch_file_modes(monkeypatch):
+    modes, flags, truncated = [], [], []
+    real_open, real_os_open, real_truncate = Path.open, os.open, os.truncate
+
+    def open_(self, mode="r", *a, **k):
+        modes.append(mode)
+        return real_open(self, mode, *a, **k)
+
+    def os_open(path, flag, *a, **k):
+        flags.append(flag)
+        return real_os_open(path, flag, *a, **k)
+
+    def truncate(path, length):
+        truncated.append(length)
+        return real_truncate(path, length)
+
+    monkeypatch.setattr(Path, "open", open_)
+    monkeypatch.setattr(os, "open", os_open)
+    monkeypatch.setattr(os, "truncate", truncate)
+    return modes, flags, truncated
+
+
+def test_an_unparseable_tail_is_cut_with_truncate_never_a_rewrite(tmp_path, monkeypatch):
+    path = tmp_path / "l.jsonl"
+    good = b'{"id": 0, "reserve": 0.5}\n{"id": 0, "settle": 0.1}\n'
+    path.write_bytes(good + b'{"id": 1, "res')
+    modes, flags, truncated = _watch_file_modes(monkeypatch)
+    led = SpendLedger(path)
+    assert path.read_bytes() == good and truncated == [len(good)]
+    assert not any("w" in m for m in modes)  # never opened to truncate-and-rewrite
+    assert not any(f & os.O_TRUNC for f in flags)
+    assert led.total() == pytest.approx(0.1)
+
+
+def test_a_missing_newline_is_appended_not_rewritten(tmp_path, monkeypatch):
+    path = tmp_path / "l.jsonl"
+    line = b'{"id": 0, "reserve": 0.5}'
+    path.write_bytes(line)
+    modes, flags, truncated = _watch_file_modes(monkeypatch)
+    led = SpendLedger(path)
+    assert path.read_bytes() == line + b"\n" and truncated == []
+    assert not any("w" in m for m in modes) and not any(f & os.O_TRUNC for f in flags)
+    assert led.total() == pytest.approx(0.5)
+
+
+def test_a_file_that_is_only_a_torn_line_is_emptied_by_truncate(tmp_path, monkeypatch):
+    path = tmp_path / "l.jsonl"
+    path.write_bytes(b'{"id": 0, "res')
+    _, _, truncated = _watch_file_modes(monkeypatch)
+    assert SpendLedger(path).total() == 0.0 and truncated == [0] and path.read_bytes() == b""

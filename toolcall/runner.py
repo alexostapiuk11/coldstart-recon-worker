@@ -44,6 +44,11 @@ floor: if they say more than the ledger (a phase run before ledgers existed),
 the ledger is topped up to match. The approved amount then caps the whole phase
 across any number of resumes.
 
+One run at a time. The ledger holds an exclusive `flock` on
+`<root>/<phase>.spend.lock` from before the stores or the seed are read until
+the phase ends, so a second run of the same phase (a resume started twice) is
+refused instead of seeding from the same total and spending the approval again.
+
 Reuse. Without `resume`, a phase refuses to start if any of its stores or its
 ledger is non-empty. A stub rehearsal marks its directory with a `STUB` file; a
 paid run refuses such a directory, and a stub run refuses a directory that has
@@ -252,7 +257,7 @@ def _announce(phase, models, plan: Plan, approved, seed, recovery, say):
     if recovery:
         msg += "; calls are a maximum, a conversation can end before its last attempt"
     if seed:
-        msg += f"; resuming with ${seed:.2f} already spent by this phase's stored records"
+        msg += f"; resuming with ${seed:.2f} already charged to this phase (ledger)"
     say(msg)
 
 
@@ -362,21 +367,31 @@ def run_phase(phase: str, prereg, library, scenarios, root, *, approved_usd: flo
     root = Path(root)
     _check_directory(root, stub)
     jobs = _jobs(phase, prereg, library, scenarios, root)
+    if stub:
+        return _run(phase, prereg, library, scenarios, root, jobs, None, approved_usd, True,
+                    resume, say, sdks)
+    _check_sdks(jobs, sdks)
+    # The ledger's lock is what makes one run at a time: taken here, before the
+    # stores or the seed are read, and released when the phase ends or dies.
+    with SpendLedger(_ledger_path(root, phase), label=phase) as ledger:
+        return _run(phase, prereg, library, scenarios, root, jobs, ledger, approved_usd, False,
+                    resume, say, sdks)
+
+
+def _run(phase, prereg, library, scenarios, root, jobs, ledger, approved_usd, stub, resume, say,
+         sdks) -> dict:
     if resume:
         _preflight_stores(root, jobs, stub)
     else:
         _refuse_reuse(root, phase, jobs, stub)
-    if not stub:
-        _check_sdks(jobs, sdks)
     plans = [_plan(job, library) for job in jobs]
     plan = Plan(sum(x.calls for x in plans), sum(x.estimate_usd for x in plans),
                 max((x.headroom_usd for x in plans), default=0.0))
-    guard = ledger = None
+    guard = None
     seed = 0.0
     if not stub:
-        # Refuse on the approval first, so a bad one never touches the ledger.
+        # Refuse on the approval before the ledger is read or written.
         check_estimate(plan.estimate_usd + plan.headroom_usd, approved_usd)
-        ledger = SpendLedger(_ledger_path(root, phase))
         seed = _seed(root, jobs, ledger) if resume else 0.0
         guard = SpendGuard(approved_usd, spent=seed, ledger=ledger)  # one for every job
     _announce(phase, ", ".join(sorted({j.settings.model for j in jobs})), plan, approved_usd,
