@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Revise before executing.** Plan 1's execution changed interfaces this plan calls: the spend ledger, `sdks=`, `--allow-stub` and the NOT_DATA marker, `identical_retry_all_kinds`, the per-phase approval cap and the cross-phase total. Revise this plan against the real code at plan 2's kickoff, using every "For plan 3" and "For the post" line in `2026-10-10-artifact-3-plan-1-deviations.md`.
+
 **Goal:** Rehearse the paid path on the stub, run the campaign, recovery, slice and exploratory phases, record the spend, and publish the analysis, four figures and post, with every number in the post generated from the committed analysis and tests that fail if anything drifts.
 
 **Architecture:** The same library code as plans 1 and 2. `scripts/a3_run.py` runs each phase through `toolcall.runner`, which refuses to start without an approval covering its estimate and meters every call. `scripts/a3_analyse.py` writes one JSON file; the figures and the post's numbers block are generated from it. `scripts/a3_prepublish_check.py` reads the files that will ship and refuses while anything is unfinished.

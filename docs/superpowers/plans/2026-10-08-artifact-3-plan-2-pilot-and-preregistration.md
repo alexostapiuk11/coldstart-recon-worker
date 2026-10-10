@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Revise before executing.** Plan 1's execution changed interfaces this plan calls: `run_phase(sdks=...)`, the spend ledger and its lock, the STUB marker, pilot-recovery planning, `recovered_given_correct_first`, the openai/anthropic dependencies, and new pre-registration rules. Revise this plan against the real code at kickoff, using every "For plan 2" line in `2026-10-10-artifact-3-plan-1-deviations.md`.
+
 **Goal:** Install the provider SDKs, confirm each pinned model accepts the registered settings with one call each, commit pre-registration step 1, run the paid pilot, compute S, N and the budget from it, and commit pre-registration step 2 before any campaign call.
 
 **Architecture:** No new library code: plan 1 built and tested every module this plan calls. Three thin scripts drive it: `scripts/a3_smoke.py` (one call per model), `scripts/a3_run.py` (any phase, paid or `--stub`), and `scripts/a3_select.py` (step 2's values from the pilot). The pre-registered values live in `toolcall/prereg_values.py`; `docs/experiment-a3.md` embeds them, and a test fails if the two disagree. Pilot records are committed under `data/a3/` and are never campaign data.

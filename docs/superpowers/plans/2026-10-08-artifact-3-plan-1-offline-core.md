@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Executed 2026-10-09 to 2026-10-10, with approved deviations.** Review changed much of this plan's code. The code on `main` and `2026-10-10-artifact-3-plan-1-deviations.md` are authoritative; this plan's code blocks are kept as history.
+
 **Goal:** Build all of artifact 3's code and its scenario suite with no API spend: the `toolcall/` package from the tool and scenario formats through the renderer, the deterministic grader, the mock tool layer and recovery loop, the provider clients, the campaign wiring and spend guard, to the statistics, analysis and four figures, all tested against a scripted stand-in for a model.
 
 **Architecture:** `toolcall/` is artifact 3's package. It imports `harness/` and nothing from another artifact's package, transitively, and a test enforces it. A scenario and its tools are plain JSON; `formulation.render` turns one scenario into eight renderings that differ only in the manipulated factor. Each call is one scheduled run of the harness campaign loop, stored as a `CallRecord` with its exact request body, raw response and grade. Analysis is pure functions from records to one JSON-shaped dict, which the figures and the post's numbers block read. A stub model with planted effects stands where a provider would, so the tests check that the analysis recovers what was put in.
