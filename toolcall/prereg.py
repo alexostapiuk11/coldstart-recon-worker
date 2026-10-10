@@ -38,6 +38,8 @@ class Preregistration:
     retry_cap: int  # attempts in the cost-per-successful-call policy (§4f)
     turn_budget: int
     normalizer_version: int
+    # below this, a scenario is dropped from the analysis and disclosed (pre-registration rule)
+    min_graded_per_cell: int = 2
     # --- step 2: after the pilot, before the campaign ---------------------
     included: tuple[str, ...] | None = None
     reps: int | None = None
@@ -59,6 +61,11 @@ class Preregistration:
             raise ValueError("n_floor must be at least 2: H5's A/A contrast splits repetitions")
         if self.n_cap < self.n_floor:
             raise ValueError("n_cap must be at least n_floor")
+        if (not isinstance(self.min_graded_per_cell, int)
+                or not 1 <= self.min_graded_per_cell <= self.n_floor):
+            raise ValueError(
+                f"min_graded_per_cell must be an int in [1, n_floor={self.n_floor}], "
+                f"got {self.min_graded_per_cell!r}")
         if self.s_floor < MIN_BOOTSTRAP_SAMPLES:
             raise ValueError(f"s_floor is below the bootstrap floor {MIN_BOOTSTRAP_SAMPLES}")
         if not 0.0 < self.delta2 < 0.5 or not 0.0 < self.identical_retry_floor < 1.0:

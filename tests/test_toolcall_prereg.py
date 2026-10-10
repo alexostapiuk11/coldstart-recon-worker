@@ -69,3 +69,15 @@ def test_selection_refuses_pilot_runs_outside_the_baseline_cell():
 def test_rho_from_the_pilot():
     recs = _pilot({"a": 1.0, "b": 0.0, "c": 1.0, "d": 0.0})
     assert rho(recs, {"a", "b", "c", "d"}) == 1.0
+
+
+def test_min_graded_per_cell_defaults_to_two_and_appears_in_the_table():
+    p = example_prereg()
+    assert p.min_graded_per_cell == 2
+    assert "| `min_graded_per_cell` | `2` |" in prereg_table(p)
+
+
+@pytest.mark.parametrize("value", [0, 6])
+def test_min_graded_per_cell_outside_one_to_n_floor_is_refused(value):
+    with pytest.raises(ValueError, match="min_graded_per_cell"):
+        example_prereg(min_graded_per_cell=value)
