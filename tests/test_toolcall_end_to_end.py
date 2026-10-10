@@ -21,6 +21,7 @@ from toolcall.grader import FAILURES
 from toolcall.hypotheses import bootstrap_params
 from toolcall.providers import ScriptedClient
 from toolcall.records import CallRecord, RecoveryRecord
+from toolcall.scenarios import PERSISTENT_KINDS
 from toolcall.stub import StubModel
 
 
@@ -70,6 +71,29 @@ def test_strictness_cuts_malformed_and_wrong_params_and_not_wrong_tool(analysis)
 def test_h4_finds_more_identical_retries_after_opaque_errors(analysis):
     h4 = analysis["hypotheses"]["H4"]
     assert h4["testable"] and h4["lo"] > 0 and h4["verdict"] == "supported"
+
+
+def test_the_all_kinds_retry_rate_is_named_for_what_it_pools():
+    """Only `identical_retry_persistent` is H4's quantity; the other mixes error
+    kinds, a timeout (retried unchanged on purpose) included, and says so."""
+    from types import SimpleNamespace
+
+    from toolcall.analysis import _recovery
+
+    def conv(sid, kind, retry):
+        return SimpleNamespace(
+            scenario_id=sid, fmt="opaque", error_kind=kind, identical_retry=retry,
+            injected=True, excluded=None, first_grade=None, recovered=True, gave_up=False,
+            hallucinated_success=False, turns_to_recovery=2)
+
+    # four persistent conversations that retry in 1 of 4; four timeouts that all do
+    records = ([conv(f"s{i}", "invalid_parameter", i == 0) for i in range(4)]
+               + [conv(f"t{i}", "timeout", True) for i in range(4)])
+    out = _recovery(records, example_prereg())["opaque"]
+    assert "identical_retry" not in out
+    assert out["identical_retry_all_kinds"] == pytest.approx(5 / 8)
+    assert out["identical_retry_persistent"] is None  # 4 scenarios: under the bootstrap floor
+    assert PERSISTENT_KINDS == ("invalid_parameter", "contradicting_result")
 
 
 def test_every_hypothesis_has_a_verdict_and_holm_was_applied(analysis):

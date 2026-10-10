@@ -201,6 +201,31 @@ def test_missing_usage_is_unmetered_not_free(tmp_path):
     assert not store2.read_all()[0].unmetered
 
 
+def _zero_usage_call(body):
+    """An otherwise valid, gradable tool call whose usage block is all zeros."""
+    return openai_call(body["tools"][0]["name"], {}, input_tokens=0, output_tokens=0)
+
+
+def test_an_otherwise_valid_response_with_zero_usage_is_excluded_not_graded(tmp_path):
+    """The guard charged it one bound (it cannot be metered), so spend stays honest;
+    the record is API_ERROR with a reason, so it is not a graded call with no
+    cost, which `costs._units` and the whole analysis refuse."""
+    from toolcall.costs import _units
+
+    store = JsonlStore(tmp_path / "c.jsonl", CallRecord)
+    campaign.single_turn(campaign.schedule(CELLS[:1], SCS[:3], 1, 1),
+                         ScriptedClient(MINI, _zero_usage_call), SCS, LIB, store,
+                         phase="campaign")
+    records = store.read_all()
+    assert records
+    for r in records:
+        assert r.grade["category"] == "API_ERROR"
+        assert "no usable usage" in r.error and r.error == r.grade["detail"]
+        assert r.unmetered and r.usage is None and r.cost_usd is None
+        assert r.response is not None  # the evidence is kept
+    assert _units(records) == {}  # nothing for the cost code to refuse
+
+
 def test_recovery_missing_usage_is_counted_as_unmetered_turns(tmp_path):
     rec, cells = _rec_setup()
     store = JsonlStore(tmp_path / "r.jsonl", RecoveryRecord)

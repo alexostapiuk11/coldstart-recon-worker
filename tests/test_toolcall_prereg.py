@@ -148,6 +148,8 @@ _NANO = ModelSettings("openai", "gpt-5.4-nano-2026-03-17", 0.0, reasoning_effort
     ({"band": [0.1, 0.9]}, "band must be a"),
     ({"iterations": 99}, "below 100"),
     ({"alpha": 0.6}, "alpha"),
+    ({"alpha": 0.26}, "alpha"),
+    ({"alpha": 0.5}, "alpha"),  # H2 would use 2*alpha = 1, which harness.stats refuses
     ({"alpha": 0.0}, "alpha"),
     ({"reps": 5}, "partly committed"),
     ({"approved_usd": 10.0}, "partly committed"),
@@ -170,7 +172,7 @@ def test_unusable_values_are_refused(kw, match):
 
 
 def test_boundary_values_are_accepted():
-    example_prereg(iterations=100, alpha=0.5, bootstrap_seed=0, schedule_seed=-3,
+    example_prereg(iterations=100, alpha=0.25, bootstrap_seed=0, schedule_seed=-3,
                    slice_models=(_NANO, _ANTHROPIC))
     example_prereg(**_step2(recovery_reps=20, slice_reps=5))
 

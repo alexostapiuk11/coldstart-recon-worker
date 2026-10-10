@@ -158,7 +158,6 @@ def single_turn(schedule_, client, scenarios, library, store, *, phase: str,
                 error = f"unparseable response: {type(e).__name__}: {e}"
             if parsed is not None and parsed.model != model:
                 error = f"model mismatch: asked for {model}, response names {parsed.model}"
-        g = grade(parsed, by_id[sid], library, names, error=error)
         usage = parsed.usage if parsed else None
         # The parsers' placeholder for a missing usage is all zeros; that is not
         # a measurement of a free call. A call that returned nothing parseable
@@ -166,6 +165,15 @@ def single_turn(schedule_, client, scenarios, library, store, *, phase: str,
         unmetered = usage is None or (usage["input"] == 0 and usage["output"] == 0)
         if unmetered:
             usage = None
+            if error is None and parsed is not None:
+                # An otherwise valid response that reports no tokens: billed (the
+                # guard charged it one bound) but with no cost to put in the cost
+                # analysis, which refuses a graded call without one. So it is
+                # excluded as API_ERROR, never graded; the response stays stored.
+                error = ("response carries no usable usage (all zero), so the call "
+                         "cannot be metered and is excluded (a paid call is charged "
+                         "one bound by the spend guard)")
+        g = grade(parsed, by_id[sid], library, names, error=error)
         return CallRecord(
             run_index=scheduled.run_index, block_index=scheduled.block_index,
             condition=scheduled.condition, run_id=run_id, phase=phase, model=model,

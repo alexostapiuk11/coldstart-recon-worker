@@ -203,7 +203,14 @@ def _recovery(records, prereg) -> dict:
     was graded CORRECT. Several scenarios put a persistent error on a parameter
     other than their target trap, so a model whose first call was wrong in some
     other way can never recover; this rate shows recovery without them. It is
-    descriptive only: no interval, and not in the figures."""
+    descriptive only: no interval, and not in the figures.
+
+    `identical_retry_all_kinds` is the share of injected, non-excluded
+    conversations whose first action after the error repeated the failing call,
+    over EVERY error kind: transient ones (a timeout is meant to be retried
+    unchanged) included. It is descriptive and is NOT the H4 quantity. H4 is
+    `identical_retry_persistent`, over persistent kinds only, bootstrapped over
+    scenarios."""
     by_fmt: dict = defaultdict(list)
     for r in records:
         by_fmt[r.fmt].append(r)
@@ -218,7 +225,8 @@ def _recovery(records, prereg) -> dict:
             "injected": n,
             "not_injected": sum(not r.injected and not r.excluded for r in rs),
             "excluded": Counter(r.excluded for r in rs if r.excluded),
-            "identical_retry": (sum(bool(r.identical_retry) for r in injected) / n) if n else None,
+            "identical_retry_all_kinds": (
+                sum(bool(r.identical_retry) for r in injected) / n) if n else None,
             "recovered": (sum(r.recovered for r in injected) / n) if n else None,
             "n_correct_first": len(correct_first),
             "recovered_given_correct_first": (

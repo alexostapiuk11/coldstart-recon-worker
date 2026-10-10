@@ -20,6 +20,9 @@ from toolcall.providers import ModelSettings
 # With Holm's procedure at alpha/5 and add-one bootstrap p-values, fewer draws
 # than this can never reach the smallest threshold, so the test cannot reject.
 MIN_ITERATIONS = 100
+# H2 tests equivalence with a (1 - 2*alpha) interval, and harness.stats refuses an
+# alpha of 1 or more, so alpha above 0.25 would pass here and fail in the analysis.
+MAX_ALPHA = 0.25
 
 
 def _require_int(name: str, value, *, positive: bool = False) -> None:
@@ -49,7 +52,8 @@ class Preregistration:
     n_cap: int
     s_floor: int
     # The familywise level for Holm's procedure over the five hypotheses; each
-    # interval is (1 - alpha). H2's equivalence part uses a (1 - 2*alpha) interval.
+    # interval is (1 - alpha). H2's equivalence part uses a (1 - 2*alpha) interval,
+    # so alpha is at most MAX_ALPHA = 0.25.
     alpha: float
     iterations: int
     bootstrap_seed: int
@@ -103,8 +107,10 @@ class Preregistration:
                 "alpha/5 and add-one p-values, fewer draws can never reject")
         if not 0.0 < self.delta2 < 0.5 or not 0.0 < self.identical_retry_floor < 1.0:
             raise ValueError("delta2 and identical_retry_floor must be proportions")
-        if not 0.0 < self.alpha <= 0.5:
-            raise ValueError("alpha must be in (0, 0.5]")
+        if not 0.0 < self.alpha <= MAX_ALPHA:
+            raise ValueError(
+                f"alpha must be in (0, {MAX_ALPHA}], got {self.alpha!r}: H2's equivalence "
+                "part uses a (1 - 2*alpha) interval, and harness.stats refuses 2*alpha >= 1")
         if self.normalizer_version != NORMALIZER_VERSION:
             raise ValueError(
                 f"pre-registered normalizer v{self.normalizer_version}, code is "
