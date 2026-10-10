@@ -243,3 +243,17 @@ def test_one_helper_carries_the_bootstrap_settings(analysis, run):
     assert analysis["effects"]["failure"]["main:count"]["iterations"] == prereg.iterations
     assert analysis["cost"][CELL_A]["retry"]["iterations"] == prereg.iterations
     assert analysis["hypotheses"]["H4"]["iterations"] == prereg.iterations
+
+
+def test_the_analysis_flags_fewer_analysable_scenarios_than_s_floor(run, analysis, trimmed):
+    assert analysis["analysable_below_s_floor"] is False
+    assert trimmed[0]["analysable_below_s_floor"] is False
+    short = run[2][0].id
+
+    def mutate(r):
+        return _api_error(r) if (r.scenario_id == short and r.cell == CELL_A
+                                 and r.block_index >= 1) else r
+
+    a, _, _ = _variant(run, mutate, s_floor=N_SCEN)  # one scenario is dropped: S < s_floor
+    assert a["S"] == N_SCEN - 1 and a["analysable_below_s_floor"] is True
+    assert a["hypotheses"]["H1"]["n_scenarios"] == N_SCEN - 1  # the estimates still run

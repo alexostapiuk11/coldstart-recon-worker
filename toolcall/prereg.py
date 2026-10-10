@@ -57,8 +57,10 @@ class Preregistration:
     retry_cap: int  # attempts in the cost-per-successful-call policy (§4f)
     turn_budget: int
     normalizer_version: int
-    # below this, a scenario is dropped from the analysis and disclosed (pre-registration rule)
-    min_graded_per_cell: int = 2
+    # Below this many graded repetitions in any cell, a scenario is dropped from
+    # the analysis and disclosed. At least retry_cap: the retry walk needs a full
+    # group of retry_cap graded repetitions in every analysable scenario-cell.
+    min_graded_per_cell: int = 3
     # --- step 2: after the pilot, before the campaign ---------------------
     included: tuple[str, ...] | None = None
     reps: int | None = None
@@ -88,6 +90,11 @@ class Preregistration:
             raise ValueError(
                 f"min_graded_per_cell must be an int in [1, n_floor={self.n_floor}], "
                 f"got {self.min_graded_per_cell!r}")
+        if self.min_graded_per_cell < self.retry_cap:
+            raise ValueError(
+                f"min_graded_per_cell {self.min_graded_per_cell} is below retry_cap "
+                f"{self.retry_cap}: the retry walk needs a full group of retry_cap graded "
+                "repetitions in every analysable scenario-cell")
         if self.s_floor < MIN_BOOTSTRAP_SAMPLES:
             raise ValueError(f"s_floor is below the bootstrap floor {MIN_BOOTSTRAP_SAMPLES}")
         if self.iterations < MIN_ITERATIONS:

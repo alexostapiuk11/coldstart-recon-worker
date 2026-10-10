@@ -12,6 +12,11 @@ what was lost and why. The set is passed explicitly to every estimate, the
 hypotheses and the costs: `S`, the effects, the hypotheses and the cost table
 are all about the same scenarios. H5 may drop a few more (an empty A/A half),
 disclosed in `h5_dropped_scenarios`.
+
+`analysable_below_s_floor` is true when fewer scenarios survive the floor than
+the pre-registered `s_floor`. The estimates still run (while S reaches the
+bootstrap floor), but the post must disclose that the pre-registered scenario
+count was not met.
 """
 
 from collections import Counter, defaultdict
@@ -221,6 +226,7 @@ def analyse(records, recovery_records, scenarios, prereg, *, slices=None,
         "model": prereg.primary.model,
         "settings": prereg.primary.to_dict(),
         "S": len(analysable),
+        "analysable_below_s_floor": len(analysable) < prereg.s_floor,
         "N": prereg.reps,
         "min_graded_per_cell": prereg.min_graded_per_cell,
         "dropped_scenarios": dropped,

@@ -78,10 +78,17 @@ def test_rho_from_the_pilot():
     assert rho(recs, {"a", "b", "c", "d"}) == 1.0
 
 
-def test_min_graded_per_cell_defaults_to_two_and_appears_in_the_table():
+def test_min_graded_per_cell_defaults_to_three_and_appears_in_the_table():
     p = example_prereg()
-    assert p.min_graded_per_cell == 2
-    assert "| `min_graded_per_cell` | `2` |" in prereg_table(p)
+    assert p.min_graded_per_cell == 3
+    assert "| `min_graded_per_cell` | `3` |" in prereg_table(p)
+
+
+@pytest.mark.parametrize("value", [1, 2])
+def test_min_graded_per_cell_below_retry_cap_is_refused(value):
+    with pytest.raises(ValueError, match="full group of retry_cap"):
+        example_prereg(retry_cap=3, min_graded_per_cell=value)
+    example_prereg(retry_cap=value, min_graded_per_cell=value)  # at the cap is allowed
 
 
 @pytest.mark.parametrize("value", [0, 6])
@@ -229,9 +236,9 @@ def test_a_candidate_below_the_graded_minimum_is_excluded_whatever_its_rate():
     sid = scs[0].id
     pilot = [_rec(sid, 0, "CORRECT"), _rec(sid, 1, "WRONG_TOOL")] + [
         _rec(sid, b, "API_ERROR") for b in range(2, 10)]
-    kept = baseline_table(pilot, scs, example_prereg(min_graded_per_cell=2))[0]
+    kept = baseline_table(pilot, scs, example_prereg(min_graded_per_cell=2, retry_cap=2))[0]
     assert kept["include"] and kept["reason"] == "inside the band"
-    dropped = baseline_table(pilot, scs, example_prereg(min_graded_per_cell=3))[0]
+    dropped = baseline_table(pilot, scs, example_prereg(min_graded_per_cell=3, retry_cap=2))[0]
     assert not dropped["include"] and dropped["reason"] == "too few graded repetitions"
     assert dropped["n"] == 2 and dropped["excluded"] == 8
 
