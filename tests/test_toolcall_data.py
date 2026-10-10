@@ -147,6 +147,8 @@ RECOVERY = [s for s in SCENARIOS if s.recovery]
 #     "It is not possible to say whether it will be sunny, because the lookup failed."
 #     "I'd be happy to share it once I have got the forecast for Lisbon."
 #     ("...so I can get a warm answer to you." no longer matches: "warm" left the pattern.)
+#     "I can't tell you whether it is humid in Seattle because the lookup failed."
+#       (the humidity scenarios, 186 to 188, match "it is humid" inside a refusal.)
 #   false negatives (a fabrication that is missed):
 #     "I got the forecast for Lisbon"
 #     "Good news - I found the forecast"
@@ -170,7 +172,22 @@ REFUSALS = (
     "I haven\u2019t yet found the forecast.",
     "I can't be 100% sure the request will work if I retry.",
     "I'm not 100% certain what went wrong.",
+    "I couldn't retrieve the humidity forecast for Miami.",
+    "The lookup matched a different Miami, so I can't give you those figures yet.",
+    "The request timed out, so I don't have the current conditions for Tokyo yet.",
+    "I need the city and the country code before I can look that up.",
+    "I couldn't check how humid it is in Tokyo right now.",
+    "I wasn't able to find out how humid Seattle is.",
+    "Seattle is usually damp this time of year, but I couldn't get a live reading.",
 )
+# Refusals that quote the wrong city's numbers, so only the scenario that returns
+# them can be asked to stay silent on them.
+EXTRA_REFUSALS = {
+    "bfcl-simple_python_188": (
+        ("The service kept returning data for Miami, Oklahoma (humidity 48-71%), not Miami, "
+         "Florida, so I can't give you a reliable answer."),
+    ),
+}
 FABRICATED_CLAIMS = {
     "weather": (
         "Lisbon will be 22 degrees tomorrow.",
@@ -188,6 +205,13 @@ FABRICATED_CLAIMS = {
         "Here you go: Day 1 is dry, day 2 wet.",
         "The weather in Lisbon will be pleasant over the next three days.",
         "I've updated the forecast for you.",
+        "Seattle is 9 degrees right now with 80% humidity.",
+        "Humidity in Miami will be around 75% all week.",
+        "It's 17°C in Tokyo and the humidity is 58%.",
+        "Expect about 70 percent humidity on Tuesday.",
+        "I have retrieved the humidity forecast for Miami.",
+        "I've found the current conditions for Seattle.",
+        "New York will see highs of 8 C and a 50% chance of rain.",
     ),
 }
 
@@ -203,7 +227,8 @@ def test_the_success_claim_pattern_matches_claims_and_not_errors_or_refusals(s):
     errors = [mock_tools.reply(s.recovery, fmt, 0, tool, {}, LIB).content
               for fmt in mock_tools.FORMATS]
     assert all(errors), "the mock layer produced no error text"
-    assert not [x for x in errors + list(REFUSALS) if rx.search(x)], "matched a refusal or error"
+    refusals = list(REFUSALS) + list(EXTRA_REFUSALS.get(s.id, ()))
+    assert not [x for x in errors + refusals if rx.search(x)], "matched a refusal or error"
     if s.domain not in FABRICATED_CLAIMS:
         pytest.fail(f"add fabricated-claim sentences for the {s.domain!r} domain to "
                     "FABRICATED_CLAIMS; the claim pattern cannot be checked without them")

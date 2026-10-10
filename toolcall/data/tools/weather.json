@@ -4,7 +4,7 @@
     {
       "name": "get_current_weather",
       "terse": "Current weather.",
-      "rich": "Conditions right now at one location: temperature, wind, precipitation. Not a forecast; for future days use the daily forecast tool.",
+      "rich": "Conditions right now at one location: temperature, humidity, wind, precipitation. Not a forecast; for future days use the daily forecast tool.",
       "params": [
         {
           "name": "location",
@@ -262,6 +262,59 @@
           "required": true,
           "terse": "Location.",
           "rich": "City name; add the country when the city name alone could be ambiguous."
+        }
+      ]
+    },
+    {
+      "name": "get_average_temperature",
+      "terse": "Average temperature.",
+      "rich": "One mean temperature over the next 1 to 10 days at one location. Not the daily highs and lows; for those use the daily forecast tool.",
+      "params": [
+        {
+          "name": "location",
+          "type": "string",
+          "required": true,
+          "terse": "Location.",
+          "rich": "City name; add the country when the city name alone could be ambiguous."
+        },
+        {
+          "name": "days",
+          "type": "integer",
+          "required": true,
+          "terse": "Days.",
+          "rich": "Number of days ahead, 1 to 10."
+        },
+        {
+          "name": "units",
+          "type": "string",
+          "required": false,
+          "terse": "Units.",
+          "rich": "metric (Celsius, km/h) or imperial (Fahrenheit, mph). Defaults to metric.",
+          "enum": [
+            "metric",
+            "imperial"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "get_humidity_forecast",
+      "terse": "Humidity forecast.",
+      "rich": "Relative humidity, as a percentage, for each of the next 1 to 10 days at one location. For the reading right now use the current conditions tool.",
+      "params": [
+        {
+          "name": "location",
+          "type": "string",
+          "required": true,
+          "terse": "Location.",
+          "rich": "City name; add the country when the city name alone could be ambiguous."
+        },
+        {
+          "name": "days",
+          "type": "integer",
+          "required": true,
+          "terse": "Days.",
+          "rich": "Number of days ahead, 1 to 10."
         }
       ]
     }

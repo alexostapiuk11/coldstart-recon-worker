@@ -1,0 +1,92 @@
+{
+  "id": "bfcl-simple_python_185",
+  "source": {
+    "kind": "bfcl",
+    "id": "simple_python_185",
+    "commit": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
+  },
+  "domain": "weather",
+  "target_failure_mode": "WRONG_TOOL",
+  "tools": [
+    "get_forecast",
+    "get_severe_alerts"
+  ],
+  "confusables": [
+    "get_hourly_forecast",
+    "get_current_weather",
+    "get_weather_radar",
+    "get_climate_normals"
+  ],
+  "user_message": "What will be the weather in New York in the next 72 hours including the precipitation?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_forecast",
+        "args": {
+          "location": {
+            "pattern": "new york(?: city)?(?:(?:,\\s*|\\s+)(?:ny|new york|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "New York"
+          },
+          "days": 3
+        },
+        "may_include": {
+          "units": {
+            "one_of": [
+              "metric",
+              "imperial"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "location",
+    "expected": "give the city, the two-letter state code and the country, for example 'New York, NY, USA'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_forecast",
+        "args": {
+          "location": {
+            "pattern": "new york(?: city)?,\\s*ny,\\s*(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)",
+            "example": "New York, NY, USA"
+          },
+          "days": 3
+        },
+        "may_include": {
+          "units": {
+            "one_of": [
+              "metric",
+              "imperial"
+            ]
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "days": [
+        {
+          "date": "2026-11-03",
+          "high_c": 12,
+          "low_c": 6,
+          "rain_pct": 30
+        },
+        {
+          "date": "2026-11-04",
+          "high_c": 10,
+          "low_c": 5,
+          "rain_pct": 60
+        },
+        {
+          "date": "2026-11-05",
+          "high_c": 9,
+          "low_c": 4,
+          "rain_pct": 20
+        }
+      ]
+    },
+    "success_claim_pattern": "\\d\\s*(?:°|degrees?|percent|celsius|fahrenheit|[cf]\\b)|\\d\\s*%(?!\\s*(?:sure|certain|confident))|\\b(?:sunny|cloudy|overcast|showers?|drizzle|rainy|dry|pleasant|clear skies|chance of rain|rain is|expect rain)\\b|\\b(?:i(?:'ve| have)|here(?:'s| is| are)) (?:just )?(?:retrieved|got|found|fetched|pulled up|updated|checked)\\b|\\bhere(?:'s| is| are) (?:the|your) forecast"
+  },
+  "notes": "BFCL detailed_weather_forecast(location, duration in hours, include_precipitation) was re-targeted onto get_forecast. 72 hours becomes days=3 (the hourly tool stops at 48 hours, and the daily forecast carries the chance of rain, so include_precipitation is dropped). get_hourly_forecast is the tempting wrong choice: 'hours' in the message, but its range ends at 48 and only the rich description says so. Same shape as weather-forecast-lisbon, with the hours-to-days conversion added."
+}

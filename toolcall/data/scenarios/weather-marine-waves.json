@@ -1,0 +1,43 @@
+{
+  "id": "weather-marine-waves",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "weather",
+  "target_failure_mode": "MALFORMED",
+  "tools": [
+    "get_marine_forecast",
+    "get_sunrise_sunset"
+  ],
+  "confusables": [
+    "get_forecast",
+    "get_hourly_forecast",
+    "get_current_weather",
+    "get_severe_alerts",
+    "get_weather_radar"
+  ],
+  "user_message": "How high are the waves going to be at Cascais?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_marine_forecast",
+        "args": {
+          "station": {
+            "pattern": "cascais(?:(?:,\\s*|\\s+)portugal)?",
+            "example": "Cascais"
+          },
+          "days": {
+            "one_of": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "notes": "The message never says for how long, but days is required (1 to 5). The natural call omits it, which is MALFORMED, most likely in the loose renderings where only the station is required. Any whole number of days from 1 to 5 is a fair reading of 'going to be', so every value in the tool's range is accepted; only an omitted or non-integer days is a failure."
+}

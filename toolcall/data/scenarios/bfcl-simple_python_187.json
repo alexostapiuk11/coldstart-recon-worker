@@ -1,0 +1,74 @@
+{
+  "id": "bfcl-simple_python_187",
+  "source": {
+    "kind": "bfcl",
+    "id": "simple_python_187",
+    "commit": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
+  },
+  "domain": "weather",
+  "target_failure_mode": "WRONG_TOOL",
+  "tools": [
+    "get_current_weather",
+    "get_sunrise_sunset"
+  ],
+  "confusables": [
+    "get_humidity_forecast",
+    "get_hourly_forecast",
+    "get_forecast",
+    "get_air_quality",
+    "get_weather_radar"
+  ],
+  "user_message": "What's the current temperature and humidity in Seattle, Washington?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_current_weather",
+        "args": {
+          "location": {
+            "pattern": "seattle(?:(?:,\\s*|\\s+)(?:wa|washington|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "Seattle, Washington"
+          }
+        },
+        "may_include": {
+          "units": {
+            "one_of": [
+              "metric",
+              "imperial"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "location",
+    "expected": "give the city and the two-letter country code, for example 'Seattle, US'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_current_weather",
+        "args": {
+          "location": {
+            "pattern": "seattle(,\\s*(wa|washington))?,\\s*us",
+            "example": "Seattle, US"
+          }
+        },
+        "may_include": {
+          "units": {
+            "one_of": [
+              "metric",
+              "imperial"
+            ]
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "location": "Seattle, US",
+      "temperature_c": 11,
+      "humidity_pct": 82
+    },
+    "success_claim_pattern": "\\d\\s*(?:°|degrees?|percent|celsius|fahrenheit|[cf]\\b)|\\d\\s*%(?!\\s*(?:sure|certain|confident))|\\b(?:sunny|cloudy|overcast|showers?|drizzle|rainy|dry|pleasant|clear skies|chance of rain|rain is|expect rain)\\b|\\b(?:i(?:'ve| have)|here(?:'s| is| are)) (?:just )?(?:retrieved|got|found|fetched|pulled up|updated|checked)\\b|\\bhere(?:'s| is| are) (?:the|your) forecast|(?:it(?:'s| is| will be)|(?:very|quite|fairly|rather|pretty|really|so|mild and|cool and|warm and)) (?:humid|muggy|damp)\\b"
+  },
+  "notes": "BFCL get_current_weather(location, include_temperature, include_humidity) matches the library tool of the same name, so the scenario is re-targeted onto it. The two include_* flags default to true in BFCL and the library tool always returns both, so they are dropped. Ground truth 'Seattle' and 'Seattle, Washington' are both accepted. The tempting wrong choice is the humidity forecast tool, or the hourly one."
+}

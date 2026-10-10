@@ -1,0 +1,71 @@
+{
+  "id": "bfcl-simple_python_188",
+  "source": {
+    "kind": "bfcl",
+    "id": "simple_python_188",
+    "commit": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
+  },
+  "domain": "weather",
+  "target_failure_mode": "MISSING",
+  "tools": [
+    "get_humidity_forecast",
+    "get_uv_index"
+  ],
+  "confusables": [
+    "get_current_weather",
+    "get_forecast",
+    "get_climate_normals",
+    "get_hourly_forecast",
+    "get_historical_weather"
+  ],
+  "user_message": "What is the humidity level in Miami, Florida in the upcoming 7 days?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_humidity_forecast",
+        "args": {
+          "location": {
+            "pattern": "miami(?:(?:,\\s*|\\s+)(?:fl|florida|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "Miami, Florida"
+          },
+          "days": 7
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "contradicting_result",
+    "param": "location",
+    "expected": "The lookup matched a different Miami; give the city, state and country, for example 'Miami, Florida, United States'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_humidity_forecast",
+        "args": {
+          "location": {
+            "pattern": "miami,\\s*(?:florida|fl),\\s*(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)",
+            "example": "Miami, Florida, United States"
+          },
+          "days": 7
+        }
+      }
+    ],
+    "contradicting_result": {
+      "location": "Miami, Oklahoma, United States",
+      "days": 7,
+      "humidity_pct_range": [
+        48,
+        71
+      ]
+    },
+    "success_result": {
+      "location": "Miami, Florida, United States",
+      "days": 7,
+      "humidity_pct_range": [
+        64,
+        85
+      ]
+    },
+    "success_claim_pattern": "(?s)^(?!.*oklahoma).*?(?:\\d\\s*(?:°|degrees?|percent|celsius|fahrenheit|[cf]\\b)|\\d\\s*%(?!\\s*(?:sure|certain|confident))|\\b(?:sunny|cloudy|overcast|showers?|drizzle|rainy|dry|pleasant|clear skies|chance of rain|rain is|expect rain)\\b|\\b(?:i(?:'ve| have)|here(?:'s| is| are)) (?:just )?(?:retrieved|got|found|fetched|pulled up|updated|checked)\\b|\\bhere(?:'s| is| are) (?:the|your) forecast|(?:it(?:'s| is| will be)|(?:very|quite|fairly|rather|pretty|really|so|mild and|cool and|warm and)) (?:humid|muggy|damp)\\b)"
+  },
+  "notes": "BFCL weather_humidity_forecast(location, days, min_humidity) became the new library tool get_humidity_forecast(location, days): no existing tool forecasts humidity. The optional min_humidity filter is dropped (the message does not use it; ground truth left it at 0). Target MISSING: Miami's humidity is common knowledge, so a model may answer from memory instead of calling; the seven-day figures need the tool. Ground truth 'Miami' and 'Miami, Florida' are both accepted."
+}

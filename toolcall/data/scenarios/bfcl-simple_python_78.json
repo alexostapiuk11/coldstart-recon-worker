@@ -1,0 +1,43 @@
+{
+  "id": "bfcl-simple_python_78",
+  "source": {
+    "kind": "bfcl",
+    "id": "simple_python_78",
+    "commit": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
+  },
+  "domain": "weather",
+  "target_failure_mode": "WRONG_PARAMS",
+  "tools": [
+    "get_average_temperature",
+    "get_air_quality"
+  ],
+  "confusables": [
+    "get_forecast",
+    "get_climate_normals",
+    "get_historical_weather",
+    "get_current_weather"
+  ],
+  "user_message": "Get the average temperature in Austin for the next 3 days in Celsius.",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_average_temperature",
+        "args": {
+          "location": {
+            "pattern": "austin(?:(?:,\\s*|\\s+)(?:tx|texas|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "Austin"
+          },
+          "days": 3
+        },
+        "may_include": {
+          "units": {
+            "one_of": [
+              "metric"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "notes": "BFCL average_temperature(location, days, temp_unit) became the new library tool get_average_temperature(location, days, units): no existing tool returns one mean temperature, and get_forecast gives daily highs and lows. temp_unit 'Celsius' maps to units 'metric' (omitting units is also right, metric is the default), so the user's word 'Celsius' is a wrong value for the enum. Ground truth location 'Austin' also accepts a state or country suffix."
+}

@@ -1,0 +1,72 @@
+{
+  "id": "bfcl-simple_python_186",
+  "source": {
+    "kind": "bfcl",
+    "id": "simple_python_186",
+    "commit": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
+  },
+  "domain": "weather",
+  "target_failure_mode": "WRONG_PARAMS",
+  "tools": [
+    "get_current_weather",
+    "get_sunrise_sunset"
+  ],
+  "confusables": [
+    "get_forecast",
+    "get_hourly_forecast",
+    "get_air_quality",
+    "get_humidity_forecast",
+    "get_climate_normals"
+  ],
+  "user_message": "What is the temperature in celsius and humidity level of Tokyo, Japan right now?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_current_weather",
+        "args": {
+          "location": {
+            "pattern": "tokyo(?:(?:,\\s*|\\s+)japan)?",
+            "example": "Tokyo, Japan"
+          }
+        },
+        "may_include": {
+          "units": {
+            "one_of": [
+              "metric"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "timeout",
+    "param": "location",
+    "expected": "send the same request again",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_current_weather",
+        "args": {
+          "location": {
+            "pattern": "tokyo(?:(?:,\\s*|\\s+)japan)?",
+            "example": "Tokyo, Japan"
+          }
+        },
+        "may_include": {
+          "units": {
+            "one_of": [
+              "metric"
+            ]
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "location": "Tokyo, Japan",
+      "temperature_c": 15,
+      "humidity_pct": 62
+    },
+    "success_claim_pattern": "\\d\\s*(?:°|degrees?|percent|celsius|fahrenheit|[cf]\\b)|\\d\\s*%(?!\\s*(?:sure|certain|confident))|\\b(?:sunny|cloudy|overcast|showers?|drizzle|rainy|dry|pleasant|clear skies|chance of rain|rain is|expect rain)\\b|\\b(?:i(?:'ve| have)|here(?:'s| is| are)) (?:just )?(?:retrieved|got|found|fetched|pulled up|updated|checked)\\b|\\bhere(?:'s| is| are) (?:the|your) forecast|(?:it(?:'s| is| will be)|(?:very|quite|fairly|rather|pretty|really|so|mild and|cool and|warm and)) (?:humid|muggy|damp)\\b"
+  },
+  "notes": "BFCL current_weather_condition(city, country, measurement) was re-targeted onto get_current_weather(location, units). city 'Tokyo' and country 'Japan' become location 'Tokyo, Japan' (bare 'Tokyo' is also accepted); measurement 'c' becomes units 'metric' (omitting units is also right). 'celsius' or 'c' is a wrong value for the enum. get_current_weather's description now lists humidity (rich only). The recovery is a timeout, so an identical retry is the right move; a model whose first call carried a bad unit cannot recover by retrying it."
+}
