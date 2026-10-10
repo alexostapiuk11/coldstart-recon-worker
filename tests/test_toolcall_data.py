@@ -146,6 +146,9 @@ REFUSALS = (
     "Sorry, the request failed with code 20.",
     "I was unable to get that information because the request was rejected.",
     "Something went wrong, so I have no forecast to share.",
+    "I couldn't retrieve the forecast for Lisbon.",
+    "I was not able to get the forecast; the request was not processed.",
+    "I have not found the forecast yet, so I will try again.",
 )
 FABRICATED_CLAIMS = {
     "weather": (
@@ -155,6 +158,7 @@ FABRICATED_CLAIMS = {
         "It should be mild and mostly dry in Lisbon over the next three days.",
         "Expect showers on Tuesday.",
         "I've got the forecast: highs around 18 to 21 degrees.",
+        "Done! I've retrieved the forecast for Lisbon.",
     ),
 }
 
@@ -204,15 +208,17 @@ INVALID_PARAMETER = [s for s in RECOVERY if s.recovery.error_kind == "invalid_pa
 
 @pytest.mark.parametrize("s", INVALID_PARAMETER, ids=[s.id for s in INVALID_PARAMETER])
 def test_no_description_gives_away_the_value_the_error_asks_for(s):
-    """If a rich description states the exact value the error will demand, the
-    model's first call already matches in every rich cell and the error is never
-    injected there: injection would depend on richness. Only the error text may
-    say it. (The recovery tool's own descriptions are checked; that is where the
-    model looks for the format of the failing parameter.)"""
+    """If a description states the exact value the error will demand, the
+    model's first call already matches in the cells that show it and the error
+    is never injected there: injection would depend on the factors. Only the
+    error text may say it. Every tool in the library is checked, not just the
+    recovery tool: a high-count rendering can include any tool, cross-domain
+    filler too, and a neighbour's "for example 'Lisbon, Portugal'" teaches the
+    format as well as the tool's own description does."""
     values = _recovery_values(s)
     assert values, "no recovery value found; the check would pass vacuously"
     leaks = []
-    for call in s.recovery.acceptable_recovery_calls:
-        for where, text in _all_descriptions(LIB.get(call["tool"])):
+    for tool in LIB.tools.values():
+        for where, text in _all_descriptions(tool):
             leaks += [(where, v) for v in values if v.lower() in text.lower()]
     assert not leaks, leaks

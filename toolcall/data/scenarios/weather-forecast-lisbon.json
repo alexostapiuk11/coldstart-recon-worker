@@ -84,7 +84,7 @@
         }
       ]
     },
-    "success_claim_pattern": "\\d\\s*(?:°|degrees|%|percent)|\\b(?:sunny|cloudy|overcast|showers?|drizzle|mild|warm|chance of rain)\\b|\\bhere(?:'s| is| are) (?:the|your) forecast"
+    "success_claim_pattern": "\\d\\s*(?:°|degrees|%|percent)|\\b(?:sunny|cloudy|overcast|showers?|drizzle|mild|warm|chance of rain)\\b|\\bhere(?:'s| is| are) (?:the|your) forecast|\\b(?<!not )(?<!n't )(?<!n’t )(?<!never )(?:retrieved|got|found|fetched|pulled up) (?:the|your) forecast"
   },
   "notes": "get_current_weather and get_climate_normals both answer 'weather in Lisbon'; only get_forecast answers 'next three days'."
 }

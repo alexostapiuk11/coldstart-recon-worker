@@ -11,7 +11,7 @@
           "type": "string",
           "required": true,
           "terse": "Location.",
-          "rich": "City and country, for example 'Lisbon, Portugal'."
+          "rich": "City name; add the country when the city name alone could be ambiguous."
         },
         {
           "name": "units",
@@ -68,7 +68,7 @@
           "type": "string",
           "required": true,
           "terse": "Location.",
-          "rich": "City and country, for example 'Lisbon, Portugal'."
+          "rich": "City name; add the country when the city name alone could be ambiguous."
         },
         {
           "name": "hours",
@@ -89,7 +89,7 @@
           "type": "string",
           "required": true,
           "terse": "Location.",
-          "rich": "City and country, for example 'Lisbon, Portugal'."
+          "rich": "City name; add the country when the city name alone could be ambiguous."
         }
       ]
     },
@@ -103,7 +103,7 @@
           "type": "string",
           "required": true,
           "terse": "Location.",
-          "rich": "City and country, for example 'Lisbon, Portugal'."
+          "rich": "City name; add the country when the city name alone could be ambiguous."
         },
         {
           "name": "date",
@@ -125,7 +125,7 @@
           "type": "string",
           "required": true,
           "terse": "Location.",
-          "rich": "City and country, for example 'Lisbon, Portugal'."
+          "rich": "City name; add the country when the city name alone could be ambiguous."
         },
         {
           "name": "date",
@@ -161,7 +161,7 @@
           "type": "string",
           "required": true,
           "terse": "Location.",
-          "rich": "City and country, for example 'Lisbon, Portugal'."
+          "rich": "City name; add the country when the city name alone could be ambiguous."
         },
         {
           "name": "date",
@@ -183,7 +183,7 @@
           "type": "string",
           "required": true,
           "terse": "Location.",
-          "rich": "City and country, for example 'Lisbon, Portugal'."
+          "rich": "City name; add the country when the city name alone could be ambiguous."
         },
         {
           "name": "date",
@@ -226,7 +226,7 @@
           "type": "string",
           "required": true,
           "terse": "Location.",
-          "rich": "City and country, for example 'Lisbon, Portugal'."
+          "rich": "City name; add the country when the city name alone could be ambiguous."
         },
         {
           "name": "month",
@@ -261,7 +261,7 @@
           "type": "string",
           "required": true,
           "terse": "Location.",
-          "rich": "City and country, for example 'Lisbon, Portugal'."
+          "rich": "City name; add the country when the city name alone could be ambiguous."
         }
       ]
     }
