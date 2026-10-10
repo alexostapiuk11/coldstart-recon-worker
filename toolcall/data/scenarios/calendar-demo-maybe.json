@@ -1,0 +1,59 @@
+{
+  "id": "calendar-demo-maybe",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "calendar",
+  "target_failure_mode": "WRONG_PARAMS",
+  "tools": [
+    "rsvp_event",
+    "get_event"
+  ],
+  "confusables": [
+    "add_attendee",
+    "remove_attendee",
+    "cancel_event",
+    "set_reminder",
+    "update_event"
+  ],
+  "user_message": "I'm only a maybe for the product demo on 2026-11-19 (event 5120). Can you answer the invitation that way?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "rsvp_event",
+        "args": {
+          "event_id": {
+            "pattern": "#?(?:(?:ev|evt|event)[-_ ]?)?5120(?:-26)?",
+            "example": "5120"
+          },
+          "response": "tentative"
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "event_id",
+    "expected": "ids are written 'ev-', then the number, then the two-digit year of the event's date, for example 'ev-4471-26'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "rsvp_event",
+        "args": {
+          "event_id": {
+            "pattern": "ev-5120-26",
+            "example": "ev-5120-26"
+          },
+          "response": "tentative"
+        }
+      }
+    ],
+    "success_result": {
+      "event_id": "ev-5120-26",
+      "title": "Product demo",
+      "your_response": "tentative",
+      "organizer_notified": true
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:created|scheduled|booked|added|set up|sent|invited|moved|rescheduled|updated|changed|converted|replied|responded|marked|put|told|notified|informed)\\b|\\bhere(?:'s| is| are) (?:the|your|that) (?:converted time|conversion|schedule|agenda|calendar|events|list|week|invite|invitation|updated)\\b|(?:^|[.!?]\\s*)(?:done|all set|you(?:'re| are) all set)\\b|\\b(?<!nothing )(?:has been|have been|was|is now|are now) (?:recorded|marked|set|updated|notified|saved|told|informed)\\b|\\byour (?:response|reply|status) is (?:now |currently )(?:tentative|a maybe|maybe)\\b|\\b(?:you(?:'re| are)|your (?:response|reply|status) is) (?:now |currently )?(?:marked|recorded|set|showing|listed|down)\\b"
+  },
+  "notes": "Target WRONG_PARAMS: 'maybe' is the natural word, and it is not in the response enum (accepted, declined, tentative). The strict renderings show the enum, so the trap bites mostly in the loose ones. Recovery is on event_id, a different parameter, so a loose-cell model that first wrote 'maybe' must fix two things while the error names one (the same shape as weather-forecast-lisbon, where a wrong tool also meets a location error). A wrong first call can confound recovery; the analysis also reports recovery conditioned on a correct first call. The natural event_id is the bare number from the message; the service wants a year-suffixed form it can only learn from the error. The date in the message (2026-11-19) is what makes the two-digit year derivable."
+}

@@ -1,0 +1,105 @@
+{
+  "id": "calendar-board-prep-move",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "calendar",
+  "target_failure_mode": "WRONG_TOOL",
+  "tools": [
+    "update_event",
+    "list_events",
+    "search_events",
+    "list_events_between"
+  ],
+  "confusables": [
+    "create_event",
+    "cancel_event",
+    "get_event",
+    "find_free_slots",
+    "set_reminder"
+  ],
+  "user_message": "Move my 'Board prep' on 2026-11-18 to 15:00.",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "list_events",
+        "args": {
+          "date": "2026-11-18"
+        }
+      },
+      {
+        "tool": "list_events_between",
+        "args": {
+          "start_date": "2026-11-18",
+          "end_date": {
+            "one_of": [
+              "2026-11-18",
+              "2026-11-19"
+            ]
+          }
+        }
+      },
+      {
+        "tool": "search_events",
+        "args": {
+          "query": {
+            "pattern": "board(?: prep(?:aration)?)?",
+            "example": "Board prep"
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "timeout",
+    "param": "date",
+    "expected": "send the same request again",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "list_events",
+        "args": {
+          "date": "2026-11-18"
+        }
+      },
+      {
+        "tool": "list_events_between",
+        "args": {
+          "start_date": "2026-11-18",
+          "end_date": {
+            "one_of": [
+              "2026-11-18",
+              "2026-11-19"
+            ]
+          }
+        }
+      },
+      {
+        "tool": "search_events",
+        "args": {
+          "query": {
+            "pattern": "board(?: prep(?:aration)?)?",
+            "example": "Board prep"
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "events": [
+        {
+          "id": "ev-3187-26",
+          "title": "Board prep",
+          "start_time": "11:00",
+          "duration_minutes": 60
+        },
+        {
+          "id": "ev-3190-26",
+          "title": "Lunch with Sam Ortiz",
+          "start_time": "12:30",
+          "duration_minutes": 45
+        }
+      ]
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:created|scheduled|booked|added|set up|sent|invited|moved|rescheduled|updated|changed|converted|replied|responded|marked|put|told|notified|informed)\\b|\\bhere(?:'s| is| are) (?:the|your|that) (?:converted time|conversion|schedule|agenda|calendar|events|list|week|invite|invitation|updated)\\b|(?:^|[.!?]\\s*)(?:done|all set|you(?:'re| are) all set)\\b|\\b(?:has been|have been|'s been|is now|are now) (?:moved|pushed|rescheduled|changed|shifted|updated)\\b|\\b(?:was|were) (?:moved|pushed|rescheduled|shifted)\\b|\\bnow (?:starts?|begins?|runs?) (?:at|from) \\d|\\bis now (?:at|set for|scheduled for|starting at) \\d|\\b(?:it(?:'s| is)|that(?:'s| is)) now (?:at|set for) \\d"
+  },
+  "notes": "Moving an event needs its id, which the message does not give. WRONG_TOOL here means the model skipped the lookup. The tempting wrong call is update_event with an invented id (or a new event at 15:00); the right first step is to look the event up: the day listing, the title search, or a one-day range listing (start 2026-11-18, end 2026-11-18 or 2026-11-19) are all legitimate. A transient timeout is safe here: the lookup is the same call on retry, and the first call fails whatever it was."
+}

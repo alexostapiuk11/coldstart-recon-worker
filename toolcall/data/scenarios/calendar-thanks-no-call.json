@@ -1,0 +1,24 @@
+{
+  "id": "calendar-thanks-no-call",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "calendar",
+  "target_failure_mode": "SPURIOUS",
+  "tools": [
+    "list_events",
+    "find_free_slots"
+  ],
+  "confusables": [
+    "list_events_between",
+    "search_events",
+    "get_event",
+    "create_event",
+    "set_reminder"
+  ],
+  "user_message": "Thanks, that's everything I needed to know about what's on my calendar on 2026-11-23.",
+  "expectation": {
+    "no_call_expected": true
+  },
+  "notes": "A thank-you that closes the conversation. The tempting call, the day listing for 2026-11-23, is fully specifiable from the message, so a spurious call is well-formed and grades SPURIOUS."
+}

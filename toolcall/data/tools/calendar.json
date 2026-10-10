@@ -94,7 +94,7 @@
     {
       "name": "list_events",
       "terse": "List events.",
-      "rich": "Every event on one date, with ids, times and titles.",
+      "rich": "Every event on one date, with ids, times and titles. For a span of several days use the multi-day listing tool.",
       "params": [
         {
           "name": "date",
@@ -174,7 +174,7 @@
     {
       "name": "add_attendee",
       "terse": "Invite someone.",
-      "rich": "Add one invitee to an existing event by its id.",
+      "rich": "Add one invitee to an existing event by its id. To take someone off an event use the invitee-removal tool.",
       "params": [
         {
           "name": "event_id",
@@ -238,6 +238,113 @@
           "required": true,
           "terse": "Query.",
           "rich": "Text to look for in titles."
+        }
+      ]
+    },
+    {
+      "name": "list_events_between",
+      "terse": "Events in a date range.",
+      "rich": "Every event from a first date through a last date, with ids, dates, times and titles; up to 14 days. For a single day use the day listing tool.",
+      "params": [
+        {
+          "name": "start_date",
+          "type": "string",
+          "required": true,
+          "terse": "Start date.",
+          "rich": "The first date, YYYY-MM-DD.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        {
+          "name": "end_date",
+          "type": "string",
+          "required": true,
+          "terse": "End date.",
+          "rich": "The last date, YYYY-MM-DD.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      ]
+    },
+    {
+      "name": "convert_time",
+      "terse": "Convert a time.",
+      "rich": "Convert a clock time on a given date from one time zone to another. Not for creating an event or finding free time.",
+      "params": [
+        {
+          "name": "time",
+          "type": "string",
+          "required": true,
+          "terse": "Time.",
+          "rich": "The time in the source zone, 24-hour HH:MM.",
+          "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+        },
+        {
+          "name": "date",
+          "type": "string",
+          "required": true,
+          "terse": "Date.",
+          "rich": "The date, YYYY-MM-DD, because daylight saving can change the result.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        {
+          "name": "from_timezone",
+          "type": "string",
+          "required": true,
+          "terse": "From zone.",
+          "rich": "The time zone the time is in, such as a city or a zone name."
+        },
+        {
+          "name": "to_timezone",
+          "type": "string",
+          "required": true,
+          "terse": "To zone.",
+          "rich": "The time zone to convert to, named the same way."
+        }
+      ]
+    },
+    {
+      "name": "rsvp_event",
+      "terse": "Reply to an invitation.",
+      "rich": "Answer an invitation you received to an existing event, by its id. Not for adding someone else to an event.",
+      "params": [
+        {
+          "name": "event_id",
+          "type": "string",
+          "required": true,
+          "terse": "Event.",
+          "rich": "The id returned by the day listing or the title search."
+        },
+        {
+          "name": "response",
+          "type": "string",
+          "required": true,
+          "terse": "Response.",
+          "rich": "Your answer to the invitation.",
+          "enum": [
+            "accepted",
+            "declined",
+            "tentative"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "remove_attendee",
+      "terse": "Remove an invitee.",
+      "rich": "Take one invitee off an existing event by its id. The event itself stays.",
+      "params": [
+        {
+          "name": "event_id",
+          "type": "string",
+          "required": true,
+          "terse": "Event.",
+          "rich": "The id returned by the day listing or the title search."
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "terse": "Email.",
+          "rich": "The email address of the invitee to remove."
         }
       ]
     }
