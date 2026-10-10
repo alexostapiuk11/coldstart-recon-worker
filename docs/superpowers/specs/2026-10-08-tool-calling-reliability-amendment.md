@@ -649,9 +649,8 @@ Added to the August list. Nothing is removed except the item §11 makes optional
 ## 14. Revised during planning, 2026-10-08
 
 Writing and running plan 1's code in a copy of the repository changed seven details. Each is
-listed with its reason. Item 1 changes a number in §4e and §8. **It needs the author's
-sign-off and has not had it yet.** The others refine the approved decisions without changing
-them.
+listed with its reason. Item 1 changes a number in §4e and §8; **the author signed it off on
+2026-10-09.** The others refine the approved decisions without changing them.
 
 1. **Recovery needs at least 20 scenarios, not 8.** H4's interval is a bootstrap over
    scenarios, and the harness refuses one over fewer than 20 (`MIN_BOOTSTRAP_SAMPLES`,
@@ -720,3 +719,25 @@ was committed. None changes a hypothesis's claim; each makes its test do what §
 
 The sign of each hypothesis's p-value is pinned by tests, because one of the plan's own code
 blocks had H2's backwards. With that error H2 could never have been supported.
+
+### Decided by the author before authoring the suite, 2026-10-09
+
+12. **High-count filler is partly cross-domain, and the pre-registration says so.** §4c asks for
+    filler "from the domain's tool library", but a domain library smaller than 20 tools cannot
+    fill a high cell on its own. The author chose:
+    - every domain library has at least 12 tools;
+    - a scenario's 4–6 confusables come from its own domain, since they carry the `WRONG_TOOL`
+      signal;
+    - the rest of the 20 is filler, from the scenario's own domain first and then from other
+      domains;
+    - the pre-registration states that the filler is partly cross-domain, and the post's
+      `WRONG_TOOL` split (confusable, low set, filler) is read with that in mind.
+
+    Growing every domain to 20 tools would roughly double the authoring and was not chosen.
+13. **The BFCL seed is six files at a pinned commit, not a clone.** The repository is about
+    380 MB, and the seed needs six files of about 0.9 MB in total, fetched at commit `6ea5797`
+    of `ShishirPatil/gorilla` with the author's permission. They are BFCL's v4 files; the plan
+    had assumed v3, and the converter accepted the v4 entries unchanged. The license is Apache 2.0, at the
+    repository root, in the data directory's README front matter, and in the leaderboard's
+    `pyproject.toml`. `toolcall/data/BFCL-SOURCE.md` is the attribution. The author chose 14
+    entries in three domains: weather, units and travel.
