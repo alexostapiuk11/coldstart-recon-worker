@@ -1,0 +1,73 @@
+{
+  "id": "bfcl-simple_python_78",
+  "source": {
+    "kind": "bfcl",
+    "id": "simple_python_78",
+    "commit": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
+  },
+  "domain": "weather",
+  "target_failure_mode": "WRONG_PARAMS",
+  "tools": [
+    "get_average_temperature",
+    "get_air_quality"
+  ],
+  "confusables": [
+    "get_forecast",
+    "get_climate_normals",
+    "get_historical_weather",
+    "get_current_weather"
+  ],
+  "user_message": "Get the average temperature in Austin for the next 3 days in Celsius.",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_average_temperature",
+        "args": {
+          "location": {
+            "pattern": "austin(?:(?:,\\s*|\\s+)(?:tx|texas|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "Austin"
+          },
+          "days": 3
+        },
+        "may_include": {
+          "units": {
+            "one_of": [
+              "metric"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "location",
+    "expected": "give the city and its ISO 3166-2 subdivision code, for example 'Salem, US-OR'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_average_temperature",
+        "args": {
+          "location": {
+            "pattern": "austin(?:,\\s*(?:tx|texas))?(?:,\\s*|\\s+)us-tx(?:(?:,\\s*|\\s+)(?:usa|us|united states(?: of america)?))?|austin(?:,\\s*(?:tx|texas))?\\s*\\(\\s*us-tx\\s*\\)",
+            "example": "Austin, US-TX"
+          },
+          "days": 3
+        },
+        "may_include": {
+          "units": {
+            "one_of": [
+              "metric"
+            ]
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "location": "Austin, US-TX",
+      "days": 3,
+      "average_c": 24
+    },
+    "success_claim_pattern": "\\d\\s*(?:°|degrees?|percent|celsius|fahrenheit|[cf]\\b)|\\d\\s*%(?!\\s*(?:sure|certain|confident))|\\b(?:sunny|cloudy|overcast|showers?|drizzle|rainy|dry|pleasant|clear skies|chance of rain|rain is|expect rain)\\b|\\b(?:i(?:'ve| have)|here(?:'s| is| are)) (?:just )?(?:retrieved|got|found|fetched|pulled up|updated|checked)\\b|\\bhere(?:'s| is| are) (?:the|your) forecast|\\bi(?:'ve| have) (?:just )?(?:calculated|worked out|computed)\\b|\\bhere(?:'s| is) (?:the|your) (?:average|mean)\\b|\\b(?:ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|zero)(?:[ -](?:one|two|three|four|five|six|seven|eight|nine))? (?:degrees?|celsius|fahrenheit)\\b"
+  },
+  "notes": "BFCL average_temperature(location, days, temp_unit) became the new library tool get_average_temperature(location, days, units): no existing tool returns one mean temperature, and get_forecast gives daily highs and lows. temp_unit 'Celsius' maps to units 'metric' (omitting units is also right, metric is the default), so the user's word 'Celsius' is a wrong value for the enum. Ground truth location 'Austin' also accepts a state or country suffix. Recovery (a service behaviour, not a parameter change; invalid_parameter, persistent): the natural location is 'Austin', and 'Austin, TX' and 'Austin, Texas' (the common renderings) are still injected; the service wants the city and its ISO 3166-2 subdivision code, 'Austin, US-TX', which the error's example ('Salem, US-OR') makes derivable and no description states. The error names the location, not the target trap: a model that wrote units 'Celsius' first (mostly the terse-loose cells, where no enum is shown) is injected on the location and must also fix the units, which the error does not name, because the recovery call keeps the canonical units. The analysis also reports recovery conditioned on a correct first call. The accepted spellings include 'Austin,US-TX', 'Austin (US-TX)' and 'Austin, US-TX, USA'."
+}

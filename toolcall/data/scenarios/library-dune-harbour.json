@@ -1,0 +1,60 @@
+{
+  "id": "library-dune-harbour",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "library",
+  "target_failure_mode": "WRONG_TOOL",
+  "tools": [
+    "check_book_availability",
+    "get_book_details",
+    "place_hold"
+  ],
+  "confusables": [
+    "list_branches",
+    "get_branch_hours",
+    "search_catalogue",
+    "list_my_holds",
+    "borrow_ebook"
+  ],
+  "user_message": "Is the copy of Dune with ISBN 9780441172719 on the shelf at the Harbour Street branch today?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "check_book_availability",
+        "args": {
+          "isbn": "9780441172719",
+          "branch": {
+            "pattern": "(?:the )?harbou?r (?:street|st\\.?)(?:,?\\s*(?:branch|library|branch library|library branch|public library|community library))?\\.?",
+            "example": "Harbour Street"
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "branch",
+    "expected": "give the branch's full name, for example 'Mill Lane Community Library'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "check_book_availability",
+        "args": {
+          "isbn": "9780441172719",
+          "branch": {
+            "pattern": "harbour street community library",
+            "example": "Harbour Street Community Library"
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "isbn": "9780441172719",
+      "branch": "Harbour Street Community Library",
+      "copies_on_shelf": 2,
+      "copies_on_loan": 1
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|checked|pulled up|retrieved|fetched|renewed|extended|placed|put|reserved|borrowed|booked|cancelled|canceled|set up|added|updated|sent|processed|completed|submitted)\\b|(?:^|[.!?]\\s+)(?:done|all set)[.!]|\\b(?:\\d+|one|two|three|four|five|six|seven|eight|nine|ten|no|zero)\\s+(?:cop(?:y|ies)|books?)\\b(?! (?:of|you|count|information|data|status|details))|\\b(?:it|they|the copy|the copies|copies|dune)(?:'s|'re| is| are| isn't| aren't| is not| are not)\\s+(?:currently |right now |still |all |both |not |sitting |waiting )?(?:available|unavailable|on the shelf|on the shelves|on loan|out on loan|checked out|in stock|out)\\b|\\b(?:there(?:'s| is| are)|we have|they have|it has|branch has)\\s+(?:currently |still |right now )?(?:\\d+|one|two|three|four|a|an|no|any)\\s+(?:cop(?:y|ies)|book)\\b|\\b(?:on the shelf|on the shelves|available) (?:today|right now|at harbour street)\\b|\\bcopies on (?:the )?shel(?:f|ves)\\s*:?\\s*\\d|\\b\\d+\\s+(?:are |is )?on the shel(?:f|ves)\\b|\\b(?:a|one) copy is (?:available|on the shelf|in)\\b|\\bhere(?:'s| is| are) (?:the|your) (?:availability|result|answer|details)\\b"
+  },
+  "notes": "Target WRONG_TOOL. 'On the shelf today' is an availability question; the tempting wrong calls are the book-details tool (it describes the book and the model may expect availability in it) and a hold (the nearest action on a title that may be out). The ISBN is given as 13 bare digits so that only the branch can break. Recovery is a naming quirk: the service wants the branch's full official name, which ends in 'Community Library', and only the error says so. Tested first calls 'Harbour Street', 'Harbour Street Library', 'Harbour Street Branch', 'Harbour Street branch library' and 'Harbour St' are all injected; a first call with the full name is accepted and not injected. The error's example names a different branch, so the answer itself is never handed over. 'Community Library' and both branch names appear in no description."
+}

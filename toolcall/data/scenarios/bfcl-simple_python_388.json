@@ -1,0 +1,99 @@
+{
+  "id": "bfcl-simple_python_388",
+  "source": {
+    "kind": "bfcl",
+    "id": "simple_python_388",
+    "commit": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
+  },
+  "domain": "units",
+  "target_failure_mode": "WRONG_PARAMS",
+  "tools": [
+    "convert_currency",
+    "convert_currency_at_reference_rate",
+    "get_currency_info"
+  ],
+  "confusables": [
+    "convert_length",
+    "convert_data_size",
+    "convert_energy",
+    "convert_speed",
+    "describe_unit"
+  ],
+  "user_message": "How many Canadian dollars can I get for 500 US dollars?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "convert_currency",
+        "args": {
+          "base_currency": {
+            "pattern": "usd",
+            "example": "USD"
+          },
+          "target_currency": {
+            "pattern": "cad",
+            "example": "CAD"
+          },
+          "amount": 500
+        }
+      },
+      {
+        "tool": "convert_currency_at_reference_rate",
+        "args": {
+          "amount": 500,
+          "from_currency": {
+            "pattern": "usd",
+            "example": "USD"
+          },
+          "to_currency": {
+            "pattern": "cad",
+            "example": "CAD"
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "amount",
+    "expected": "give the amount in the smallest unit of the base currency, for example 'send 1500 for 15.00'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "convert_currency",
+        "args": {
+          "base_currency": {
+            "pattern": "usd|u\\.?s\\.? dollars?|united states dollars?",
+            "example": "USD"
+          },
+          "target_currency": {
+            "pattern": "cad|canadian dollars?",
+            "example": "CAD"
+          },
+          "amount": 50000
+        }
+      },
+      {
+        "tool": "convert_currency_at_reference_rate",
+        "args": {
+          "amount": 50000,
+          "from_currency": {
+            "pattern": "usd|u\\.?s\\.? dollars?|united states dollars?",
+            "example": "USD"
+          },
+          "to_currency": {
+            "pattern": "cad|canadian dollars?",
+            "example": "CAD"
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "base_currency": "USD",
+      "target_currency": "CAD",
+      "amount": 50000,
+      "converted_amount": 68250,
+      "minor_units": true
+    },
+    "success_claim_pattern": "\\b(?:i(?:['’]ve| have)|we(?:['’]ve| have)) (?:just |now |successfully |already )?(?:converted|worked out|calculated|looked up|found|retrieved|fetched|pulled up|checked)\\b|\\bhere(?:['’]s| is| are) (?:the|your|that) (?:conversion|converted (?:time|amount|value|figure)|result|figure)\\b|\\b\\d[\\d,]*(?:\\.\\d+)?[\\s-]*(?:cad|canadian dollars?|canadian bucks)\\b|(?:^|[^a-z])(?:c|ca)\\$ ?\\d|\\bcad ?\\$? ?\\d[\\d,]*|\\b(?:one|two|three|four|five|six|seven|eight|nine)[a-z -]{0,25}hundred[a-z -]{0,25}canadian dollars?\\b"
+  },
+  "notes": "BFCL currency_exchange.convert(base_currency, target_currency, amount) became convert_currency with BFCL's parameters unchanged: two required free strings and an integer amount. BFCL's ground truth is base_currency USD, target_currency CAD, amount 500 (case-insensitive). Two library tools can fairly serve every currency request: convert_currency (base_currency, target_currency, amount) at the live market rate and convert_currency_at_reference_rate (amount, from_currency, to_currency) at the daily reference rate. The message does not say which rate it wants, so both are acceptable calls with the same values mapped onto each tool's own parameter names. Mapping: base_currency/from_currency USD, target_currency/to_currency CAD, amount 500. Target WRONG_PARAMS: the message uses names ('US dollars', 'Canadian dollars') and BFCL's value is the code, so a model that copies the words writes something that is not USD or CAD. The rich descriptions say 'three-letter code', the terse ones do not, so the trap bites mainly in the terse cells. Names are NOT accepted, since a name is not another spelling of the code. Recovery is an invalid parameter about the amount: the service wants it in the smallest unit of the base currency (cents), so 500 US dollars is sent as 50000. No description says so; only the error does. The recovery is a service behaviour, not a parameter change: the first call is still graded on BFCL's amount 500. The recovery calls also accept the currency names ('US dollars', 'Canadian dollars'), because the error names only the amount and a model that started with names must still be able to recover. Persistent, and allowed on WRONG_PARAMS."
+}

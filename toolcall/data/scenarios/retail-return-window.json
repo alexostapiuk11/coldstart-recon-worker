@@ -1,0 +1,50 @@
+{
+  "id": "retail-return-window",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "retail_orders",
+  "target_failure_mode": "MISSING",
+  "tools": [
+    "get_return_policy",
+    "start_return"
+  ],
+  "confusables": [
+    "request_refund",
+    "get_order_details",
+    "get_order_status",
+    "list_customer_orders",
+    "search_products"
+  ],
+  "user_message": "How many days do I have to return a paperback I bought online?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_return_policy",
+        "args": {
+          "category": "books"
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "timeout",
+    "param": "category",
+    "expected": "the same request can be sent again",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_return_policy",
+        "args": {
+          "category": "books"
+        }
+      }
+    ],
+    "success_result": {
+      "category": "books",
+      "return_window_days": 45,
+      "return_postage_paid_by": "customer"
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|checked|pulled up|retrieved|fetched|started|set up|opened|initiated|created|requested|submitted|processed|cancelled|canceled|placed|arranged|issued|registered)\\b|\\bhere(?:'s| is| are) (?:the|your|that) return (?:policy|window)\\b|\\b\\d+[\\s-]*(?:calendar |working |business )?days?\\b|\\b(?:two|three|four|five|six|seven|eight|nine|ten|twelve|fourteen|twenty|twenty-eight|thirty|forty|forty-five|sixty|ninety)[\\s-]*(?:calendar |working |business )?days?\\b|\\b(?:have|get|within|up to|for|in) (?:a|one|two|three|four|six|eight) (?:weeks?|months?)\\b|\\b\\d+[\\s-]*(?:weeks?|months?)\\b|\\breturn (?:window|period) (?:is|of|lasts)\\b|\\bfree (?:return|returns|return postage|return shipping)\\b|\\b(?:postage|shipping) (?:is|are) (?:free|paid)\\b|\\b(?:a|one) (?:full |whole )?(?:month|fortnight)\\b|\\b(?:a )?couple of weeks\\b|\\bwindow is\\b"
+  },
+  "notes": "Target MISSING. Every shop has a return window, and a model believes it knows the usual one (30 days, 14 days) and may answer from memory. The figure for books, and who pays the postage, is the shop's own and only the policy tool has it. The category is an enum and the paperback maps to books only; 'book' or 'paperback' grade WRONG_PARAMS, so in the loose cells that, not MISSING, is the likelier failure. Recovery is a timeout, which is transient: an identical retry is the right move, so H4 excludes it. The scripted answer (45 days) differs from the usual 14 and 30, so a fabricated figure is visible in the transcript."
+}

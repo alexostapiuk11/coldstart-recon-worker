@@ -1,0 +1,366 @@
+{
+  "domain": "files",
+  "tools": [
+    {
+      "name": "list_folder",
+      "terse": "List a folder.",
+      "rich": "Names and kinds (file or folder) of the items directly inside one folder, nothing deeper. Not for finding a file whose folder is unknown and not for the size or dates of a single item.",
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "terse": "Folder.",
+          "rich": "The folder to list, written as a path."
+        },
+        {
+          "name": "sort_by",
+          "type": "string",
+          "required": false,
+          "terse": "Sort order.",
+          "rich": "How to order the items: name, modified (newest first) or size (largest first). By name when omitted.",
+          "enum": [
+            "name",
+            "modified",
+            "size"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "search_files",
+      "terse": "Search files by name.",
+      "rich": "Files and folders whose name contains the search text, from anywhere in the drive or from inside one folder. Not for listing everything in a folder and not for looking inside the contents of files.",
+      "params": [
+        {
+          "name": "query",
+          "type": "string",
+          "required": true,
+          "terse": "Name text.",
+          "rich": "Part of the name to look for."
+        },
+        {
+          "name": "folder",
+          "type": "string",
+          "required": false,
+          "terse": "Search within.",
+          "rich": "Limit the search to this folder and everything under it, written as a path. The whole drive when omitted."
+        }
+      ]
+    },
+    {
+      "name": "get_file_info",
+      "terse": "File details.",
+      "rich": "Size, type, owner, creation date and last-modified date for one file or folder. Not for what is inside a folder and not for earlier versions of a file.",
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "terse": "Item.",
+          "rich": "The file or folder, written as a path."
+        }
+      ]
+    },
+    {
+      "name": "create_folder",
+      "terse": "Create a folder.",
+      "rich": "Make a new empty folder; the folder it goes in must already exist. Not for saving files and not for duplicating a folder that already exists.",
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "terse": "New folder.",
+          "rich": "Where the new folder goes, written as a path that ends with its name."
+        }
+      ]
+    },
+    {
+      "name": "move_file",
+      "terse": "Move a file.",
+      "rich": "Take one file or folder out of its current folder and put it in another, keeping its name and contents; it is gone from the old place afterwards. Not for leaving a duplicate behind and not for changing the name.",
+      "params": [
+        {
+          "name": "source_path",
+          "type": "string",
+          "required": true,
+          "terse": "Item.",
+          "rich": "The file or folder to move, written as a path."
+        },
+        {
+          "name": "destination_folder",
+          "type": "string",
+          "required": true,
+          "terse": "Target folder.",
+          "rich": "The folder it should end up in, written as a path."
+        }
+      ]
+    },
+    {
+      "name": "copy_file",
+      "terse": "Copy a file.",
+      "rich": "Make a duplicate of one file inside a folder and leave the original where it is. Not for relocating the original and not for changing a name.",
+      "params": [
+        {
+          "name": "source_path",
+          "type": "string",
+          "required": true,
+          "terse": "Item.",
+          "rich": "The file to duplicate, written as a path."
+        },
+        {
+          "name": "destination_folder",
+          "type": "string",
+          "required": true,
+          "terse": "Target folder.",
+          "rich": "The folder the duplicate goes in, written as a path."
+        },
+        {
+          "name": "new_name",
+          "type": "string",
+          "required": false,
+          "terse": "Copy name.",
+          "rich": "Name for the duplicate. The original name when omitted."
+        }
+      ]
+    },
+    {
+      "name": "rename_file",
+      "terse": "Rename a file.",
+      "rich": "Change the name of one file or folder where it sits. Not for putting it in a different folder.",
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "terse": "Item.",
+          "rich": "The file or folder to rename, written as a path."
+        },
+        {
+          "name": "new_name",
+          "type": "string",
+          "required": true,
+          "terse": "New name.",
+          "rich": "The new name on its own, with no folders in front of it."
+        }
+      ]
+    },
+    {
+      "name": "delete_file",
+      "terse": "Delete a file.",
+      "rich": "Send one file or folder to the trash, from where it can be brought back for a while. Not for erasing anything for good.",
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "terse": "Item.",
+          "rich": "The file or folder, written as a path."
+        }
+      ]
+    },
+    {
+      "name": "restore_from_trash",
+      "terse": "Restore from trash.",
+      "rich": "Bring one trashed item back to the folder it was deleted from. Not for older versions of a file that is still in place.",
+      "params": [
+        {
+          "name": "file_name",
+          "type": "string",
+          "required": true,
+          "terse": "Trashed item.",
+          "rich": "The name of the item in the trash, with its extension."
+        }
+      ]
+    },
+    {
+      "name": "list_trash",
+      "terse": "List the trash.",
+      "rich": "The items currently in the trash, newest deletion first, with the date each was deleted and the folder it came from. Not for how long items are kept.",
+      "params": [
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": true,
+          "terse": "How many.",
+          "rich": "How many items to show, 1 to 50."
+        }
+      ]
+    },
+    {
+      "name": "share_file",
+      "terse": "Share with a person.",
+      "rich": "Give one named person access to a file or folder at the level chosen; they are told by email. Not for making a link that anyone can open.",
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "terse": "Item.",
+          "rich": "The file or folder to share, written as a path."
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "terse": "Their email.",
+          "rich": "Email address of the person who gets access."
+        },
+        {
+          "name": "permission",
+          "type": "string",
+          "required": true,
+          "terse": "Access level.",
+          "rich": "What the person may do: viewer (look only), commenter (look and leave comments) or editor (change it).",
+          "enum": [
+            "viewer",
+            "commenter",
+            "editor"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "get_share_link",
+      "terse": "Get a share link.",
+      "rich": "A web link that anyone who has it can open to see one file or folder, optionally set to stop working after some days. Not for giving access to a named person.",
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "terse": "Item.",
+          "rich": "The file or folder to link to, written as a path."
+        },
+        {
+          "name": "expires_in_days",
+          "type": "integer",
+          "required": false,
+          "terse": "Link lifetime.",
+          "rich": "Days until the link stops working, 1 to 90. It never expires when omitted."
+        }
+      ]
+    },
+    {
+      "name": "save_from_url",
+      "terse": "Save from a web address.",
+      "rich": "Download the file at a web address and store it in a folder of the drive. Not for copying a file that is already in the drive.",
+      "params": [
+        {
+          "name": "url",
+          "type": "string",
+          "required": true,
+          "terse": "Web address.",
+          "rich": "The full address of the file, starting with https://."
+        },
+        {
+          "name": "destination_folder",
+          "type": "string",
+          "required": true,
+          "terse": "Target folder.",
+          "rich": "The folder the file should be stored in, written as a path."
+        },
+        {
+          "name": "if_exists",
+          "type": "string",
+          "required": true,
+          "terse": "If it exists.",
+          "rich": "What to do when that folder already holds a file with the same name: replace it, keep_both, or skip the download.",
+          "enum": [
+            "replace",
+            "keep_both",
+            "skip"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "check_storage_usage",
+      "terse": "Check storage.",
+      "rich": "How much of the storage allowance is used and how much is free, for the whole drive. Not for the size of one file.",
+      "params": [
+        {
+          "name": "unit",
+          "type": "string",
+          "required": true,
+          "terse": "Unit.",
+          "rich": "Size unit for all the figures, in binary multiples of a byte.",
+          "enum": [
+            "MiB",
+            "GiB",
+            "TiB"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "list_recent_files",
+      "terse": "Recent files.",
+      "rich": "Files added or changed lately, newest first, from anywhere in the drive. Not for searching by name and not for the contents of one folder.",
+      "params": [
+        {
+          "name": "days",
+          "type": "integer",
+          "required": true,
+          "terse": "Days back.",
+          "rich": "How far back to look, 1 to 30 days."
+        },
+        {
+          "name": "kind",
+          "type": "string",
+          "required": false,
+          "terse": "File kind.",
+          "rich": "Only files of this kind: document, image, video, audio or other. All kinds when omitted.",
+          "enum": [
+            "document",
+            "image",
+            "video",
+            "audio",
+            "other"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "list_file_versions",
+      "terse": "Version history.",
+      "rich": "Earlier versions of one file: version number, date saved and who saved it. Not for bringing back a file that was deleted.",
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "terse": "Item.",
+          "rich": "The file or folder, written as a path."
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "terse": "How many.",
+          "rich": "How many versions to show, 1 to 50. The latest 10 when omitted."
+        }
+      ]
+    },
+    {
+      "name": "get_retention_period",
+      "terse": "Retention rules.",
+      "rich": "How long the drive keeps items of one kind before they are erased permanently. Not for what is in the trash right now.",
+      "params": [
+        {
+          "name": "item_type",
+          "type": "string",
+          "required": true,
+          "terse": "Item kind.",
+          "rich": "Which kind of item: trash (deleted files), versions (earlier versions of files) or share_links (links to files).",
+          "enum": [
+            "trash",
+            "versions",
+            "share_links"
+          ]
+        }
+      ]
+    }
+  ]
+}

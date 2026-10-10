@@ -1,0 +1,59 @@
+{
+  "id": "travel-heathrow-code",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "travel",
+  "target_failure_mode": "MISSING",
+  "tools": [
+    "get_airport_info",
+    "get_flight_status"
+  ],
+  "confusables": [
+    "search_flights",
+    "get_geo_distance",
+    "get_driving_distance",
+    "get_transit_distance",
+    "get_visa_requirements"
+  ],
+  "user_message": "What's the three-letter code for Heathrow, and how far is it from central London?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_airport_info",
+        "args": {
+          "airport": {
+            "pattern": "(?:(?:london )?heathrow(?: airport)?(?:\\s*\\(lhr\\))?(?:,?\\s*(?:london|(?:uk|u\\.k\\.|united kingdom|england|great britain)))*(?:\\s*\\(lhr\\))?|lhr)\\.?",
+            "example": "Heathrow"
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "airport",
+    "expected": "give the airport's name, its city and its country, for example 'Schiphol Airport, Amsterdam, Netherlands'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_airport_info",
+        "args": {
+          "airport": {
+            "pattern": "(?:london )?heathrow(?: airport)?(?:\\s*\\(lhr\\))?,\\s*london,\\s*(?:england,\\s*)?(?:uk|u\\.k\\.|united kingdom|england|great britain)\\.?",
+            "example": "Heathrow Airport, London, United Kingdom"
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "name": "Heathrow Airport",
+      "code": "LHR",
+      "city": "London",
+      "country": "United Kingdom",
+      "terminals": 4,
+      "distance_to_centre_km": 23
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|calculated|worked out|pulled up|retrieved|searched|measured|fetched)\\b|\\bhere(?:'s| is| are) (?:the|your|that|a|an) (?:airport|distance)\\b|\\b\\d[\\d,]*(?:\\.\\d+)?[\\s-]*(?:miles?|mi|kms?|kilomet(?:er|re)s?)\\b|\\b(?:hundred|thousand)[a-z -]{0,30}(?:miles?|kilomet(?:er|re)s?)\\b|\\bcode\\b[^.\\n]{0,40}?\\b(?:is|was|=|:)\\s*[\"'“(]?(?-i:[A-Z]{3})\\b|\\b(?:\\d+|one|two|three|four|five|six)\\s+terminals?\\b"
+  },
+  "notes": "Target MISSING: the IATA code of Heathrow and its rough distance from London are among the best-known airport facts, so a model may answer from memory instead of calling. The lookup is still the correct answer: the message asks for a code and a distance, both of which the tool returns. Both the name and the code are accepted as the first call. Recovery: the natural airport value is the name ('Heathrow', 'London Heathrow', 'Heathrow Airport', with or without a city); the service wants name, city and country. The code 'LHR' is also a correct first call, and it is injected too, so recovery has to supply the name, city and country in every case."
+}

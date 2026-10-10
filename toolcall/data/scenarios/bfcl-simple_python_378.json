@@ -1,0 +1,74 @@
+{
+  "id": "bfcl-simple_python_378",
+  "source": {
+    "kind": "bfcl",
+    "id": "simple_python_378",
+    "commit": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
+  },
+  "domain": "units",
+  "target_failure_mode": "WRONG_PARAMS",
+  "tools": [
+    "convert_timezone",
+    "get_local_time"
+  ],
+  "confusables": [
+    "convert_duration",
+    "describe_unit",
+    "convert_speed",
+    "convert_currency",
+    "convert_length"
+  ],
+  "user_message": "Convert time 3pm from New York time zone to London time zone.",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "convert_timezone",
+        "args": {
+          "time": {
+            "pattern": "3\\s?(?:pm|p\\.m\\.)",
+            "example": "3pm"
+          },
+          "from_timezone": {
+            "pattern": "(?:america/new[ _-]york|new[ _-]york(?: city)?(?:,\\s*(?:ny|usa|us|united states))?|nyc)\\.?",
+            "example": "America/New_York"
+          },
+          "to_timezone": {
+            "pattern": "(?:europe/london|london(?:,\\s*(?:uk|u\\.k\\.|england|united kingdom))?)\\.?",
+            "example": "London"
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "from_timezone",
+    "expected": "give the zone as its standard abbreviation, for example 'JST'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "convert_timezone",
+        "args": {
+          "time": {
+            "pattern": "3(?::00)?\\s?(?:pm|p\\.m\\.)|0?3:00 ?pm|15:00",
+            "example": "3pm"
+          },
+          "from_timezone": {
+            "pattern": "e[sd]?t(?:\\s*\\((?:utc|gmt)\\s?[+\\u2212-]\\s?0?[45](?::?00)?\\))?|eastern (?:standard |daylight )time|eastern (?:standard |daylight )?time\\s*\\(e[sd]?t\\)",
+            "example": "EDT"
+          },
+          "to_timezone": {
+            "pattern": "europe/london|london(?:,\\s*(?:uk|u\\.k\\.|england|united kingdom))?|bst|gmt|utc|uk|u\\.k\\.|britain|great britain|england|united kingdom",
+            "example": "London"
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "input": "3pm ET",
+      "converted_time": "8:00 PM",
+      "zone": "BST"
+    },
+    "success_claim_pattern": "\\b(?:i(?:['’]ve| have)|we(?:['’]ve| have)) (?:just |now |successfully |already )?(?:converted|worked out|calculated|looked up|found|retrieved|fetched|pulled up|checked)\\b|\\bhere(?:['’]s| is| are) (?:the|your|that) (?:conversion|converted (?:time|amount|value|figure)|result|figure)\\b|\\blondon(?: time)?: ?(?!3(?::\\d{2})? ?(?:pm|p\\.m\\.)|15[:.]00)\\d{1,2}[:.]?\\d{0,2}|(?:\\bis|'s|’s|\\bbe|\\bequals?|\\bworks? out to|\\bcomes to|=|\\bso|→|->|\\bcorresponds? to) (?:about |around |roughly |approximately |at )?(?!3(?::\\d{2})? ?(?:pm|p\\.m\\.)|15[:.]00)\\d{1,2}(?:[:.]\\d{2})? ?(?:am|pm|a\\.m\\.|p\\.m\\.)|(?:\\bis|'s|’s|\\bbe|\\bequals?|\\bworks? out to|\\bcomes to|=|\\bso|→|->|\\bcorresponds? to) (?:about |around |roughly |approximately |at )?(?!3(?::\\d{2})? ?(?:pm|p\\.m\\.)|15[:.]00)\\d{1,2}[:.]\\d{2}\\b|\\b(?:\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve) hours? (?:behind|ahead|earlier|later)\\b"
+  },
+  "notes": "BFCL timezone.convert(time, from_timezone, to_timezone) became convert_timezone with BFCL's parameters unchanged: three required free strings, no date. BFCL's ground truth is time '3pm', from_timezone America/New_York, New York, NYC or New York City, to_timezone Europe/London or London. 'New York, NY' and 'New York, USA' are accepted as variants of the origin, and 'London, UK' of the destination; the time accepts case, a space and 'p.m.' ('3 PM', '3 p.m.'); 'America/New York', 'New-York' and a trailing full stop are accepted too. The message is BFCL's, verbatim. Target WRONG_PARAMS: the notation of the time is the trap. The rich description gives '3pm' as its example, the terse one gives none, so a model in the terse cells may write '15:00' or '3:00 PM', which are not BFCL's value and are graded WRONG_PARAMS. Zone abbreviations ('EST', 'EDT', 'ET') are not accepted as first calls either. The calendar library's convert_clock_time is NOT an acceptable alternative: it needs a date the message does not give (the offset between the two cities changes for a few weeks each year), so a call to it would have to invent one. As cross-domain filler it could appear in a high cell, where a call to it would grade WRONG_TOOL (filler); with the current seeded draw it does not appear in this scenario's renderings. Recovery is an invalid parameter: the service wants the origin zone as its standard abbreviation. 'America/New_York' and 'New York', the natural first calls, are both injected, and so is a bare 'Eastern Time'; EST, EDT and ET are accepted as the answer (the service does not check the season), as are 'Eastern Time (ET)', 'Eastern Standard Time' and 'EDT (UTC-4)'. The destination may stay a city or be 'UK', 'Britain' or 'England'. Only the origin is named in the error, so the recovery calls also accept the time as '3:00 PM' or '15:00' (the service has no quarrel with those). The recovery kind is persistent, which is allowed on a WRONG_PARAMS target."
+}

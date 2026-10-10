@@ -1,0 +1,372 @@
+{
+  "domain": "travel",
+  "tools": [
+    {
+      "name": "search_flights",
+      "terse": "Search flights.",
+      "rich": "Flights between two airports on one departure date, with times, airlines and prices. Not for the live status of a flight, and not for trains.",
+      "params": [
+        {
+          "name": "origin",
+          "type": "string",
+          "required": true,
+          "terse": "Origin.",
+          "rich": "Departure airport as a three-letter IATA code.",
+          "pattern": "^[A-Z]{3}$"
+        },
+        {
+          "name": "destination",
+          "type": "string",
+          "required": true,
+          "terse": "Destination.",
+          "rich": "Arrival airport as a three-letter IATA code.",
+          "pattern": "^[A-Z]{3}$"
+        },
+        {
+          "name": "date",
+          "type": "string",
+          "required": true,
+          "terse": "Date.",
+          "rich": "Departure date, YYYY-MM-DD.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        {
+          "name": "passengers",
+          "type": "integer",
+          "required": false,
+          "terse": "Passengers.",
+          "rich": "Number of travellers, 1 to 9. Defaults to 1."
+        }
+      ]
+    },
+    {
+      "name": "get_flight_status",
+      "terse": "Flight status.",
+      "rich": "Live status of one flight on one date: scheduled and expected times, gate and delay. Not for finding flights and not for seats.",
+      "params": [
+        {
+          "name": "flight_number",
+          "type": "string",
+          "required": true,
+          "terse": "Flight.",
+          "rich": "Two-letter airline code followed by the number, with no space.",
+          "pattern": "^[A-Z]{2}\\d{1,4}$"
+        },
+        {
+          "name": "date",
+          "type": "string",
+          "required": true,
+          "terse": "Date.",
+          "rich": "Departure date, YYYY-MM-DD.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      ]
+    },
+    {
+      "name": "search_trains",
+      "terse": "Search trains.",
+      "rich": "Train departures between two cities on one date, with times, changes and fares. Not for flights, and not for a plain distance.",
+      "params": [
+        {
+          "name": "origin",
+          "type": "string",
+          "required": true,
+          "terse": "Origin.",
+          "rich": "City the train leaves from."
+        },
+        {
+          "name": "destination",
+          "type": "string",
+          "required": true,
+          "terse": "Destination.",
+          "rich": "City the train arrives in."
+        },
+        {
+          "name": "date",
+          "type": "string",
+          "required": true,
+          "terse": "Date.",
+          "rich": "Departure date, YYYY-MM-DD.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      ]
+    },
+    {
+      "name": "get_driving_distance",
+      "terse": "Driving distance.",
+      "rich": "Shortest road distance between two places, as a single figure. Not for directions or driving time, and not for straight-line distance.",
+      "params": [
+        {
+          "name": "origin",
+          "type": "string",
+          "required": true,
+          "terse": "Start.",
+          "rich": "Starting place, written as a city name."
+        },
+        {
+          "name": "destination",
+          "type": "string",
+          "required": true,
+          "terse": "End.",
+          "rich": "End place, written as a city name."
+        },
+        {
+          "name": "unit",
+          "type": "string",
+          "required": false,
+          "terse": "Unit.",
+          "rich": "Preferred unit of distance. Defaults to km."
+        }
+      ]
+    },
+    {
+      "name": "get_driving_directions",
+      "terse": "Driving directions.",
+      "rich": "Turn-by-turn driving directions between two places, with the total driving time and the main roads. Not for the distance alone.",
+      "params": [
+        {
+          "name": "origin",
+          "type": "string",
+          "required": true,
+          "terse": "Start.",
+          "rich": "Starting place, written as a city name."
+        },
+        {
+          "name": "destination",
+          "type": "string",
+          "required": true,
+          "terse": "End.",
+          "rich": "End place, written as a city name."
+        }
+      ]
+    },
+    {
+      "name": "get_geo_distance",
+      "terse": "Distance between places.",
+      "rich": "Straight-line distance between two places, not along roads. For the distance by road use the driving distance tool; for public transport use the transit distance tool.",
+      "params": [
+        {
+          "name": "start_location",
+          "type": "string",
+          "required": true,
+          "terse": "Start.",
+          "rich": "Starting place, written as city and state, such as Austin, TX."
+        },
+        {
+          "name": "end_location",
+          "type": "string",
+          "required": true,
+          "terse": "End.",
+          "rich": "End place, written as city and state, such as Austin, TX."
+        },
+        {
+          "name": "units",
+          "type": "string",
+          "required": false,
+          "terse": "Units.",
+          "rich": "Distance units, 'miles' or 'kilometers'. Defaults to miles."
+        }
+      ]
+    },
+    {
+      "name": "get_transit_distance",
+      "terse": "Public transport distance.",
+      "rich": "Shortest distance between two cities by public transport, optionally allowing changes between vehicles. Not for timetables or fares, and not for a particular date.",
+      "params": [
+        {
+          "name": "start_city",
+          "type": "string",
+          "required": true,
+          "terse": "From.",
+          "rich": "City the journey starts in."
+        },
+        {
+          "name": "end_city",
+          "type": "string",
+          "required": true,
+          "terse": "To.",
+          "rich": "City the journey ends in."
+        },
+        {
+          "name": "transportation",
+          "type": "string",
+          "required": false,
+          "terse": "Mode.",
+          "rich": "Preferred mode of public transport. Defaults to bus."
+        },
+        {
+          "name": "allow_transfer",
+          "type": "boolean",
+          "required": false,
+          "terse": "Changes allowed.",
+          "rich": "True to allow changing between vehicles. Defaults to false."
+        }
+      ]
+    },
+    {
+      "name": "search_hotels",
+      "terse": "Search hotels.",
+      "rich": "Hotels with a free room in one city for a stay starting on a given date, with nightly prices. Not for an existing reservation.",
+      "params": [
+        {
+          "name": "city",
+          "type": "string",
+          "required": true,
+          "terse": "City.",
+          "rich": "City to stay in."
+        },
+        {
+          "name": "check_in",
+          "type": "string",
+          "required": true,
+          "terse": "Check-in.",
+          "rich": "Check-in date, YYYY-MM-DD.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        {
+          "name": "nights",
+          "type": "integer",
+          "required": true,
+          "terse": "Nights.",
+          "rich": "Number of nights, 1 to 30."
+        },
+        {
+          "name": "guests",
+          "type": "integer",
+          "required": false,
+          "terse": "Guests.",
+          "rich": "Number of guests, 1 to 6. Defaults to 1."
+        }
+      ]
+    },
+    {
+      "name": "get_booking",
+      "terse": "Look up a booking.",
+      "rich": "Details of an existing reservation by its reference: travellers, dates and status. Not for finding new flights or hotels.",
+      "params": [
+        {
+          "name": "booking_reference",
+          "type": "string",
+          "required": true,
+          "terse": "Reference.",
+          "rich": "Booking reference: BK- then six letters or digits.",
+          "pattern": "^BK-[A-Z0-9]{6}$"
+        }
+      ]
+    },
+    {
+      "name": "get_seat_map",
+      "terse": "Seat map.",
+      "rich": "Free and taken seats on one flight on one date, by row, with the seat types. Not for flight times or bags.",
+      "params": [
+        {
+          "name": "flight_number",
+          "type": "string",
+          "required": true,
+          "terse": "Flight.",
+          "rich": "Two-letter airline code followed by the number, with no space.",
+          "pattern": "^[A-Z]{2}\\d{1,4}$"
+        },
+        {
+          "name": "date",
+          "type": "string",
+          "required": true,
+          "terse": "Date.",
+          "rich": "Departure date, YYYY-MM-DD.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      ]
+    },
+    {
+      "name": "get_baggage_allowance",
+      "terse": "Baggage allowance.",
+      "rich": "Free checked and carry-on bags, with weight limits, for one flight in one cabin. Not for seat choice.",
+      "params": [
+        {
+          "name": "flight_number",
+          "type": "string",
+          "required": true,
+          "terse": "Flight.",
+          "rich": "Two-letter airline code followed by the number, with no space.",
+          "pattern": "^[A-Z]{2}\\d{1,4}$"
+        },
+        {
+          "name": "cabin",
+          "type": "string",
+          "required": true,
+          "terse": "Cabin.",
+          "rich": "Cabin class: economy, business or first.",
+          "enum": [
+            "economy",
+            "business",
+            "first"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "get_airport_info",
+      "terse": "Airport details.",
+      "rich": "Name, three-letter code, city, number of terminals and distance from the city centre for one airport. Not for flights from or to it.",
+      "params": [
+        {
+          "name": "airport",
+          "type": "string",
+          "required": true,
+          "terse": "Airport.",
+          "rich": "Airport name, such as Gatwick."
+        }
+      ]
+    },
+    {
+      "name": "get_visa_requirements",
+      "terse": "Entry requirements.",
+      "rich": "Whether a traveller of one nationality needs a visa for a country, and the permitted length of stay. Not for booking or applying.",
+      "params": [
+        {
+          "name": "nationality",
+          "type": "string",
+          "required": true,
+          "terse": "Nationality.",
+          "rich": "Country that issued the passport, such as Portugal."
+        },
+        {
+          "name": "destination_country",
+          "type": "string",
+          "required": true,
+          "terse": "Destination.",
+          "rich": "Country being entered."
+        }
+      ]
+    },
+    {
+      "name": "search_rental_cars",
+      "terse": "Search rental cars.",
+      "rich": "Rental cars available in a city from a pickup date for a number of days, with daily prices. Not for taxis or transfers.",
+      "params": [
+        {
+          "name": "city",
+          "type": "string",
+          "required": true,
+          "terse": "City.",
+          "rich": "City to pick the car up in."
+        },
+        {
+          "name": "pickup_date",
+          "type": "string",
+          "required": true,
+          "terse": "Pickup date.",
+          "rich": "Pickup date, YYYY-MM-DD.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        {
+          "name": "days",
+          "type": "integer",
+          "required": true,
+          "terse": "Days.",
+          "rich": "Rental length in days, 1 to 30."
+        }
+      ]
+    }
+  ]
+}

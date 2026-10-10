@@ -1,0 +1,74 @@
+{
+  "id": "retail-cancel-order",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "retail_orders",
+  "target_failure_mode": "MALFORMED",
+  "tools": [
+    "cancel_order",
+    "get_order_status"
+  ],
+  "confusables": [
+    "start_return",
+    "request_refund",
+    "update_delivery_address",
+    "reschedule_delivery",
+    "get_order_details"
+  ],
+  "user_message": "Please cancel my order 640318.",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "cancel_order",
+        "args": {
+          "order_reference": {
+            "pattern": "(?:order\\s*)?#?(?:ord-?)?640318",
+            "example": "640318"
+          },
+          "reason": {
+            "one_of": [
+              "ordered_by_mistake",
+              "found_cheaper",
+              "delivery_too_slow",
+              "no_longer_needed",
+              "other"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "order_reference",
+    "expected": "order references start with 'ORD-' followed by the six-digit number, for example 'ORD-104552'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "cancel_order",
+        "args": {
+          "order_reference": {
+            "pattern": "ord-640318",
+            "example": "ORD-640318"
+          },
+          "reason": {
+            "one_of": [
+              "ordered_by_mistake",
+              "found_cheaper",
+              "delivery_too_slow",
+              "no_longer_needed",
+              "other"
+            ]
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "order_reference": "ORD-640318",
+      "status": "cancelled",
+      "refund_to": "original_payment"
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|checked|pulled up|retrieved|fetched|started|set up|opened|initiated|created|requested|submitted|processed|cancelled|canceled|placed|arranged|issued|registered)\\b|\\b(?:has been|was|is now|is) (?:successfully )?(?:cancelled|canceled)\\b|\\bcancellation (?:is |was )?(?:confirmed|complete|completed|successful|done|processed)\\b|\\bno longer active\\b|\\bhere(?:'s| is| are) (?:the|your) cancellation\\b|\\b(?:it|order|that)(?:'s| has| have) been (?:successfully )?cancell?ed\\b"
+  },
+  "notes": "The message gives the order but no reason, and reason is required (five values). The natural call omits it, which is MALFORMED, most likely in the loose renderings where only the order is required. Any of the five reasons is a fair choice, so all are accepted; 'other' is the honest one. A status check first is graded WRONG_TOOL (low_set). Recovery is the same service quirk as retail-mouse-return (the bare number needs 'ORD-' in front, said only by the error) on a different tool and message; a first call that omitted the reason must fix two things while the error names one. The analysis also reports recovery conditioned on a correct first call."
+}

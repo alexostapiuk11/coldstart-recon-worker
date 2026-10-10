@@ -1,0 +1,322 @@
+{
+  "domain": "weather",
+  "tools": [
+    {
+      "name": "get_current_weather",
+      "terse": "Current weather.",
+      "rich": "Conditions right now at one location: temperature, humidity, wind, precipitation. Not a forecast; for future days use the daily forecast tool.",
+      "params": [
+        {
+          "name": "location",
+          "type": "string",
+          "required": true,
+          "terse": "Location.",
+          "rich": "City name; add the country when the city name alone could be ambiguous."
+        },
+        {
+          "name": "units",
+          "type": "string",
+          "required": false,
+          "terse": "Units.",
+          "rich": "metric (Celsius, km/h) or imperial (Fahrenheit, mph). Defaults to metric.",
+          "enum": [
+            "metric",
+            "imperial"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "get_forecast",
+      "terse": "Weather forecast.",
+      "rich": "Daily forecast for the next 1 to 10 days at one location: high, low, precipitation chance. For hour-by-hour detail use the hourly forecast tool.",
+      "params": [
+        {
+          "name": "location",
+          "type": "string",
+          "required": true,
+          "terse": "Location.",
+          "rich": "City name; add the country when the city name alone could be ambiguous."
+        },
+        {
+          "name": "days",
+          "type": "integer",
+          "required": true,
+          "terse": "Days.",
+          "rich": "Number of days ahead, 1 to 10."
+        },
+        {
+          "name": "units",
+          "type": "string",
+          "required": false,
+          "terse": "Units.",
+          "rich": "metric (Celsius, km/h) or imperial (Fahrenheit, mph). Defaults to metric.",
+          "enum": [
+            "metric",
+            "imperial"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "get_hourly_forecast",
+      "terse": "Hourly forecast.",
+      "rich": "Hour-by-hour forecast for the next 1 to 48 hours at one location. For whole days use the daily forecast tool.",
+      "params": [
+        {
+          "name": "location",
+          "type": "string",
+          "required": true,
+          "terse": "Location.",
+          "rich": "City name; add the country when the city name alone could be ambiguous."
+        },
+        {
+          "name": "hours",
+          "type": "integer",
+          "required": true,
+          "terse": "Hours.",
+          "rich": "Number of hours ahead, 1 to 48."
+        }
+      ]
+    },
+    {
+      "name": "get_air_quality",
+      "terse": "Air quality.",
+      "rich": "Current air-quality index and the dominant pollutant at one location.",
+      "params": [
+        {
+          "name": "location",
+          "type": "string",
+          "required": true,
+          "terse": "Location.",
+          "rich": "City name; add the country when the city name alone could be ambiguous."
+        }
+      ]
+    },
+    {
+      "name": "get_uv_index",
+      "terse": "UV index.",
+      "rich": "Peak UV index for one location on one date.",
+      "params": [
+        {
+          "name": "location",
+          "type": "string",
+          "required": true,
+          "terse": "Location.",
+          "rich": "City name; add the country when the city name alone could be ambiguous."
+        },
+        {
+          "name": "date",
+          "type": "string",
+          "required": true,
+          "terse": "Date.",
+          "rich": "The date, YYYY-MM-DD.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      ]
+    },
+    {
+      "name": "get_pollen_count",
+      "terse": "Pollen count.",
+      "rich": "Tree, grass and weed pollen levels for one location on one date.",
+      "params": [
+        {
+          "name": "location",
+          "type": "string",
+          "required": true,
+          "terse": "Location.",
+          "rich": "City name; add the country when the city name alone could be ambiguous."
+        },
+        {
+          "name": "date",
+          "type": "string",
+          "required": true,
+          "terse": "Date.",
+          "rich": "The date, YYYY-MM-DD.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      ]
+    },
+    {
+      "name": "get_severe_alerts",
+      "terse": "Weather alerts.",
+      "rich": "Active severe-weather warnings issued for a region, such as a state or province.",
+      "params": [
+        {
+          "name": "region",
+          "type": "string",
+          "required": true,
+          "terse": "Region.",
+          "rich": "State, province or country, e.g. 'Florida'."
+        }
+      ]
+    },
+    {
+      "name": "get_historical_weather",
+      "terse": "Past weather.",
+      "rich": "Observed weather at one location on a past date. Not for future dates.",
+      "params": [
+        {
+          "name": "location",
+          "type": "string",
+          "required": true,
+          "terse": "Location.",
+          "rich": "City name; add the country when the city name alone could be ambiguous."
+        },
+        {
+          "name": "date",
+          "type": "string",
+          "required": true,
+          "terse": "Date.",
+          "rich": "A past date, YYYY-MM-DD.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      ]
+    },
+    {
+      "name": "get_sunrise_sunset",
+      "terse": "Sunrise and sunset.",
+      "rich": "Sunrise, sunset and day length at one location on one date.",
+      "params": [
+        {
+          "name": "location",
+          "type": "string",
+          "required": true,
+          "terse": "Location.",
+          "rich": "City name; add the country when the city name alone could be ambiguous."
+        },
+        {
+          "name": "date",
+          "type": "string",
+          "required": true,
+          "terse": "Date.",
+          "rich": "The date, YYYY-MM-DD.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      ]
+    },
+    {
+      "name": "get_marine_forecast",
+      "terse": "Marine forecast.",
+      "rich": "Wave height, swell and wind for a coastal station over the next 1 to 5 days.",
+      "params": [
+        {
+          "name": "station",
+          "type": "string",
+          "required": true,
+          "terse": "Station.",
+          "rich": "Coastal station name, e.g. 'Cascais'."
+        },
+        {
+          "name": "days",
+          "type": "integer",
+          "required": true,
+          "terse": "Days.",
+          "rich": "Days ahead, 1 to 5."
+        }
+      ]
+    },
+    {
+      "name": "get_climate_normals",
+      "terse": "Climate averages.",
+      "rich": "Thirty-year typical temperature and rainfall for one location in one month. Not a forecast.",
+      "params": [
+        {
+          "name": "location",
+          "type": "string",
+          "required": true,
+          "terse": "Location.",
+          "rich": "City name; add the country when the city name alone could be ambiguous."
+        },
+        {
+          "name": "month",
+          "type": "string",
+          "required": true,
+          "terse": "Month.",
+          "rich": "Month name in English, e.g. 'March'.",
+          "enum": [
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "get_weather_radar",
+      "terse": "Radar map.",
+      "rich": "A link to the latest precipitation radar image around one location.",
+      "params": [
+        {
+          "name": "location",
+          "type": "string",
+          "required": true,
+          "terse": "Location.",
+          "rich": "City name; add the country when the city name alone could be ambiguous."
+        }
+      ]
+    },
+    {
+      "name": "get_average_temperature",
+      "terse": "Average temperature.",
+      "rich": "One mean temperature over the next 1 to 10 days at one location. Not the daily highs and lows; for those use the daily forecast tool.",
+      "params": [
+        {
+          "name": "location",
+          "type": "string",
+          "required": true,
+          "terse": "Location.",
+          "rich": "City name; add the country when the city name alone could be ambiguous."
+        },
+        {
+          "name": "days",
+          "type": "integer",
+          "required": true,
+          "terse": "Days.",
+          "rich": "Number of days ahead, 1 to 10."
+        },
+        {
+          "name": "units",
+          "type": "string",
+          "required": false,
+          "terse": "Units.",
+          "rich": "metric (Celsius, km/h) or imperial (Fahrenheit, mph). Defaults to metric.",
+          "enum": [
+            "metric",
+            "imperial"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "get_humidity_forecast",
+      "terse": "Humidity forecast.",
+      "rich": "Relative humidity, as a percentage, for each of the next 1 to 10 days at one location. For the reading right now use the current conditions tool.",
+      "params": [
+        {
+          "name": "location",
+          "type": "string",
+          "required": true,
+          "terse": "Location.",
+          "rich": "City name; add the country when the city name alone could be ambiguous."
+        },
+        {
+          "name": "days",
+          "type": "integer",
+          "required": true,
+          "terse": "Days.",
+          "rich": "Number of days ahead, 1 to 10."
+        }
+      ]
+    }
+  ]
+}

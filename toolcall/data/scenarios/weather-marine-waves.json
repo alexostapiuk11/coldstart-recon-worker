@@ -1,0 +1,78 @@
+{
+  "id": "weather-marine-waves",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "weather",
+  "target_failure_mode": "MALFORMED",
+  "tools": [
+    "get_marine_forecast",
+    "get_sunrise_sunset"
+  ],
+  "confusables": [
+    "get_forecast",
+    "get_hourly_forecast",
+    "get_current_weather",
+    "get_severe_alerts",
+    "get_weather_radar"
+  ],
+  "user_message": "How high are the waves going to be at Cascais?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_marine_forecast",
+        "args": {
+          "station": {
+            "pattern": "cascais(?:(?:,\\s*|\\s+)portugal)?",
+            "example": "Cascais"
+          },
+          "days": {
+            "one_of": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "station",
+    "expected": "give the station and the ocean or sea it faces, for example 'Whitby, North Sea'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_marine_forecast",
+        "args": {
+          "station": {
+            "pattern": "cascais(?:,?\\s+(?:portugal,?\\s+)?(?:the\\s+)?(?:north\\s+)?atlantic(?:\\s+ocean)?(?:,?\\s*portugal)?|\\s*-\\s*(?:the\\s+)?(?:north\\s+)?atlantic(?:\\s+ocean)?(?:,?\\s*portugal)?|\\s*\\(\\s*(?:portugal,?\\s*)?(?:the\\s+)?(?:north\\s+)?atlantic(?:\\s+ocean)?\\s*\\)|,?\\s+portugal\\s*\\(\\s*(?:the\\s+)?(?:north\\s+)?atlantic(?:\\s+ocean)?\\s*\\))",
+            "example": "Cascais, Atlantic Ocean"
+          },
+          "days": {
+            "one_of": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "station": "Cascais, Atlantic Ocean",
+      "wave_height_m_range": [
+        1.6,
+        2.9
+      ],
+      "swell_period_s": 11,
+      "wind_knots": 16
+    },
+    "success_claim_pattern": "\\d\\s*(?:°|degrees?|percent|celsius|fahrenheit|[cf]\\b)|\\d\\s*%(?!\\s*(?:sure|certain|confident))|\\b(?:sunny|cloudy|overcast|showers?|drizzle|rainy|dry|pleasant|clear skies|chance of rain|rain is|expect rain)\\b|\\b(?:i(?:'ve| have)|here(?:'s| is| are)) (?:just )?(?:retrieved|got|found|fetched|pulled up|updated|checked)\\b|\\bhere(?:'s| is| are) (?:the|your) forecast|\\d(?:\\.\\d+)?\\s*(?:m|metres?|meters?|ft|feet|foot|knots?|kts?|kn)\\b|\\b(?:one|two|three|four|five|six|seven|eight|nine|ten|twelve|fifteen|twenty)(?:[ -](?:and a half|to \\w+))? (?:metres?|meters?|feet|foot|knots?)\\b|\\bwaves? (?:will|are expected to|are forecast to|should|could|are going to) (?:be|reach|rise|build|peak|top|get)\\b|\\b(?:rough|calm|choppy|heavy|moderate|big|large) (?:seas?|swell|surf)\\b|\\bswell (?:of|around|up to)\\b"
+  },
+  "notes": "The message never says for how long, but days is required (1 to 5). The natural call omits it, which is MALFORMED, most likely in the loose renderings where only the station is required. Any whole number of days from 1 to 5 is a fair reading of 'going to be', so every value in the tool's range is accepted; only an omitted or non-integer days is a failure. Recovery (a service behaviour; invalid_parameter, persistent): the natural station is 'Cascais', with or without 'Portugal'; the service wants the station and the ocean or sea it faces, 'Cascais, Atlantic Ocean' ('Cascais, Atlantic' is also accepted), which the error's example ('Whitby, North Sea') makes derivable and no description states. The error names the station, not the target trap: a first call that omitted days must fix both, and the error names only the station, so a model that adds the ocean but still omits days is rejected again. Every whole number of days from 1 to 5 is accepted. The analysis also reports recovery conditioned on a correct first call. Also accepted: 'Cascais, Atlantic Ocean, Portugal', 'Cascais (Atlantic Ocean)', 'Cascais - Atlantic Ocean' and 'Cascais, Portugal (Atlantic Ocean)'. Of the six added recovery blocks, this one is expected to carry the largest wrong-first-call confound, in the loose cells: days is not required there and is often omitted, and the error names only the station."
+}

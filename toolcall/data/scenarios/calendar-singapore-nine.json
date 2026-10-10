@@ -1,0 +1,69 @@
+{
+  "id": "calendar-singapore-nine",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "calendar",
+  "target_failure_mode": "MISSING",
+  "tools": [
+    "convert_clock_time",
+    "find_free_slots"
+  ],
+  "confusables": [
+    "create_event",
+    "list_events",
+    "list_events_between",
+    "search_events",
+    "set_reminder"
+  ],
+  "user_message": "A colleague in Singapore suggested 09:00 their time on 2026-11-24. What time is that in Lisbon?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "convert_clock_time",
+        "args": {
+          "time": "09:00",
+          "date": "2026-11-24",
+          "from_timezone": {
+            "pattern": "(?:asia/)?singapore(?:,\\s*singapore)?|singapore(?: standard)? time|sgt|(?:utc|gmt)\\s?\\+\\s?0?8(?::?00)?|etc/gmt-8",
+            "example": "Singapore"
+          },
+          "to_timezone": {
+            "pattern": "(?:(?:europe|atlantic)/)?lisbon(?:,\\s*portugal)?(?:\\s*\\((?:portugal|wet|utc\\+?0?0?(?::?00)?)\\))?|lisbon time|portugal|wet|greenwich mean time|western european(?: standard)? time|(?:utc|gmt)(?:\\s?[+-]\\s?0?0(?::?00)?)?",
+            "example": "Lisbon"
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "from_timezone",
+    "expected": "give the zone as a UTC offset, for example 'UTC+02:00'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "convert_clock_time",
+        "args": {
+          "time": "09:00",
+          "date": "2026-11-24",
+          "from_timezone": {
+            "pattern": "(?:utc|gmt)\\s?\\+\\s?0?8(?::?00)?",
+            "example": "UTC+08:00"
+          },
+          "to_timezone": {
+            "pattern": "(?:(?:europe|atlantic)/)?lisbon(?:,\\s*portugal)?(?:\\s*\\((?:portugal|wet|utc\\+?0?0?(?::?00)?)\\))?|lisbon time|portugal|wet|greenwich mean time|western european(?: standard)? time|(?:utc|gmt)(?:\\s?[+-]\\s?0?0(?::?00)?)?",
+            "example": "Lisbon"
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "date": "2026-11-24",
+      "input": "09:00 UTC+08:00",
+      "converted_time": "01:00",
+      "zone": "UTC+00:00"
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:created|scheduled|booked|added|set up|sent|invited|moved|rescheduled|updated|changed|converted|replied|responded|marked|put|told|notified|informed)\\b|\\bhere(?:'s| is| are) (?:the|your|that) (?:converted time|conversion|schedule|agenda|calendar|events|list|week|invite|invitation|updated)\\b|(?:^|[.!?]\\s*)(?:done|all set|you(?:'re| are) all set)\\b|\\bcorresponds? to (?:about |around |roughly |approximately )?(?!0?9[:.]00)\\d{1,2}[:.]\\d{2}\\b|\\blisbon(?: time)?: ?(?!0?9[:.]00)\\d{1,2}[:.]\\d{2}\\b|(?:\\bis|'s|\\bbe|\\bequals?|\\bworks? out to|\\bcomes to|=|\\bso|→|->) (?:about |around |roughly |approximately |at )?(?!0?9[:.]00)\\d{1,2}[:.]\\d{2}\\b|(?:\\bis|'s|\\bbe|\\bequals?|\\bworks? out to|\\bcomes to|=|\\bso) (?:about |around |roughly |approximately |at )?(?!9 ?(?:am|a\\.m\\.))\\d{1,2} ?(?:am|pm|a\\.m\\.|p\\.m\\.)|\\b(?:\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve) hours? (?:behind|ahead|earlier|later)\\b"
+  },
+  "notes": "Target MISSING: a model believes it knows that Singapore is eight hours ahead of Lisbon and may answer from memory instead of calling. Both zones may be named by city, zone name or abbreviation (the first-call patterns also accept the offset forms). Recovery: the natural from_timezone is the city or zone name; the service wants a UTC offset, and Singapore's offset has no daylight saving. Every UTC/GMT+8 spelling (UTC+8, GMT+8, UTC +8, UTC+08, UTC+08:00) is accepted both as a first call and as the recovery, so a model that already writes an offset is correct, is not injected, and cannot be stuck on a spelling; Etc/GMT-8 is a correct first call that is injected and recovers by switching spelling. 'SST' is not accepted: Samoa Standard Time uses the same abbreviation (UTC-11), so it is not an unambiguous Singapore form. to_timezone also takes Greenwich Mean Time, Atlantic/Lisbon, 'Lisbon (Portugal)' and 'Lisbon, Portugal (WET)'. to_timezone stays free (Lisbon, or UTC+00:00 in the offset style)."
+}

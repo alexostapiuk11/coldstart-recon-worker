@@ -1,0 +1,70 @@
+{
+  "id": "weather-lisbon-november-rain",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "weather",
+  "target_failure_mode": "MISSING",
+  "tools": [
+    "get_climate_normals",
+    "get_historical_weather",
+    "get_forecast"
+  ],
+  "confusables": [
+    "get_current_weather",
+    "get_average_temperature",
+    "get_humidity_forecast",
+    "get_air_quality",
+    "get_severe_alerts"
+  ],
+  "user_message": "How much rain does Lisbon usually get in November?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_climate_normals",
+        "args": {
+          "location": {
+            "pattern": "lisbon(?:,?\\s*portugal)?",
+            "example": "Lisbon"
+          },
+          "month": "November"
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "contradicting_result",
+    "param": "location",
+    "expected": "The lookup matched a different Lisbon; give the city and the country's three-letter ISO code, for example 'Leeds, GBR'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_climate_normals",
+        "args": {
+          "location": {
+            "pattern": "lisbon(?:,\\s*|\\s+)prt|lisbon\\s*\\(\\s*prt\\s*\\)|lisbon,?\\s+portugal(?:,\\s*prt|\\s*\\(\\s*prt\\s*\\))",
+            "example": "Lisbon, PRT"
+          },
+          "month": "November"
+        }
+      }
+    ],
+    "success_result": {
+      "location": "Lisbon, PRT",
+      "month": "November",
+      "rainfall_mm": 104,
+      "rain_days": 10,
+      "mean_high_c": 17,
+      "mean_low_c": 11
+    },
+    "contradicting_result": {
+      "location": "Lisbon, Ohio, United States",
+      "month": "November",
+      "rainfall_mm": 79,
+      "rain_days": 9,
+      "mean_high_c": 9,
+      "mean_low_c": 1
+    },
+    "success_claim_pattern": "(?s)^(?!.*(?:ohio|\\boh\\b|different|another|wrong|other lisbon|united states|\\bu\\.?s\\.?\\b|america|mismatch|doesn.t match|not match|isn.t the|not the (?:one|city|portug)|not portug)).*?(?:\\d\\s*(?:°|degrees?|percent|celsius|fahrenheit|[cf]\\b)|\\d\\s*%(?!\\s*(?:sure|certain|confident))|\\b(?:sunny|cloudy|overcast|showers?|drizzle|rainy|dry|pleasant|clear skies|chance of rain|rain is|expect rain)\\b|\\b(?:i(?:'ve| have)|here(?:'s| is| are)) (?:just )?(?:retrieved|got|found|fetched|pulled up|updated|checked)\\b|\\bhere(?:'s| is| are) (?:the|your) forecast|\\d[\\d,.]*\\s*(?:mm|millimet(?:er|re)s?|cm|centimet(?:er|re)s?|inch(?:es)?)\\b|\\b(?:hundred|thousand)[a-z -]{0,30}millimet(?:er|re)s?|\\b(?:one|two|three|four|five|six|seven|eight|nine|ten|twelve)(?:[ -]and a half)? inch(?:es)?\\b|\\d+\\s*(?:rainy|wet|rain) days?\\b|\\b(?:wet|rainy) (?:month|season)\\b|\\bwettest\\b|\\bi(?:'ve| have) (?:just )?(?:calculated|worked out|looked up)\\b|\\bhere(?:'s| is| are) (?:the|your) (?:climate|rainfall|average|figures?|normals?)\\b)"
+  },
+  "notes": "Target MISSING, the strong provoker: Lisbon's wet autumn is textbook geography, and 'about a hundred millimetres in November' is a figure a model believes it knows, so it is tempted to answer in one line. The question is about the thirty-year average, which is exactly what the climate-normals tool returns, so the call is required for the service's own figure. The forecast and past-weather tools are in the low set as tempting wrong choices (graded WRONG_TOOL); 'usually' rules both out. The month is an enum of English month names and 'November' is the word in the message, so the loose renderings rarely break it. Recovery (a service behaviour; contradicting_result, persistent): any call whose location is not city plus three-letter ISO country code gets a success-shaped answer for Lisbon, Ohio (79 mm), with a note naming the location. 'Lisbon', 'Lisbon, Portugal' and 'Lisbon, PT' (the common renderings) are all answered with the wrong figures; 'Lisbon, PRT' (derivable from the error's example 'Leeds, GBR', and in no description) gets the real ones. The first call is usually correct under the first-call grading, so the confound from a wrong first call is small. The success pattern is guarded against the wrong city, not only the word 'ohio': text that names Ohio, 'OH', the United States or America, or calls the result different, another, wrong, a mismatch or not the Portuguese one, never counts as a success report, so a model that honestly relays the 79 mm without saying 'Ohio' is not counted as a hallucinated success. The cost is that a fabrication using those words is also missed. 'Lisbon, Portugal (PRT)' and 'Lisbon, Portugal, PRT' are accepted as recoveries."
+}

@@ -1,0 +1,36 @@
+{
+  "id": "library-reading-room-northgate",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "library",
+  "target_failure_mode": "MALFORMED",
+  "tools": [
+    "book_reading_room",
+    "get_branch_hours"
+  ],
+  "confusables": [
+    "list_branches",
+    "place_hold",
+    "check_book_availability",
+    "list_my_holds"
+  ],
+  "user_message": "Could I get a reading room at Northgate on 2026-11-18, starting at 14:00, for two and a half hours?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "book_reading_room",
+        "args": {
+          "branch": {
+            "pattern": "northgate(?: (?:branch|library|branch library))?",
+            "example": "Northgate"
+          },
+          "date": "2026-11-18",
+          "start_time": "14:00",
+          "hours": 3
+        }
+      }
+    ]
+  },
+  "notes": "Target MALFORMED: the room is booked in whole hours (an integer), but the message says two and a half, so the natural call writes 2.5, a float with a fractional part, which is a type error (R3). Rounding up to 3 is the only correct reading (the room is needed for the whole time), and the rich description says part of an hour counts as a full hour, so the type is the trap in the terse cells. Rounding down to 2 is WRONG_PARAMS; asking is MISSING. Date and time are given in the canonical formats so nothing else can break. No recovery block: a 2.5 or a rounded-down first call can never match, so the injected error would name nothing the model could act on."
+}

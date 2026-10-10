@@ -1,0 +1,65 @@
+{
+  "id": "files-archive-move",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "files",
+  "target_failure_mode": "WRONG_TOOL",
+  "tools": [
+    "move_file",
+    "copy_file",
+    "rename_file"
+  ],
+  "confusables": [
+    "delete_file",
+    "create_folder",
+    "get_file_info",
+    "list_folder",
+    "search_files"
+  ],
+  "user_message": "Please put budget-2026.xlsx in my Archive folder instead of leaving it in Documents.",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "move_file",
+        "args": {
+          "source_path": {
+            "pattern": "(?:drive:/?|\\./|~/|/)?documents/budget-2026\\.xlsx",
+            "example": "Documents/budget-2026.xlsx"
+          },
+          "destination_folder": {
+            "pattern": "(?:drive:/?|\\./|~/|/)?archive/?",
+            "example": "Archive"
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "source_path",
+    "expected": "paths start with 'drive:', for example 'drive:projects/plan.txt'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "move_file",
+        "args": {
+          "source_path": {
+            "pattern": "drive:/?documents/budget-2026\\.xlsx",
+            "example": "drive:Documents/budget-2026.xlsx"
+          },
+          "destination_folder": {
+            "pattern": "(?:drive:/?|\\./|~/|/)?archive/?",
+            "example": "Archive"
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "moved": "drive:Documents/budget-2026.xlsx",
+      "now_in": "drive:Archive/budget-2026.xlsx",
+      "status": "moved"
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|checked|pulled up|retrieved|fetched|moved|copied|renamed|shared|saved|uploaded|downloaded|set up|created|completed|processed|submitted|put|placed|stored|transferred|given|added|sent)\\b|(?<!not )(?<!n't )(?<!never )\\b(?:has been|was|is now|is|are now) (?:successfully )?(?:moved|copied|relocated|transferred|filed|archived)\\b|\\b(?:it|file|spreadsheet|budget-2026\\.xlsx)(?:'s| is| has been| was)(?: now)? (?:in|inside|under|at|sitting in|located in|stored in) (?:your |the )?archive\\b|\\b(?:it|file|spreadsheet|budget-2026\\.xlsx) (?:now )?(?:landed|sits|lives) in (?:your |the )?archive\\b|(?<!not )(?<!n't )(?<!never )\\bmoved (?:it |the file |budget-2026\\.xlsx )?(?:to|into) (?:your |the )?archive\\b|\\bnow (?:in|inside|lives in|sits in|sitting in) (?:your |the )?archive\\b|\\bmove (?:is |was )?(?:complete|completed|successful|done)\\b|\\barchive (?:now )?has the file\\b|\\b(?:moved|transferred|relocated|archived)! |\\bsuccessfully (?:moved|archived)\\b|(?:^|[.!?]\\s+)(?:done|all set|finished|moved)[.!]|\\bhere(?:'s| is| are) (?:the|your) (?:moved|updated) (?:file|folder)\\b"
+  },
+  "notes": "Target WRONG_TOOL, but expect it to be rare: 'instead of leaving it in Documents' reads as a move to nearly every model. The scenario's main value is its recovery. The copy tool (it leaves the original) and the rename tool (a path-like new name) are in the low set as the tempting wrong choices, and they are the realistic low-cell errors. A look-up first (folder listing, file details) grades WRONG_TOOL only in the high cells; in the low cells those tools are not rendered and the call grades MALFORMED. Recovery is a path-format quirk: the service wants every path to start with 'drive:', which only the error says; the natural first call writes 'Documents/budget-2026.xlsx'. A first call that already writes the prefix is accepted and not injected. The recovery call accepts the destination with or without the prefix, so the error's single named parameter (source_path) is the only thing that has to change. The recovery value 'drive:' is in no description."
+}

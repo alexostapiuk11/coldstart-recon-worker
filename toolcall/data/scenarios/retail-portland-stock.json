@@ -1,0 +1,64 @@
+{
+  "id": "retail-portland-stock",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "retail_orders",
+  "target_failure_mode": "WRONG_TOOL",
+  "tools": [
+    "check_store_stock",
+    "get_product_details"
+  ],
+  "confusables": [
+    "search_products",
+    "get_delivery_time",
+    "place_order",
+    "track_shipment"
+  ],
+  "user_message": "Is the 2-litre stainless kettle, product number P-20417, in stock at your Portland, Maine store?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "check_store_stock",
+        "args": {
+          "product_id": "P-20417",
+          "store_location": {
+            "pattern": "portland(?:,\\s*|\\s+)(?:me|maine)(?:(?:,\\s*|\\s+)(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?))*",
+            "example": "Portland, Maine"
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "contradicting_result",
+    "param": "store_location",
+    "expected": "The lookup matched a different Portland; give the city, state and country, for example 'Columbus, Ohio, United States'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "check_store_stock",
+        "args": {
+          "product_id": "P-20417",
+          "store_location": {
+            "pattern": "portland,\\s*(?:maine|me),\\s*united states(?: of america)?",
+            "example": "Portland, Maine, United States"
+          }
+        }
+      }
+    ],
+    "contradicting_result": {
+      "product_id": "P-20417",
+      "store": "Portland, Oregon, United States",
+      "in_stock": true,
+      "units": 11
+    },
+    "success_result": {
+      "product_id": "P-20417",
+      "store": "Portland, Maine, United States",
+      "in_stock": true,
+      "units": 2
+    },
+    "success_claim_pattern": "(?s)^(?!.*oregon).*?(?:\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|checked|pulled up|retrieved|fetched|started|set up|opened|initiated|created|requested|submitted|processed|cancelled|canceled|placed|arranged|issued|registered)\\b|\\bhere(?:'s| is| are) (?:the|your) (?:stock|availability)\\b|\\bout of stock\\b|\\b(?:has|have) (?:it|them|that|one|some) in stock\\b|\\b(?:is|are|it's|they're|currently|still|now|only)\\s+(?:\\w+\\s+)?in stock\\b|\\b(?:there (?:is|are)|they have|it has|the store has) (?:\\d+|one|two|three|four|five|a few|some|plenty|several) |\\b\\d+ (?:units?|left|in stock|available|remaining|pieces?|kettles?)\\b|\\b(?:only|just) (?:\\d+|one|two|three|four|five|a few|a couple)\\b|\\b(?:has|have|had)\\s+(?:\\w+\\s+){1,4}in stock\\b|\\bsold out\\b|\\b(?:has|have|holds?|got) (?:\\d+|one|two|three|four|five) (?:of them|units?|in stock|left)\\b|\\bavailable (?:at|in) (?:the )?(?:portland|maine)\\b)"
+  },
+  "notes": "Stock in one physical store is the stock tool's job. The product-details tool, in the low set, takes the same product number and is the tempting wrong choice, and its terse description does not rule out availability. The store may be written with or without the state and country. Recovery: a call that does not spell out the city, state and country gets the stock of a different Portland (Oregon); the real answer needs the city, state and country spelled out. The recovery value ('Portland, Maine, United States') is not in any description. Like the humidity scenario, a first call that already meets the recovery requirement is answered with success and is not injected."
+}

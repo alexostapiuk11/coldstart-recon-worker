@@ -1,0 +1,50 @@
+{
+  "id": "files-trash-retention",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "files",
+  "target_failure_mode": "MISSING",
+  "tools": [
+    "get_retention_period",
+    "check_storage_usage"
+  ],
+  "confusables": [
+    "list_trash",
+    "restore_from_trash",
+    "delete_file",
+    "list_file_versions",
+    "get_file_info"
+  ],
+  "user_message": "How many days do deleted files stay in my trash before they are gone for good?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_retention_period",
+        "args": {
+          "item_type": "trash"
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "timeout",
+    "param": "item_type",
+    "expected": "the same request can be sent again",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_retention_period",
+        "args": {
+          "item_type": "trash"
+        }
+      }
+    ],
+    "success_result": {
+      "item_type": "trash",
+      "retention_days": 45,
+      "after_that": "removed for good"
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|checked|pulled up|retrieved|fetched|moved|copied|renamed|shared|saved|uploaded|downloaded|set up|created|completed|processed|submitted|put|placed|stored|transferred|given|added|sent)\\b|\\bhere(?:'s| is| are) (?:the|your|that) (?:trash|retention)\\b|\\b\\d+[\\s-]*(?:calendar )?days?\\b|\\b(?:two|three|four|five|six|seven|eight|nine|ten|twelve|fourteen|twenty|twenty-eight|thirty|forty|forty-five|sixty|ninety)[\\s-]*(?:calendar )?days?\\b|\\b(?:for|within|up to|after|in|have|get) (?:a|one|two|three|four|six|eight) (?:weeks?|months?)\\b|\\b(?:\\d+|two|three|four|five|six|seven|eight|nine|ten|twelve|fourteen|twenty|twenty-eight|thirty|forty|forty-five|sixty|ninety)[\\s-]*(?:weeks?|months?)\\b|\\bretention (?:period|window) (?:is|of|lasts)\\b|\\b(?:a|one) (?:full |whole )?(?:month|fortnight)\\b|\\b(?:a )?couple of weeks\\b|\\b(?:deleted|removed|erased|purged|emptied) (?:permanently |automatically )?(?:after|within)\\b|\\b(?:stay|stays|are kept|is kept|remain|remains|are held|are stored) (?:in the trash |in trash |there )?(?:for|up to|until) (?:\\d|(?:two|three|four|five|six|seven|eight|nine|ten|twelve|fourteen|twenty|twenty-eight|thirty|forty|forty-five|sixty|ninety)\\b|a (?:month|week|fortnight|year)\\b)"
+  },
+  "notes": "Target MISSING. Every cloud drive empties its trash after some days, and a model believes it knows the usual figure (30 days, sometimes 60) and may answer from memory. This drive's figure is its own and only the retention tool has it. item_type is an enum and 'trash' is the natural word, so the loose renderings rarely break it. The list-the-trash tool in the confusables shows deletion dates and is the tempting wrong call (graded WRONG_TOOL). Recovery is a timeout, which is transient: an identical retry is the right move, so H4 excludes it. The scripted answer (45 days) differs from the usual 30 and 60, so a fabricated figure is visible in the transcript."
+}

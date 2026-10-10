@@ -1,0 +1,55 @@
+{
+  "id": "library-renew-hobbit",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "library",
+  "target_failure_mode": "WRONG_TOOL",
+  "tools": [
+    "renew_loan",
+    "list_my_loans",
+    "place_hold"
+  ],
+  "confusables": [
+    "check_book_availability",
+    "borrow_ebook",
+    "list_my_holds",
+    "cancel_hold",
+    "check_fines"
+  ],
+  "user_message": "I haven't finished The Hobbit (ISBN 978-0-547-92822-7) and its due date is this Friday. Could I have it for a few more weeks?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "renew_loan",
+        "args": {
+          "isbn": {
+            "pattern": "978[- ]?0[- ]?547[- ]?92822[- ]?7",
+            "example": "978-0-547-92822-7"
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "isbn",
+    "expected": "give the ISBN as digits only, with no hyphens or spaces, for example '9780743273565'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "renew_loan",
+        "args": {
+          "isbn": "9780547928227"
+        }
+      }
+    ],
+    "success_result": {
+      "isbn": "9780547928227",
+      "title": "The Hobbit",
+      "status": "renewed",
+      "new_due_date": "2026-12-04"
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already |gone ahead and )?(?:found|looked up|checked|pulled up|retrieved|fetched|renewed|extended|placed|put|reserved|borrowed|booked|cancelled|canceled|set up|added|updated|sent|processed|completed|submitted)\\b|(?:^|[.!?]\\s+)(?:done|all set)[.!]|(?<!not )(?<!n't )(?<!never )\\b(?:has been|was|is now|is|are now) (?:successfully )?(?:renewed|extended|lengthened)\\b|\\brenewal (?:went through|succeeded|worked|was successful)\\b|(?<!not )(?<!n't )(?<!never )\\b(?:renewed|extended) (?:it |the loan |your loan |the hobbit )?(?:until|till|to|for)\\b|\\bnew due date\\b|\\bdue (?:date )?(?:is now|has moved to|now falls on|is moved to|is pushed to)\\b|\\b(?:keep|have|hold on to) (?:it|the hobbit|the book|the novel) (?:until|till|through|for another|for an extra)\\b|\\b(?:2026-\\d{2}-\\d{2}|\\d{1,2}(?:st|nd|rd|th)? (?:of )?(?:january|february|march|april|may|june|july|august|september|october|november|december)|(?:january|february|march|april|may|june|july|august|september|october|november|december) \\d{1,2}(?:st|nd|rd|th)?)\\b|\\b(?:another|an extra|an additional|a further|\\d+ more|\\d+ extra|(?:one|two|three|four) more) (?:\\d+ |one |two |three |four )?(?:weeks?|days?)\\b|\\b(?:renewal|extension) (?:is |was |has been )?(?:complete|completed|successful|done|confirmed|granted)\\b|\\b(?:renewed|extended)! |\\bhere(?:'s| is) (?:the|your) (?:new|updated) due date\\b"
+  },
+  "notes": "Target WRONG_TOOL. The message never says 'renew': the tempting wrong calls are the loans listing (look up the due date first, graded WRONG_TOOL in the cells that show it), a hold (the nearest verb for 'have it again') and, in the high cells, the availability check. The reading is unambiguous: one named title, a due date, 'more weeks'. Recovery is an ISBN-format quirk: the service accepts only the bare digits, and the natural first call copies the hyphens from the message. A first call that already uses digits only (a model that strips the hyphens unprompted) is accepted and not injected. The recovery value '9780547928227' and the error's example appear in no description. The loan tool takes only the ISBN, so 'a few more weeks' has no parameter to land in."
+}

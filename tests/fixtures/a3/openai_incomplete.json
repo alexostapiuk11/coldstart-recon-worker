@@ -1,0 +1,11 @@
+{
+  "id": "resp_6g7h8i",
+  "object": "response",
+  "status": "incomplete",
+  "incomplete_details": {"reason": "max_output_tokens"},
+  "model": "gpt-5.4-mini-2026-03-17",
+  "output": [
+    {"type": "function_call", "id": "fc_6g7h8i", "call_id": "call_1", "name": "search_flights", "arguments": "{\"origin\":\"JF", "status": "incomplete"}
+  ],
+  "usage": {"input_tokens": 900, "input_tokens_details": {"cached_tokens": 0}, "output_tokens": 1024, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 1924}
+}

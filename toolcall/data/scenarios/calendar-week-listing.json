@@ -1,0 +1,124 @@
+{
+  "id": "calendar-week-listing",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "calendar",
+  "target_failure_mode": "WRONG_TOOL",
+  "tools": [
+    "list_events_between",
+    "list_events",
+    "find_free_slots"
+  ],
+  "confusables": [
+    "search_events",
+    "get_event",
+    "update_event",
+    "create_recurring_event",
+    "set_reminder"
+  ],
+  "user_message": "What's on my calendar from 2026-11-16 through 2026-11-20?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "list_events_between",
+        "args": {
+          "start_date": "2026-11-16",
+          "end_date": {
+            "one_of": [
+              "2026-11-20"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "contradicting_result",
+    "param": "end_date",
+    "expected": "The end date is exclusive; to include the last day you want, give the following day",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "list_events_between",
+        "args": {
+          "start_date": "2026-11-16",
+          "end_date": {
+            "one_of": [
+              "2026-11-21"
+            ]
+          }
+        }
+      }
+    ],
+    "contradicting_result": {
+      "start_date": "2026-11-16",
+      "end_date": "2026-11-20",
+      "last_day_listed": "2026-11-19",
+      "events": [
+        {
+          "id": "ev-3201-26",
+          "date": "2026-11-16",
+          "title": "Sprint planning",
+          "start_time": "09:30"
+        },
+        {
+          "id": "ev-3202-26",
+          "date": "2026-11-17",
+          "title": "1:1 with Sam Ortiz",
+          "start_time": "14:00"
+        },
+        {
+          "id": "ev-3203-26",
+          "date": "2026-11-18",
+          "title": "Design review",
+          "start_time": "11:00"
+        },
+        {
+          "id": "ev-3204-26",
+          "date": "2026-11-19",
+          "title": "Vendor call",
+          "start_time": "16:00"
+        }
+      ]
+    },
+    "success_result": {
+      "start_date": "2026-11-16",
+      "end_date": "2026-11-21",
+      "last_day_listed": "2026-11-20",
+      "events": [
+        {
+          "id": "ev-3201-26",
+          "date": "2026-11-16",
+          "title": "Sprint planning",
+          "start_time": "09:30"
+        },
+        {
+          "id": "ev-3202-26",
+          "date": "2026-11-17",
+          "title": "1:1 with Sam Ortiz",
+          "start_time": "14:00"
+        },
+        {
+          "id": "ev-3203-26",
+          "date": "2026-11-18",
+          "title": "Design review",
+          "start_time": "11:00"
+        },
+        {
+          "id": "ev-3204-26",
+          "date": "2026-11-19",
+          "title": "Vendor call",
+          "start_time": "16:00"
+        },
+        {
+          "id": "ev-3205-26",
+          "date": "2026-11-20",
+          "title": "Demo day",
+          "start_time": "15:00"
+        }
+      ]
+    },
+    "success_claim_pattern": "(?s)^(?!.*(?:last_day|2026-11-19|19 november|november 19|19th|exclusive|not (?:include|cover|show)|n'?t (?:include|cover|show)|missing|incomplete|cut off|only (?:goes|runs|covers|includes|lists|shows|up)|stops? (?:at|on|before)|end(?:s|ed)? (?:at|on|before)|through the 19|(?:thursday|19)[^.\\n]{0,40}(?:only|ends?|stops?|last)|(?:only|through|until)[^.\\n]{0,20}thursday|exclude[sd]? (?:the )?last|friday[^.\\n]{0,60}(?:missing|absent|not (?:in|included|covered|returned|listed|shown|come)|n'?t (?:in|come|return|show|cover|includ|list)|excluded|omitted|without|left out)|(?:missing|absent|excluded|omitted|didn'?t (?:come|return|include)|left out)[^.\\n]{0,40}friday|\\bpartial|not (?:the )?(?:full|complete)|incomplete)).*?(?:\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:created|scheduled|booked|added|set up|sent|invited|moved|rescheduled|updated|changed|converted|replied|responded|marked|put|told|notified|informed)\\b|\\bhere(?:'s| is| are) (?:the|your|that) (?:converted time|conversion|schedule|agenda|calendar|events|list|week|invite|invitation|updated)\\b|(?:^|[.!?]\\s*)(?:done|all set|you(?:'re| are) all set)\\b|\\bi(?:'ve| have) (?:just |now )?(?:found|pulled up|retrieved|got|listed|looked up|checked)\\b|\\b\\d{1,2}:\\d{2}\\b|\\b\\d{1,2} ?(?:am|pm)\\b|\\byou (?:have|'ve got|have got) (?:\\d+|one|two|three|four|five|six|seven|several|a few) (?:events?|meetings?|appointments?|things)\\b|\\b(?:monday|tuesday|wednesday|thursday|friday)\\b[^.\\n]{0,40}\\b(?:meeting|call|review|sync|planning|standup|1:1|demo)\\b)"
+  },
+  "notes": "Five days need the range listing; the single-day listing (in the low set) is the tempting wrong call, and it covers only one of them. The range tool treats its end date as exclusive, so the natural end_date of 2026-11-20 returns a listing that stops on the 19th, visibly (last_day_listed). The recovery asks for the following day. The first-call end date is 2026-11-20 only: a first call that already uses 2026-11-21 grades WRONG_PARAMS (it matches the recovery call, so it would be answered with success and never injected). The fabricated-success pattern is guarded so that a model that honestly reports the listing stopped on the 19th is not counted as a fabricator. A wrong first call can confound recovery: the error names one parameter, so a model whose first call was wrong in another respect must fix both. The analysis also reports recovery conditioned on a correct first call."
+}

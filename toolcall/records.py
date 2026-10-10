@@ -1,0 +1,106 @@
+"""What one stored run is. Both shapes go through `harness.store.JsonlStore`.
+
+A `CallRecord` is one single-turn call: the cell, the scenario, the repetition,
+the exact request body, the raw response or the error, and the grade. A
+`RecoveryRecord` is one recovery conversation with every turn kept.
+
+Records keep the raw provider response, not only the grade, so re-grading
+under a new normalizer version needs no new call.
+
+Two notes on evidence:
+
+- The store writes keys sorted, so the stored `request` has the key order of the
+  store, not of the body as built. `request_sha256` is the hash of the
+  canonical form, `json.dumps(body, sort_keys=True)`, which is the form the
+  store writes: `sha256(json.dumps(record.request, sort_keys=True))` reproduces
+  it from a stored record. It pins the request's content; the key order is
+  canonical.
+- A call whose usage is missing is `unmetered`: `usage` and `cost_usd` are None,
+  not zero, because a response with no usage is not a measurement of a free
+  call. The spend guard charged those calls its per-call bound, so the spend
+  record, not `cost_usd`, is what reconciles them. `RecoveryRecord.unmetered_turns`
+  counts the same thing per conversation, and its `cost_usd` is the sum of the
+  metered turns only.
+"""
+
+from dataclasses import asdict, dataclass, field
+
+from toolcall import NORMALIZER_VERSION, SCHEMA_VERSION
+
+
+@dataclass
+class CallRecord:
+    run_index: int
+    block_index: int  # the repetition: block b is every (cell, scenario) once
+    condition: str  # "<cell>|<scenario id>"
+    run_id: str
+    # The store's name, as toolcall.runner names it: "pilot-baseline", "pilot-cells",
+    # "pilot-slice-<model>", "campaign", "slice-<model>" or "exploratory"; scripts/
+    # a3_diagnose.py's runs are "diagnose". (The pilot-recovery and recovery phases
+    # write RecoveryRecords, below.)
+    phase: str
+    model: str  # the pinned id the request named
+    returned_model: str | None
+    cell: str
+    scenario_id: str
+    settings: dict
+    request: dict | None
+    response: dict | None
+    error: str | None
+    clock_A: dict
+    grade: dict
+    usage: dict | None
+    cost_usd: float | None
+    rendered_tools: list
+    schema_version: int = SCHEMA_VERSION
+    normalizer_version: int = NORMALIZER_VERSION
+    unmetered: bool = False
+    request_sha256: str | None = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "CallRecord":
+        return cls(**d)
+
+
+@dataclass
+class RecoveryRecord:
+    run_index: int
+    block_index: int
+    condition: str  # "<cell>|<scenario id>|<format>"
+    run_id: str
+    # Always "recovery": toolcall.campaign.recovery_runs writes that constant for both
+    # the pilot-recovery phase (pilot-recovery.jsonl) and the campaign's recovery phase
+    # (recovery.jsonl), so the field does not tell the two apart; the store does.
+    phase: str
+    model: str
+    cell: str
+    scenario_id: str
+    error_kind: str
+    fmt: str
+    settings: dict
+    turns: list
+    first_grade: dict | None
+    injected: bool
+    recovered: bool
+    turns_to_recovery: int | None
+    identical_retry: bool | None
+    gave_up: bool
+    hallucinated_success: bool
+    budget_exhausted: bool
+    excluded: str | None
+    cost_usd: float
+    schema_version: int = SCHEMA_VERSION
+    normalizer_version: int = NORMALIZER_VERSION
+    # Defaulted last so a record written before these fields still loads.
+    returned_models: list = field(default_factory=list)  # the model of every parsed turn
+    unmetered_turns: int = 0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "RecoveryRecord":
+        return cls(**d)
