@@ -15,7 +15,7 @@
     "get_uv_index",
     "get_severe_alerts"
   ],
-  "user_message": "Great, that forecast is all I needed. Thanks!",
+  "user_message": "Thanks, that's everything I needed to know about the weather in Lisbon over the next three days.",
   "expectation": {
     "no_call_expected": true
   }

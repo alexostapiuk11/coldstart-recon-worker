@@ -4,7 +4,7 @@
     {
       "name": "get_current_weather",
       "terse": "Current weather.",
-      "rich": "Conditions right now at one location: temperature, wind, precipitation. Not a forecast; use get_forecast for future days.",
+      "rich": "Conditions right now at one location: temperature, wind, precipitation. Not a forecast; for future days use the daily forecast tool.",
       "params": [
         {
           "name": "location",
@@ -29,14 +29,14 @@
     {
       "name": "get_forecast",
       "terse": "Weather forecast.",
-      "rich": "Daily forecast for the next 1 to 10 days at one location: high, low, precipitation chance. For hour-by-hour detail use get_hourly_forecast.",
+      "rich": "Daily forecast for the next 1 to 10 days at one location: high, low, precipitation chance. For hour-by-hour detail use the hourly forecast tool.",
       "params": [
         {
           "name": "location",
           "type": "string",
           "required": true,
           "terse": "Location.",
-          "rich": "City and country, for example 'Lisbon, Portugal'."
+          "rich": "City name; add the country when the city name alone could be ambiguous."
         },
         {
           "name": "days",
@@ -61,7 +61,7 @@
     {
       "name": "get_hourly_forecast",
       "terse": "Hourly forecast.",
-      "rich": "Hour-by-hour forecast for the next 1 to 48 hours at one location. For whole days use get_forecast.",
+      "rich": "Hour-by-hour forecast for the next 1 to 48 hours at one location. For whole days use the daily forecast tool.",
       "params": [
         {
           "name": "location",

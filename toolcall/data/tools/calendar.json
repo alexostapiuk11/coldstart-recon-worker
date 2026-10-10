@@ -4,7 +4,7 @@
     {
       "name": "create_event",
       "terse": "Create an event.",
-      "rich": "Create a single, one-off event on one date. For a repeating event use create_recurring_event.",
+      "rich": "Create a single, one-off event on one date. For an event that repeats, use the recurring-event tool.",
       "params": [
         {
           "name": "title",
@@ -138,7 +138,7 @@
           "type": "string",
           "required": true,
           "terse": "Event.",
-          "rich": "The id list_events or search_events returned."
+          "rich": "The id returned by the day listing or the title search."
         },
         {
           "name": "new_title",
@@ -167,7 +167,7 @@
           "type": "string",
           "required": true,
           "terse": "Event.",
-          "rich": "The id list_events or search_events returned."
+          "rich": "The id returned by the day listing or the title search."
         }
       ]
     },
@@ -181,7 +181,7 @@
           "type": "string",
           "required": true,
           "terse": "Event.",
-          "rich": "The id list_events or search_events returned."
+          "rich": "The id returned by the day listing or the title search."
         },
         {
           "name": "email",
@@ -202,7 +202,7 @@
           "type": "string",
           "required": true,
           "terse": "Event.",
-          "rich": "The id list_events or search_events returned."
+          "rich": "The id returned by the day listing or the title search."
         },
         {
           "name": "minutes_before",
@@ -223,7 +223,7 @@
           "type": "string",
           "required": true,
           "terse": "Event.",
-          "rich": "The id list_events or search_events returned."
+          "rich": "The id returned by the day listing or the title search."
         }
       ]
     },

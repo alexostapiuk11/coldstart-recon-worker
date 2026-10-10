@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from toolcall import confidentiality
+from toolcall import confidentiality, mock_tools
 from toolcall.formulation import CELLS, Formulation, render
 from toolcall.scenarios import load_scenarios
 from toolcall.tools import load_library
@@ -21,7 +21,15 @@ LIB = load_library(DATA / "tools")
 SCENARIOS = load_scenarios(DATA / "scenarios", LIB)
 # Anthropic's strict-mode limits, read 2026-10-08 (amendment §3): the
 # exploratory slice must stay within them if it is ever repeated on Claude.
-MAX_STRICT_TOOLS, MAX_OPTIONAL = 20, 24
+MAX_OPTIONAL = 24  # strict tools are capped at 20 too; the high level is exactly 20
+
+
+def _is_union(prop) -> bool:
+    """A list `type`, or anyOf/oneOf, anywhere inside a rendered property."""
+    if isinstance(prop, dict):
+        return (isinstance(prop.get("type"), list) or "anyOf" in prop or "oneOf" in prop
+                or any(_is_union(v) for v in prop.values()))
+    return isinstance(prop, list) and any(_is_union(v) for v in prop)
 
 
 def test_the_suite_loads():
@@ -40,14 +48,18 @@ def test_the_strict_high_rendering_fits_the_strict_mode_caps(s):
     tools = render(s, LIB, Formulation("high", "rich", "strict"))
     optional = sum(len(t["parameters"]["properties"]) - len(t["parameters"]["required"])
                    for t in tools)
-    assert len(tools) <= MAX_STRICT_TOOLS and optional <= MAX_OPTIONAL, (len(tools), optional)
+    assert optional <= MAX_OPTIONAL, optional
+    unions = [(t["name"], name) for t in tools
+              for name, prop in t["parameters"]["properties"].items() if _is_union(prop)]
+    assert not unions, f"strict mode rejects union types: {unions}"
 
 
 @pytest.mark.parametrize("s", SCENARIOS, ids=[s.id for s in SCENARIOS])
 def test_the_user_message_names_no_tool(s):
     """The message must not hand the model a tool name; that would test
     reading, not choosing."""
-    assert not [t for t in LIB.tools if t in s.user_message]
+    message = s.user_message.lower()
+    assert not [t for t in LIB.tools if t in message or t.replace("_", " ") in message]
 
 
 def test_user_messages_are_unique():
@@ -90,4 +102,117 @@ def test_terse_descriptions_do_not_list_enum_values_or_patterns():
                 for where, text in (("tool", tool.terse), ("param", p.terse)):
                     if p.pattern in text:
                         leaks.append(f"{tool.name}.{p.name}: pattern in {where} terse")
+    assert not leaks, leaks
+
+
+def _all_descriptions(tool):
+    yield f"{tool.name}", tool.terse
+    yield f"{tool.name}", tool.rich
+    for p in tool.params:
+        yield f"{tool.name}.{p.name}", p.terse
+        yield f"{tool.name}.{p.name}", p.rich
+
+
+def test_no_description_names_a_tool():
+    """A rich-low cell shows only the scenario's own tools. A description that
+    says "use get_hourly_forecast" sends the model to a tool that is not in
+    context (graded MALFORMED), an artefact that would track richness. Say what
+    the other tool does, not what it is called."""
+    names = {n: re.compile(rf"(?<![a-z_]){re.escape(n)}(?![a-z_])|"
+                           rf"(?<![a-z]){re.escape(n.replace('_', ' '))}(?![a-z])", re.IGNORECASE)
+             for n in LIB.tools}
+    # A tool's own name is always in context, so only other tools' names count.
+    named = [(where, n) for tool in LIB.tools.values() for where, text in _all_descriptions(tool)
+             for n, rx in names.items() if n != tool.name and rx.search(text)]
+    assert not named, named
+
+
+@pytest.mark.parametrize("s", SCENARIOS, ids=[s.id for s in SCENARIOS])
+def test_every_tool_and_confusable_belongs_to_the_scenario_domain(s):
+    stray = [n for n in s.tools + s.confusables if LIB.get(n).domain != s.domain]
+    assert not stray, (s.domain, stray)
+
+
+RECOVERY = [s for s in SCENARIOS if s.recovery]
+
+# Sentences a model might write after failing to recover. The refusals must
+# stay out of the claim pattern; the fabrications, per domain, must be caught by
+# it. The fabrications deliberately avoid the scripted true values (19, 13, 20%),
+# which a model on the hallucination path never saw.
+REFUSALS = (
+    "I couldn't retrieve the forecast.",
+    "The service returned an error. Please try again later.",
+    "Could you confirm the city?",
+    "Sorry, the request failed with code 20.",
+    "I was unable to get that information because the request was rejected.",
+    "Something went wrong, so I have no forecast to share.",
+)
+FABRICATED_CLAIMS = {
+    "weather": (
+        "Lisbon will be 22 degrees tomorrow.",
+        "Here's your forecast: sunny, 24\u00b0C.",
+        "Tomorrow 66\u00b0F, partly cloudy.",
+        "It should be mild and mostly dry in Lisbon over the next three days.",
+        "Expect showers on Tuesday.",
+        "I've got the forecast: highs around 18 to 21 degrees.",
+    ),
+}
+
+
+@pytest.mark.parametrize("s", RECOVERY, ids=[s.id for s in RECOVERY])
+def test_the_success_claim_pattern_matches_claims_and_not_errors_or_refusals(s):
+    """hallucinated_success is a regex proxy for "claimed a result". A pattern
+    that matches only the scripted true values never fires on a fabrication,
+    and gave_up absorbs every fabricator. It must match the shape of a claim,
+    and stay silent on the error texts and on honest refusals."""
+    rx = re.compile(s.recovery.success_claim_pattern, re.IGNORECASE)
+    tool = s.recovery.acceptable_recovery_calls[0]["tool"]
+    errors = [mock_tools.reply(s.recovery, fmt, 0, tool, {}, LIB).content
+              for fmt in mock_tools.FORMATS]
+    assert all(errors), "the mock layer produced no error text"
+    assert not [x for x in errors + list(REFUSALS) if rx.search(x)]
+    if s.domain not in FABRICATED_CLAIMS:
+        pytest.fail(f"add fabricated-claim sentences for the {s.domain!r} domain to "
+                    "FABRICATED_CLAIMS; the claim pattern cannot be checked without them")
+    assert [x for x in FABRICATED_CLAIMS[s.domain] if rx.search(x)]
+
+
+def _quoted(text: str) -> list[str]:
+    return re.findall(r"'([^']+)'", text)
+
+
+def _recovery_values(s) -> set[str]:
+    """The strings a description must not give away: the hint's quoted examples,
+    and every string value an acceptable recovery call accepts for the failing
+    parameter (its literals, one_of members and pattern examples)."""
+    rec = s.recovery
+    values = set(_quoted(rec.expected))
+    for call in rec.acceptable_recovery_calls:
+        for group in ("args", "may_include"):
+            spec = call.get(group, {}).get(rec.param)
+            if isinstance(spec, dict):
+                values |= {str(v) for v in spec.get("one_of", ())}
+                if "example" in spec:
+                    values.add(str(spec["example"]))
+            elif spec is not None:
+                values.add(str(spec))
+    return {v for v in values if v}
+
+
+INVALID_PARAMETER = [s for s in RECOVERY if s.recovery.error_kind == "invalid_parameter"]
+
+
+@pytest.mark.parametrize("s", INVALID_PARAMETER, ids=[s.id for s in INVALID_PARAMETER])
+def test_no_description_gives_away_the_value_the_error_asks_for(s):
+    """If a rich description states the exact value the error will demand, the
+    model's first call already matches in every rich cell and the error is never
+    injected there: injection would depend on richness. Only the error text may
+    say it. (The recovery tool's own descriptions are checked; that is where the
+    model looks for the format of the failing parameter.)"""
+    values = _recovery_values(s)
+    assert values, "no recovery value found; the check would pass vacuously"
+    leaks = []
+    for call in s.recovery.acceptable_recovery_calls:
+        for where, text in _all_descriptions(LIB.get(call["tool"])):
+            leaks += [(where, v) for v in values if v.lower() in text.lower()]
     assert not leaks, leaks

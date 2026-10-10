@@ -15,7 +15,7 @@
     "find_free_slots",
     "set_reminder"
   ],
-  "user_message": "Put a 15-minute 'Team standup' on 2026-11-09 at half past nine in the morning.",
+  "user_message": "Put a 15-minute 'Team standup' on 2026-11-09 at quarter past two in the afternoon.",
   "expectation": {
     "acceptable_calls": [
       {
@@ -28,11 +28,18 @@
             ]
           },
           "date": "2026-11-09",
-          "start_time": "09:30",
+          "start_time": "14:15",
           "duration_minutes": 15
+        },
+        "may_include": {
+          "attendees": {
+            "one_of": [
+              []
+            ]
+          }
         }
       }
     ]
   },
-  "notes": "'half past nine in the morning' must become 09:30; 9:30 or 9.30 is a wrong value."
+  "notes": "'quarter past two in the afternoon' must become 14:15; 2:15, 02:15 or 2:15 PM is a wrong value."
 }
