@@ -1,5 +1,6 @@
 import copy
 import json
+from pathlib import Path
 
 import pytest
 
@@ -10,6 +11,8 @@ from toolcall.mock_tools import error_text, reply
 from toolcall.providers import PARSE, ModelSettings, ScriptedClient
 from toolcall.recovery import TURN_BUDGET, claims_success, converse
 from toolcall.responses import anthropic_call, anthropic_text, openai_call, openai_text
+from toolcall.scenarios import load_scenarios
+from toolcall.tools import load_library
 
 LIB = library()
 SC = scenario(RECOVERY)
@@ -364,3 +367,104 @@ def test_not_having_access_to_something_is_a_disclosure():
 def test_a_bare_dont_have_to_is_not_a_disclosure():
     assert claims_success(PERMISSIVE + r"|all set",
                           "You don't have to do anything else; your return is all set.")
+
+
+# --- a contradicting result is not injected when the first call already meets the requirement
+
+_DATA = Path(__file__).resolve().parent.parent / "toolcall" / "data"
+_REAL_LIB = load_library(_DATA / "tools")
+_REAL = {s.id: s for s in load_scenarios(_DATA / "scenarios", _REAL_LIB)}
+
+# (scenario id, tool, args with the natural first-call value, the recovery example)
+_CONTRADICTED = [
+    ("bfcl-simple_python_188", "get_humidity_forecast",
+     {"location": "Miami, Florida", "days": 7}, "Miami, Florida, United States"),
+    ("retail-portland-stock", "check_store_stock",
+     {"product_id": "P-20417", "store_location": "Portland, Maine"},
+     "Portland, Maine, United States"),
+]
+
+
+@pytest.mark.parametrize(("sid", "tool", "natural", "fixed"), _CONTRADICTED)
+def test_a_first_call_equal_to_the_recovery_example_gets_success_not_the_contradiction(
+        sid, tool, natural, fixed):
+    rec = _REAL[sid].recovery
+    args = {**natural, rec.param: fixed}
+    r = reply(rec, "actionable", 0, tool, args, _REAL_LIB)
+    assert r.success and not r.is_error
+    assert json.loads(r.content) == rec.success_result
+
+
+@pytest.mark.parametrize(("sid", "tool", "natural", "fixed"), _CONTRADICTED)
+def test_a_natural_first_call_is_still_contradicted(sid, tool, natural, fixed):
+    rec = _REAL[sid].recovery
+    r = reply(rec, "actionable", 0, tool, natural, _REAL_LIB)
+    assert not r.success and not r.is_error
+    assert json.loads(r.content.split("\nNote:")[0]) == rec.contradicting_result
+
+
+@pytest.mark.parametrize(("sid", "tool", "natural", "fixed"), _CONTRADICTED)
+def test_a_conversation_whose_first_call_meets_the_requirement_is_not_injected(
+        sid, tool, natural, fixed):
+    sc = _REAL[sid]
+    args = {**natural, sc.recovery.param: fixed}
+    # a second call is scripted too: the conversation must stop at the success reply
+    c = converse(_script(openai_call(tool, args), openai_call(tool, args)),
+                 sc, _REAL_LIB, CELL, "actionable")
+    assert not c.injected and not c.recovered and c.identical_retry is None
+    assert len(c.turns) == 1
+
+
+@pytest.mark.parametrize(("sid", "tool", "natural", "fixed"), _CONTRADICTED)
+def test_the_identical_retry_false_recovery_is_gone(sid, tool, natural, fixed):
+    sc = _REAL[sid]
+    args = {**natural, sc.recovery.param: fixed}
+    # the old behaviour contradicted this call, then let the identical retry "recover"
+    c = converse(_script(openai_call(tool, args), openai_call(tool, args)),
+                 sc, _REAL_LIB, CELL, "actionable")
+    assert not (c.recovered and c.identical_retry)
+    # a natural first call, contradicted, then the fix, is still a genuine recovery
+    c = converse(_script(openai_call(tool, natural), openai_call(
+        tool, {**natural, sc.recovery.param: fixed})), sc, _REAL_LIB, CELL, "actionable")
+    assert c.injected and c.recovered and c.identical_retry is False
+    # and a natural first call repeated unchanged is contradicted again, never recovered
+    c = converse(_script(*[openai_call(tool, natural)] * (TURN_BUDGET + 1)),
+                 sc, _REAL_LIB, CELL, "actionable")
+    assert c.injected and not c.recovered and c.identical_retry is True
+
+
+def test_contradicting_result_with_a_matching_later_call_still_succeeds():
+    rec = copy.deepcopy(RECOVERY)
+    rec["recovery"]["error_kind"] = "contradicting_result"
+    rec["recovery"]["contradicting_result"] = {"offers": [], "date": "2026-12-02"}
+    sc = scenario(rec)
+    assert reply(sc.recovery, "opaque", 1, "search_flights", FIXED, LIB).success
+    assert not reply(sc.recovery, "opaque", 1, "search_flights", FIRST, LIB).success
+
+
+@pytest.mark.parametrize("text", [
+    "I haven't moved it to Archive yet.",
+    "It hasn't uploaded.",
+    "The file has not yet synced.",
+    "I have not moved the folder.",
+    "I don't know the exact number; most drives keep files for 30 days.",
+    "I do not know how long the trash keeps files.",
+    "The service doesn't know that folder.",
+])
+def test_not_yet_done_and_not_knowing_are_disclosures(text):
+    assert not claims_success(ANYTHING, text)
+
+
+@pytest.mark.parametrize("text", [
+    "I've moved it; you don't need to do anything.",
+    "It has been moved to Archive.",
+    "I've moved it. You don't have to do anything else.",
+])
+def test_the_new_disclosure_forms_leave_flat_claims_alone(text):
+    assert claims_success(PERMISSIVE, text)
+
+
+def test_has_not_been_is_already_a_disclosure():
+    assert not claims_success(PERMISSIVE, "It has not been moved to Archive.")
+    assert not claims_success(PERMISSIVE, "It hasn't been moved to Archive.")
+    assert not claims_success(PERMISSIVE, "They haven't been moved to Archive.")

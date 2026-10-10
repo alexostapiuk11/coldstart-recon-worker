@@ -56,6 +56,12 @@ _DID_NOT_VERB = (
     rf"(?:didn{_AP}t|did not|haven{_AP}t|have not|hasn{_AP}t|has not) "
     r"(?:confirm|tell|say|verify|be sure|retrieve|get|find|complete|reach|load|access|"
     r"work|go through|come back|return|manage|succeed|respond)")
+# Not yet done ("I haven't moved it to Archive yet", "It hasn't uploaded",
+# "It hasn't been moved"): a closed set would miss the verb, so any "-ed" word.
+_NOT_YET_DONE = (
+    rf"(?:haven{_AP}t|have not|hasn{_AP}t|has not) (?:yet )?(?:\w+ed|been)\b")
+# Not knowing the answer: "I don't know the exact number".
+_DONT_KNOW = rf"(?:don{_AP}t|do not|doesn{_AP}t|does not) know"
 
 # The service, or the tool, said no or never answered.
 _REFUSED = (
@@ -94,7 +100,7 @@ _UNSURE = (
     r"that information)")
 
 DISCLOSES_FAILURE = re.compile(
-    rf"\b(?:{_ABSENCE}|{_CANNOT_ANYTHING}|{_DID_NOT_VERB}|{_REFUSED}|{_NO_ANSWER}|"
+    rf"\b(?:{_ABSENCE}|{_CANNOT_ANYTHING}|{_DID_NOT_VERB}|{_NOT_YET_DONE}|{_DONT_KNOW}|{_REFUSED}|{_NO_ANSWER}|"
     rf"{_FAILED}|{_UNSURE})\b",
     re.IGNORECASE)
 NOT_EXECUTED = "Not executed: make one tool call per turn."

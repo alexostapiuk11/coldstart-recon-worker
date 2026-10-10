@@ -9,9 +9,12 @@ calls (the calls the service would accept):
 - invalid_parameter: the service rejects any call that matches no acceptable
   recovery call, naming the parameter. A first call that already matches is
   accepted, and that conversation records that no error was injected.
-- contradicting_result: the first call returns a success-shaped result that
-  contradicts the request. Later calls that match an acceptable recovery call
-  get the real result; anything else gets the contradiction again.
+- contradicting_result: a call that matches no acceptable recovery call gets a
+  success-shaped result that contradicts the request, at any attempt. A call
+  that matches one gets the real result, the first call included: a first call
+  that already meets the recovery requirement is accepted and that
+  conversation records that no contradiction was injected, as for
+  invalid_parameter.
 - timeout, malformed_payload: the first call fails whatever it was. Later calls
   that match get the real result. These are transient: an identical retry is
   the right move, which is why H4 excludes them (scenarios.PERSISTENT_KINDS).
@@ -86,9 +89,7 @@ def reply(recovery: Recovery, fmt: str, attempt: int, name: str, args,
     if kind == "invalid_parameter":
         return success if ok else ToolReply(error_text(recovery, fmt), True, False)
     if kind == "contradicting_result":
-        if attempt > 0 and ok:
-            return success
-        return ToolReply(_contradiction(recovery, fmt), False, False)
+        return success if ok else ToolReply(_contradiction(recovery, fmt), False, False)
     if attempt == 0 or not ok:
         return ToolReply(error_text(recovery, fmt), True, False)
     return success
