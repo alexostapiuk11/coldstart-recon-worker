@@ -251,6 +251,16 @@ def _plan(job: Job, library) -> Plan:
     return Plan(calls, total, worst)
 
 
+def plan_cost(settings: ModelSettings, library, scenarios, cells, reps: int
+              ) -> tuple[int, float, float]:
+    """`(calls, estimate_usd, headroom_usd)` for single-turn calls of `reps`
+    repetitions of every scenario in every cell: the same planning a phase does,
+    for a script that runs one job outside the phases (scripts/a3_diagnose.py).
+    The approval must cover `estimate_usd + headroom_usd`."""
+    plan = _plan(Job("plan", settings, list(cells), list(scenarios), reps, None, 0), library)
+    return plan.calls, plan.estimate_usd, plan.headroom_usd
+
+
 def _announce(phase, models, plan: Plan, approved, seed, recovery, say):
     msg = (f"{phase} on {models}: {plan.calls:,} calls, estimated ${plan.estimate_usd:.2f}"
            f" + ${plan.headroom_usd:.2f} guard headroom; approved ${approved:.2f}")

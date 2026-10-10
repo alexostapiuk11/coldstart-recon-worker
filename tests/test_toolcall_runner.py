@@ -37,6 +37,7 @@ from toolcall.runner import (
     PHASES,
     THINKING_TOKENS_ESTIMATE,
     estimate_call_usd,
+    plan_cost,
     run_phase,
     stored_spend_usd,
     tool_result_chars,
@@ -199,6 +200,16 @@ def test_an_approval_equal_to_the_estimate_is_refused_for_want_of_guard_headroom
                     approved_usd=est + headroom, sdks={"openai": sdk}, say=_quiet)
     assert len(sdk.bodies) == out["calls_planned"] == len(SCS) * 10
     assert out["headroom_usd"] == pytest.approx(headroom) and out["spent_usd"] < est + headroom
+
+
+def test_plan_cost_matches_the_phase_it_mirrors(tmp_path):
+    prereg = example_prereg()
+    dry = run_phase("pilot-baseline", prereg, LIB, SCS, tmp_path, stub=True, say=_quiet)
+    calls, est, headroom = plan_cost(prereg.primary, LIB, SCS, [BASELINE], 10)
+    assert calls == dry["calls_planned"] == len(SCS) * 10
+    assert est == pytest.approx(dry["estimate_usd"])
+    assert headroom == pytest.approx(dry["headroom_usd"]) and headroom > 0
+    assert plan_cost(prereg.primary, LIB, SCS, [BASELINE], 20)[1] == pytest.approx(2 * est)
 
 
 def test_the_single_turn_headroom_is_the_dearest_first_turn_bound_times_the_retries(tmp_path):
