@@ -265,7 +265,7 @@
       ]
     },
     {
-      "name": "convert_time",
+      "name": "convert_clock_time",
       "terse": "Convert a time.",
       "rich": "Convert a clock time on a given date from one time zone to another. Not for creating an event or finding free time.",
       "params": [

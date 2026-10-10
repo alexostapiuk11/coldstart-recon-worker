@@ -1,0 +1,56 @@
+{
+  "id": "bfcl-simple_python_393",
+  "source": {
+    "kind": "bfcl",
+    "id": "simple_python_393",
+    "commit": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
+  },
+  "domain": "units",
+  "target_failure_mode": "WRONG_PARAMS",
+  "tools": [
+    "convert_currency",
+    "convert_currency_at_reference_rate",
+    "get_currency_info"
+  ],
+  "confusables": [
+    "convert_speed",
+    "convert_length",
+    "convert_energy",
+    "convert_volume",
+    "describe_unit"
+  ],
+  "user_message": "How much will 20000 Japanese Yen be in United States Dollar?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "convert_currency",
+        "args": {
+          "base_currency": {
+            "pattern": "jpy",
+            "example": "JPY"
+          },
+          "target_currency": {
+            "pattern": "usd",
+            "example": "USD"
+          },
+          "amount": 20000
+        }
+      },
+      {
+        "tool": "convert_currency_at_reference_rate",
+        "args": {
+          "amount": 20000,
+          "from_currency": {
+            "pattern": "jpy",
+            "example": "JPY"
+          },
+          "to_currency": {
+            "pattern": "usd",
+            "example": "USD"
+          }
+        }
+      }
+    ]
+  },
+  "notes": "BFCL convert_currency(base_currency, target_currency, amount) is the library tool convert_currency with BFCL's parameters unchanged (the same tool serves seed 388). BFCL's ground truth is base_currency JPY, target_currency USD, amount 20000 (case-insensitive). Two library tools can fairly serve every currency request: convert_currency (base_currency, target_currency, amount) at the live market rate and convert_currency_at_reference_rate (amount, from_currency, to_currency) at the daily reference rate. The message does not say which rate it wants, so both are acceptable calls with the same values mapped onto each tool's own parameter names. Mapping: base_currency/from_currency JPY, target_currency/to_currency USD, amount 20000. Target WRONG_PARAMS: the message spells both currencies out ('Japanese Yen', 'United States Dollar'), and BFCL's value is the code, so a model that copies the words is wrong. The rich descriptions say 'three-letter code', the terse ones do not. Names are not accepted. No recovery block: yen has no smaller unit, so the amount demand used for seed 388 cannot apply, and a wrong first call cannot recover from a transient error."
+}

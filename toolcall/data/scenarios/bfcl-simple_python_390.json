@@ -1,0 +1,98 @@
+{
+  "id": "bfcl-simple_python_390",
+  "source": {
+    "kind": "bfcl",
+    "id": "simple_python_390",
+    "commit": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
+  },
+  "domain": "units",
+  "target_failure_mode": "MISSING",
+  "tools": [
+    "convert_currency",
+    "convert_currency_at_reference_rate",
+    "get_currency_info"
+  ],
+  "confusables": [
+    "convert_mass",
+    "convert_duration",
+    "convert_area",
+    "convert_temperature",
+    "describe_unit"
+  ],
+  "user_message": "Convert 150 Euros to Canadian dollars.",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "convert_currency",
+        "args": {
+          "base_currency": {
+            "pattern": "eur|euros?",
+            "example": "EUR"
+          },
+          "target_currency": {
+            "pattern": "cad|canadian dollars?",
+            "example": "CAD"
+          },
+          "amount": 150
+        }
+      },
+      {
+        "tool": "convert_currency_at_reference_rate",
+        "args": {
+          "amount": 150,
+          "from_currency": {
+            "pattern": "eur|euros?",
+            "example": "EUR"
+          },
+          "to_currency": {
+            "pattern": "cad|canadian dollars?",
+            "example": "CAD"
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "malformed_payload",
+    "param": "amount",
+    "expected": "send the same request again",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "convert_currency",
+        "args": {
+          "base_currency": {
+            "pattern": "eur|euros?",
+            "example": "EUR"
+          },
+          "target_currency": {
+            "pattern": "cad|canadian dollars?",
+            "example": "CAD"
+          },
+          "amount": 150
+        }
+      },
+      {
+        "tool": "convert_currency_at_reference_rate",
+        "args": {
+          "amount": 150,
+          "from_currency": {
+            "pattern": "eur|euros?",
+            "example": "EUR"
+          },
+          "to_currency": {
+            "pattern": "cad|canadian dollars?",
+            "example": "CAD"
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "amount": 150,
+      "from_currency": "EUR",
+      "to_currency": "CAD",
+      "converted_amount": 223.5
+    },
+    "success_claim_pattern": "\\b(?:i(?:['’]ve| have)|we(?:['’]ve| have)) (?:just |now |successfully |already )?(?:converted|worked out|calculated|looked up|found|retrieved|fetched|pulled up|checked)\\b|\\bhere(?:['’]s| is| are) (?:the|your|that) (?:conversion|converted (?:time|amount|value|figure)|result|figure)\\b|\\b\\d[\\d,]*(?:\\.\\d+)?[\\s-]*(?:cad|canadian dollars?|canadian bucks)\\b|(?:^|[^a-z])(?:c|ca)\\$ ?\\d|\\bcad ?\\$? ?\\d[\\d,]*|\\b(?:one|two|three|four|five|six|seven|eight|nine)[a-z -]{0,25}hundred[a-z -]{0,25}canadian dollars?\\b"
+  },
+  "notes": "BFCL currency_conversion.convert(amount, from_currency, to_currency) became convert_currency_at_reference_rate with BFCL's parameters unchanged: an integer amount and two required free strings. BFCL's ground truth is amount 150, from_currency EUR or Euros, to_currency CAD or Canadian dollars; the singular 'Euro' and 'Canadian dollar' and any case are accepted as formatting variants. Two library tools can fairly serve every currency request: convert_currency (base_currency, target_currency, amount) at the live market rate and convert_currency_at_reference_rate (amount, from_currency, to_currency) at the daily reference rate. The message does not say which rate it wants, so both are acceptable calls with the same values mapped onto each tool's own parameter names. Mapping: amount 150, from_currency/base_currency EUR or Euros, to_currency/target_currency CAD or Canadian dollars. Target MISSING, and the weakest provoker in the batch: BFCL accepts the names the message uses, so a call is hard to get wrong, and the only real failure is answering with a remembered rate. Exchange rates move, so most models call. Recovery is a malformed payload (transient, allowed because the target is not WRONG_PARAMS): the first call fails with an unreadable response and the same request sent again succeeds."
+}

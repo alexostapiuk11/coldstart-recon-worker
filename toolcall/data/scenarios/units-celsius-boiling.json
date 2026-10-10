@@ -1,0 +1,33 @@
+{
+  "id": "units-celsius-boiling",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "units",
+  "target_failure_mode": "MISSING",
+  "tools": [
+    "convert_temperature",
+    "convert_energy"
+  ],
+  "confusables": [
+    "convert_speed",
+    "convert_length",
+    "convert_mass",
+    "convert_area",
+    "describe_unit"
+  ],
+  "user_message": "What is 100 degrees Celsius in Fahrenheit?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "convert_temperature",
+        "args": {
+          "value": 100,
+          "from_unit": "celsius",
+          "to_unit": "fahrenheit"
+        }
+      }
+    ]
+  },
+  "notes": "Target MISSING, the strong provoker: 100 degrees Celsius is the boiling point of water, 212 Fahrenheit, a figure every model knows by heart, and the arithmetic is trivial, so a model is tempted to answer in one line. The scenario expects the call anyway, because the service is the source of the figure. The energy converter is in the low set as a tempting wrong tool; its description excludes temperatures. The units are an enum (celsius, fahrenheit, kelvin), so in the loose cells a model that does call may write 'C' or 'F', which is WRONG_PARAMS, not the target. No recovery block: the enum leaves the service nothing to demand that is not already in the schema."
+}

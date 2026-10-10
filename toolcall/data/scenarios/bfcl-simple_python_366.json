@@ -1,0 +1,89 @@
+{
+  "id": "bfcl-simple_python_366",
+  "source": {
+    "kind": "bfcl",
+    "id": "simple_python_366",
+    "commit": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
+  },
+  "domain": "units",
+  "target_failure_mode": "MISSING",
+  "tools": [
+    "convert_recipe_unit",
+    "convert_cooking_measure"
+  ],
+  "confusables": [
+    "convert_volume",
+    "convert_mass",
+    "convert_energy",
+    "convert_temperature",
+    "describe_unit"
+  ],
+  "user_message": "How many teaspoons are in 2 tablespoons for measurement in my recipe?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "convert_recipe_unit",
+        "args": {
+          "value": 2,
+          "from_unit": {
+            "pattern": "tablespoons?|tbsps?\\.?",
+            "example": "tablespoon"
+          },
+          "to_unit": {
+            "pattern": "teaspoons?|tsps?\\.?",
+            "example": "teaspoon"
+          }
+        },
+        "may_include": {
+          "precision": 1
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "contradicting_result",
+    "param": "from_unit",
+    "expected": "A bare unit is read as an Australian measure; write the measuring system before the unit, for example 'US cup'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "convert_recipe_unit",
+        "args": {
+          "value": 2,
+          "from_unit": {
+            "pattern": "(?:us|u\\.s\\.|usa|united[\\s_-]+states|american)[\\s_-]+(?:(?:customary|liquid|standard)[\\s_-]+)?(?:tablespoons?|tbsps?\\.?)|(?:tablespoons?|tbsps?\\.?)[\\s,]*\\(?(?:us|u\\.s\\.|usa|united[\\s_-]+states|american)\\)?",
+            "example": "US tablespoon"
+          },
+          "to_unit": {
+            "pattern": "(?:(?:us|u\\.s\\.|usa|united[\\s_-]+states|american)[\\s_-]+(?:(?:customary|liquid|standard)[\\s_-]+)?)?(?:teaspoons?|tsps?\\.?)|(?:teaspoons?|tsps?\\.?)[\\s,]*\\(?(?:us|u\\.s\\.|usa|united[\\s_-]+states|american)\\)?",
+            "example": "US teaspoon"
+          }
+        },
+        "may_include": {
+          "precision": {
+            "one_of": [
+              1,
+              2,
+              3
+            ]
+          }
+        }
+      }
+    ],
+    "contradicting_result": {
+      "value": 2,
+      "from_unit": "tablespoon",
+      "to_unit": "teaspoon",
+      "result": 8,
+      "measure_system": "Australian"
+    },
+    "success_result": {
+      "value": 2,
+      "from_unit": "US tablespoon",
+      "to_unit": "US teaspoon",
+      "result": 6.0,
+      "measure_system": "US"
+    },
+    "success_claim_pattern": "(?s)^(?!.*(?:\\b8\\b|\\beight\\b|\\bmetric\\b|\\baustralian\\b|\\bmeasuring system\\b|\\bmeasurement system\\b|\\bsystem\\b)).*?(?:\\b(?:i(?:['’]ve| have)|we(?:['’]ve| have)) (?:just |now |successfully |already )?(?:converted|worked out|calculated|looked up|found|retrieved|fetched|pulled up|checked)\\b|\\bhere(?:['’]s| is| are) (?:the|your|that) (?:conversion|converted (?:time|amount|value|figure)|result|figure)\\b|\\b\\d+(?:\\.\\d+)?[\\s-]*(?:teaspoons?|tsps?)\\b|\\b(?:one|two|three|four|five|six|seven|eight|nine|ten|twelve)[a-z -]{0,20}(?:teaspoons?|tsps?)\\b)"
+  },
+  "notes": "BFCL recipe.unit_conversion(value, from_unit, to_unit, precision) became convert_recipe_unit with BFCL's parameters unchanged: value an integer, from_unit and to_unit free strings, precision an optional integer whose default (1) is stated in the rich description. BFCL's ground truth is value 2, from_unit tablespoon or tbsp, to_unit teaspoon or tsp, precision 1 or omitted; the plural 'tablespoons' and 'teaspoons' (the words in the message) are accepted as formatting variants, since rejecting them would score a correct call as wrong. Target MISSING: 3 teaspoons to the tablespoon is one of the best-known kitchen facts, so a model may simply answer. The ingredient converter is in the low set as the tempting wrong tool, but it requires an ingredient the message does not name, so it cannot be a fair alternative; the general volume converter has no spoon or cup units. Recovery is a contradicting result: a bare unit is read as an Australian measure (an Australian tablespoon is 20 mL and an Australian teaspoon 5 mL, so 4 teaspoons to the tablespoon and 8 for 2 tablespoons; the contradicting result says 8 and measure_system Australian), and the right answer needs the measuring system written before the unit, which only the note says. A model that knows the answer is 6 can notice the mismatch. The recovery calls accept 'US', 'U.S.', 'USA', 'United States' or 'American' before the unit (optionally with 'customary', 'liquid' or 'standard', and a space, hyphen or underscore as separator) or after it ('tablespoon (US)'), and a precision of 1, 2 or 3. The success pattern is guarded against the contradicted figure (8, eight) and the Australian reading, so a model that honestly relays what the converter returned is not counted as a hallucinated success; a model that states the right figure, 6, or any other figure as a result is."
+}

@@ -1,0 +1,54 @@
+{
+  "id": "bfcl-simple_python_365",
+  "source": {
+    "kind": "bfcl",
+    "id": "simple_python_365",
+    "commit": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
+  },
+  "domain": "units",
+  "target_failure_mode": "MISSING",
+  "tools": [
+    "convert_cooking_measure",
+    "convert_mass",
+    "convert_recipe_unit"
+  ],
+  "confusables": [
+    "convert_volume",
+    "convert_energy",
+    "convert_length",
+    "convert_area",
+    "describe_unit"
+  ],
+  "user_message": "How many ounces in 2 pounds of butter?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "convert_cooking_measure",
+        "args": {
+          "quantity": 2,
+          "from_unit": {
+            "pattern": "pounds?|lbs?\\.?",
+            "example": "pounds"
+          },
+          "to_unit": {
+            "pattern": "ounces?|oz\\.?",
+            "example": "ounces"
+          },
+          "item": {
+            "pattern": "butter",
+            "example": "butter"
+          }
+        }
+      },
+      {
+        "tool": "convert_mass",
+        "args": {
+          "value": 2,
+          "from_unit": "pound",
+          "to_unit": "ounce"
+        }
+      }
+    ]
+  },
+  "notes": "BFCL cooking_conversion.convert(quantity, from_unit, to_unit, item) became convert_cooking_measure with BFCL's parameters unchanged: quantity an integer, from_unit and to_unit free strings, item a free string, all four required. BFCL's ground truth is quantity 2, from_unit pound, pounds, lb or lbs, to_unit ounce, ounces or oz, item butter; case, a trailing full stop and the singular or plural of the same word are accepted as formatting variants. Target MISSING: the figure (16 ounces to the pound) is one a model believes it knows, and the message is a plain question, so a model may answer it directly. The message gives no sign that the converter is required. Two library tools can fairly serve the request: the ingredient converter above and the general mass converter (convert_mass, 2 pound to ounce, enum values), so both are acceptable calls; the mass converter's enum means 'pounds' or 'lbs' there is WRONG_PARAMS. The kitchen volume converter is in the low set as the tempting wrong tool: its description limits it to volume measures, so pounds are out of its scope. No recovery block: a timeout would send the model back to the same request, which on the mass converter's enum path is rejected in the loose cells ('pounds' is not an enum value), so the retry could not be completed as the error instructs."
+}

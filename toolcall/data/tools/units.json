@@ -1,0 +1,591 @@
+{
+  "domain": "units",
+  "tools": [
+    {
+      "name": "convert_cooking_measure",
+      "terse": "Convert an ingredient amount.",
+      "rich": "Convert an amount of one named cooking ingredient from one measure to another, for example between two weight units or between a weight and a volume. Not for spoon and cup conversions that do not depend on the ingredient.",
+      "params": [
+        {
+          "name": "quantity",
+          "type": "integer",
+          "required": true,
+          "terse": "Quantity.",
+          "rich": "How many of the starting unit there are, as a whole number."
+        },
+        {
+          "name": "from_unit",
+          "type": "string",
+          "required": true,
+          "terse": "From unit.",
+          "rich": "The unit the quantity is in, such as cup."
+        },
+        {
+          "name": "to_unit",
+          "type": "string",
+          "required": true,
+          "terse": "To unit.",
+          "rich": "The unit to convert to, such as gram."
+        },
+        {
+          "name": "item",
+          "type": "string",
+          "required": true,
+          "terse": "Ingredient.",
+          "rich": "The ingredient being converted, such as flour."
+        }
+      ]
+    },
+    {
+      "name": "convert_recipe_unit",
+      "terse": "Convert a kitchen measure.",
+      "rich": "Convert a number of kitchen volume measures, such as spoons and cups, into another kitchen volume measure. The result does not depend on the ingredient. Not for weights and not for turning a named ingredient from weight into volume.",
+      "params": [
+        {
+          "name": "value",
+          "type": "integer",
+          "required": true,
+          "terse": "Value.",
+          "rich": "How many of the starting unit there are, as a whole number."
+        },
+        {
+          "name": "from_unit",
+          "type": "string",
+          "required": true,
+          "terse": "From unit.",
+          "rich": "The kitchen unit the value is in, such as cup."
+        },
+        {
+          "name": "to_unit",
+          "type": "string",
+          "required": true,
+          "terse": "To unit.",
+          "rich": "The kitchen unit to convert to."
+        },
+        {
+          "name": "precision",
+          "type": "integer",
+          "required": false,
+          "terse": "Decimals.",
+          "rich": "How many decimal places to round to when the result is not a whole number. 1 when omitted."
+        }
+      ]
+    },
+    {
+      "name": "convert_timezone",
+      "terse": "Time in another zone.",
+      "rich": "Change a clock time from one time zone to another, using the current offsets of both zones. Not for a time on a particular past or future date, whose offset may differ, and not for the time right now.",
+      "params": [
+        {
+          "name": "time",
+          "type": "string",
+          "required": true,
+          "terse": "Time.",
+          "rich": "The local time you want to convert, e.g. 3pm"
+        },
+        {
+          "name": "from_timezone",
+          "type": "string",
+          "required": true,
+          "terse": "From zone.",
+          "rich": "The time zone the time is in, named by a city or a zone name."
+        },
+        {
+          "name": "to_timezone",
+          "type": "string",
+          "required": true,
+          "terse": "To zone.",
+          "rich": "The time zone to convert to, named the same way."
+        }
+      ]
+    },
+    {
+      "name": "convert_currency",
+      "terse": "Convert currency, live rate.",
+      "rich": "Convert an amount of money from one currency to another at the current market exchange rate. Not for the rate that is published once a day and not for facts about a currency.",
+      "params": [
+        {
+          "name": "base_currency",
+          "type": "string",
+          "required": true,
+          "terse": "Currency to convert from.",
+          "rich": "The currency the amount is in, written as its three-letter code, such as GBP."
+        },
+        {
+          "name": "target_currency",
+          "type": "string",
+          "required": true,
+          "terse": "Currency to convert to.",
+          "rich": "The currency to convert to, written the same way."
+        },
+        {
+          "name": "amount",
+          "type": "integer",
+          "required": true,
+          "terse": "Amount.",
+          "rich": "The amount to convert, as a whole number."
+        }
+      ]
+    },
+    {
+      "name": "convert_currency_at_reference_rate",
+      "terse": "Convert at the daily rate.",
+      "rich": "Convert an amount of money from one currency to another at a rate published once a day. Not for the live market rate and not for facts about a currency.",
+      "params": [
+        {
+          "name": "amount",
+          "type": "integer",
+          "required": true,
+          "terse": "Amount.",
+          "rich": "The amount to convert, as a whole number."
+        },
+        {
+          "name": "from_currency",
+          "type": "string",
+          "required": true,
+          "terse": "Currency to convert from.",
+          "rich": "The currency the amount is in, written as its three-letter code, such as CHF."
+        },
+        {
+          "name": "to_currency",
+          "type": "string",
+          "required": true,
+          "terse": "Currency to convert to.",
+          "rich": "The currency to convert to, written the same way."
+        }
+      ]
+    },
+    {
+      "name": "convert_length",
+      "terse": "Convert a length.",
+      "rich": "Convert a distance or length between metric and imperial units. Not for the distance between two places.",
+      "params": [
+        {
+          "name": "value",
+          "type": "number",
+          "required": true,
+          "terse": "Length.",
+          "rich": "The number of the starting unit."
+        },
+        {
+          "name": "from_unit",
+          "type": "string",
+          "required": true,
+          "terse": "From unit.",
+          "rich": "The unit the value is in.",
+          "enum": [
+            "millimeter",
+            "centimeter",
+            "meter",
+            "kilometer",
+            "inch",
+            "foot",
+            "yard",
+            "mile"
+          ]
+        },
+        {
+          "name": "to_unit",
+          "type": "string",
+          "required": true,
+          "terse": "To unit.",
+          "rich": "The unit to convert to.",
+          "enum": [
+            "millimeter",
+            "centimeter",
+            "meter",
+            "kilometer",
+            "inch",
+            "foot",
+            "yard",
+            "mile"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "convert_mass",
+      "terse": "Convert a mass.",
+      "rich": "Convert a mass or weight between metric and imperial units. Not for measuring an ingredient by volume.",
+      "params": [
+        {
+          "name": "value",
+          "type": "number",
+          "required": true,
+          "terse": "Mass.",
+          "rich": "The number of the starting unit."
+        },
+        {
+          "name": "from_unit",
+          "type": "string",
+          "required": true,
+          "terse": "From unit.",
+          "rich": "The unit the value is in.",
+          "enum": [
+            "milligram",
+            "gram",
+            "kilogram",
+            "tonne",
+            "ounce",
+            "pound",
+            "stone"
+          ]
+        },
+        {
+          "name": "to_unit",
+          "type": "string",
+          "required": true,
+          "terse": "To unit.",
+          "rich": "The unit to convert to.",
+          "enum": [
+            "milligram",
+            "gram",
+            "kilogram",
+            "tonne",
+            "ounce",
+            "pound",
+            "stone"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "convert_temperature",
+      "terse": "Convert a temperature.",
+      "rich": "Convert a temperature reading from one scale to another. Not for the weather outside.",
+      "params": [
+        {
+          "name": "value",
+          "type": "number",
+          "required": true,
+          "terse": "Temperature.",
+          "rich": "The temperature on the starting scale."
+        },
+        {
+          "name": "from_unit",
+          "type": "string",
+          "required": true,
+          "terse": "From unit.",
+          "rich": "The unit the value is in.",
+          "enum": [
+            "celsius",
+            "fahrenheit",
+            "kelvin"
+          ]
+        },
+        {
+          "name": "to_unit",
+          "type": "string",
+          "required": true,
+          "terse": "To unit.",
+          "rich": "The unit to convert to.",
+          "enum": [
+            "celsius",
+            "fahrenheit",
+            "kelvin"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "convert_area",
+      "terse": "Convert an area.",
+      "rich": "Convert a surface area between metric and imperial units. Not for lengths and not for volumes.",
+      "params": [
+        {
+          "name": "value",
+          "type": "number",
+          "required": true,
+          "terse": "Area.",
+          "rich": "The number of the starting unit."
+        },
+        {
+          "name": "from_unit",
+          "type": "string",
+          "required": true,
+          "terse": "From unit.",
+          "rich": "The unit the value is in.",
+          "enum": [
+            "square_meter",
+            "square_kilometer",
+            "hectare",
+            "acre",
+            "square_foot",
+            "square_mile"
+          ]
+        },
+        {
+          "name": "to_unit",
+          "type": "string",
+          "required": true,
+          "terse": "To unit.",
+          "rich": "The unit to convert to.",
+          "enum": [
+            "square_meter",
+            "square_kilometer",
+            "hectare",
+            "acre",
+            "square_foot",
+            "square_mile"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "convert_speed",
+      "terse": "Convert a speed.",
+      "rich": "Convert a speed between units used on roads, at sea and in science. Not for the time a trip takes.",
+      "params": [
+        {
+          "name": "value",
+          "type": "number",
+          "required": true,
+          "terse": "Speed.",
+          "rich": "The speed in the starting unit."
+        },
+        {
+          "name": "from_unit",
+          "type": "string",
+          "required": true,
+          "terse": "From unit.",
+          "rich": "The unit the value is in.",
+          "enum": [
+            "meters_per_second",
+            "kilometers_per_hour",
+            "miles_per_hour",
+            "knots"
+          ]
+        },
+        {
+          "name": "to_unit",
+          "type": "string",
+          "required": true,
+          "terse": "To unit.",
+          "rich": "The unit to convert to.",
+          "enum": [
+            "meters_per_second",
+            "kilometers_per_hour",
+            "miles_per_hour",
+            "knots"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "convert_volume",
+      "terse": "Convert a volume.",
+      "rich": "Convert a liquid or container volume between metric and imperial units. Not for kitchen spoon and cup measures.",
+      "params": [
+        {
+          "name": "value",
+          "type": "number",
+          "required": true,
+          "terse": "Volume.",
+          "rich": "The number of the starting unit."
+        },
+        {
+          "name": "from_unit",
+          "type": "string",
+          "required": true,
+          "terse": "From unit.",
+          "rich": "The unit the value is in.",
+          "enum": [
+            "milliliter",
+            "liter",
+            "cubic_meter",
+            "cubic_foot",
+            "us_gallon",
+            "us_quart",
+            "us_pint",
+            "imperial_gallon"
+          ]
+        },
+        {
+          "name": "to_unit",
+          "type": "string",
+          "required": true,
+          "terse": "To unit.",
+          "rich": "The unit to convert to.",
+          "enum": [
+            "milliliter",
+            "liter",
+            "cubic_meter",
+            "cubic_foot",
+            "us_gallon",
+            "us_quart",
+            "us_pint",
+            "imperial_gallon"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "convert_data_size",
+      "terse": "Convert a data size.",
+      "rich": "Convert an amount of digital data between units, counting each step as a thousand of the one below. Not for a transfer speed.",
+      "params": [
+        {
+          "name": "value",
+          "type": "number",
+          "required": true,
+          "terse": "Size.",
+          "rich": "The size in the starting unit."
+        },
+        {
+          "name": "from_unit",
+          "type": "string",
+          "required": true,
+          "terse": "From unit.",
+          "rich": "The unit the value is in.",
+          "enum": [
+            "byte",
+            "kilobyte",
+            "megabyte",
+            "gigabyte",
+            "terabyte"
+          ]
+        },
+        {
+          "name": "to_unit",
+          "type": "string",
+          "required": true,
+          "terse": "To unit.",
+          "rich": "The unit to convert to.",
+          "enum": [
+            "byte",
+            "kilobyte",
+            "megabyte",
+            "gigabyte",
+            "terabyte"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "convert_energy",
+      "terse": "Convert an energy value.",
+      "rich": "Convert an amount of energy between units, including food energy and electricity use. Not for temperatures and not for power.",
+      "params": [
+        {
+          "name": "value",
+          "type": "number",
+          "required": true,
+          "terse": "Energy.",
+          "rich": "The energy in the starting unit."
+        },
+        {
+          "name": "from_unit",
+          "type": "string",
+          "required": true,
+          "terse": "From unit.",
+          "rich": "The unit the value is in.",
+          "enum": [
+            "joule",
+            "kilojoule",
+            "calorie",
+            "kilocalorie",
+            "kilowatt_hour"
+          ]
+        },
+        {
+          "name": "to_unit",
+          "type": "string",
+          "required": true,
+          "terse": "To unit.",
+          "rich": "The unit to convert to.",
+          "enum": [
+            "joule",
+            "kilojoule",
+            "calorie",
+            "kilocalorie",
+            "kilowatt_hour"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "convert_duration",
+      "terse": "Convert a duration.",
+      "rich": "Convert a length of time between units such as hours and days. Not for a clock time in another time zone.",
+      "params": [
+        {
+          "name": "value",
+          "type": "number",
+          "required": true,
+          "terse": "Duration.",
+          "rich": "The length of time in the starting unit."
+        },
+        {
+          "name": "from_unit",
+          "type": "string",
+          "required": true,
+          "terse": "From unit.",
+          "rich": "The unit the value is in.",
+          "enum": [
+            "second",
+            "minute",
+            "hour",
+            "day",
+            "week"
+          ]
+        },
+        {
+          "name": "to_unit",
+          "type": "string",
+          "required": true,
+          "terse": "To unit.",
+          "rich": "The unit to convert to.",
+          "enum": [
+            "second",
+            "minute",
+            "hour",
+            "day",
+            "week"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "get_local_time",
+      "terse": "Current local time.",
+      "rich": "The current date and time in one city or time zone, as it is right now. Not for turning a given clock time into another zone.",
+      "params": [
+        {
+          "name": "place",
+          "type": "string",
+          "required": true,
+          "terse": "Place.",
+          "rich": "The city or time zone to look up."
+        }
+      ]
+    },
+    {
+      "name": "get_currency_info",
+      "terse": "Currency details.",
+      "rich": "The name, symbol, issuing country and number of decimal places of one currency. Not for turning an amount into another currency.",
+      "params": [
+        {
+          "name": "currency",
+          "type": "string",
+          "required": true,
+          "terse": "Currency.",
+          "rich": "The currency, written as its three-letter code, such as GBP."
+        }
+      ]
+    },
+    {
+      "name": "describe_unit",
+      "terse": "Explain a unit.",
+      "rich": "What a unit of measurement is, what it measures and how it relates to the base unit of its system. Not for turning a number from one unit into another.",
+      "params": [
+        {
+          "name": "unit",
+          "type": "string",
+          "required": true,
+          "terse": "Unit.",
+          "rich": "The unit to explain, such as a stone."
+        }
+      ]
+    }
+  ]
+}

@@ -6,7 +6,7 @@
   "domain": "calendar",
   "target_failure_mode": "MISSING",
   "tools": [
-    "convert_time",
+    "convert_clock_time",
     "find_free_slots"
   ],
   "confusables": [
@@ -20,7 +20,7 @@
   "expectation": {
     "acceptable_calls": [
       {
-        "tool": "convert_time",
+        "tool": "convert_clock_time",
         "args": {
           "time": "09:00",
           "date": "2026-11-24",
@@ -42,7 +42,7 @@
     "expected": "give the zone as a UTC offset, for example 'UTC+02:00'",
     "acceptable_recovery_calls": [
       {
-        "tool": "convert_time",
+        "tool": "convert_clock_time",
         "args": {
           "time": "09:00",
           "date": "2026-11-24",
