@@ -264,7 +264,15 @@ PARSE = {OPENAI: openai_parse, ANTHROPIC: anthropic_parse}
 class Client:
     """Builds and sends one request. `send` returns (request body, response
     dict); `request` and `post` are its two halves, so a caller can keep the
-    body even when the post raises."""
+    body even when the post raises.
+
+    WARNING: `post` is UNGUARDED. It sends whatever it is given, meters nothing,
+    and has no spend cap. Code that can spend money must wrap a client in
+    `toolcall.guard.GuardedClient` (as `toolcall.runner` does) and never call
+    `Client.post` or `Client.send` directly.
+
+    The real SDK is built lazily on the first `post`; `build_sdk` builds it up
+    front, so a missing package surfaces before a guard reserves anything."""
 
     def __init__(self, settings: ModelSettings, sdk=None):
         self.settings = settings
@@ -273,19 +281,31 @@ class Client:
     def request(self, tools: list[dict], transcript: list[dict]) -> dict:
         return BUILD[self.settings.provider](self.settings, tools, transcript)
 
-    def post(self, body: dict) -> dict:
+    def build_sdk(self):
+        """The provider's real SDK client (or the one this client was given),
+        built now. A missing package is a ValueError saying what to install."""
         if self._sdk is None:
-            if self.settings.provider == OPENAI:
-                from openai import OpenAI
+            provider = self.settings.provider
+            try:
+                if provider == OPENAI:
+                    from openai import OpenAI
 
-                self._sdk = OpenAI(max_retries=SDK_MAX_RETRIES)
-            else:
-                from anthropic import Anthropic
+                    self._sdk = OpenAI(max_retries=SDK_MAX_RETRIES)
+                else:
+                    from anthropic import Anthropic
 
-                self._sdk = Anthropic(max_retries=SDK_MAX_RETRIES)
+                    self._sdk = Anthropic(max_retries=SDK_MAX_RETRIES)
+            except ImportError as e:
+                raise ValueError(
+                    f"install the {provider} package (`pip install {provider}`) to make "
+                    f"paid {provider} calls: {e}") from e
+        return self._sdk
+
+    def post(self, body: dict) -> dict:
+        sdk = self.build_sdk()
         if self.settings.provider == OPENAI:
-            return self._sdk.responses.create(**body).model_dump(exclude_none=True)
-        return self._sdk.messages.create(**body).model_dump(exclude_none=True)
+            return sdk.responses.create(**body).model_dump(exclude_none=True)
+        return sdk.messages.create(**body).model_dump(exclude_none=True)
 
     def send(self, tools: list[dict], transcript: list[dict]) -> tuple[dict, dict]:
         body = self.request(tools, transcript)

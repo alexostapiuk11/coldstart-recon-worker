@@ -98,6 +98,25 @@ def ranked_cells(records, prereg, scenarios=None) -> dict:
     return {"best": order[0], "worst": order[-1], "failure_rate": points}
 
 
+def ranked_analysable_cells(records, included, prereg) -> dict:
+    """`ranked_cells` over exactly the set `analyse` ranks on: the `included`
+    scenarios that meet `min_graded_per_cell` in every cell. The runner picks
+    the recovery, slice and exploratory cells with this, so it and the analysis
+    can never name different cells, and a scenario whose calls all errored in
+    one cell cannot make a later phase refuse to start while `analyse` carries
+    on without it."""
+    included = set(included)
+    records = [r for r in records if r.scenario_id in included]
+    analysable, _ = analysable_scenarios(records, included, prereg)
+    if not analysable:
+        raise ValueError(
+            "no included scenario has at least "
+            f"{prereg.min_graded_per_cell} graded repetitions in every cell, so no cell "
+            "can be ranked")
+    keep = set(analysable)
+    return ranked_cells([r for r in records if r.scenario_id in keep], prereg, analysable)
+
+
 def _two_cell(records, cells: tuple[str, str], scenarios, prereg) -> dict:
     outcomes = graded_outcomes(records)
     formulations = [parse_cell(c) for c in cells]

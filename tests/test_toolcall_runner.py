@@ -9,6 +9,7 @@ approval that covers its own estimate plus the guard's headroom."""
 import errno
 import fcntl
 import json
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -726,3 +727,133 @@ def test_a_stub_run_says_no_spend_instead_of_an_approval(tmp_path):
     assert said[0].startswith(f"pilot-baseline on gpt-5.4-mini-2026-03-17: {len(SCS) * 10:,} calls")
     assert "guard headroom; stub: no spend" in said[0]
     assert "approved" not in said[0]
+
+
+def _campaign_with_one_dead_scenario_cell(root):
+    """A stub campaign in which every repetition of one scenario in one cell is an
+    API_ERROR: that scenario has no graded call there, so the analysis drops it."""
+    from toolcall.analysis import analyse
+
+    prereg = example_prereg(**STEP2, iterations=100)
+    src = root / "src"
+    run_phase("campaign", prereg, LIB, SCS, src, stub=True, say=_quiet)
+    calls = JsonlStore(src / "campaign.jsonl", CallRecord).read_all()
+    dst = root / "dst"
+    dst.mkdir()
+    store = JsonlStore(dst / "campaign.jsonl", CallRecord)
+    for r in calls:
+        if r.scenario_id == SCS[0].id and r.cell == "high-rich-strict":
+            r.grade = dict(r.grade, category="API_ERROR", detail="the post failed")
+        store.append(r)
+    (dst / "STUB").touch()
+    return prereg, dst, analyse
+
+
+def _stored_campaign(dst):
+    return JsonlStore(dst / "campaign.jsonl", CallRecord).read_all()
+
+
+@pytest.mark.parametrize("phase", ["recovery", "slice", "exploratory"])
+def test_later_phases_start_and_pick_the_cells_the_analysis_ranks(tmp_path, phase):
+    from toolcall.formulation import parse_cell
+    from toolcall.runner import _jobs
+
+    prereg, dst, analyse = _campaign_with_one_dead_scenario_cell(tmp_path)
+    ranks = analyse(_stored_campaign(dst), [], SCS, prereg)["ranked_cells"]
+    run_phase(phase, prereg, LIB, SCS, dst, stub=True, say=_quiet)  # used to raise
+    cells = {c.name for job in _jobs(phase, prereg, LIB, SCS, dst) for c in job.cells}
+    best, worst = parse_cell(ranks["best"]).name, parse_cell(ranks["worst"]).name
+    assert best in cells
+    if phase == "slice":
+        assert worst in cells
+
+
+def test_the_runner_and_the_analysis_rank_the_same_cells(tmp_path):
+    from toolcall.analysis import ranked_analysable_cells
+
+    prereg, dst, analyse = _campaign_with_one_dead_scenario_cell(tmp_path)
+    done = _stored_campaign(dst)
+    assert analyse(done, [], SCS, prereg)["ranked_cells"] == ranked_analysable_cells(
+        done, prereg.included, prereg)
+
+
+def test_a_paid_phase_without_its_api_key_refuses_before_anything_is_reserved(
+        tmp_path, monkeypatch):
+    """No key: every post would fail, and the guard would charge each at its worst
+    case as phantom spend. The refusal comes before the ledger is even created."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+        run_phase("pilot-baseline", example_prereg(), LIB, SCS, tmp_path, approved_usd=20.0,
+                  say=_quiet)
+    with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+        run_phase("pilot-slice", example_prereg(), LIB, SCS, tmp_path, approved_usd=20.0,
+                  say=_quiet)  # empty counts as unset (and openai is not set either)
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(("package", "phase"), [("openai", "pilot-baseline"),
+                                                ("anthropic", "pilot-slice")])
+def test_a_paid_phase_without_its_sdk_package_refuses_before_anything_is_reserved(
+        tmp_path, monkeypatch, package, phase):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-real")
+    monkeypatch.setitem(sys.modules, package, None)  # `from <package> import ...` fails
+    with pytest.raises(ValueError, match=rf"install the {package} package"):
+        run_phase(phase, example_prereg(), LIB, SCS, tmp_path, approved_usd=20.0, say=_quiet)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_the_stub_and_given_sdks_skip_the_key_and_package_checks(tmp_path, monkeypatch):
+    for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setitem(sys.modules, "openai", None)
+    run_phase("pilot-baseline", example_prereg(), LIB, SCS, tmp_path / "stub", stub=True,
+              say=_quiet)
+    out = run_phase("pilot-baseline", example_prereg(), LIB, SCS, tmp_path / "fake",
+                    approved_usd=20.0, sdks={"openai": FakeSDK()}, say=_quiet)
+    assert out["spent_usd"] > 0
+
+
+def test_the_real_sdks_are_built_before_the_first_post(tmp_path, monkeypatch):
+    """With sdks=None the phase builds each provider's SDK itself, eagerly, before
+    the ledger exists, and the clients then use those same objects."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-real")
+    sdks = _both()
+    built, ledger_there, seen_at_first_post = [], [], []
+
+    def fake_build(self):
+        built.append(self.settings.provider)
+        ledger_there.append((tmp_path / "pilot-slice.spend.jsonl").exists())
+        return sdks[self.settings.provider]
+
+    def watch(sdk, namespace):
+        inner = getattr(sdk, namespace).create
+
+        def create(**body):
+            seen_at_first_post.append(sorted(set(built)))
+            return inner(**body)
+
+        getattr(sdk, namespace).create = create
+
+    watch(sdks["openai"], "responses")
+    watch(sdks["anthropic"], "messages")
+    monkeypatch.setattr("toolcall.providers.Client.build_sdk", fake_build)
+    run_phase("pilot-slice", example_prereg(), LIB, SCS, tmp_path, approved_usd=20.0,
+              say=_quiet)
+    assert seen_at_first_post[0] == ["anthropic", "openai"]
+    assert ledger_there[:2] == [False, False]  # both built before the ledger was created
+    assert sdks["openai"].bodies and sdks["anthropic"].bodies
+
+
+def test_a_phase_refuses_an_approval_above_the_preregistered_one(tmp_path):
+    prereg = example_prereg(**{**STEP2, "approved_usd": 5.0})
+    sdk = FakeSDK()
+    with pytest.raises(ValueError, match=r"approved_usd 6.0 .*pre-registered 5.0"):
+        run_phase("campaign", prereg, LIB, SCS, tmp_path, approved_usd=6.0,
+                  sdks={"openai": sdk}, say=_quiet)
+    assert sdk.bodies == [] and list(tmp_path.iterdir()) == []
+    # the pilot comes before step 2: nothing is registered yet to be above
+    run_phase("pilot-baseline", prereg, LIB, SCS, tmp_path / "pilot", approved_usd=20.0,
+              sdks={"openai": FakeSDK()}, say=_quiet)

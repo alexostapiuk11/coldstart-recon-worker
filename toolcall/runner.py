@@ -18,7 +18,9 @@ the client in one spend guard shared by every job of the phase.
 | exploratory     | best, constrained decoding  | included                 | reps         |
 
 "best" and "worst" come from the campaign's own records by the pre-registered
-rule (`analysis.ranked_cells`), so those phases cannot start before it ends.
+rule, over the same analysable scenarios `analysis.analyse` ranks on
+(`analysis.ranked_analysable_cells`), so those phases cannot start before the
+campaign ends and cannot pick cells the analysis would not.
 
 Recovery conversations. `recovery.converse` makes up to TURN_BUDGET + 1
 attempts, so a recovery phase plans that many calls per conversation, as a
@@ -57,13 +59,14 @@ spend. The store paths are the same either way.
 """
 
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
 
 from harness.store import JsonlStore
 from toolcall import campaign
-from toolcall.analysis import ranked_cells
+from toolcall.analysis import ranked_analysable_cells
 from toolcall.campaign import _check_same_run
 from toolcall.formulation import BASELINE, CELLS, Formulation, parse_cell, render
 from toolcall.guard import (
@@ -79,7 +82,14 @@ from toolcall.guard import (
 )
 from toolcall.mock_tools import FORMATS, reply
 from toolcall.prices import PRICES
-from toolcall.providers import PARSE, Client, ModelSettings, ScriptedClient
+from toolcall.providers import (
+    ANTHROPIC,
+    OPENAI,
+    PARSE,
+    Client,
+    ModelSettings,
+    ScriptedClient,
+)
 from toolcall.records import CallRecord, RecoveryRecord
 from toolcall.recovery import TURN_BUDGET
 from toolcall.scenarios import Scenario
@@ -297,7 +307,7 @@ def _jobs(phase, prereg, library, scenarios, root) -> list[Job]:
     done = JsonlStore(root / "campaign.jsonl", CallRecord).read_all()
     if not done:
         raise ValueError(f"{phase} needs the campaign's records to pick the cells")
-    ranks = ranked_cells(done, p)
+    ranks = ranked_analysable_cells(done, p.included, p)
     best, worst = parse_cell(ranks["best"]), parse_cell(ranks["worst"])
     if phase == "recovery":
         cells = [BASELINE] if best == BASELINE else [BASELINE, best]
@@ -349,6 +359,39 @@ def _check_sdks(jobs: list[Job], sdks) -> None:
         raise ValueError(f"no SDK for provider {provider!r}: pass sdks={{{provider!r}: ...}}")
 
 
+API_KEY_ENV = {OPENAI: "OPENAI_API_KEY", ANTHROPIC: "ANTHROPIC_API_KEY"}
+
+
+def _real_sdks(jobs: list[Job]) -> dict[str, object]:
+    """For a paid phase given no SDKs: check each provider's API key is set and
+    build its real SDK now, once, shared by that provider's jobs. Run before the
+    ledger is created or anything is reserved: a missing key or package makes
+    every post fail, and the guard charges a failed post at its worst case, so
+    finding out per call would book phantom spend and store API_ERROR records."""
+    providers = sorted({job.settings.provider for job in jobs})
+    for provider in providers:
+        if not os.environ.get(API_KEY_ENV[provider], "").strip():
+            raise ValueError(f"{API_KEY_ENV[provider]} is not set in the environment "
+                             f"(or is empty), and the phase would call {provider}")
+    first = {job.settings.provider: job.settings for job in jobs}
+    return {provider: Client(first[provider]).build_sdk() for provider in providers}
+
+
+def _check_approval(phase: str, prereg, approved_usd: float) -> None:
+    """From step 2 on, the pre-registration holds the author's approved amount
+    for the whole experiment; one phase may not be approved for more than it.
+    (Each phase's approval caps that phase alone. Keeping the sum over phases
+    within `prereg.approved_usd` is the job of the script that runs them, plan 3's
+    `scripts/a3_run.py`; this only stops any single phase from exceeding it.)"""
+    cap = prereg.approved_usd
+    if phase.startswith("pilot") or cap is None:
+        return
+    if approved_usd > cap:
+        raise ValueError(
+            f"{phase}: approved_usd {approved_usd} is above the pre-registered {cap} "
+            "(prereg.approved_usd); lower it, or amend the pre-registration first")
+
+
 def _seed(root: Path, jobs: list[Job], ledger: SpendLedger) -> float:
     """What the phase has already spent: the ledger's total, floored by what the
     stores say. A store that says more (a phase run before ledgers existed) tops
@@ -381,6 +424,9 @@ def run_phase(phase: str, prereg, library, scenarios, root, *, approved_usd: flo
     if stub:
         return _run(phase, prereg, library, scenarios, root, jobs, None, approved_usd, True,
                     resume, say, sdks)
+    _check_approval(phase, prereg, approved_usd)
+    if sdks is None:
+        sdks = _real_sdks(jobs)
     _check_sdks(jobs, sdks)
     # The ledger's lock is what makes one run at a time: taken here, before the
     # stores or the seed are read, and released when the phase ends or dies.
