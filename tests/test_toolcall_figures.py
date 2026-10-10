@@ -153,6 +153,30 @@ def test_identical_retry_labels_each_bar_with_its_own_n(analysis, tmp_path):
         fig._suptitle.get_text())
 
 
+def test_identical_retry_title_states_its_repetitions(analysis, tmp_path):
+    assert analysis["recovery_reps"] == 5
+    fig = FIGURES["identical_retry"](analysis, tmp_path / "x.png")
+    assert f"up to {analysis['recovery_reps']} conversations" in fig._suptitle.get_text()
+
+
+def test_analysis_carries_the_recovery_and_slice_repetitions(analysis):
+    assert analysis["recovery_reps"] == 5 and analysis["slice_reps"] == 5
+
+
+def test_flakiness_bars_carry_their_unit_counts(analysis, tmp_path):
+    a = copy.deepcopy(analysis)
+    a["flakiness"]["distinct_categories_per_unit"] = {"1": 40, "3": 20}
+    a["flakiness"]["units"] = 60
+    fig = FIGURES["flakiness"](a, tmp_path / "f.png")
+    ax = fig.axes[0]
+    assert [t.get_text() for t in ax.texts] == ["n=40", "n=0", "n=20"]
+    tiny = copy.deepcopy(analysis)
+    dist = tiny["flakiness"]["distinct_categories_per_unit"]
+    fig = FIGURES["flakiness"](tiny, tmp_path / "g.png")
+    assert [t.get_text() for t in fig.axes[0].texts] == [
+        f"n={dist.get(str(k), 0)}" for k in range(1, max(int(k) for k in dist) + 1)]
+
+
 def test_flakiness_shows_an_empty_bar_for_a_missing_middle_count(analysis, tmp_path):
     a = copy.deepcopy(analysis)
     a["flakiness"]["distinct_categories_per_unit"] = {"1": 40, "3": 20}

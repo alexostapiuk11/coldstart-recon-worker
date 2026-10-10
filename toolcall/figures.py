@@ -141,7 +141,11 @@ def flakiness(analysis: dict, out_path):
     counts = range(1, max(int(k) for k in dist) + 1)
     shares = [dist.get(str(k), 0) / f["units"] for k in counts]
     fig, ax = plt.subplots(figsize=(WIDTH_IN, 5.0))
-    ax.bar([f"{k} outcome{'s' if k != 1 else ''}" for k in counts], shares, color="#2f6fd0")
+    bars = ax.bar([f"{k} outcome{'s' if k != 1 else ''}" for k in counts], shares,
+                  color="#2f6fd0")
+    # A bar can be too short to see; its unit count tells a reader zero from small.
+    ax.bar_label(bars, labels=[f"n={dist.get(str(k), 0)}" for k in counts], padding=2,
+                 fontsize=_pt(PX_TEXT))
     ax.set_ylim(0, 1)
     ax.set_ylabel("Share of (scenario, cell) units")
     ax.set_xlabel("Distinct categories among one unit's repetitions")
@@ -183,7 +187,8 @@ def identical_retry(analysis: dict, out_path):
     ax.legend(fontsize=_pt(PX_TEXT), loc="upper left")
     fig.suptitle(
         f"Repeating the failing call unchanged\n"
-        f"persistent error kinds · whisker: {_pct(cis[0])} interval\n"
+        f"persistent error kinds · up to {analysis['recovery_reps']} conversations\n"
+        f"per scenario and format · whisker: {_pct(cis[0])} interval\n"
         f"H4 pairs {h4['n_scenarios']} scenarios · H4 {h4['verdict']}",
         fontsize=_pt(PX_TITLE),
     )
