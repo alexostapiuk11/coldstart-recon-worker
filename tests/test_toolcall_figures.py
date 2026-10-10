@@ -229,3 +229,67 @@ def test_two_renders_are_byte_identical_with_no_version_metadata(analysis, tmp_p
     first = (tmp_path / "a.png").read_bytes()
     assert first == (tmp_path / "b.png").read_bytes()
     assert b"Software" not in first and b"matplotlib" not in first.lower()
+
+
+def test_the_analysis_names_the_cells_the_recovery_ran_in(analysis):
+    assert analysis["recovery_cells"] == ["low-terse-loose"]  # this fixture ran just one
+
+
+def test_identical_retry_title_counts_the_pooled_recovery_cells(analysis, tmp_path):
+    reps = analysis["recovery_reps"]
+    one = FIGURES["identical_retry"](analysis, tmp_path / "one.png")
+    assert (f"up to {reps} conversations per scenario and format (the one recovery cell)"
+            in " ".join(one._suptitle.get_text().split()))
+    two = copy.deepcopy(analysis)
+    two["recovery_cells"] = ["low-terse-loose", "high-rich-strict"]
+    fig = FIGURES["identical_retry"](two, tmp_path / "two.png")
+    assert (f"up to {2 * reps} conversations per scenario and format (both recovery cells)"
+            in " ".join(fig._suptitle.get_text().split()))
+
+
+def _h4_untestable(analysis, reason):
+    a = copy.deepcopy(analysis)
+    a["hypotheses"]["H4"].update(testable=False, verdict="not testable", reason=reason)
+    for rec in a["recovery"].values():
+        rec["identical_retry_persistent"] = None
+    return a
+
+
+def test_an_untestable_h4_draws_a_panel_saying_why_instead_of_aborting(analysis, tmp_path):
+    reason = "3 scenarios with both formats; the bootstrap floor is 4"
+    out = tmp_path / "untestable.png"
+    fig = FIGURES["identical_retry"](_h4_untestable(analysis, reason), out)
+    assert out.stat().st_size > 5_000
+    texts = " ".join(" ".join(t.get_text().split()) for t in fig.findobj(matplotlib.text.Text))
+    assert f"H4 not testable: {reason}" in texts
+    assert not fig.axes[0].patches  # no bars: there is nothing to draw them from
+    for t in fig.findobj(matplotlib.text.Text):
+        if t.get_text().strip():
+            assert t.get_fontsize() * PHONE_WIDTH_PX / (72 * WIDTH_IN) >= MIN_PHONE_TEXT_PX
+    assert "scenarios" in fig._suptitle.get_text()  # the sample size stays on the figure
+
+
+def test_every_figure_still_renders_when_h4_is_untestable(analysis, tmp_path):
+    a = _h4_untestable(analysis, "opaque identical-retry rate 0.010 is below the floor")
+    for name, draw in FIGURES.items():
+        draw(a, tmp_path / f"{name}.png")
+        assert (tmp_path / f"{name}.png").stat().st_size > 5_000
+
+
+def test_the_required_paths_cover_the_recovery_cells(analysis):
+    from toolcall.figures import REQUIRED_PATHS, missing_paths
+
+    assert "recovery_cells" in REQUIRED_PATHS
+    assert missing_paths(analysis) == []
+    old = {k: v for k, v in analysis.items() if k != "recovery_cells"}
+    assert missing_paths(old) == ["recovery_cells"]
+
+
+@pytest.mark.parametrize("cells", [["a"], ["a", "b"], ["a", "b", "c"]])
+def test_identical_retry_title_is_not_clipped_at_any_cell_count(analysis, tmp_path, cells):
+    a = copy.deepcopy(analysis)
+    a["recovery_cells"] = cells
+    fig = FIGURES["identical_retry"](a, tmp_path / "x.png")
+    fig.canvas.draw()
+    box = fig._suptitle.get_window_extent()
+    assert box.x0 >= 0 and box.x1 <= fig.bbox.x1

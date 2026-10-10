@@ -6,6 +6,8 @@ intervals shown, legible on a phone. Text sizes go through
 every text artist clears the phone floor.
 """
 
+import textwrap
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -40,7 +42,7 @@ _NO_METADATA = {"Software": None}
 REQUIRED_PATHS = (
     "S", "N", "recovery_reps", "cell_rates.failure", "marginal_count_richness",
     "hypotheses.H1", "hypotheses.H4", "flakiness.distinct_categories_per_unit",
-    "flakiness.units", "flakiness.ever_flip", "recovery",
+    "flakiness.units", "flakiness.ever_flip", "recovery", "recovery_cells",
 )
 
 
@@ -190,22 +192,56 @@ def flakiness(analysis: dict, out_path):
     return fig
 
 
+def _recovery_cells_phrase(analysis: dict) -> str:
+    """How many conversations one scenario and format has: recovery runs in the
+    baseline and the best cell, and the two are pooled."""
+    reps, cells = analysis["recovery_reps"], analysis["recovery_cells"]
+    if len(cells) == 1:
+        return f"up to {reps} conversations per scenario and format\n(the one recovery cell)"
+    both = "both" if len(cells) == 2 else f"all {len(cells)}"
+    return (f"up to {reps * len(cells)} conversations per scenario and format\n"
+            f"({both} recovery cells)")
+
+
+def _h4_not_testable_panel(fig, ax, h4: dict) -> None:
+    """No bars to draw: say that H4 could not be tested and why, in the
+    analysis' own words, rather than abort the render."""
+    reason = h4.get("reason", "the analysis gives no reason")
+    ax.set_axis_off()
+    ax.text(0.5, 0.5, "\n".join(textwrap.wrap(f"H4 not testable: {reason}", 34)),
+            ha="center", va="center", fontsize=_pt(PX_TITLE), transform=ax.transAxes)
+    fig.suptitle(
+        f"Repeating the failing call unchanged\n"
+        f"persistent error kinds · H4 pairs {h4['n_scenarios']} scenarios\n"
+        f"H4 {h4['verdict']}",
+        fontsize=_pt(PX_TITLE),
+    )
+
+
 def identical_retry(analysis: dict, out_path):
     """Figure 4: H4. Identical-retry rate after an error, by message format,
-    over persistent error kinds, with the pre-registered floor drawn."""
+    over persistent error kinds, with the pre-registered floor drawn. If H4
+    could not be tested (too few scenarios, or an opaque rate under the floor)
+    the panel says so and why, and draws no bars."""
     rec = analysis["recovery"]
     fmts = [f for f in ("actionable", "opaque") if f in rec]
     validate_rows(fmts)
+    h4 = analysis["hypotheses"]["H4"]
+    fig, ax = plt.subplots(figsize=(WIDTH_IN, 5.0))
+    if not h4["testable"]:
+        _h4_not_testable_panel(fig, ax, h4)
+        fig.tight_layout()
+        fig.savefig(out_path, dpi=150, metadata=_NO_METADATA)
+        return fig
     cis = [rec[f]["identical_retry_persistent"] for f in fmts]
     for fmt, ci in zip(fmts, cis):
         if ci is None:
+            plt.close(fig)
             raise ValueError(f"no persistent-kind identical-retry interval for {fmt}")
-    fig, ax = plt.subplots(figsize=(WIDTH_IN, 5.0))
     for x, (fmt, ci) in enumerate(zip(fmts, cis)):
         ax.bar(x, ci["point"], color=FORMAT_COLOR[fmt], width=0.6)
         ax.errorbar([x], [ci["point"]], yerr=_err([ci["point"]], [ci["lo"]], [ci["hi"]]),
                     fmt="none", ecolor="black", capsize=5, lw=1.2)
-    h4 = analysis["hypotheses"]["H4"]
     ax.axhline(h4["floor"], color="#888888", ls="--", lw=1.2, label="pre-registered floor")
     ax.set_xticks(range(len(fmts)),
                   [f"{f} error\n{ci['n_scenarios']} scenarios" for f, ci in zip(fmts, cis)])
@@ -215,8 +251,8 @@ def identical_retry(analysis: dict, out_path):
     ax.legend(fontsize=_pt(PX_TEXT), loc="upper left")
     fig.suptitle(
         f"Repeating the failing call unchanged\n"
-        f"persistent error kinds · up to {analysis['recovery_reps']} conversations\n"
-        f"per scenario and format · whisker: {_pct(cis[0])} interval\n"
+        f"persistent error kinds · whisker: {_pct(cis[0])} interval\n"
+        f"{_recovery_cells_phrase(analysis)}\n"
         f"H4 pairs {h4['n_scenarios']} scenarios · H4 {h4['verdict']}",
         fontsize=_pt(PX_TITLE),
     )

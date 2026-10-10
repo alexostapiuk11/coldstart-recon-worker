@@ -308,6 +308,9 @@ def analyse(records, recovery_records, scenarios, prereg, *, slices=None,
         "N": prereg.reps,
         "retry_cap": prereg.retry_cap,
         "recovery_reps": prereg.recovery_reps,
+        # The cells the recovery conversations ran in (both the baseline and the
+        # best cell, or the baseline alone when it is the best); they are pooled.
+        "recovery_cells": sorted({r.cell for r in recovery_records}),
         "slice_reps": prereg.slice_reps,
         "baseline_cell": prereg.baseline_cell,
         "min_graded_per_cell": prereg.min_graded_per_cell,
