@@ -183,14 +183,23 @@ def holm(pvalues: dict[str, float], alpha: float = 0.05) -> dict[str, bool]:
     return out
 
 
-def ever_flip_rows(outcomes, scenarios=None) -> list[float]:
+def ever_flip_rows(outcomes, scenarios=None, min_reps: int = 1) -> list[float]:
     """Per scenario: the share of its cells whose graded repetitions do not all
-    land in one category. The Noise Floor Audit's measure (amendment §4f)."""
+    land in one category. The Noise Floor Audit's measure (amendment §4f).
+
+    A cell with a single graded repetition cannot flip, so counting it as "did
+    not flip" would pull the fraction down for no reason. `min_reps` keeps only
+    the (scenario, cell) units with at least that many graded repetitions in
+    the denominator; a scenario with no such unit has no row."""
     rows = []
     for sid in sorted(scenarios if scenarios is not None else outcomes):
-        flips = [len({c for _, c in _graded_reps(outcomes, sid, cell.name)}) > 1
-                 for cell in CELLS]
-        rows.append(sum(flips) / len(flips))
+        flips = []
+        for cell in CELLS:
+            reps = _graded_reps(outcomes, sid, cell.name)
+            if len(reps) >= min_reps:
+                flips.append(len({c for _, c in reps}) > 1)
+        if flips:
+            rows.append(sum(flips) / len(flips))
     return rows
 
 

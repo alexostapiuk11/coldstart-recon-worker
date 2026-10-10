@@ -7,14 +7,18 @@ leave WRONG_TOOL alone, and opaque errors bring more identical retries.
 """
 
 import json
+from dataclasses import replace
 
 import pytest
 
 from harness.store import JsonlStore
 from tests.a3_examples import example_prereg, library, scenarios, synthetic_suite
 from toolcall import campaign
-from toolcall.analysis import analyse
+from toolcall.analysis import ESTIMANDS, analyse
+from toolcall.effects import average, contrast, graded_outcomes, half_rows, rate_rows
 from toolcall.formulation import CELLS, parse_cell
+from toolcall.grader import FAILURES
+from toolcall.hypotheses import bootstrap_params
 from toolcall.providers import ScriptedClient
 from toolcall.records import CallRecord, RecoveryRecord
 from toolcall.stub import StubModel
@@ -100,3 +104,142 @@ def test_excluded_scenarios_are_left_out(run):
                                                   slice_reps=5, approved_usd=1.0,
                                                   iterations=100))
     assert a["S"] == 40
+
+
+# --- the pre-registered scenario floor, the sensitivity analysis, flag counts ---
+
+N_SCEN = 66  # synthetic_suite(60, 6): 60 call scenarios and 6 more
+CELL_A = "low-terse-loose"
+CELL_B = "high-terse-loose"
+
+
+def _api_error(r):
+    """A call the provider never answered: ungradable, unmetered, no cost."""
+    return replace(r, grade={**r.grade, "category": "API_ERROR"}, usage=None, cost_usd=None,
+                   unmetered=True)
+
+
+def _variant(run, mutate, **prereg_overrides):
+    calls, recs, scs, _ = run
+    prereg = example_prereg(included=tuple(s.id for s in scs), reps=8, recovery_reps=5,
+                            slice_reps=5, approved_usd=1.0, iterations=100, **prereg_overrides)
+    return analyse([mutate(r) for r in calls], recs, scs, prereg), calls, scs
+
+
+@pytest.fixture(scope="module")
+def trimmed(run):
+    """Scenario 0 keeps one graded repetition in CELL_A (below the floor of 2);
+    scenarios 1-10 lose two repetitions to API errors in CELL_B (above it);
+    two calls have no response text."""
+    scs = run[2]
+    short = scs[0].id
+    thinned = {s.id for s in scs[1:11]}
+
+    def mutate(r):
+        if r.scenario_id == short and r.cell == CELL_A and r.block_index >= 1:
+            return _api_error(r)
+        if r.scenario_id in thinned and r.cell == CELL_B and r.block_index < 2:
+            return _api_error(r)
+        if r.scenario_id == scs[20].id and r.cell == CELL_A and r.block_index < 2:
+            return replace(r, grade={**r.grade, "empty_response": True})
+        return r
+
+    analysis, calls, scs = _variant(run, mutate)
+    return analysis, calls, short, thinned
+
+
+def test_a_scenario_below_the_floor_is_dropped_and_disclosed(analysis, trimmed):
+    a, _, short, _ = trimmed
+    assert analysis["S"] == N_SCEN and analysis["dropped_scenarios"] == []
+    assert a["S"] == N_SCEN - 1
+    (d,) = a["dropped_scenarios"]
+    assert d["scenario"] == short
+    assert d["graded_by_cell"][CELL_A] == 1
+    assert all(n == 8 for c, n in d["graded_by_cell"].items() if c != CELL_A)
+    assert CELL_A in d["reason"]
+
+
+def test_every_estimate_is_about_the_same_analysable_scenarios(trimmed):
+    a, *_ = trimmed
+    assert a["effects"]["failure"]["main:count"]["n_scenarios"] == N_SCEN - 1
+    assert a["cell_rates"]["failure"][CELL_A]["n_scenarios"] == N_SCEN - 1
+    assert a["hypotheses"]["H1"]["n_scenarios"] == N_SCEN - 1
+    assert a["hypotheses"]["H3"]["n_scenarios"] == N_SCEN - 1
+    assert a["hypotheses"]["H5"]["n_scenarios"] == N_SCEN - 1
+    assert a["cost"][CELL_A]["retry"]["n_scenarios"] == N_SCEN - 1
+    sens = a["sensitivity_exclusions_as_failures"]["effects"]
+    assert sens["main:count"]["n_scenarios"] == N_SCEN - 1
+    assert a["flakiness"]["ever_flip"]["n_scenarios"] == N_SCEN - 1
+
+
+def test_ever_flip_counts_only_units_with_two_or_more_graded_repetitions(run, analysis):
+    assert analysis["flakiness"]["units_with_two_or_more"] == N_SCEN * 8
+    a, _, _ = _variant(
+        run, lambda r: _api_error(r) if (r.scenario_id == run[2][0].id and r.cell == CELL_A
+                                         and r.block_index >= 1) else r,
+        min_graded_per_cell=1, retry_cap=1)  # costs need retry_cap <= the shortest cell
+    # With a floor of 1 the scenario stays, and its one-repetition cell is not
+    # an informative unit: it cannot flip, so it is left out of the fraction.
+    assert a["S"] == N_SCEN and a["dropped_scenarios"] == []
+    assert a["flakiness"]["units_with_two_or_more"] == N_SCEN * 8 - 1
+    assert a["flakiness"]["units"] == N_SCEN * 8
+
+
+def test_the_sensitivity_analysis_recomputes_every_estimand_and_is_labelled(analysis, trimmed):
+    a, *_ = trimmed
+    block = a["sensitivity_exclusions_as_failures"]
+    assert "exploratory" in block["label"]
+    assert set(block["effects"]) == set(ESTIMANDS)
+    for e in block["effects"].values():
+        assert e["lo"] <= e["point"] <= e["hi"]
+    # Counting API errors as failures moves the failure effect it is meant to probe.
+    assert (block["effects"]["main:count"]["point"]
+            != a["effects"]["failure"]["main:count"]["point"])
+    # Nothing excluded in the clean stub run, so there the two agree exactly.
+    clean = analysis["sensitivity_exclusions_as_failures"]["effects"]
+    for e in ESTIMANDS:
+        assert clean[e]["point"] == pytest.approx(analysis["effects"]["failure"][e]["point"])
+
+
+def test_counts_report_empty_responses_and_unmetered_calls_per_cell(analysis, trimmed):
+    a, calls, _short, thinned = trimmed
+    assert all(c["empty_response"] == 0 and c["unmetered"] == 0
+               for c in analysis["counts"].values())
+    assert a["counts"][CELL_A]["empty_response"] == 2
+    assert a["counts"][CELL_A]["unmetered"] == 7  # the dropped scenario's API errors
+    assert a["counts"][CELL_B]["unmetered"] == 2 * len(thinned)
+    assert a["counts"][CELL_B]["API_ERROR"] == 2 * len(thinned)
+    # `counts` covers every call of the included scenarios, dropped ones too.
+    assert sum(c["calls"] for c in a["counts"].values()) == len(calls)
+
+
+def test_h5_pairs_each_scenario_with_its_own_aa_contrast_and_drops_empty_halves(run):
+    scs = run[2]
+    odd_less = scs[5].id
+
+    def mutate(r):  # in one cell, every odd repetition is lost: no odd half
+        if r.scenario_id == odd_less and r.cell == CELL_A and r.block_index % 2 == 1:
+            return _api_error(r)
+        return r
+
+    a, calls, _ = _variant(run, mutate)
+    assert a["S"] == N_SCEN and a["dropped_scenarios"] == []  # four graded reps remain
+    h5 = a["hypotheses"]["H5"]
+    assert h5["dropped_scenarios"] == [odd_less] == a["h5_dropped_scenarios"]
+    assert h5["n_scenarios"] == N_SCEN - 1 and a["hypotheses"]["H1"]["n_scenarios"] == N_SCEN
+    keep = sorted(s.id for s in scs if s.id != odd_less)
+    outcomes = graded_outcomes([mutate(r) for r in calls])
+    rows = rate_rows(outcomes, FAILURES, scenarios=keep)
+    aa = half_rows(outcomes, FAILURES, scenarios=keep)
+    expected = (abs(average(contrast(r, "main:count") for r in rows))
+                - abs(average(contrast(h, "main:count") for h in aa)))
+    assert h5["point"] == pytest.approx(expected)
+
+
+def test_one_helper_carries_the_bootstrap_settings(analysis, run):
+    prereg = run[3]
+    assert bootstrap_params(prereg) == {"iterations": prereg.iterations,
+                                        "seed": prereg.bootstrap_seed, "alpha": prereg.alpha}
+    assert analysis["effects"]["failure"]["main:count"]["iterations"] == prereg.iterations
+    assert analysis["cost"][CELL_A]["retry"]["iterations"] == prereg.iterations
+    assert analysis["hypotheses"]["H4"]["iterations"] == prereg.iterations

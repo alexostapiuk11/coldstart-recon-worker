@@ -202,3 +202,29 @@ def test_icc_is_undefined_without_within_group_information_or_variation():
     with pytest.raises(ValueError, match="two or more repetitions"):
         icc([[1], [0], [1]])
     assert icc([[1] * 4, [1] * 4, [1] * 4]) == 1.0   # undefined, treated as 1
+
+
+def test_scenarios_keyword_restricts_spend_retry_and_guards_to_the_analysable_set():
+    records = _records(fail_scenarios=6, n_scen=30)  # s00-s05 fail every repetition
+    analysable = [f"s{i:02d}" for i in range(6, 30)]
+    # A scenario outside the set whose paid call carries no cost would be
+    # refused; outside the set it must never be read.
+    records.append(_extra(9999, CELLS[0].name, 0, "MISSING", None, scenario="s99"))
+    costs = cost_per_success(records, retry_cap=3, iterations=100, seed=1, scenarios=analysable)
+    cell = costs["low-terse-loose"]
+    assert cell["calls"] == 24 * 6
+    assert cell["failure_rate_pooled"] == 0.0
+    assert cell["single"]["n_scenarios"] == cell["retry"]["n_scenarios"] == 24
+    assert cell["single"]["point"] == pytest.approx(0.001)
+    # Default (None): every scenario in the records, as before.
+    everyone = {f"s{i:02d}" for i in range(30)}
+    default = cost_per_success(_records(fail_scenarios=6, n_scen=30), retry_cap=3,
+                               iterations=100, seed=1)
+    explicit = cost_per_success(_records(fail_scenarios=6, n_scen=30), retry_cap=3, iterations=100,
+                                seed=1, scenarios=everyone)
+    assert default == explicit
+    assert default["low-terse-loose"]["retry"]["n_scenarios"] == 30
+    # A scenario named in the set but absent from the records is refused.
+    with pytest.raises(ValueError, match="s77"):
+        cost_per_success(_records(n_scen=30), retry_cap=3, iterations=100, seed=1,
+                         scenarios=[*sorted(everyone), "s77"])

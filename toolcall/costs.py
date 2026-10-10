@@ -122,11 +122,19 @@ def _verdict(r: dict) -> str:
 
 
 def cost_per_success(records, retry_cap: int, iterations: int, seed: int,
-                     alpha: float = 0.05) -> dict:
+                     alpha: float = 0.05, *, scenarios=None) -> dict:
+    """`scenarios`: the analysable set, as ids. Default: every scenario in the
+    records. When given, only those scenarios' records are read, so a scenario
+    outside the set cannot reach the spend, the retry walk or the guards, and a
+    scenario in the set with no graded repetitions in a cell is refused."""
     records = list(records)
+    if scenarios is not None:
+        keep = set(scenarios)
+        records = [r for r in records if r.scenario_id in keep]
     graded = graded_outcomes(records)  # duplicates and unknown categories refused
     units = _units(records)
-    sids = sorted({r.scenario_id for r in records})
+    sids = sorted(set(scenarios) if scenarios is not None
+                  else {r.scenario_id for r in records})
     for sid in sids:
         for cell in CELLS:
             _graded_reps(graded, sid, cell.name)  # the one missing-cell rule
