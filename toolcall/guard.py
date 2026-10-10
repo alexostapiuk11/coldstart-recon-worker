@@ -102,10 +102,14 @@ def check_estimate(estimate_usd: float, approved_usd: float) -> None:
 
 
 class SpendGuard:
-    def __init__(self, approved_usd: float):
+    def __init__(self, approved_usd: float, spent: float = 0.0):
+        """`spent` seeds a resumed phase with what its stored records already cost,
+        so the approved amount caps the whole phase across resumes."""
         _require_finite_positive(approved_usd, "the approved amount")
+        if isinstance(spent, bool) or not math.isfinite(spent) or spent < 0:
+            raise SpendCapReached(f"the seed spend must be a finite amount >= 0, got {spent!r}")
         self.approved = approved_usd
-        self.spent = 0.0
+        self.spent = spent
         self.calls = 0
         self.unmetered = 0  # calls charged at a bound because usage was unavailable
 

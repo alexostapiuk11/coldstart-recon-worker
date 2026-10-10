@@ -154,3 +154,18 @@ def test_the_anthropic_response_is_metered_with_cache_writes():
     gc, guard, _ = _guarded(SONNET, lambda b: anthropic_text("ok"))
     gc.post(BODY)
     assert guard.spent == pytest.approx((1000 * 2.00 + 40 * 10.00) / 1e6)
+
+
+def test_a_seeded_guard_counts_prior_spend_against_the_approval():
+    bound = call_bound_usd(MINI, BODY)
+    guard = SpendGuard(bound * 10, spent=bound * 8)
+    assert guard.spent == pytest.approx(bound * 8)
+    with pytest.raises(SpendCapReached, match="stopping"):
+        guard.before(bound * 3)
+    guard.before(bound)  # still fits
+
+
+@pytest.mark.parametrize("bad", [math.nan, math.inf, -0.01, True])
+def test_a_bad_seed_is_refused(bad):
+    with pytest.raises(SpendCapReached, match="seed"):
+        SpendGuard(1.0, spent=bad)
