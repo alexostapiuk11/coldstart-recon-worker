@@ -107,3 +107,24 @@ def test_every_exit_code_the_readme_names_is_one_the_script_produces(text):
     assert named <= returned
     assert "raise ValueError" in source  # a refusal that raises out of main is exit 1
     assert "also when a refusal" in para
+
+
+def test_the_readme_states_the_shipped_scenario_count_and_it_is_true(text, tmp_path):
+    """The dry-run example's arithmetic is in the README; it must match the data
+    and what the command really makes, or it goes stale as scenarios are added."""
+    shipped = len(list((DATA / "scenarios").glob("*.json")))
+    (stated,) = re.findall(r"suite has (\d+)\s+scenarios", text)
+    assert int(stated) == shipped
+    (reps,) = re.findall(r"`--reps (\d+)` makes (\d+) graded calls", text)
+    assert int(reps[1]) == int(reps[0]) * shipped
+    # and the command in the README, run for real on the stub, makes that many
+    spec = importlib.util.spec_from_file_location("a3_diagnose", ROOT / "scripts" / "a3_diagnose.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    store = tmp_path / "dry.jsonl"
+    assert module.main(["--tools", str(DATA / "tools"), "--scenarios", str(DATA / "scenarios"),
+                        "--dry-run", "--reps", reps[0], "--store", str(store)]) == 0
+    from harness.store import JsonlStore
+    from toolcall.records import CallRecord
+
+    assert len(JsonlStore(store, CallRecord).read_all()) == int(reps[1])

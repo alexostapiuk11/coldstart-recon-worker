@@ -51,7 +51,8 @@ To try it on the worked examples shipped here:
     --scenarios toolcall/data/scenarios --dry-run --reps 3 --store runs/dry-examples.jsonl
 ```
 
-That is 3 scenarios times 3 repetitions: 9 graded calls.
+That is one graded call per scenario per repetition. The shipped suite has 49
+scenarios, so `--reps 3` makes 147 graded calls.
 
 ## Run it on your agent
 

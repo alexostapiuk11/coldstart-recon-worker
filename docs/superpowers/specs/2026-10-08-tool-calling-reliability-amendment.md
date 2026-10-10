@@ -741,3 +741,19 @@ blocks had H2's backwards. With that error H2 could never have been supported.
     repository root, in the data directory's README front matter, and in the leaderboard's
     `pyproject.toml`. `toolcall/data/BFCL-SOURCE.md` is the attribution. The author chose 14
     entries in three domains: weather, units and travel.
+
+### Corrections noted during implementation, 2026-10-10
+
+Earlier text above is left as written. These corrections record where it no longer matches the code or
+the files, as found in the final review of plan 1.
+
+- (a) **§14 item 4, "the other three kinds inject on the first call regardless of what it was",
+  no longer holds for `contradicting_result`.** Since commit `3fa06a1`, a first call that already
+  meets the requirement is answered with the success result, and the conversation is counted as
+  "not injected", the same as `invalid_parameter`. Only `timeout` and `malformed_payload` inject on
+  the first call regardless.
+- (b) **§6 names `toolcall/scenarios/confidentiality_signoff.json`.** The sign-off file is at
+  `toolcall/data/confidentiality_signoff.json`.
+- (c) **§14 item 3 says `openai` and `anthropic` are added to `pyproject.toml`.** Plan 1 did not
+  add them, because the SDKs are imported lazily and plan 1 makes no API call. Plan 2 adds them,
+  with the author's agreement.

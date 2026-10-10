@@ -157,8 +157,8 @@ def step2_proposal(pilot: dict, scenarios, prereg) -> dict:
     misses = _guard_misses(pilot)
     if misses:
         raise ValueError(f"the spend guard's input bound failed on {len(misses)} pilot calls; "
-                         "raise toolcall.guard.CHARS_PER_TOKEN_BOUND's margin before any "
-                         "campaign spend")
+                         "lower toolcall.guard.CHARS_PER_TOKEN_BOUND (fewer characters per "
+                         "token makes the input bound larger) before any campaign spend")
     if len(included) < prereg.s_floor:
         return {"candidates": len(rows), "included": included,
                 "selection_table": table_markdown(rows), "enough_scenarios": False}

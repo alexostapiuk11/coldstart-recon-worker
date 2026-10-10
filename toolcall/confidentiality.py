@@ -19,7 +19,8 @@ are not hits. Bare "adjust" and "adjusted" are not in the vocabulary; "adjuster"
 and "adjustor" are.
 
 A file with a hit must be listed in the sign-off file or
-tests/test_toolcall_confidentiality.py fails. The scan cannot read intent; the
+tests/test_toolcall_data.py::test_no_unsigned_confidentiality_hits fails (it scans
+the shipped data; tests/test_toolcall_publication.py tests the scan itself). The scan cannot read intent; the
 pre-publish gate's non-negotiable item still applies.
 
 The sign-off file (toolcall/data/confidentiality_signoff.json, plan 1 Task 16):

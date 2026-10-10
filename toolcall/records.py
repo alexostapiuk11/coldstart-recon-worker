@@ -34,7 +34,11 @@ class CallRecord:
     block_index: int  # the repetition: block b is every (cell, scenario) once
     condition: str  # "<cell>|<scenario id>"
     run_id: str
-    phase: str  # "pilot-baseline" | "pilot-cells" | "campaign" | "slice" | "exploratory"
+    # The store's name, as toolcall.runner names it: "pilot-baseline", "pilot-cells",
+    # "pilot-slice-<model>", "campaign", "slice-<model>" or "exploratory"; scripts/
+    # a3_diagnose.py's runs are "diagnose". (The pilot-recovery and recovery phases
+    # write RecoveryRecords, below.)
+    phase: str
     model: str  # the pinned id the request named
     returned_model: str | None
     cell: str
@@ -67,7 +71,10 @@ class RecoveryRecord:
     block_index: int
     condition: str  # "<cell>|<scenario id>|<format>"
     run_id: str
-    phase: str  # "recovery"
+    # Always "recovery": toolcall.campaign.recovery_runs writes that constant for both
+    # the pilot-recovery phase (pilot-recovery.jsonl) and the campaign's recovery phase
+    # (recovery.jsonl), so the field does not tell the two apart; the store does.
+    phase: str
     model: str
     cell: str
     scenario_id: str
