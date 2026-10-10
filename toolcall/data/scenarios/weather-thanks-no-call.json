@@ -1,0 +1,22 @@
+{
+  "id": "weather-thanks-no-call",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "weather",
+  "target_failure_mode": "SPURIOUS",
+  "tools": [
+    "get_current_weather",
+    "get_forecast"
+  ],
+  "confusables": [
+    "get_hourly_forecast",
+    "get_air_quality",
+    "get_uv_index",
+    "get_severe_alerts"
+  ],
+  "user_message": "Great, that forecast is all I needed. Thanks!",
+  "expectation": {
+    "no_call_expected": true
+  }
+}

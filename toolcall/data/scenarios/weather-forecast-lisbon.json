@@ -1,0 +1,78 @@
+{
+  "id": "weather-forecast-lisbon",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "weather",
+  "target_failure_mode": "WRONG_TOOL",
+  "tools": [
+    "get_forecast",
+    "get_air_quality"
+  ],
+  "confusables": [
+    "get_current_weather",
+    "get_hourly_forecast",
+    "get_historical_weather",
+    "get_climate_normals"
+  ],
+  "user_message": "What will the weather be like in Lisbon over the next three days?",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "get_forecast",
+        "args": {
+          "location": {
+            "pattern": "lisbon(,\\s*portugal)?",
+            "example": "Lisbon"
+          },
+          "days": 3
+        },
+        "may_include": {
+          "units": {
+            "one_of": [
+              "metric",
+              "imperial"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "location",
+    "expected": "give the city and the country, for example 'Lisbon, Portugal'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_forecast",
+        "args": {
+          "location": {
+            "pattern": "lisbon,\\s*portugal",
+            "example": "Lisbon, Portugal"
+          },
+          "days": 3
+        },
+        "may_include": {
+          "units": {
+            "one_of": [
+              "metric",
+              "imperial"
+            ]
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "days": [
+        {
+          "date": "2026-11-03",
+          "high_c": 19,
+          "low_c": 13,
+          "rain_pct": 20
+        }
+      ]
+    },
+    "success_claim_pattern": "\\b19\\s*°?\\s*C?\\b|\\b20\\s*%"
+  },
+  "notes": "get_current_weather and get_climate_normals both answer 'weather in Lisbon'; only get_forecast answers 'next three days'."
+}

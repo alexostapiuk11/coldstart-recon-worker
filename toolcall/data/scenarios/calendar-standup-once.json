@@ -1,0 +1,38 @@
+{
+  "id": "calendar-standup-once",
+  "source": {
+    "kind": "authored"
+  },
+  "domain": "calendar",
+  "target_failure_mode": "WRONG_PARAMS",
+  "tools": [
+    "create_event",
+    "list_events"
+  ],
+  "confusables": [
+    "create_recurring_event",
+    "update_event",
+    "find_free_slots",
+    "set_reminder"
+  ],
+  "user_message": "Put a 15-minute 'Team standup' on 2026-11-09 at half past nine in the morning.",
+  "expectation": {
+    "acceptable_calls": [
+      {
+        "tool": "create_event",
+        "args": {
+          "title": {
+            "one_of": [
+              "Team standup",
+              "Team Standup"
+            ]
+          },
+          "date": "2026-11-09",
+          "start_time": "09:30",
+          "duration_minutes": 15
+        }
+      }
+    ]
+  },
+  "notes": "'half past nine in the morning' must become 09:30; 9:30 or 9.30 is a wrong value."
+}
