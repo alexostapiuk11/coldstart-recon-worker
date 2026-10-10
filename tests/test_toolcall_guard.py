@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import stat
 
 import pytest
 
@@ -202,13 +203,37 @@ def test_a_reopened_ledger_keeps_its_total_and_never_reuses_an_id(tmp_path):
     assert reopened.total() == pytest.approx(0.21)
 
 
-def test_every_ledger_line_is_flushed_and_fsynced(tmp_path, monkeypatch):
-    synced = []
+def _record_fsyncs(monkeypatch):
+    """(file fsyncs, directory fsyncs), told apart by what the descriptor is."""
+    files, dirs = [], []
     real = os.fsync
-    monkeypatch.setattr(os, "fsync", lambda fd: (synced.append(fd), real(fd))[1])
+
+    def spy(fd):
+        (dirs if stat.S_ISDIR(os.fstat(fd).st_mode) else files).append(fd)
+        real(fd)
+
+    monkeypatch.setattr(os, "fsync", spy)
+    return files, dirs
+
+
+def test_every_ledger_line_is_flushed_and_fsynced(tmp_path, monkeypatch):
+    files, _ = _record_fsyncs(monkeypatch)
     led = SpendLedger(tmp_path / "l.jsonl")
     led.settle(led.reserve(0.5), 0.1)
-    assert len(synced) == 2 == len(_ledger_lines(tmp_path / "l.jsonl"))
+    assert len(files) == 2 == len(_ledger_lines(tmp_path / "l.jsonl"))
+
+
+def test_the_ledgers_directory_is_fsynced_once_when_the_file_is_created(tmp_path, monkeypatch):
+    files, dirs = _record_fsyncs(monkeypatch)
+    led = SpendLedger(tmp_path / "sub" / "l.jsonl")
+    assert dirs == []  # opening a ledger writes nothing
+    rid = led.reserve(0.5)
+    assert len(dirs) == 1  # the first reserve created the file
+    led.settle(rid, 0.1)
+    led.settle(led.reserve(0.2), 0.0)
+    assert len(dirs) == 1 and len(files) == 4
+    SpendLedger(tmp_path / "sub" / "l.jsonl").reserve(0.1)  # an existing file: no new entry
+    assert len(dirs) == 1
 
 
 @pytest.mark.parametrize("bad", [math.nan, math.inf, -0.1])

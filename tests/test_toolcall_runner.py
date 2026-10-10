@@ -574,6 +574,19 @@ def test_the_stub_never_touches_an_sdk_it_is_given(tmp_path):
     assert sdks["openai"].bodies == [] and sdks["anthropic"].bodies == []
 
 
+@pytest.mark.parametrize("stub", [True, False])
+@pytest.mark.parametrize("phase", ["pilot-recovery", "recovery"])
+def test_recovery_phases_refuse_a_turn_budget_the_code_does_not_run(tmp_path, phase, stub):
+    prereg = example_prereg(**STEP2, turn_budget=TURN_BUDGET + 2)
+    sdk = FakeSDK()
+    with pytest.raises(ValueError, match=rf"turn_budget is {TURN_BUDGET + 2} .*is {TURN_BUDGET}"):
+        run_phase(phase, prereg, LIB, SCS, tmp_path, approved_usd=20.0, stub=stub,
+                  sdks={"openai": sdk}, say=_quiet)
+    assert sdk.bodies == [] and list(tmp_path.iterdir()) == []  # nothing posted, nothing written
+    # the other phases never run a conversation, so they do not care
+    run_phase("pilot-baseline", prereg, LIB, SCS, tmp_path, stub=True, say=_quiet)
+
+
 def test_step_two_is_computed_from_the_pilot(tmp_path):
     from toolcall.selection import step2_proposal
 

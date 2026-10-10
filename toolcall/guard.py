@@ -187,10 +187,20 @@ class SpendLedger:
         return reserved, settled
 
     def _append(self, entry: dict) -> None:
+        created = not self.path.exists()
         with self.path.open("ab") as f:
             f.write((json.dumps(entry, sort_keys=True) + "\n").encode())
             f.flush()
             os.fsync(f.fileno())
+        if created:
+            # The new file's directory entry is durable only once its directory is
+            # fsynced; otherwise a power loss right after the first reserve could
+            # drop the whole file, and the spend with it.
+            fd = os.open(self.path.parent, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
 
     def reserve(self, usd: float) -> int:
         self._amount(usd, "reserve")

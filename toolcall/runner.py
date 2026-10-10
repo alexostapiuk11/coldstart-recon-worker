@@ -87,6 +87,7 @@ CHARS_PER_TOKEN = 4.0  # an estimate, not a bound; the guard's bound is in toolc
 # than any tokenizer produces on JSON arguments, so it is a ceiling, not a guess.
 ASSISTANT_CHARS_PER_TOKEN = 6
 ATTEMPTS = TURN_BUDGET + 1  # what recovery.converse can make per conversation
+RECOVERY_PHASES = ("pilot-recovery", "recovery")
 STUB_MARKER = "STUB"
 PHASES = ("pilot-baseline", "pilot-cells", "pilot-slice", "pilot-recovery", "campaign",
           "recovery", "slice", "exploratory")
@@ -353,6 +354,11 @@ def run_phase(phase: str, prereg, library, scenarios, root, *, approved_usd: flo
               sdks: dict[str, object] | None = None) -> dict:
     if phase not in PHASES:
         raise ValueError(f"unknown phase {phase!r}; one of {PHASES}")
+    if phase in RECOVERY_PHASES and prereg.turn_budget != TURN_BUDGET:
+        raise ValueError(
+            f"{phase}: the pre-registered turn_budget is {prereg.turn_budget} but "
+            f"toolcall.recovery.TURN_BUDGET, which converse actually runs, is {TURN_BUDGET}; "
+            "the recovery phases would measure something other than what was registered")
     root = Path(root)
     _check_directory(root, stub)
     jobs = _jobs(phase, prereg, library, scenarios, root)
