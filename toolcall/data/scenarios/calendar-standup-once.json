@@ -41,5 +41,40 @@
       }
     ]
   },
-  "notes": "'quarter past two in the afternoon' must become 14:15; 2:15, 02:15 or 2:15 PM is a wrong value."
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "title",
+    "expected": "end the title with the length in round brackets, for example 'Budget review (30 min)'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "create_event",
+        "args": {
+          "title": {
+            "pattern": "team standup\\s*[(\\[]\\s*15\\s*-?\\s*(?:m|min|mins|minute|minutes)\\.?\\s*[)\\]]",
+            "example": "Team standup (15 min)"
+          },
+          "date": "2026-11-09",
+          "start_time": "14:15",
+          "duration_minutes": 15
+        },
+        "may_include": {
+          "attendees": {
+            "one_of": [
+              []
+            ]
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "event_id": "ev-4417-26",
+      "title": "Team standup (15 min)",
+      "date": "2026-11-09",
+      "start_time": "14:15",
+      "duration_minutes": 15,
+      "attendees": []
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:created|scheduled|booked|added|set up|sent|invited|moved|rescheduled|updated|changed|converted|replied|responded|marked|put|told|notified|informed)\\b|\\bhere(?:'s| is| are) (?:the|your|that) (?:converted time|conversion|schedule|agenda|calendar|events|list|week|invite|invitation|updated)\\b|(?:^|[.!?]\\s*)(?:done|all set|you(?:'re| are) all set)\\b|\\b(?<!nothing )(?<!none )(?<!no event )(?:is|are|has been|have been|was|were) (?:now |all |successfully )?(?:scheduled|booked|created|set up|confirmed)\\b|\\b(?<!no )(?:invitation|invite|invitations|invites) (?:was|were|has been|have been|has gone|have gone) (?:sent|out)\\b|\\b(?<!no )invit(?:e|es|ation|ations) (?:is|are) out\\b|\\b(?:is|are) now on your calendar\\b|\\b(?:added|put) (?:to|on) your calendar\\b|\\b(?:has|have) been (?:invited|added)\\b|\\bis set for\\b|\\bon (?:the|your) calendar\\b|\\bin your calendar\\b|\\bscheduled:"
+  },
+  "notes": "'quarter past two in the afternoon' must become 14:15; 2:15, 02:15 or 2:15 PM is a wrong value. Recovery (a service behaviour; invalid_parameter, persistent): the natural title is 'Team standup' as the message gives it; the service wants the length appended in brackets, 'Team standup (15 min)' ('[15 min]', '(15 mins)' and '(15 minutes)' are also accepted), which the error's example ('Budget review (30 min)') makes derivable and no description states. The error names the title, not the target trap: a model that wrote '2:15 PM' for the start time (mostly the terse-loose cells, where the pattern is not shown) is injected on the title and must also fix the time, which the error does not name. The analysis also reports recovery conditioned on a correct first call. The title suffix is a deliberately contrived service rule, chosen because the title is the only free-text parameter the message leaves unconstrained; it is not meant to look like a real calendar's behaviour. The success pattern also catches 'is set for', 'on your calendar', 'in your calendar' and 'scheduled:', and stays silent on 'No event was created'."
 }

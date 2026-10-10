@@ -59,5 +59,53 @@
       }
     ]
   },
-  "notes": "BFCL geo_distance.calculate(start_location, end_location, units) became get_geo_distance with BFCL's parameters unchanged: two required strings, and units an optional free string ('miles' or 'kilometers' in the rich description, default miles). BFCL's ground truth is 'Boston, MA', 'Washington, D.C.' and units 'miles' or omitted (the locations accept formatting variants). Target WRONG_PARAMS: the message says 'in mile', so a model may copy 'mile' (or write 'mi'), which is not the ground truth; 'miles' or no units at all is correct. The message does not say how the distance is measured, and 'approximate distance between two cities' can fairly mean the road distance, so get_driving_distance is a second acceptable call (it is in the low set, because the loader requires every acceptable tool to be there). Its unit is also a free string whose default is km, so here the unit must be given as 'miles': omitting it gives kilometers, and 'kilometers' contradicts the message. No recovery block: a wrong first call cannot recover."
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "units",
+    "expected": "write the unit in full with its system, as 'statute miles' or 'metric kilometres'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_geo_distance",
+        "args": {
+          "start_location": {
+            "pattern": "boston(?:(?:,\\s*|\\s+)(?:ma|massachusetts|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "Boston, MA"
+          },
+          "end_location": {
+            "pattern": "washington(?:,\\s*|\\s+)(?:d\\.?c\\.?|district of columbia)(?:(?:,\\s*|\\s+)(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?))*",
+            "example": "Washington, D.C."
+          },
+          "units": {
+            "pattern": "(?:(?:us|u\\.s\\.)\\s+)?statute\\s+miles?|miles?\\s*\\(\\s*statute\\s*\\)",
+            "example": "statute miles"
+          }
+        }
+      },
+      {
+        "tool": "get_driving_distance",
+        "args": {
+          "origin": {
+            "pattern": "boston(?:(?:,\\s*|\\s+)(?:ma|massachusetts|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "Boston, MA"
+          },
+          "destination": {
+            "pattern": "washington(?:,\\s*|\\s+)(?:d\\.?c\\.?|district of columbia)(?:(?:,\\s*|\\s+)(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?))*",
+            "example": "Washington, D.C."
+          },
+          "unit": {
+            "pattern": "(?:(?:us|u\\.s\\.)\\s+)?statute\\s+miles?|miles?\\s*\\(\\s*statute\\s*\\)",
+            "example": "statute miles"
+          }
+        }
+      }
+    ],
+    "success_result": {
+      "start": "Boston, MA",
+      "end": "Washington, D.C.",
+      "distance": 412,
+      "unit": "statute miles"
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|calculated|worked out|pulled up|retrieved|searched|measured|fetched)\\b|\\bhere(?:'s| is| are) (?:the|your|that|a|an) (?:distance|figure)\\b|\\b\\d[\\d,]*(?:\\.\\d+)?[\\s-]*(?:miles?|mi|kms?|kilomet(?:er|re)s?)\\b|\\b(?:hundred|thousand)[a-z -]{0,30}(?:miles?|kilomet(?:er|re)s?)\\b"
+  },
+  "notes": "BFCL geo_distance.calculate(start_location, end_location, units) became get_geo_distance with BFCL's parameters unchanged: two required strings, and units an optional free string ('miles' or 'kilometers' in the rich description, default miles). BFCL's ground truth is 'Boston, MA', 'Washington, D.C.' and units 'miles' or omitted (the locations accept formatting variants). Target WRONG_PARAMS: the message says 'in mile', so a model may copy 'mile' (or write 'mi'), which is not the ground truth; 'miles' or no units at all is correct. The message does not say how the distance is measured, and 'approximate distance between two cities' can fairly mean the road distance, so get_driving_distance is a second acceptable call (it is in the low set, because the loader requires every acceptable tool to be there). Its unit is also a free string whose default is km, so here the unit must be given as 'miles': omitting it gives kilometers, and 'kilometers' contradicts the message. Recovery (a service behaviour, not a parameter change; invalid_parameter, persistent): the error names the same parameter the trap is on. 'mile', 'miles' and 'mi' are all rejected, and so is an omitted unit (geo units is optional in BFCL, but the service wants the unit stated); only 'statute miles' or 'statute mile' gets the result, on either tool. The hint offers 'statute miles' or 'metric kilometres', and no description states either. The error says 'units', the geo tool's name; the driving tool's parameter is 'unit', one letter apart, so a model calling the driving tool has to map it. A first call with 'kilometers' is injected too, and is not accepted as a recovery: it contradicts the message. 'miles' is BFCL's ground truth and grades CORRECT as a first call, yet it is still injected here (the same pattern as weather-forecast-lisbon and bfcl-185, where a correct first call meets the error). 'US statute miles' and 'miles (statute)' are also accepted."
 }

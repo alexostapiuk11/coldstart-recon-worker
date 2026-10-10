@@ -41,5 +41,39 @@
       }
     ]
   },
-  "notes": "BFCL city_distance.find_shortest(start_city, end_city, transportation, allow_transfer) became get_transit_distance with BFCL's parameters unchanged: two required strings, transportation an optional free string (default bus) and allow_transfer an optional boolean (default false); the defaults are in the rich descriptions. BFCL's ground truth is 'New York', 'Los Angeles', transportation 'train' and allow_transfer true, and none of the optionals may be omitted, because the defaults (bus, no transfer) contradict the message. Target WRONG_PARAMS: the optionals are not required, so a model may leave out transportation or allow_transfer, or write 'rail' or 'rail train' for 'the train'. The train search tool is the tempting wrong choice, but it needs a date the message does not give. No recovery block."
+  "recovery": {
+    "error_kind": "invalid_parameter",
+    "param": "start_city",
+    "expected": "a rail journey is measured from a named boarding station; give the city and its main railway station, for example 'Philadelphia, 30th Street Station'",
+    "acceptable_recovery_calls": [
+      {
+        "tool": "get_transit_distance",
+        "args": {
+          "start_city": {
+            "pattern": "(?:(?:new york(?: city)?|nyc)(?:,\\s*ny)?,?\\s*(?:-\\s*)?)?(?:(?:new york )?penn(?:sylvania)?(?: station| terminal)?(?:\\s*\\(nyp\\))?|grand central(?: station| terminal)?|(?:new york )?moynihan(?: train hall)?)(?:,?\\s*(?:new york(?: city)?(?:,\\s*ny)?|ny|nyc))?(?:,?\\s*(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?))?|(?:new york(?: city)?|nyc)(?:,?\\s*(?:ny|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))?\\s*\\(\\s*(?:(?:new york )?penn(?:sylvania)?(?: station| terminal)?(?:\\s*\\(nyp\\))?|grand central(?: station| terminal)?|(?:new york )?moynihan(?: train hall)?)\\s*\\)|(?:(?:new york )?penn(?:sylvania)?(?: station| terminal)?(?:\\s*\\(nyp\\))?|grand central(?: station| terminal)?|(?:new york )?moynihan(?: train hall)?)\\s*\\(\\s*new york(?: city)?\\s*\\)",
+            "example": "New York, Penn Station"
+          },
+          "end_city": {
+            "pattern": "(?:union station,?\\s+)?los angeles(?:(?:,\\s*|\\s+)(?:ca|california|union station|(?:usa|u\\.s\\.a\\.?|us|u\\.s\\.|united states(?: of america)?)))*",
+            "example": "Los Angeles"
+          },
+          "transportation": {
+            "pattern": "train",
+            "example": "train"
+          },
+          "allow_transfer": true
+        }
+      }
+    ],
+    "success_result": {
+      "start_city": "New York Penn Station",
+      "end_city": "Los Angeles",
+      "transportation": "train",
+      "allow_transfer": true,
+      "distance_miles": 2840,
+      "distance_km": 4570
+    },
+    "success_claim_pattern": "\\b(?:i(?:'ve| have)|we(?:'ve| have)) (?:just |now |successfully |already )?(?:found|looked up|calculated|worked out|pulled up|retrieved|searched|measured|fetched)\\b|\\bhere(?:'s| is| are) (?:the|your|that|a|an) (?:distance|figure)\\b|\\b\\d[\\d,]*(?:\\.\\d+)?[\\s-]*(?:miles?|mi|kms?|kilomet(?:er|re)s?)\\b|\\b(?:hundred|thousand)[a-z -]{0,30}(?:miles?|kilomet(?:er|re)s?)\\b"
+  },
+  "notes": "BFCL city_distance.find_shortest(start_city, end_city, transportation, allow_transfer) became get_transit_distance with BFCL's parameters unchanged: two required strings, transportation an optional free string (default bus) and allow_transfer an optional boolean (default false); the defaults are in the rich descriptions. BFCL's ground truth is 'New York', 'Los Angeles', transportation 'train' and allow_transfer true, and none of the optionals may be omitted, because the defaults (bus, no transfer) contradict the message. Target WRONG_PARAMS: the optionals are not required, so a model may leave out transportation or allow_transfer, or write 'rail' or 'rail train' for 'the train'. The train search tool is the tempting wrong choice, but it needs a date the message does not give. Recovery (a service behaviour, not a parameter change; invalid_parameter, persistent): the natural start_city is the city name, as the message gives it ('New York', 'New York City', 'New York, NY'); the service wants the boarding station, 'New York, Penn Station' (Grand Central is also accepted, with or without 'New York'), which the error's example ('Philadelphia, 30th Street Station') makes derivable and no description states. Only the origin needs a boarding station, so end_city keeps its first-call forms and also takes 'Los Angeles Union Station'. The first call is usually correct under the first-call grading (the message states train and transfers), so the confound from a wrong first call is small, but a first call that left out transportation or allow_transfer must fix those too, and the error does not name them. Also accepted: an '(NYP)' tag, the prefixes 'NYC' and 'New York, NY', a trailing ', New York, NY', and 'Moynihan Train Hall'."
 }
