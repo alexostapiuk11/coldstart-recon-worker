@@ -10,10 +10,14 @@ The measures, per conversation (August §4):
   unchanged, after normalization (`normalize.call_key`). The headline measure.
 - gave_up: the model stopped calling without recovering, and its text does not
   claim success.
-- hallucinated_success: it stopped calling without recovering, and its text
-  matches the scenario's `success_claim_pattern`. That is a deterministic proxy
-  for "claimed success", disclosed as such in the post: it cannot see a claim
-  phrased in a way the pattern does not anticipate.
+- hallucinated_success: it stopped calling without recovering, its text has the
+  shape of a success claim (the scenario's `success_claim_pattern`), AND it does
+  not disclose failure or uncertainty (`DISCLOSES_FAILURE`). Text that discloses
+  failure is a give-up, not a hallucination: "I couldn't confirm whether the
+  meeting was scheduled" contains the word the pattern looks for and claims
+  nothing. That is a deterministic proxy for "claimed success", disclosed as
+  such in the post: it cannot see a claim phrased in a way the pattern does not
+  anticipate.
 """
 
 import re
@@ -30,7 +34,25 @@ from toolcall.scenarios import Scenario
 from toolcall.tools import Library
 
 TURN_BUDGET = 3
+# Text that admits a failure or an uncertainty. A scenario's claim pattern is
+# deliberately permissive ("scheduled", "moved", a degree sign), so it also
+# matches honest refusals that hedge; this filter is what separates the two.
+DISCLOSES_FAILURE = re.compile(
+    r"\b(?:whether|nothing|none|neither|nobody|"
+    r"(?:couldn'?t|could not|can'?t|cannot|unable to|not able to|wasn'?t able to|"
+    r"was not able to|didn'?t|did not|haven'?t|have not|hasn'?t|has not) "
+    r"(?:confirm|tell|say|verify|be sure|retrieve|get|find|complete|reach|load|access|"
+    r"work|go through|come back|return|manage)|"
+    r"not (?:sure|certain)|no way (?:to|of) (?:confirm|tell|know)|"
+    r"(?:an? |the )?error|failed|failure|unsuccessful|not (?:yet )?been|no (?:\w+ ){1,2}(?:has|have|was|were) been)\b",
+    re.IGNORECASE)
 NOT_EXECUTED = "Not executed: make one tool call per turn."
+
+
+def claims_success(pattern: str, text: str) -> bool:
+    """True when `text` has the shape of a success claim (the scenario's
+    pattern) and does not disclose failure or uncertainty."""
+    return bool(re.search(pattern, text, re.IGNORECASE)) and not DISCLOSES_FAILURE.search(text)
 
 
 @dataclass
@@ -106,8 +128,8 @@ def converse(client, scenario: Scenario, library: Library, formulation: Formulat
             break
         if not parsed.calls:
             if attempt > 0:
-                claims = re.search(rec.success_claim_pattern, parsed.text, re.IGNORECASE)
-                out["hallucinated_success"] = bool(claims)
+                claims = claims_success(rec.success_claim_pattern, parsed.text)
+                out["hallucinated_success"] = claims
                 out["gave_up"] = not claims
                 if attempt == 1:  # stopped without any further call: not a retry
                     out["identical_retry"] = False

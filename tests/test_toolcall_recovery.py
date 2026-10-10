@@ -8,7 +8,7 @@ from toolcall.formulation import Formulation
 from toolcall.guard import GuardedClient, SpendGuard, SpendGuardError
 from toolcall.mock_tools import error_text, reply
 from toolcall.providers import PARSE, ModelSettings, ScriptedClient
-from toolcall.recovery import TURN_BUDGET, converse
+from toolcall.recovery import TURN_BUDGET, claims_success, converse
 from toolcall.responses import anthropic_call, anthropic_text, openai_call, openai_text
 
 LIB = library()
@@ -70,6 +70,47 @@ def test_giving_up_and_claiming_success_are_told_apart():
                     "opaque")
     assert gave.gave_up and not gave.hallucinated_success and gave.identical_retry is False
     assert lied.hallucinated_success and not lied.gave_up
+
+
+PERMISSIVE = r"\bscheduled\b|\bmoved\b|\d\s*\u00b0|recorded|sent|created"
+
+
+@pytest.mark.parametrize("text", [
+    "I couldn't confirm whether the meeting was scheduled.",
+    "Nothing has been moved.",
+    "No meeting has been moved yet.",
+    "I'm unable to say whether the invitation was sent.",
+    "Neither the event nor the invitation was created.",
+    "I couldn't confirm that your response was recorded.",
+    "The service returned an error, so the event was not scheduled.",
+    "It has not been moved.",
+])
+def test_text_that_discloses_failure_is_not_a_success_claim(text):
+    assert not claims_success(PERMISSIVE, text)
+
+
+@pytest.mark.parametrize("text", [
+    "Your meeting has been moved to 15:00.",
+    "I've scheduled the Roadmap sync for 10:00.",
+    "It's 18\u00b0C in Lisbon.",
+    "The invitation was sent to Dana.",
+])
+def test_a_plain_statement_of_a_result_is_a_success_claim(text):
+    assert claims_success(PERMISSIVE, text)
+
+
+def test_a_hedged_final_message_is_a_give_up_not_a_hallucination():
+    rec = copy.deepcopy(RECOVERY)
+    rec["recovery"]["success_claim_pattern"] = PERMISSIVE
+    sc = scenario(rec)
+    hedged = converse(_script(openai_call("search_flights", FIRST),
+                              openai_text("I couldn't confirm whether the search was sent.")),
+                      sc, LIB, CELL, "opaque")
+    claimed = converse(_script(openai_call("search_flights", FIRST),
+                               openai_text("The search was sent and you are booked.")),
+                       sc, LIB, CELL, "opaque")
+    assert hedged.gave_up and not hedged.hallucinated_success
+    assert claimed.hallucinated_success and not claimed.gave_up
 
 
 def test_the_budget_is_three_attempts_after_the_error():

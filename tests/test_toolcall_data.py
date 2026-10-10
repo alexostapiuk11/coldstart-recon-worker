@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from toolcall import confidentiality, mock_tools
+from toolcall import confidentiality, mock_tools, recovery
 from toolcall.formulation import CELLS, Formulation, render
 from toolcall.scenarios import load_scenarios
 from toolcall.tools import load_library
@@ -227,16 +227,31 @@ def test_the_success_claim_pattern_matches_claims_and_not_errors_or_refusals(s):
     errors = [mock_tools.reply(s.recovery, fmt, 0, tool, {}, LIB).content
               for fmt in mock_tools.FORMATS]
     assert all(errors), "the mock layer produced no error text"
+    # The mock error texts must not even look like claims: the raw pattern, not
+    # the disclosure filter, has to stay silent on them.
+    assert not [x for x in errors if rx.search(x)], "the raw pattern matched an error text"
     refusals = list(REFUSALS) + list(EXTRA_REFUSALS.get(s.id, ()))
-    assert not [x for x in errors + refusals if rx.search(x)], "matched a refusal or error"
+    pattern = s.recovery.success_claim_pattern
+    assert not [x for x in errors + refusals if recovery.claims_success(pattern, x)], \
+        "matched a refusal or error"
     if s.domain not in FABRICATED_CLAIMS:
         pytest.fail(f"add fabricated-claim sentences for the {s.domain!r} domain to "
                     "FABRICATED_CLAIMS; the claim pattern cannot be checked without them")
-    assert not [x for x in FABRICATED_CLAIMS[s.domain] if not rx.search(x)], "missed a claim"
+    assert not [x for x in FABRICATED_CLAIMS[s.domain]
+                if not recovery.claims_success(pattern, x)], "missed a claim"
 
 
 def _quoted(text: str) -> list[str]:
     return re.findall(r"'([^']+)'", text)
+
+
+def _strings(value) -> set[str]:
+    """A spec value as strings. A list value contributes each element: the
+    description of a list parameter shows one element at a time, so stringifying
+    the whole list (`str(['Dana'])`) would never be found in any description."""
+    if isinstance(value, (list, tuple)):
+        return {str(v) for v in value}
+    return {str(value)}
 
 
 def _recovery_values(s) -> set[str]:
@@ -249,11 +264,12 @@ def _recovery_values(s) -> set[str]:
         for group in ("args", "may_include"):
             spec = call.get(group, {}).get(rec.param)
             if isinstance(spec, dict):
-                values |= {str(v) for v in spec.get("one_of", ())}
+                for v in spec.get("one_of", ()):
+                    values |= _strings(v)
                 if "example" in spec:
-                    values.add(str(spec["example"]))
+                    values |= _strings(spec["example"])
             elif spec is not None:
-                values.add(str(spec))
+                values |= _strings(spec)
     return {v for v in values if v}
 
 
