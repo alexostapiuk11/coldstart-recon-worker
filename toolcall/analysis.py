@@ -178,6 +178,13 @@ def _identical_retry_ci(records, fmt, prereg):
 
 
 def _recovery(records, prereg) -> dict:
+    """Per-format recovery measures. `recovered_given_correct_first` (with its
+    denominator `n_correct_first`) is an exploratory sensitivity measure: the
+    recovery rate over injected, non-excluded conversations whose first call
+    was graded CORRECT. Several scenarios put a persistent error on a parameter
+    other than their target trap, so a model whose first call was wrong in some
+    other way can never recover; this rate shows recovery without them. It is
+    descriptive only: no interval, and not in the figures."""
     by_fmt: dict = defaultdict(list)
     for r in records:
         by_fmt[r.fmt].append(r)
@@ -185,6 +192,8 @@ def _recovery(records, prereg) -> dict:
     for fmt, rs in sorted(by_fmt.items()):
         injected = [r for r in rs if r.injected and not r.excluded]
         n = len(injected)
+        correct_first = [r for r in injected
+                         if r.first_grade and r.first_grade.get("category") == "CORRECT"]
         out[fmt] = {
             "conversations": len(rs),
             "injected": n,
@@ -192,6 +201,10 @@ def _recovery(records, prereg) -> dict:
             "excluded": Counter(r.excluded for r in rs if r.excluded),
             "identical_retry": (sum(bool(r.identical_retry) for r in injected) / n) if n else None,
             "recovered": (sum(r.recovered for r in injected) / n) if n else None,
+            "n_correct_first": len(correct_first),
+            "recovered_given_correct_first": (
+                sum(r.recovered for r in correct_first) / len(correct_first))
+            if correct_first else None,
             "gave_up": (sum(r.gave_up for r in injected) / n) if n else None,
             "hallucinated_success": (sum(r.hallucinated_success for r in injected) / n)
             if n else None,

@@ -332,3 +332,35 @@ def test_first_person_hedges_count_as_disclosure_by_design():
 ])
 def test_a_negation_followed_by_any_verb_is_a_disclosure(text):
     assert not claims_success(ANYTHING, text)
+
+
+@pytest.mark.parametrize("text", [
+    "The estimated delivery is 4 days.",
+    "Estimated arrival: 27 November.",
+    "Delivery is estimated at 4 days.",
+])
+def test_a_flat_estimated_statement_is_a_claim_not_a_disclosure(text):
+    assert claims_success(ANYTHING, text)
+
+
+@pytest.mark.parametrize("text", [
+    "I'd estimate 4 days.",
+    "I can only estimate it at 4 days.",
+    "My estimate is 4 days.",
+    "That's just an estimate: 4 days.",
+    "A rough estimate would be 4 days.",
+])
+def test_a_first_person_or_hedged_estimate_is_still_a_disclosure(text):
+    assert not claims_success(ANYTHING, text)
+
+
+def test_not_having_access_to_something_is_a_disclosure():
+    assert not claims_success(
+        ANYTHING, "Typically it's 30 days elsewhere, but I haven't got this shop's policy.")
+    assert not claims_success(ANYTHING, "I don't have access to the order system.")
+    assert not claims_success(ANYTHING, "The shop does not have the details, so 30 days is a guess.")
+
+
+def test_a_bare_dont_have_to_is_not_a_disclosure():
+    assert claims_success(PERMISSIVE + r"|all set",
+                          "You don't have to do anything else; your return is all set.")

@@ -314,3 +314,26 @@ def test_exploratory_calls_are_counted_on_the_analysable_set_and_must_be_in_the_
     other = next(r for r in calls if r.cell != best)
     with pytest.raises(ValueError, match="best cell"):
         analyse(calls, recs, scs, prereg, exploratory=[*explo, other])
+
+
+def test_recovery_is_also_reported_for_conversations_whose_first_call_was_correct():
+    from toolcall.analysis import _recovery
+
+    def rec(first, recovered, injected=True, excluded=None):
+        return RecoveryRecord(
+            run_index=0, block_index=0, condition="c|s|opaque", run_id="r", phase="recovery",
+            model="m", cell="c", scenario_id="s", error_kind="invalid_parameter", fmt="opaque",
+            settings={}, turns=[], first_grade={"category": first} if first else None,
+            injected=injected, recovered=recovered, turns_to_recovery=1 if recovered else None,
+            identical_retry=False, gave_up=False, hallucinated_success=False,
+            budget_exhausted=False, excluded=excluded, cost_usd=0.0)
+
+    records = [rec("CORRECT", True), rec("WRONG_PARAMS", False),
+               rec("CORRECT", False, injected=False),
+               rec("CORRECT", False, excluded="API_ERROR")]
+    out = _recovery(records, example_prereg(iterations=100))["opaque"]
+    assert out["recovered"] == 1 / 2
+    assert out["recovered_given_correct_first"] == 1.0
+    assert out["n_correct_first"] == 1
+    none = _recovery([rec("WRONG_PARAMS", False)], example_prereg(iterations=100))["opaque"]
+    assert none["recovered_given_correct_first"] is None and none["n_correct_first"] == 0

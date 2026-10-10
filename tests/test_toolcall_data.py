@@ -401,6 +401,7 @@ EXTRA_FABRICATED = {
         "Here's the delivery time for Cardiff.",
         "That takes five business days.",
         "It will get there by Friday.",
+        "The estimated delivery is 4 days.",
     ),
     "retail-cancel-order": (
         "Your order has been cancelled.",

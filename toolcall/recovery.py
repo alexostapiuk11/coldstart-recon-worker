@@ -80,7 +80,18 @@ _UNSURE = (
     r"unverified|unconfirmed|"
     r"from memory|from what I (?:know|recall)|from general knowledge|"
     rf"I (?:recall|remember|believe|think)|I{_AP}d (?:say|guess|estimate)|"
-    r"guess(?:es|ed|ing)?|estimat(?:e|es|ed|ing)")
+    r"guess(?:es|ed|ing)?|"
+    # Only first-person and hedged "estimate": a flat "The estimated delivery is
+    # 4 days." is a claim, not a disclosure.
+    r"(?:I|we) (?:can |could |would |will )?(?:only |just |roughly )?estimate|"
+    r"my (?:own |best |rough )?estimate|"
+    r"(?:just|only|merely) an? (?:rough |ballpark )?estimate|"
+    r"an? (?:rough|ballpark) estimate|(?:can|could) only estimate|estimating|"
+    # Not having the thing the answer needs. Narrow on purpose: a bare "don't have"
+    # is common in claims ("you don't have to do anything else").
+    rf"(?:haven{_AP}t|have not|don{_AP}t|do not|doesn{_AP}t|does not) (?:got|have) "
+    rf"(?:access|the (?:policy|data|details|information|figures?)|this shop{_AP}s|their|"
+    r"that information)")
 
 DISCLOSES_FAILURE = re.compile(
     rf"\b(?:{_ABSENCE}|{_CANNOT_ANYTHING}|{_DID_NOT_VERB}|{_REFUSED}|{_NO_ANSWER}|"
