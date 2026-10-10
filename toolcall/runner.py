@@ -261,9 +261,10 @@ def plan_cost(settings: ModelSettings, library, scenarios, cells, reps: int
     return plan.calls, plan.estimate_usd, plan.headroom_usd
 
 
-def _announce(phase, models, plan: Plan, approved, seed, recovery, say):
+def _announce(phase, models, plan: Plan, approved, seed, recovery, say, stub=False):
+    spend = "stub: no spend" if stub else f"approved ${approved:.2f}"
     msg = (f"{phase} on {models}: {plan.calls:,} calls, estimated ${plan.estimate_usd:.2f}"
-           f" + ${plan.headroom_usd:.2f} guard headroom; approved ${approved:.2f}")
+           f" + ${plan.headroom_usd:.2f} guard headroom; {spend}")
     if recovery:
         msg += "; calls are a maximum, a conversation can end before its last attempt"
     if seed:
@@ -405,7 +406,7 @@ def _run(phase, prereg, library, scenarios, root, jobs, ledger, approved_usd, st
         seed = _seed(root, jobs, ledger) if resume else 0.0
         guard = SpendGuard(approved_usd, spent=seed, ledger=ledger)  # one for every job
     _announce(phase, ", ".join(sorted({j.settings.model for j in jobs})), plan, approved_usd,
-              seed, any(j.formats for j in jobs), say)
+              seed, any(j.formats for j in jobs), say, stub)
     if stub:
         root.mkdir(parents=True, exist_ok=True)
         (root / STUB_MARKER).touch()

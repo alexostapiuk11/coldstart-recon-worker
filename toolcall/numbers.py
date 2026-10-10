@@ -70,6 +70,9 @@ def _h5_rows(h5: dict) -> list[tuple[str, str]]:
 
 
 def numbers_block(a: dict) -> str:
+    if "NOT_DATA" in a:
+        raise ValueError(f"NOT_DATA analysis ({a['NOT_DATA']}): a numbers block states "
+                         "measured values, and a stub analysis has none")
     h = a["hypotheses"]
     rates = a["cell_rates"]["failure"]
     ranks = a["ranked_cells"]

@@ -31,6 +31,31 @@ RICHNESS_COLOR = {"terse": "#c04a4a", "rich": "#2f6fd0"}
 FORMAT_COLOR = {"actionable": "#2f6fd0", "opaque": "#c04a4a"}
 
 
+# matplotlib stamps its version into a PNG's Software chunk; dropping it keeps a
+# render byte-identical across matplotlib upgrades.
+_NO_METADATA = {"Software": None}
+
+# Every key the figures read, as dotted paths, so a renderer can refuse an
+# analysis that predates one before it draws anything.
+REQUIRED_PATHS = (
+    "S", "N", "recovery_reps", "cell_rates.failure", "marginal_count_richness",
+    "hypotheses.H1", "hypotheses.H4", "flakiness.distinct_categories_per_unit",
+    "flakiness.units", "flakiness.ever_flip", "recovery",
+)
+
+
+def missing_paths(analysis: dict) -> list[str]:
+    missing = []
+    for path in REQUIRED_PATHS:
+        node = analysis
+        for part in path.split("."):
+            if not isinstance(node, dict) or part not in node:
+                missing.append(path)
+                break
+            node = node[part]
+    return missing
+
+
 def _pt(px: float) -> float:
     return phone_pt(px, WIDTH_IN)
 
@@ -93,7 +118,7 @@ def taxonomy(analysis: dict, out_path):
         fontsize=_pt(PX_TITLE),
     )
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=150, metadata=_NO_METADATA)
     return fig
 
 
@@ -127,7 +152,7 @@ def interaction(analysis: dict, out_path):
         fontsize=_pt(PX_TITLE),
     )
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=150, metadata=_NO_METADATA)
     return fig
 
 
@@ -146,7 +171,10 @@ def flakiness(analysis: dict, out_path):
     # A bar can be too short to see; its unit count tells a reader zero from small.
     ax.bar_label(bars, labels=[f"n={dist.get(str(k), 0)}" for k in counts], padding=2,
                  fontsize=_pt(PX_TEXT))
-    ax.set_ylim(0, 1)
+    # Headroom above 1.0 keeps the label of a bar near 1.0 inside the frame; the
+    # ticks stop at 1.0, the largest possible share.
+    ax.set_ylim(0, 1.1)
+    ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
     ax.set_ylabel("Share of (scenario, cell) units")
     ax.set_xlabel("Distinct categories among one unit's repetitions")
     _style(ax)
@@ -158,7 +186,7 @@ def flakiness(analysis: dict, out_path):
         fontsize=_pt(PX_TITLE),
     )
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=150, metadata=_NO_METADATA)
     return fig
 
 
@@ -193,7 +221,7 @@ def identical_retry(analysis: dict, out_path):
         fontsize=_pt(PX_TITLE),
     )
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=150, metadata=_NO_METADATA)
     return fig
 
 

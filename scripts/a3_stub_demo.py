@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from harness.store import JsonlStore
 from toolcall.analysis import analyse
-from toolcall.prereg import Preregistration
+from toolcall.prereg import MIN_ITERATIONS, Preregistration
 from toolcall.providers import ModelSettings
 from toolcall.records import CallRecord, RecoveryRecord
 from toolcall.runner import run_phase
@@ -44,13 +44,25 @@ def main(argv=None) -> int:
     ap.add_argument("--no-calls", type=int, default=6, help="synthetic no-call scenarios")
     ap.add_argument("--iterations", type=int, default=1000, help="bootstrap draws")
     args = ap.parse_args(argv)
+    # Everything that can be wrong with the arguments is found before any
+    # directory is made, so a bad run leaves nothing behind.
+    if args.iterations < MIN_ITERATIONS:
+        ap.error(f"--iterations {args.iterations} is below {MIN_ITERATIONS}")
+    if args.calls < 1 or args.no_calls < 0:
+        ap.error("--calls must be at least 1 and --no-calls at least 0")
+    lib, scs = library(), scenarios(synthetic_suite(args.calls, args.no_calls))
+    try:
+        prereg = demo_prereg((s.id for s in scs), args.iterations)
+    except ValueError as e:
+        ap.error(f"{e} (--calls {args.calls} + --no-calls {args.no_calls} scenarios)")
     out = Path(args.out)
-    if out.exists() and (not out.is_dir() or any(out.iterdir())):
+    if out.exists() and not out.is_dir():
+        print(f"{out} is a file, not a directory; choose a new --out", file=sys.stderr)
+        return 2
+    if out.exists() and any(out.iterdir()):
         print(f"{out} is not empty; choose a new --out", file=sys.stderr)
         return 2
     out.mkdir(parents=True, exist_ok=True)
-    lib, scs = library(), scenarios(synthetic_suite(args.calls, args.no_calls))
-    prereg = demo_prereg((s.id for s in scs), args.iterations)
     for phase in ("campaign", "recovery", "slice"):
         run_phase(phase, prereg, lib, scs, out, stub=True)
     calls = JsonlStore(out / "campaign.jsonl", CallRecord).read_all()
@@ -58,6 +70,7 @@ def main(argv=None) -> int:
     slices = {m.model: JsonlStore(out / f"slice-{m.model}.jsonl", CallRecord).read_all()
               for m in prereg.slice_models}
     a = analyse(calls, recs, scs, prereg, slices=slices)
+    a["NOT_DATA"] = "stub output from toolcall.stub; never publish"
     (out / "analysis.json").write_text(json.dumps(a, indent=1, sort_keys=True) + "\n")
     print(f"[ok] {out / 'analysis.json'} (stub, NOT DATA)")
     return 0

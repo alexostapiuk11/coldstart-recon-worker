@@ -193,3 +193,39 @@ def test_the_interval_note_follows_the_interval_alpha(analysis, tmp_path):
     fig = FIGURES["interaction"](a, tmp_path / "i.png")
     assert "90% interval" in fig._suptitle.get_text()
     assert " pp" in fig._suptitle.get_text()
+
+
+def test_flakiness_axis_has_headroom_and_ticks_stop_at_one(analysis, tmp_path):
+    fig = FIGURES["flakiness"](analysis, tmp_path / "f.png")
+    ax = fig.axes[0]
+    assert ax.get_ylim() == (0, 1.1)
+    ticks = [round(float(t), 6) for t in ax.get_yticks() if 0 <= t <= 1.1]
+    assert ticks == [0, 0.2, 0.4, 0.6, 0.8, 1.0]
+
+
+def _flakiness_near_one(analysis):
+    a = copy.deepcopy(analysis)
+    a["flakiness"]["distinct_categories_per_unit"] = {"1": 97, "2": 3}
+    a["flakiness"]["units"] = 100
+    return a
+
+
+def test_a_label_on_a_bar_near_one_sits_inside_the_frame(analysis, tmp_path):
+    fig = FIGURES["flakiness"](_flakiness_near_one(analysis), tmp_path / "f.png")
+    ax = fig.axes[0]
+    fig.canvas.draw()
+    frame = ax.get_window_extent()
+    labels = ax.texts
+    assert [t.get_text() for t in labels] == ["n=97", "n=3"]
+    for t in labels:
+        box = t.get_window_extent()
+        assert box.y1 <= frame.y1 and box.y0 >= frame.y0, t.get_text()
+
+
+@pytest.mark.parametrize("name", list(FIGURES))
+def test_two_renders_are_byte_identical_with_no_version_metadata(analysis, tmp_path, name):
+    FIGURES[name](analysis, tmp_path / "a.png")
+    FIGURES[name](analysis, tmp_path / "b.png")
+    first = (tmp_path / "a.png").read_bytes()
+    assert first == (tmp_path / "b.png").read_bytes()
+    assert b"Software" not in first and b"matplotlib" not in first.lower()

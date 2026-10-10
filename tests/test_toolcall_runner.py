@@ -717,3 +717,12 @@ def test_step_two_is_computed_from_the_pilot(tmp_path):
     assert p["usd_per_call_by_cell"]["high-rich-strict"] > p["usd_per_call_by_cell"][
         "low-terse-loose"]
     assert p["estimate_usd"] > 0 and "**total" in p["budget_table"]
+
+
+def test_a_stub_run_says_no_spend_instead_of_an_approval(tmp_path):
+    said = []
+    run_phase("pilot-baseline", example_prereg(), LIB, SCS, tmp_path, stub=True,
+              say=said.append)
+    assert said[0].startswith(f"pilot-baseline on gpt-5.4-mini-2026-03-17: {len(SCS) * 10:,} calls")
+    assert "guard headroom; stub: no spend" in said[0]
+    assert "approved" not in said[0]
