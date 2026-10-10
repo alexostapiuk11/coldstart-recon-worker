@@ -128,7 +128,7 @@ def _variant(run, mutate, **prereg_overrides):
 
 @pytest.fixture(scope="module")
 def trimmed(run):
-    """Scenario 0 keeps one graded repetition in CELL_A (below the floor of 2);
+    """Scenario 0 keeps one graded repetition in CELL_A (below the floor of 3);
     scenarios 1-10 lose two repetitions to API errors in CELL_B (above it);
     two calls have no response text."""
     scs = run[2]
@@ -257,3 +257,60 @@ def test_the_analysis_flags_fewer_analysable_scenarios_than_s_floor(run, analysi
     a, _, _ = _variant(run, mutate, s_floor=N_SCEN)  # one scenario is dropped: S < s_floor
     assert a["S"] == N_SCEN - 1 and a["analysable_below_s_floor"] is True
     assert a["hypotheses"]["H1"]["n_scenarios"] == N_SCEN - 1  # the estimates still run
+
+
+def test_h2_reads_p_ge_0_and_is_holm_rejected_on_the_planted_strictness_effect(analysis):
+    h2 = analysis["hypotheses"]["H2"]
+    assert h2["point"] < 0
+    assert h2["p"] == h2["p_ge_0"] < h2["p_le_0"]
+    assert h2["holm_rejects"] is True
+    assert h2["failed_part"] in (None, "equivalence")
+    assert (h2["failed_part"] is None) == (h2["verdict"] == "supported")
+
+
+def _slice_records(calls, cells, mutate=lambda r: r, only=None):
+    return [mutate(r) for r in calls if r.cell in cells and (only is None or r.scenario_id in only)]
+
+
+def test_slice_models_use_the_scenarios_they_have_and_say_which_are_left_out(
+        run, analysis):
+    calls, recs, scs, _ = run
+    cells = (analysis["ranked_cells"]["best"], analysis["ranked_cells"]["worst"])
+    thin = scs[3].id
+    few = {s.id for s in scs[:10]}
+    prereg = example_prereg(included=tuple(s.id for s in scs), reps=8, recovery_reps=5,
+                            slice_reps=5, approved_usd=1.0, iterations=100)
+    a = analyse(calls, recs, scs, prereg, slices={
+        "full": _slice_records(calls, cells),
+        "thin": _slice_records(calls, cells, lambda r: _api_error(r) if (
+            r.scenario_id == thin and r.cell == cells[1] and r.block_index >= 1) else r),
+        "tiny": _slice_records(calls, cells, only=few),
+    })["slice"]
+    assert a["full"]["estimable"] and a["full"]["dropped_scenarios"] == []
+    assert a["full"]["difference"]["n_scenarios"] == N_SCEN
+    assert a["thin"]["estimable"] and a["thin"]["difference"]["n_scenarios"] == N_SCEN - 1
+    (d,) = a["thin"]["dropped_scenarios"]
+    assert d["scenario"] == thin and d["graded_by_cell"][cells[1]] == 1
+    assert a["tiny"]["estimable"] is False and "bootstrap floor" in a["tiny"]["reason"]
+    assert len(a["tiny"]["dropped_scenarios"]) == N_SCEN - len(few)
+    assert "difference" not in a["tiny"]
+
+
+def test_exploratory_calls_are_counted_on_the_analysable_set_and_must_be_in_the_best_cell(
+        run, analysis, trimmed):
+    calls, recs, scs, _ = run
+    best = analysis["ranked_cells"]["best"]
+    explo = [r for r in calls if r.cell == best]
+    prereg = example_prereg(included=tuple(s.id for s in scs), reps=8, recovery_reps=5,
+                            slice_reps=5, approved_usd=1.0, iterations=100)
+    short = trimmed[2]  # dropped when its CELL_A calls are thinned
+    thinned = [_api_error(r) if (r.scenario_id == short and r.cell == CELL_A
+                                 and r.block_index >= 1) else r for r in calls]
+    a = analyse(thinned, recs, scs, prereg, exploratory=explo)
+    assert a["exploratory_constrained"]["cell"] == a["ranked_cells"]["best"]
+    assert a["dropped_scenarios"][0]["scenario"] == short  # not analysable, so not counted
+    assert sum(a["exploratory_constrained"]["counts"].values()) == sum(
+        r.scenario_id != short for r in explo)
+    other = next(r for r in calls if r.cell != best)
+    with pytest.raises(ValueError, match="best cell"):
+        analyse(calls, recs, scs, prereg, exploratory=[*explo, other])

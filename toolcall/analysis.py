@@ -111,6 +111,44 @@ def _two_cell(records, cells: tuple[str, str], scenarios, prereg) -> dict:
     return out
 
 
+def _slice(records, cells: tuple[str, str], analysable, prereg) -> dict:
+    """One slice model on the two slice cells. The scenarios are the analysable
+    set intersected with those this model has at least `min_graded_per_cell`
+    graded repetitions for in both cells; the others are disclosed. If fewer
+    than the bootstrap floor remain the slice is reported as not estimable, with
+    the reason, rather than raising and losing the whole analysis."""
+    keep = set(analysable)
+    records = [r for r in records if r.scenario_id in keep]
+    graded = graded_outcomes(records)
+    floor = prereg.min_graded_per_cell
+    eligible, dropped = [], []
+    for sid in analysable:
+        by_cell = {c: len(graded.get(sid, {}).get(c, [])) for c in cells}
+        if min(by_cell.values()) >= floor:
+            eligible.append(sid)
+        else:
+            dropped.append({"scenario": sid, "graded_by_cell": by_cell})
+    if len(eligible) < MIN_BOOTSTRAP_SAMPLES:
+        return {"estimable": False, "cells": list(cells), "dropped_scenarios": dropped,
+                "reason": f"{len(eligible)} scenarios with at least {floor} graded repetitions "
+                          f"in both cells; the bootstrap floor is {MIN_BOOTSTRAP_SAMPLES}"}
+    return {"estimable": True, "dropped_scenarios": dropped,
+            **_two_cell(records, cells, eligible, prereg)}
+
+
+def _exploratory(records, best: str, analysable):
+    """Constrained-decoding calls, which are only comparable in the best cell:
+    any record from another cell is an error. Counted over the analysable set."""
+    if not records:
+        return None
+    wrong = sorted({r.cell for r in records if r.cell != best})
+    if wrong:
+        raise ValueError(f"exploratory calls must all be in the best cell {best}; got {wrong}")
+    return {"cell": best,
+            "counts": Counter(r.grade["category"] for r in records
+                              if r.scenario_id in analysable)}
+
+
 def _marginal(failure_rows, prereg) -> dict:
     """Failure rate at each (count, richness) pair, averaged over strictness:
     the four points of the interaction figure, each with its interval."""
@@ -247,13 +285,9 @@ def analyse(records, recovery_records, scenarios, prereg, *, slices=None,
         "recovery": _recovery(recovery_records, prereg),
         "cost": costs,
         "break_even": break_even(costs),
-        "slice": {model: _two_cell([r for r in rs if r.scenario_id in keep],
-                                   (ranks["best"], ranks["worst"]), analysable, prereg)
+        "slice": {model: _slice(rs, (ranks["best"], ranks["worst"]), analysable, prereg)
                   for model, rs in sorted((slices or {}).items())},
-        "exploratory_constrained": (
-            {"cell": ranks["best"],
-             "counts": Counter(r.grade["category"] for r in exploratory)}
-            if exploratory else None),
+        "exploratory_constrained": _exploratory(exploratory, ranks["best"], keep),
         "spend": spend,
     }
     h5 = out["hypotheses"]["H5"]
