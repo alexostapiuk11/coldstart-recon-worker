@@ -35,15 +35,29 @@ def _pt(px: float) -> float:
     return phone_pt(px, WIDTH_IN)
 
 
-def _style(ax) -> None:
+def _style(ax, grid_axis: str = "y") -> None:
     ax.tick_params(labelsize=_pt(PX_TEXT))
     ax.xaxis.label.set_size(_pt(PX_TEXT))
     ax.yaxis.label.set_size(_pt(PX_TEXT))
-    ax.grid(alpha=0.3, axis="x" if ax.get_ylabel() == "" else "y")
+    ax.grid(alpha=0.3, axis=grid_axis)
+
+
+def _err(points, los, his) -> list[list[float]]:
+    """errorbar's [[below], [above]] extents. A percentile bootstrap interval
+    need not contain its point estimate, and errorbar refuses a negative
+    extent, so a point outside [lo, hi] gets a zero-length arm on that side."""
+    return [[max(0.0, p - lo) for p, lo in zip(points, los, strict=True)],
+            [max(0.0, hi - p) for p, hi in zip(points, his, strict=True)]]
+
+
+def _pct(interval: dict) -> str:
+    """'95%' from the interval's own alpha, so the label cannot disagree with it."""
+    return f"{round(100 * (1 - interval['alpha']))}%"
 
 
 def _n_line(analysis: dict) -> str:
-    return f"{analysis['S']} scenarios × {analysis['N']} repetitions per cell"
+    # N is the scheduled repetitions: API errors can leave fewer graded ones.
+    return f"{analysis['S']} scenarios × up to {analysis['N']} repetitions per cell"
 
 
 def taxonomy(analysis: dict, out_path):
@@ -62,19 +76,20 @@ def taxonomy(analysis: dict, out_path):
         ax.barh(cells, widths, left=left, color=CATEGORY_COLOR[cat], label=cat.lower())
         left = [lo + w for lo, w in zip(left, widths)]
     fail = [rates["failure"][c] for c in cells]
+    # The whisker sits at x = 1 - failure, so the interval flips: [1 - hi, 1 - lo].
     correct_edge = [1 - f["point"] for f in fail]
     ax.errorbar(correct_edge, cells,
-                xerr=[[f["hi"] - f["point"] for f in fail], [f["point"] - f["lo"] for f in fail]],
+                xerr=_err(correct_edge, [1 - f["hi"] for f in fail], [1 - f["lo"] for f in fail]),
                 fmt="none", ecolor="black", capsize=3, lw=1.2)
     ax.set_xlim(0, 1)
     ax.set_xlabel("Share of graded calls")
     ax.set_ylabel("tool count – description – schema")
     ax.invert_yaxis()
-    _style(ax)
+    _style(ax, grid_axis="x")
     ax.legend(fontsize=_pt(PX_TEXT), ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.12))
     fig.suptitle(
         f"Failure modes by formulation\n{_n_line(analysis)}\n"
-        "whisker: 95% interval on the failure rate",
+        f"whisker: {_pct(fail[0])} interval on the failure rate",
         fontsize=_pt(PX_TITLE),
     )
     fig.tight_layout()
@@ -84,14 +99,17 @@ def taxonomy(analysis: dict, out_path):
 
 def interaction(analysis: dict, out_path):
     """Figure 2: H1. Failure rate at low and high tool count, terse vs rich,
-    averaged over schema strictness, with 95% intervals."""
+    averaged over schema strictness, with intervals."""
     m = analysis["marginal_count_richness"]
     fig, ax = plt.subplots(figsize=(WIDTH_IN, 6.0))
     xs = [0, 1]
-    for richness in ("terse", "rich"):
+    # Terse and rich share each tick; a small offset keeps overlapping markers
+    # and whiskers both visible.
+    for richness, shift in (("terse", -0.03), ("rich", 0.03)):
         pts = [m[f"{count}-{richness}"] for count in ("low", "high")]
-        ax.errorbar(xs, [p["point"] for p in pts],
-                    yerr=[[p["point"] - p["lo"] for p in pts], [p["hi"] - p["point"] for p in pts]],
+        ax.errorbar([x + shift for x in xs], [p["point"] for p in pts],
+                    yerr=_err([p["point"] for p in pts], [p["lo"] for p in pts],
+                              [p["hi"] for p in pts]),
                     color=RICHNESS_COLOR[richness], marker="o", capsize=4, lw=2,
                     label=f"{richness} descriptions")
     h1 = analysis["hypotheses"]["H1"]
@@ -104,8 +122,8 @@ def interaction(analysis: dict, out_path):
     ax.legend(fontsize=_pt(PX_TEXT), loc="upper left")
     fig.suptitle(
         f"Description richness by tool count\n{_n_line(analysis)}\n"
-        f"interaction {h1['point']:+.3f} (95% interval {h1['lo']:+.3f} to {h1['hi']:+.3f}), "
-        f"H1 {h1['verdict']}",
+        f"interaction {100 * h1['point']:+.1f} pp ({_pct(h1)} interval "
+        f"{100 * h1['lo']:+.1f} to {100 * h1['hi']:+.1f} pp), H1 {h1['verdict']}",
         fontsize=_pt(PX_TITLE),
     )
     fig.tight_layout()
@@ -117,11 +135,13 @@ def flakiness(analysis: dict, out_path):
     """Figure 3: how often repetitions of one scenario in one cell disagree."""
     f = analysis["flakiness"]
     dist = f["distinct_categories_per_unit"]
-    keys = sorted(dist, key=int)
-    validate_rows(keys)
-    shares = [dist[k] / f["units"] for k in keys]
+    validate_rows(dist)
+    # Keys are strings (the analysis dict is JSON-shaped). Every count from 1 to
+    # the largest is drawn, so a count nobody hit is an empty bar, not a gap.
+    counts = range(1, max(int(k) for k in dist) + 1)
+    shares = [dist.get(str(k), 0) / f["units"] for k in counts]
     fig, ax = plt.subplots(figsize=(WIDTH_IN, 5.0))
-    ax.bar([f"{k} outcome{'s' if k != '1' else ''}" for k in keys], shares, color="#2f6fd0")
+    ax.bar([f"{k} outcome{'s' if k != 1 else ''}" for k in counts], shares, color="#2f6fd0")
     ax.set_ylim(0, 1)
     ax.set_ylabel("Share of (scenario, cell) units")
     ax.set_xlabel("Distinct categories among one unit's repetitions")
@@ -129,8 +149,8 @@ def flakiness(analysis: dict, out_path):
     e = f["ever_flip"]
     fig.suptitle(
         f"Rerun disagreement at the most deterministic setting\n"
-        f"{f['units']} (scenario, cell) units, {analysis['N']} repetitions each\n"
-        f"ever-flip fraction {e['point']:.3f} (95% interval {e['lo']:.3f} to {e['hi']:.3f})",
+        f"{f['units']} (scenario, cell) units, up to {analysis['N']} repetitions each\n"
+        f"ever-flip fraction {e['point']:.3f} ({_pct(e)} interval {e['lo']:.3f} to {e['hi']:.3f})",
         fontsize=_pt(PX_TITLE),
     )
     fig.tight_layout()
@@ -145,24 +165,26 @@ def identical_retry(analysis: dict, out_path):
     fmts = [f for f in ("actionable", "opaque") if f in rec]
     validate_rows(fmts)
     cis = [rec[f]["identical_retry_persistent"] for f in fmts]
+    for fmt, ci in zip(fmts, cis):
+        if ci is None:
+            raise ValueError(f"no persistent-kind identical-retry interval for {fmt}")
     fig, ax = plt.subplots(figsize=(WIDTH_IN, 5.0))
     for x, (fmt, ci) in enumerate(zip(fmts, cis)):
-        point = ci["point"] if ci else rec[fmt]["identical_retry"]
-        ax.bar(x, point, color=FORMAT_COLOR[fmt], width=0.6)
-        if ci:
-            ax.errorbar(x, point, yerr=[[point - ci["lo"]], [ci["hi"] - point]],
-                        fmt="none", ecolor="black", capsize=5, lw=1.2)
+        ax.bar(x, ci["point"], color=FORMAT_COLOR[fmt], width=0.6)
+        ax.errorbar([x], [ci["point"]], yerr=_err([ci["point"]], [ci["lo"]], [ci["hi"]]),
+                    fmt="none", ecolor="black", capsize=5, lw=1.2)
     h4 = analysis["hypotheses"]["H4"]
     ax.axhline(h4["floor"], color="#888888", ls="--", lw=1.2, label="pre-registered floor")
-    ax.set_xticks(range(len(fmts)), [f"{f} error" for f in fmts])
+    ax.set_xticks(range(len(fmts)),
+                  [f"{f} error\n{ci['n_scenarios']} scenarios" for f, ci in zip(fmts, cis)])
     ax.set_ylim(0, 1)
     ax.set_ylabel("Identical-retry rate")
     _style(ax)
     ax.legend(fontsize=_pt(PX_TEXT), loc="upper left")
-    n = h4["n_scenarios"]
     fig.suptitle(
         f"Repeating the failing call unchanged\n"
-        f"{n} scenarios, persistent error kinds · H4 {h4['verdict']}",
+        f"persistent error kinds · whisker: {_pct(cis[0])} interval\n"
+        f"H4 pairs {h4['n_scenarios']} scenarios · H4 {h4['verdict']}",
         fontsize=_pt(PX_TITLE),
     )
     fig.tight_layout()
