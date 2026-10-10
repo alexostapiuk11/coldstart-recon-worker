@@ -74,10 +74,10 @@ def total(lines: list[Line]) -> float:
     return sum(line.usd for line in lines)
 
 
-def table(lines: list[Line], contingency: float = 0.25) -> str:
+def table(lines: list[Line], contingency: float = 0.25, total_label: str = "total") -> str:
     rows = ["| component | calls | USD per call | USD |", "|---|---|---|---|"]
     rows += [f"| {x.name} | {x.calls:,} | {x.usd_per_call:.5f} | {x.usd:.2f} |" for x in lines]
     t = total(lines)
-    rows.append(f"| **total** | | | **{t:.2f}** |")
+    rows.append(f"| **{total_label}** | | | **{t:.2f}** |")
     rows.append(f"| with {contingency:.0%} contingency | | | {t * (1 + contingency):.2f} |")
     return "\n".join(rows)
