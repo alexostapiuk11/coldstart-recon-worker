@@ -103,7 +103,12 @@ answer.
 
 # Learning plan — artifact 5, how many LoRA adapters fit on one GPU
 
-**The material:** the post, [`docs/post-a5.md`](../post-a5.md), and its four
+**The material:** a private explainer page,
+https://claude.ai/artifact/PRtM7pxCLUGfasftM3uYov (source:
+[`explainer/a5/page.html`](../../explainer/a5/page.html)), which covers modules
+1 to 6 with one interactive per module and the checkpoint at the end of each;
+modules 0 and 7 happen in the session and are not on the page. Behind it: the
+post, [`docs/post-a5.md`](../post-a5.md), and its four
 figures (`docs/figures/a5/`, each with a phone-width variant); the concepts
 behind it are in the design spec's
 learning guide (`docs/superpowers/specs/2026-08-17-multi-lora-serving-design.md`,
