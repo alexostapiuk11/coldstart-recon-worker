@@ -65,6 +65,14 @@ figures; the concepts behind it are in the design spec's learning guide
 above: state it unaided, survive one follow-up, and on a miss change the
 representation, not the volume.
 
+**The material, as a page:** a private interactive page,
+<https://claude.ai/artifact/Lt9oqDvw3SFoJgGBQxBKPR>, covers modules 1 to 6, each
+with a widget on the committed data and its checkpoint shown unanswered. Its
+source is `explainer_a2/`, built by `scripts/build_explainer_a2.py`; the
+checkpoint text on the page is read from the table below, so editing a
+checkpoint here means rebuilding and republishing the page. Modules 0, 7 and 8
+need no page and happen in session.
+
 **Adapted to what the artifact found, not what it set out to find.** §13b was
 written before the build and teaches the simulator's answer as if it would be
 trusted. The simulator failed its validation twice, so the weight moves to what
