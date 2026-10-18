@@ -83,8 +83,8 @@ because a test written after seeing the runs can be bent to fit them. Its core:
   receive-to-response time, which is what the simulator models.
 - **A bin misses** when all three repeats land on the same side of their own
   predictions by more than 1 ms (as amended 2026-10-05). A perfect model misses a
-  bin with probability 1/4, which is why the rule tolerates misses rather than
-  demanding every bin.
+  bin with probability at most 1/4, and less once the 1 ms margin is counted, which
+  is why the rule tolerates misses rather than demanding every bin.
 - **Pass:** at least 10 judged bins, and no more than half of them missing.
 - **A miss's size** is the residual closest to zero among the three repeats: how
   far the repeat nearest its own prediction sits from it. The raw residual of any
