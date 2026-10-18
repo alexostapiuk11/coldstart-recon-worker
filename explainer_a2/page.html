@@ -1,0 +1,765 @@
+<title>Artifact 2, Modules 1–6</title>
+<!-- A phone otherwise lays the page out at 980 CSS px. The Artifact host supplies
+     a viewport too; this makes the fragment correct on its own. -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+  /* Layout: one reading column for prose, wider cards for the widgets, one section
+     per module. Tokens, type and chrome are artifact 1's explainer (explainer/page.html)
+     so the two pages read as a pair. The clock accents are swapped for the three
+     signal colours of autoscale/figures.py (SIGNAL_COLOR), lifted for the dark page.
+     Colour is never the only channel: the three signals also differ in marker shape. */
+  :root {
+    --ink: #1b1b1d;
+    --ink-soft: #55565b;
+    --rule: #d9d9de;
+    --page: #ffffff;
+    --card: #f6f7fa;
+    --grid: #e4e5ea;
+    --focus: #1f5fc4;
+    --sig-queue: #2f6fd0;
+    --sig-flight: #2f7d32;
+    --sig-util: #c0392b;
+    --muted-mark: #7c7d86;
+    --measured: #2f6b34;
+    --measured-bg: #eef7ee;
+    --sim: #8a5200;
+    --sim-bg: #fbf1dc;
+    --synth: #6d28a8;
+    --synth-bg: #f3ecfa;
+    --toy: #4a4b52;
+    --toy-bg: #ececf0;
+    --shade: rgb(0 0 0 / .05);
+    --shadow: rgb(0 0 0 / .18);
+    --font-body: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  /* Three theme states: un-stamped follows the OS, an explicit choice stamps the
+     root and wins in both directions. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #e8e8ea;
+      --ink-soft: #a6a7ad;
+      --rule: #34353a;
+      --page: #141416;
+      --card: #1c1d21;
+      --grid: #2b2c31;
+      --focus: #79b0f5;
+      --sig-queue: #7fb0f5;
+      --sig-flight: #6fcf76;
+      --sig-util: #ff8f80;
+      --muted-mark: #6e6f77;
+      --measured: #86d48d;
+      --measured-bg: #1b2a1d;
+      --sim: #f2c46b;
+      --sim-bg: #2b2413;
+      --synth: #c79af0;
+      --synth-bg: #251a30;
+      --toy: #c4c5cc;
+      --toy-bg: #26272c;
+      --shade: rgb(255 255 255 / .06);
+      --shadow: rgb(0 0 0 / .55);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #e8e8ea;
+    --ink-soft: #a6a7ad;
+    --rule: #34353a;
+    --page: #141416;
+    --card: #1c1d21;
+    --grid: #2b2c31;
+    --focus: #79b0f5;
+    --sig-queue: #7fb0f5;
+    --sig-flight: #6fcf76;
+    --sig-util: #ff8f80;
+    --muted-mark: #6e6f77;
+    --measured: #86d48d;
+    --measured-bg: #1b2a1d;
+    --sim: #f2c46b;
+    --sim-bg: #2b2413;
+    --synth: #c79af0;
+    --synth-bg: #251a30;
+    --toy: #c4c5cc;
+    --toy-bg: #26272c;
+    --shade: rgb(255 255 255 / .06);
+    --shadow: rgb(0 0 0 / .55);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0 auto;
+    padding-block: 1.5rem 6rem;
+    padding-inline: max(1rem, env(safe-area-inset-left, 0px)) max(1rem, env(safe-area-inset-right, 0px));
+    max-width: 62rem;
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 1.06rem;
+    line-height: 1.58;
+  }
+  h1, h2, h3, h4, .kicker, summary, figcaption, label, button, select, output, th, .banner, .cp-label {
+    font-family: var(--font-ui);
+  }
+  h1, h2, h3 { text-wrap: balance; line-height: 1.22; }
+  h1 { font-size: 2.1rem; margin: .2rem 0 1rem; }
+  h2 { font-size: 1.55rem; margin: 0 0 .8rem; }
+  h3 { font-size: 1.1rem; margin: 2.2rem 0 .5rem; }
+  p { margin: 0 0 1rem; }
+  code, kbd, samp, pre { font-family: var(--font-mono); font-size: .9em; }
+  a { color: inherit; text-decoration-color: var(--focus); text-underline-offset: 2px; }
+  .kicker {
+    margin: 0; font-size: .74rem; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--ink-soft); font-weight: 600;
+  }
+  .num, td, output, .readout b { font-variant-numeric: tabular-nums; }
+  .prose { max-width: 44rem; }
+  .prose ul { padding-left: 1.2rem; margin: 0 0 1rem; }
+  .prose li { margin-bottom: .45rem; }
+
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+
+  /* --- glossary (artifact 1's mechanism) -------------------------------- */
+  .gloss { position: relative; }
+  .term {
+    font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: help;
+    text-decoration: underline dotted; text-underline-offset: .18em;
+    text-decoration-thickness: 1px; text-decoration-color: var(--ink-soft);
+  }
+  .term:hover { text-decoration-color: var(--ink); }
+  .def {
+    position: absolute; left: 0; top: calc(100% + .4rem); z-index: 20;
+    width: max-content; max-width: min(26rem, 76vw);
+    padding: .55rem .7rem;
+    border: 1px solid var(--rule); border-left: 3px solid var(--focus);
+    background: var(--page); box-shadow: 0 6px 20px var(--shadow);
+    font-family: var(--font-ui); font-size: .86rem; line-height: 1.45; font-weight: 400;
+    color: var(--ink); border-radius: 0 6px 6px 0; white-space: normal; text-align: left;
+  }
+  .def[hidden] { display: none; }
+  @media (prefers-reduced-motion: no-preference) {
+    .def { animation: gloss-in .18s ease-out; }
+    @keyframes gloss-in { from { transform: translateY(-2px); } }
+  }
+
+  /* --- top of page ------------------------------------------------------- */
+  .top { max-width: 44rem; }
+  .lede { font-size: 1.15rem; }
+  nav.jump {
+    display: flex; gap: .5rem; overflow-x: auto; margin: 1.4rem 0 .4rem; padding-bottom: .3rem;
+    font-family: var(--font-ui); font-size: .85rem;
+  }
+  nav.jump a {
+    flex: none; padding: .35rem .7rem; border: 1px solid var(--rule); border-radius: 999px;
+    text-decoration: none; white-space: nowrap;
+  }
+  nav.jump a:hover { border-color: var(--ink-soft); }
+  dl.legend { display: grid; grid-template-columns: max-content 1fr; gap: .45rem .9rem; margin: 1.2rem 0; align-items: baseline; }
+  dl.legend dt { margin: 0; }
+  dl.legend dd { margin: 0; font-size: .95rem; }
+  .tag {
+    display: inline-block; font-family: var(--font-ui); font-weight: 700; font-size: .7rem;
+    letter-spacing: .07em; padding: .18rem .5rem; border-radius: 4px; white-space: nowrap;
+  }
+  .tag.measured, .banner.measured { color: var(--measured); background: var(--measured-bg); }
+  .tag.sim, .banner.sim { color: var(--sim); background: var(--sim-bg); }
+  .tag.synth, .banner.synth { color: var(--synth); background: var(--synth-bg); }
+  .tag.toy, .banner.toy { color: var(--toy); background: var(--toy-bg); }
+
+  /* --- sections ---------------------------------------------------------- */
+  .mod { margin-top: 4.5rem; padding-top: 1.6rem; border-top: 2px solid var(--ink); }
+  .mod-head { max-width: 44rem; margin-bottom: .6rem; }
+  .widget {
+    margin: 1.6rem 0; background: var(--card); border: 1px solid var(--rule);
+    border-radius: 10px;
+  }
+  .banner {
+    display: block; margin: 0; border-radius: 9px 9px 0 0; padding: .45rem .9rem; font-size: .76rem; font-weight: 700; letter-spacing: .05em;
+  }
+  .banner span { font-weight: 500; letter-spacing: 0; }
+  .wbody { padding: 1rem 1rem 1.1rem; display: grid; gap: 1rem; min-width: 0; }
+  .controls { display: grid; align-items: start; gap: .9rem 1.4rem; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); }
+  .ctl { display: grid; gap: .3rem; min-width: 0; }
+  .ctl label, .ctl .lab { font-size: .8rem; font-weight: 600; color: var(--ink-soft); }
+  .ctl output { font-size: 1.05rem; color: var(--ink); font-weight: 600; }
+  input[type="range"] { width: 100%; accent-color: var(--focus); margin: .2rem 0; }
+  input[type="number"], select {
+    font: inherit; font-family: var(--font-ui); font-size: .95rem; color: var(--ink);
+    background: var(--page); border: 1px solid var(--rule); border-radius: 6px;
+    padding: .35rem .5rem; max-width: 100%; min-width: 0;
+  }
+  input[type="number"] { width: 8rem; font-variant-numeric: tabular-nums; }
+  .btns { display: flex; flex-wrap: wrap; gap: .4rem; }
+  button.btn {
+    font-family: var(--font-ui); font-size: .82rem; color: var(--ink); background: var(--page);
+    border: 1px solid var(--rule); border-radius: 6px; padding: .38rem .7rem; cursor: pointer;
+    min-height: 2.1rem;
+  }
+  button.btn:hover { border-color: var(--ink-soft); }
+  button.btn[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--page); }
+  .readouts {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: .6rem;
+  }
+  .readout { background: var(--page); border: 1px solid var(--rule); border-radius: 8px; padding: .55rem .7rem; min-width: 0; }
+  .readout span { display: block; font-family: var(--font-ui); font-size: .72rem; color: var(--ink-soft); letter-spacing: .02em; }
+  .readout b { display: block; font-family: var(--font-ui); font-size: 1.25rem; font-weight: 600; overflow-wrap: anywhere; }
+  .readout small { display: block; font-family: var(--font-ui); font-size: .72rem; color: var(--ink-soft); }
+  .msg { font-family: var(--font-ui); font-size: .88rem; margin: 0; color: var(--ink); }
+  .msg.fail { color: var(--sig-util); font-weight: 600; }
+  .chart { width: 100%; min-width: 0; }
+  .chart svg { display: block; max-width: 100%; height: auto; overflow: visible; }
+  .scroll { overflow-x: auto; max-width: 100%; }
+  table { border-collapse: collapse; font-size: .88rem; min-width: 34rem; width: 100%; }
+  th, td { padding: .38rem .6rem; border-bottom: 1px solid var(--rule); text-align: right; white-space: nowrap; }
+  th { font-size: .74rem; color: var(--ink-soft); font-weight: 600; vertical-align: bottom; white-space: normal; }
+  th:first-child, td:first-child { text-align: left; }
+  table.hosts th:nth-child(2), table.hosts td:nth-child(2) { text-align: left; white-space: normal; min-width: 14rem; }
+  caption { text-align: left; font-family: var(--font-ui); font-weight: 600; font-size: .85rem; padding: 0 0 .4rem; }
+  .arith { font-family: var(--font-mono); font-size: .86rem; margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+  .note { font-size: .9rem; color: var(--ink-soft); margin: 0; max-width: 46rem; }
+  .legend-inline { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; font-family: var(--font-ui); font-size: .8rem; color: var(--ink); }
+  .legend-inline span { display: inline-flex; align-items: center; gap: .4rem; }
+  .legend-inline svg { flex: none; }
+  fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+  fieldset legend { font-size: .8rem; font-weight: 600; color: var(--ink-soft); padding: 0; margin-bottom: .3rem; }
+  .radios { display: flex; flex-wrap: wrap; gap: .4rem 1rem; font-family: var(--font-ui); font-size: .9rem; }
+  .radios label { display: inline-flex; align-items: center; gap: .35rem; cursor: pointer; }
+
+  /* --- chart ink: every colour is a token ------------------------------- */
+  svg .grid { stroke: var(--grid); stroke-width: 1; }
+  svg .axis { stroke: var(--ink-soft); stroke-width: 1; }
+  svg text { fill: var(--ink-soft); font-family: var(--font-ui); font-size: 12px; }
+  svg text.strong { fill: var(--ink); font-weight: 600; }
+  svg text.title { fill: var(--ink); font-weight: 600; }
+  svg .shade { fill: var(--shade); stroke: none; }
+  svg .sq { stroke: var(--sig-queue); fill: var(--sig-queue); }
+  svg .sf { stroke: var(--sig-flight); fill: var(--sig-flight); }
+  svg .su { stroke: var(--sig-util); fill: var(--sig-util); }
+  svg .line-q { stroke: var(--sig-queue); fill: none; stroke-width: 2; }
+  svg .line-f { stroke: var(--sig-flight); fill: none; stroke-width: 2; }
+  svg .line-u { stroke: var(--sig-util); fill: none; stroke-width: 2; }
+  svg .line-ink { stroke: var(--ink); fill: none; stroke-width: 2; }
+  svg .line-soft { stroke: var(--ink-soft); fill: none; stroke-width: 1.5; }
+  svg .dash { stroke-dasharray: 5 4; }
+  svg .dot { stroke-dasharray: 2 3; }
+  svg .dot-ink { fill: var(--ink); stroke: var(--page); stroke-width: 1.5; }
+  svg .dot-open { fill: var(--page); stroke: var(--ink); stroke-width: 1.8; }
+  svg .bar { stroke: var(--ink-soft); stroke-width: 1.4; fill: none; }
+  svg .grey { stroke: var(--muted-mark); fill: none; stroke-width: 1.4; }
+  svg .grey-fill { stroke: var(--muted-mark); fill: var(--muted-mark); }
+  svg .ring { stroke: var(--ink); fill: none; stroke-width: 2; }
+  svg .meas { stroke: var(--measured); fill: none; stroke-width: 1.6; }
+  svg .meas-fill { stroke: var(--measured); fill: var(--measured); }
+  svg .sim-fill { stroke: none; fill: var(--sim); opacity: .22; }
+  svg .toy-fill { stroke: none; fill: var(--sig-util); opacity: .2; }
+  svg .toy-gap { stroke: none; fill: var(--ink-soft); opacity: .22; }
+  svg .synth-fill { stroke: var(--synth); fill: var(--synth); }
+  svg .synth-open { stroke: var(--synth); fill: var(--page); stroke-width: 1.6; }
+  svg .synth-col { fill: var(--synth); opacity: .13; stroke: none; }
+  svg .cursor { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 3 3; }
+  svg .fail { stroke: var(--sig-util); fill: none; stroke-width: 2.2; }
+  svg text.fail { fill: var(--sig-util); stroke: none; font-weight: 600; }
+  svg .hatch-line { stroke: var(--muted-mark); stroke-width: 1; opacity: .5; }
+
+  /* --- checkpoint box ---------------------------------------------------- */
+  .checkpoint {
+    margin: 2.2rem 0 0; max-width: 44rem; border: 2px solid var(--ink); border-radius: 12px;
+    padding: 1.2rem 1.4rem 1.1rem; background: var(--page);
+  }
+  .cp-label { margin: 0 0 .5rem; font-size: .74rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-soft); }
+  .cp-q { margin: 0; padding: 0; font-size: 1.04rem; }
+  .cp-q::first-letter { text-transform: uppercase; }
+  .cp-foot { margin: .9rem 0 0; padding-top: .7rem; border-top: 1px solid var(--rule); font-family: var(--font-ui); font-size: .8rem; color: var(--ink-soft); }
+  .checkpoint details { margin-top: .8rem; font-size: .9rem; }
+  .checkpoint summary { cursor: pointer; color: var(--ink-soft); font-size: .84rem; }
+  .checkpoint details ul { margin: .5rem 0 0; padding-left: 1.1rem; }
+
+  /* --- small screens ----------------------------------------------------- */
+  @media (max-width: 560px) {
+    body { font-size: 1rem; }
+    h1 { font-size: 1.7rem; }
+    h2 { font-size: 1.35rem; }
+    .wbody { padding: .8rem .75rem 1rem; }
+    .readout b { font-size: 1.08rem; }
+    .readouts { grid-template-columns: repeat(auto-fit, minmax(8.6rem, 1fr)); }
+    .checkpoint { padding: 1rem 1rem .9rem; }
+    dl.legend { grid-template-columns: 1fr; gap: .15rem; }
+    dl.legend dd { margin-bottom: .6rem; }
+    input[type="number"] { width: 100%; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<header class="top">
+  <p class="kicker">Artifact 2 · the autoscaling signal · learning material</p>
+  <h1>Artifact 2, modules 1–6</h1>
+  <p class="lede">An autoscaler is {{def:autoscaler}}. It decides from a signal, a number it can read, such as how many requests are waiting. Artifact 2 asked which signal gives the best trade between cost and p99 latency in a traffic spike. Here p99 is {{def:p99}}, and latency is {{def:latency}}.</p>
+  <p>The comparison was to be made in a simulator, which is {{def:simulator}}. The simulator was to be trusted only if it passed a test that was pre-registered, meaning {{def:pre-registered}}. It failed that test twice. So the post reports the failure and no ranking of signals, and this page follows the post.</p>
+  <p>Each section below covers one module of the learning plan: the idea, a widget that runs on data committed in the repository, and the module&rsquo;s checkpoint. <strong>The checkpoints are not answered on this page.</strong> You work each one through with Claude in a session, which records the verdict in the progress file. Modules 0 (a cold diagnostic), 7 (what could not be concluded) and 8 (teach it back) need no page and happen in session.</p>
+  <dl class="legend" aria-label="What the labels on each widget mean">
+    <dt><span class="tag measured">MEASURED</span></dt>
+    <dd>Read off a real run on rented hardware.</dd>
+    <dt><span class="tag sim">SIMULATED · FAILED VALIDATION</span></dt>
+    <dd>Produced by the simulator after it failed its test. It is the model&rsquo;s output, not a finding.</dd>
+    <dt><span class="tag synth">SYNTHETIC</span></dt>
+    <dd>Random numbers drawn in your browser to show how a rule behaves.</dd>
+    <dt><span class="tag toy">TOY</span></dt>
+    <dd>A sketch of an idea. It is not the artifact&rsquo;s simulator.</dd>
+  </dl>
+  <nav class="jump" aria-label="Modules">
+    <a href="#m1">1 · Batching and the service curve</a>
+    <a href="#m2">2 · Little&rsquo;s Law</a>
+    <a href="#m3">3 · Why utilisation is blind</a>
+    <a href="#m4">4 · Dead time and cooldowns</a>
+    <a href="#m5">5 · Frontiers and the budget</a>
+    <a href="#m6">6 · The validation gate</a>
+  </nav>
+</header>
+
+<!-- ===================================================================== -->
+<section class="mod" id="m1" aria-labelledby="m1-h">
+  <div class="mod-head">
+    <p class="kicker">Module 1</p>
+    <h2 id="m1-h">Continuous batching and the service curve</h2>
+  </div>
+  <div class="prose">
+    <p>The server is vLLM, {{def:vLLM}}. An engine is {{def:engine}}. Here it ran Qwen3-8B on one RTX 4090.</p>
+    <p>A model writes text one token at a time, and a token is {{def:token}}. An LLM server uses continuous batching, which is {{def:continuous batching}}. Requests join the running batch as they arrive and leave when they finish, and every step produces one token for every request in the batch.</p>
+    <p>The batch has limits. The setting max-num-seqs is {{def:max-num-seqs}}. The batch also needs room for each conversation&rsquo;s state, which lives in the KV cache. A KV cache is {{def:KV cache}}. When the cache is full, new arrivals wait.</p>
+    <p>To see what batching does, the sweep held a fixed number of requests outstanding and measured the server. That is a closed loop, meaning {{def:closed loop}}. The number of requests being served at one moment is the concurrency, which is {{def:concurrency}}. A request is in flight while it is {{def:in flight}}. The sweep used {{c_levels_list}} in flight, with {{runs_level}} runs at each level. The result is the service curve, which is {{def:service curve}}.</p>
+    <p>Two numbers describe a level. Latency is {{def:latency}}. It is taken here as the median over a run&rsquo;s requests and then the median of the runs. A median is {{def:median}}. Throughput is {{def:throughput}}, counted in tokens per second. Throughput divided by the requests in flight is the speed each request sees. The bars on the chart span the lowest and highest of the runs.</p>
+  </div>
+
+  <div class="widget" id="w1">
+    <x-plain class="banner measured">MEASURED <span>· {{runs_level}} runs per level · one RTX 4090 · max-num-seqs {{max_seqs}} · data/a2/service-curve.json</span></x-plain>
+    <div class="wbody">
+      <div class="controls">
+        <div class="ctl">
+          <label for="w1-conc">Requests in flight</label>
+          <input id="w1-conc" type="range" min="0" max="700" step="1" value="600" aria-describedby="w1-msg">
+          <output id="w1-out-conc" for="w1-conc"></output>
+        </div>
+        <div class="ctl">
+          <span class="lab" id="w1-snap-lab">Measured levels</span>
+          <div class="btns" id="w1-snaps" role="group" aria-labelledby="w1-snap-lab"></div>
+        </div>
+      </div>
+      <x-plain class="readouts" aria-live="polite">
+        <div class="readout"><span>Latency</span><b id="w1-lat"></b><small id="w1-lat-sub"></small></div>
+        <div class="readout"><span>Throughput, all requests</span><b id="w1-tps"></b><small id="w1-tps-sub"></small></div>
+        <div class="readout"><span>Per request (throughput ÷ in flight)</span><b id="w1-per"></b><small id="w1-per-sub"></small></div>
+      </x-plain>
+      <p class="msg" id="w1-msg"></p>
+      <div class="chart" id="w1-chart"></div>
+      <p class="note">Open circles are the measured medians with the runs&rsquo; lowest and highest as bars. The line between them is the straight-line interpolation the simulator uses. The curve is not extended past {{top_c}}, because nothing beyond it was measured. The {{ex_c}} button shows what happened at that level. Out of memory, in its message, means {{def:out of memory}}.</p>
+    </div>
+  </div>
+
+  <div class="prose">
+    <p>Between 1 and {{top_c}} in flight, latency goes from {{lat1}} s to {{lat128}} s, a factor of {{lat_ratio}}. Throughput goes from {{tps1}} to {{tps128}} tokens per second, a factor of {{tps_ratio}}. Each request&rsquo;s own speed goes from {{per1}} to {{per128}} tokens per second. A level of {{ex_c}} was also tried, and the widget shows what came of it.</p>
+  </div>
+
+  <aside class="checkpoint" aria-label="Checkpoint for module 1">
+    <p class="cp-label">Checkpoint · module 1</p>
+    <blockquote class="cp-q" data-checkpoint="1">{{checkpoint:1}}</blockquote>
+    <p class="cp-foot">Not answered here. Work it through with Claude in a session; the verdict goes in the progress file.</p>
+  </aside>
+</section>
+
+<!-- ===================================================================== -->
+<section class="mod" id="m2" aria-labelledby="m2-h">
+  <div class="mod-head">
+    <p class="kicker">Module 2</p>
+    <h2 id="m2-h">Little&rsquo;s Law, checked on real data</h2>
+  </div>
+  <div class="prose">
+    <p>Little&rsquo;s Law is {{def:Little's Law}}. In symbols, L = λ × W. L is the average number of requests in the system, λ is the rate at which they arrive and leave, and W is the average time each one spends there. Requests arriving ten per second and staying two seconds each put about twenty in the system.</p>
+    <p>It holds over any stretch where the system neither fills up nor drains, whatever happens inside. So it can be checked against data: measure two of the three and compute the third.</p>
+  </div>
+
+  <div class="widget" id="w2a">
+    <x-plain class="banner toy">ARITHMETIC <span>· solve for any one of the three</span></x-plain>
+    <div class="wbody">
+      <fieldset>
+        <legend>Solve for</legend>
+        <div class="radios">
+          <label><input type="radio" name="w2-solve" value="L" checked> L, requests in flight</label>
+          <label><input type="radio" name="w2-solve" value="lambda"> λ, requests per second</label>
+          <label><input type="radio" name="w2-solve" value="W"> W, seconds in the system</label>
+        </div>
+      </fieldset>
+      <div class="controls">
+        <div class="ctl"><label for="w2-lambda">λ (requests per second)</label><input id="w2-lambda" type="number" step="any" min="0" value="100"></div>
+        <div class="ctl"><label for="w2-w">W (seconds)</label><input id="w2-w" type="number" step="any" min="0" value="0.4"></div>
+        <div class="ctl"><label for="w2-l">L (requests in flight)</label><input id="w2-l" type="number" step="any" min="0" value="40"></div>
+      </div>
+      <p class="arith" id="w2-arith" aria-live="polite"></p>
+      <div class="btns" id="w2-presets"></div>
+    </div>
+  </div>
+
+  <div class="prose">
+    <h3>The load-balancing probes</h3>
+    <p>Before the validation runs, known traffic was sent through RunPod&rsquo;s load-balancing endpoint to see whether it could carry the test. RunPod is {{def:RunPod}}, a worker is {{def:worker}}, and a load balancer is {{def:load balancer}}. The five probes were run to find out, were not pre-registered, and changed the endpoint&rsquo;s settings between them on purpose.</p>
+    <p>Each request records which worker served it and the engine&rsquo;s own latency for it. From those, the page counts how many requests each worker held at once. A request is placed on its worker from (the time the client saw the answer, minus a return leg of {{return_leg}} s, minus the engine&rsquo;s latency) to (that time minus the return leg). The return leg is an assumption, about half the load balancer&rsquo;s overhead when idle.</p>
+  </div>
+
+  <div class="widget" id="w2b">
+    <x-plain class="banner measured">MEASURED <span>· in-flight counts reconstructed with a {{return_leg}} s return leg · probe 1: {{p1_workers}} workers at the scaler value&rsquo;s default</span></x-plain>
+    <div class="wbody">
+      <div class="scroll"><table id="w2-t1" aria-describedby="w2-t1-note"></table></div>
+      <p class="arith" id="w2-arith1" aria-live="polite"></p>
+      <p class="note" id="w2-t1-note">The scaler value is {{def:scaler value}}. W is L ÷ λ, the time each request spends in the engine.</p>
+    </div>
+  </div>
+
+  <div class="prose">
+    <p>On every step W comes out near {{p1_server50}} s, the engine&rsquo;s own p50 (p50 is {{def:p50}}). Read this check for what it is. Each worker&rsquo;s intervals are built from the engine&rsquo;s stamped latencies, so L ÷ λ lands close to their average almost by construction. It shows that the counts and the delivered rate agree. It does not test the law against something independent.</p>
+    <p>The independent test is the service curve, which was measured separately with a fixed number of requests in flight. Probes 2 and 3 used the same endpoint type with the cap raised, and at low rates one worker carried every request. Each row below takes that worker&rsquo;s mean in flight, computes W, and compares it with the curve&rsquo;s latency at that many in flight.</p>
+  </div>
+
+  <div class="widget" id="w2c">
+    <x-plain class="banner measured">MEASURED <span>· one worker per step · curve interpolated at the mean in flight</span></x-plain>
+    <div class="wbody">
+      <div class="scroll"><table id="w2-t2"></table></div>
+      <p class="arith" id="w2-arith2" aria-live="polite"></p>
+    </div>
+  </div>
+
+  <div class="prose">
+    <p>W sits below the curve&rsquo;s latency in every row, by {{ow_below_min}}% to {{ow_below_max}}%. The curve was measured on one host, closed loop. These probes ran on other workers, open loop. The post re-measured another host, {{def:host}}, of the same GPU model and found its latency {{hs_lo_pct}}% to {{hs_hi_pct}}% lower than the curve&rsquo;s host at {{hs_lvl_lo}} to {{hs_lvl_hi}} in flight. A gap of this size and sign is what a faster host would give. This repository did not test whether that is the cause, and probe 5 is not in the table because the analysis file holds no in-flight counts for probes 4 and 5.</p>
+    <h3>The cap of {{p1_cap}} per worker</h3>
+    <p>In probe 1 the scaler value was at its default. The reconstruction puts each worker&rsquo;s peak in flight at {{p1_cap}}, except one reading of {{p1_peak_over}}, which the reconstruction can produce by overlapping two neighbouring requests. So the setting acts as a limit of {{p1_cap}} in flight per worker.</p>
+    <p>Two workers at {{p1_cap}} each is {{p1_ceiling_in_flight}} in flight. At {{p1_w_round}} s per request, Little&rsquo;s Law turns that into a ceiling of {{p1_ceiling_in_flight}} ÷ {{p1_w_round}} = {{p1_ceiling_rps}} requests per second. The path delivered {{p1_delivered_median}} (the median over probe 1&rsquo;s steps), whatever was offered. The workers held {{p1_mean_pw}} in flight on average, {{p1_cap_share}} of the cap. The engine was not the limit. Its own latency stayed at {{p1_server50}} s while the client&rsquo;s grew to {{p1_client50}} s at {{p1_step_mid}} req/s offered, so requests were waiting before the engine.</p>
+    <p><strong>Why the workers sat at {{p1_cap_share}} of the cap, and not at the cap, is not established in this repository.</strong> The probe files record each request&rsquo;s send time, finish time and the worker&rsquo;s stamps. Nothing in them explains the gap. That is the open question the checkpoint asks about.</p>
+  </div>
+
+  <aside class="checkpoint" aria-label="Checkpoint for module 2">
+    <p class="cp-label">Checkpoint · module 2</p>
+    <blockquote class="cp-q" data-checkpoint="2">{{checkpoint:2}}</blockquote>
+    <p class="cp-foot">Not answered here. Work it through with Claude in a session; the verdict goes in the progress file.</p>
+  </aside>
+</section>
+
+<!-- ===================================================================== -->
+<section class="mod" id="m3" aria-labelledby="m3-h">
+  <div class="mod-head">
+    <p class="kicker">Module 3</p>
+    <h2 id="m3-h">Why GPU utilisation is blind</h2>
+  </div>
+  <div class="prose">
+    <p>The usual way to read a GPU&rsquo;s load is nvidia-smi, {{def:nvidia-smi}}. Its utilisation figure is {{def:utilisation}}. The harness sampled it every half second during each run and kept the median. It measures time. It does not measure how full the batch is.</p>
+    <p>An autoscaler acts when its signal reaches a threshold, which is {{def:threshold}}. The pre-registered thresholds were {{grid_util}} for utilisation and {{grid_flight}} for requests in flight per replica. A replica is {{def:replica}}. The highest utilisation threshold is {{util_top}}.</p>
+    <p>The chart puts the signals side by side as the load on one replica rises. Utilisation is measured, with a dashed line from the idle reading to the first measured level. In flight per replica is the load itself. Queue depth is {{def:queue depth}}. Past {{top_c}} the simulator keeps {{top_c}} in flight on a replica and queues the rest, so that part of the chart is the simulator&rsquo;s rule and not a measurement.</p>
+  </div>
+
+  <div class="widget" id="w3">
+    <x-plain class="banner measured">MEASURED <span>· utilisation reads {{util_min}} at every measured level · queue depth and the region past {{top_c}} follow the simulator&rsquo;s rule</span></x-plain>
+    <div class="wbody">
+      <div class="controls">
+        <div class="ctl">
+          <label for="w3-u">Utilisation threshold</label>
+          <input id="w3-u" type="range" min="0" max="4" step="1" value="2">
+          <output id="w3-out-u" for="w3-u"></output>
+        </div>
+        <div class="ctl">
+          <label for="w3-f">In-flight threshold (per replica)</label>
+          <input id="w3-f" type="range" min="0" max="4" step="1" value="2">
+          <output id="w3-out-f" for="w3-f"></output>
+        </div>
+      </div>
+      <x-plain class="readouts" aria-live="polite">
+        <div class="readout"><span>Utilisation first reaches it at</span><b id="w3-cu"></b><small id="w3-cu-sub"></small></div>
+        <div class="readout"><span>In flight first reaches it at</span><b id="w3-cf"></b><small id="w3-cf-sub"></small></div>
+      </x-plain>
+      <x-plain class="legend-inline" aria-hidden="true">
+        <span><svg width="14" height="14"><path d="M7 1 L13 13 L1 13 Z" class="su"/></svg>utilisation</span>
+        <span><svg width="14" height="14"><rect x="1.5" y="1.5" width="11" height="11" class="sf"/></svg>in flight per replica</span>
+        <span><svg width="14" height="14"><circle cx="7" cy="7" r="5.5" class="sq"/></svg>queue depth</span>
+      </x-plain>
+      <div class="chart" id="w3-chart"></div>
+      <p class="note">The horizontal axis is logarithmic. The shaded part is past the {{top_c}} the curve reaches. The sliders move along the thresholds in the pre-registered grids.</p>
+    </div>
+  </div>
+
+  <div class="prose">
+    <h3>What the simulator did with it</h3>
+  </div>
+  <div class="widget" id="w3s">
+    <x-plain class="banner sim">SIMULATED · FAILED VALIDATION <span>· the simulator reads utilisation off the measured curve</span></x-plain>
+    <div class="wbody">
+      <div class="prose" style="max-width:none">
+        <p style="margin:0">In the simulator a replica serving anything reads {{util_min}}, above every threshold in the grid. So every utilisation policy added a replica at every chance. All {{util_policies}} of them reached the cap of {{cap}} replicas, in each of the {{util_sweeps}} sweeps, and each cost the same {{cap_cost}} replica-seconds. A replica-second is {{def:replica-seconds}}. The total is one replica for the {{until}} s window, plus one more at every {{cooldown}} s cooldown from the first check at {{every}} s up to the cap, which sums to {{cap_cost_check}}.</p>
+        <p style="margin:.8rem 0 0">The pre-registered iso-cost budget is the cheapest spend at which every signal has a policy, and iso-cost means {{def:iso-cost}}. For utilisation the cheapest spend is the cap, so the budget became {{cap_cost}} replica-seconds. The most expensive policy on the other two signals&rsquo; frontiers cost {{other_a}}, {{other_c}}, {{other_ra}} and {{other_rc}} replica-seconds in the four sweeps. Module 5 defines a frontier.</p>
+      </div>
+    </div>
+  </div>
+
+  <aside class="checkpoint" aria-label="Checkpoint for module 3">
+    <p class="cp-label">Checkpoint · module 3</p>
+    <blockquote class="cp-q" data-checkpoint="3">{{checkpoint:3}}</blockquote>
+    <p class="cp-foot">Not answered here. Work it through with Claude in a session; the verdict goes in the progress file.</p>
+  </aside>
+</section>
+
+<!-- ===================================================================== -->
+<section class="mod" id="m4" aria-labelledby="m4-h">
+  <div class="mod-head">
+    <p class="kicker">Module 4</p>
+    <h2 id="m4-h">Dead time and cooldowns</h2>
+  </div>
+  <div class="prose">
+    <p>Adding a replica takes a cold start, which is {{def:cold start}}. Artifact 1 measured it for two setups. With nothing cached (arm A) the median was {{lag_a}} s over {{lag_a_n}} runs. With the weights on a network volume and a warm compile cache (arm C) it was {{lag_c}} s over {{lag_c_n}} runs.</p>
+    <p>That gap between asking and receiving is dead time, which is {{def:dead time}}. A cooldown is {{def:cooldown}}. While requests arrive faster than the ready replicas can serve them, they pile up as a backlog, which is {{def:backlog}}.</p>
+    <p>The spike in the artifact&rsquo;s sweeps is a step. One replica&rsquo;s capacity is {{sat}} requests per second, the top level of the curve, {{top_c}} in flight at {{lat128}} s each. Traffic sits at {{base_pct}}% of that, {{base}} req/s (req/s is {{def:req/s}}). The peak adds {{extra}} of a replica&rsquo;s capacity, {{peak}} req/s, which is {{peak_x}} times one replica&rsquo;s. It lasts {{sustain}} s. The controller checks every {{every}} s and may add one replica per decision, up to {{cap}}. One replica cannot hold that peak.</p>
+  </div>
+
+  <div class="widget" id="w4">
+    <x-plain class="banner toy">TOY <span>· a toy for the idea, not the artifact&rsquo;s simulator</span></x-plain>
+    <div class="wbody">
+      <p class="note">Traffic is a fluid. The backlog grows at the arrival rate minus the capacity of the replicas that are ready, and shrinks when capacity is larger. One policy runs: every {{every}} s, if the backlog per ready replica is at least {{up_at}} requests, request one more replica, unless the cooldown has not run out. A requested replica becomes ready after the cold-start lag. The toy never scales down, and every replica serves {{sat}} req/s whatever the load, unlike the real curve.</p>
+      <div class="controls">
+        <div class="ctl">
+          <label for="w4-lag">Cold-start lag</label>
+          <input id="w4-lag" type="range" min="5" max="120" step="1" value="81">
+          <output id="w4-out-lag" for="w4-lag"></output>
+          <div class="btns" role="group" aria-label="Snap the lag to a measured median">
+            <button type="button" class="btn" id="w4-snapA">Arm A median, {{lag_a}} s</button>
+            <button type="button" class="btn" id="w4-snapC">Arm C median, {{lag_c}} s</button>
+          </div>
+        </div>
+        <div class="ctl">
+          <label for="w4-cool">Cooldown</label>
+          <input id="w4-cool" type="range" min="0" max="60" step="1" value="30">
+          <output id="w4-out-cool" for="w4-cool"></output>
+        </div>
+        <div class="ctl">
+          <label for="w4-peak">Peak, in replicas of capacity</label>
+          <input id="w4-peak" type="range" min="1.05" max="3" step="0.05" value="1.2">
+          <output id="w4-out-peak" for="w4-peak"></output>
+          <button type="button" class="btn" id="w4-peak-reset">Back to the registered {{peak_x}}×</button>
+        </div>
+      </div>
+      <x-plain class="readouts" aria-live="polite">
+        <div class="readout"><span>Peak backlog</span><b id="w4-r-b"></b><small>requests</small></div>
+        <div class="readout"><span>Longest queue wait</span><b id="w4-r-w"></b><small>backlog ÷ capacity ready</small></div>
+        <div class="readout"><span>Time with more than 1 s of queue</span><b id="w4-r-t"></b><small>seconds</small></div>
+        <div class="readout"><span>Replicas requested</span><b id="w4-r-n"></b><small id="w4-r-n-sub"></small></div>
+        <div class="readout"><span>Dead time before the first arrives</span><b id="w4-r-d"></b><small id="w4-r-d-sub"></small></div>
+      </x-plain>
+      <div class="chart" id="w4-chart"></div>
+      <p class="note">Top: traffic (grey) against the capacity of the ready replicas (black). Middle: replicas requested (dashed) and ready (solid), with the gap between them shaded, which is dead time. Bottom: the queue wait, with the 1 s line dashed. The model carries no real latency, only the backlog.</p>
+      <p class="note"><strong>Try:</strong> arm A&rsquo;s lag with the cooldown at its lowest, at the registered {{cooldown}} s, and at its highest. Then raise the peak to the top of its range with arm C&rsquo;s lag and the longest cooldown. Say what you see before you move on.</p>
+    </div>
+  </div>
+
+  <aside class="checkpoint" aria-label="Checkpoint for module 4">
+    <p class="cp-label">Checkpoint · module 4</p>
+    <blockquote class="cp-q" data-checkpoint="4">{{checkpoint:4}}</blockquote>
+    <details>
+      <summary>The two self-check questions it points to</summary>
+      <ul>
+        <li>{{selfcheck:5}}</li>
+        <li>{{selfcheck:6}}</li>
+      </ul>
+    </details>
+    <p class="cp-foot">Not answered here. Work it through with Claude in a session; the verdict goes in the progress file.</p>
+  </aside>
+</section>
+
+<!-- ===================================================================== -->
+<section class="mod" id="m5" aria-labelledby="m5-h">
+  <div class="mod-head">
+    <p class="kicker">Module 5</p>
+    <h2 id="m5-h">Frontiers, dominance and the iso-cost slice</h2>
+  </div>
+  <div class="prose">
+    <p>A policy is {{def:policy}}. For each signal the sweep ran a grid of threshold pairs: {{pol_q}} policies for queue depth, {{pol_f}} for in-flight concurrency, {{pol_u}} for utilisation, in each of four sweeps (a step and a ramp spike, each with arm A&rsquo;s and arm C&rsquo;s cold start; a step jumps to the peak at once and a ramp climbs to it over {{ramp}} s). Each policy ran {{reps}} times. A point on the chart is the median cost, in replica-seconds, and the median p99 over those runs.</p>
+    <p>A policy is dominated when {{def:dominated}}. The frontier is {{def:frontier}}. Comparing frontiers, and not one tuning per signal, answers the objection that a signal lost because it was mistuned. Costs within one part in a billion count as equal, since the simulator sums floating-point numbers.</p>
+  </div>
+
+  <div class="widget" id="w5">
+    <x-plain class="banner sim">SIMULATED · FAILED VALIDATION <span>· {{pol_total}} policies × {{reps}} runs per sweep · data/a2/frontier-sweep.json</span></x-plain>
+    <div class="wbody">
+      <div class="controls">
+        <div class="ctl">
+          <label for="w5-sweep">Sweep</label>
+          <select id="w5-sweep"></select>
+        </div>
+        <div class="ctl">
+          <label for="w5-budget">Spend (replica-seconds)</label>
+          <input id="w5-budget" type="range" min="0" max="3300" step="5" value="3095">
+          <output id="w5-out-budget" for="w5-budget"></output>
+          <button type="button" class="btn" id="w5-snap">Snap to the budget, {{budget}}</button>
+        </div>
+      </div>
+      <div class="readouts" aria-live="polite" id="w5-readouts"></div>
+      <x-plain class="legend-inline" aria-hidden="true">
+        <span><svg width="14" height="14"><circle cx="7" cy="7" r="5.5" class="sq"/></svg>queue depth</span>
+        <span><svg width="14" height="14"><rect x="1.5" y="1.5" width="11" height="11" class="sf"/></svg>in-flight concurrency</span>
+        <span><svg width="14" height="14"><path d="M7 1 L13 13 L1 13 Z" class="su"/></svg>utilisation</span>
+        <span><svg width="14" height="14"><circle cx="7" cy="7" r="4.5" class="grey"/></svg>dominated, grey</span>
+      </x-plain>
+      <div class="chart" id="w5-chart"></div>
+      <p class="note">Filled marks are on a signal&rsquo;s frontier, joined by a step line. Grey outlines are dominated. The vertical line is the spend; a ring marks the best p99 each signal reaches at or under it. The p99 axis is cropped to the sweep&rsquo;s own range. The pre-registered budget for this sweep, by the rule, is <span id="w5-rule" class="num"></span> replica-seconds.</p>
+    </div>
+  </div>
+
+  <div class="prose">
+    <p>Utilisation&rsquo;s {{pol_u}} policies all ran the same fleet at the same cost, so they sit in one column on the chart above. The strip below lays out their p99s for the chosen sweep. The marks are where the other two signals reached, and the brackets are the margins the post reports between utilisation and the other two.</p>
+  </div>
+  <div class="widget" id="w5b">
+    <x-plain class="banner sim">SIMULATED · FAILED VALIDATION <span>· utilisation&rsquo;s at-cap policies, one dot each</span></x-plain>
+    <div class="wbody">
+      <div class="chart" id="w5-strip"></div>
+      <p class="note" id="w5-strip-note"></p>
+    </div>
+  </div>
+  <div class="prose">
+    <p>On arm A&rsquo;s step the {{pol_u}} dots span {{spread_a}} s. The margins between utilisation and the other signals there are {{margin_worse_a}} ms and {{margin_better_a}} ms.</p>
+  </div>
+
+  <div class="prose">
+    <h3>Self-check 7 as a widget</h3>
+    <p>Two policies produce (cost, damage) of ({{ex_a_cost}}, {{ex_a_dmg}}) and ({{ex_b_cost}}, {{ex_b_dmg}}). Lower is better on both axes. Mark each one, then press Check. The numbers of the second policy can be moved to see where dominance starts.</p>
+  </div>
+  <div class="widget" id="w5c">
+    <x-plain class="banner toy">EXERCISE <span>· two policies, made-up numbers</span></x-plain>
+    <div class="wbody">
+      <div class="controls">
+        <fieldset class="ctl"><legend>Policy A, cost {{ex_a_cost}}, damage {{ex_a_dmg}}</legend>
+          <div class="radios"><label><input type="radio" name="w5c-a" value="dom"> dominated</label><label><input type="radio" name="w5c-a" value="fr"> on the frontier</label></div>
+        </fieldset>
+        <fieldset class="ctl"><legend>Policy B, <span id="w5c-b-lab">cost {{ex_b_cost}}, damage {{ex_b_dmg}}</span></legend>
+          <div class="radios"><label><input type="radio" name="w5c-b" value="dom"> dominated</label><label><input type="radio" name="w5c-b" value="fr"> on the frontier</label></div>
+        </fieldset>
+        <div class="ctl"><label for="w5c-bc">Move B&rsquo;s cost</label><input id="w5c-bc" type="range" min="80" max="140" step="1" value="120"><output id="w5c-out-bc" for="w5c-bc"></output></div>
+        <div class="ctl"><label for="w5c-bd">Move B&rsquo;s damage</label><input id="w5c-bd" type="range" min="30" max="60" step="1" value="40"><output id="w5c-out-bd" for="w5c-bd"></output></div>
+      </div>
+      <div class="btns"><button type="button" class="btn" id="w5c-check">Check my marks</button><button type="button" class="btn" id="w5c-reset">Clear the marks</button></div>
+      <p class="msg" id="w5c-msg" aria-live="polite"></p>
+      <div class="chart" id="w5c-chart"></div>
+    </div>
+  </div>
+
+  <aside class="checkpoint" aria-label="Checkpoint for module 5">
+    <p class="cp-label">Checkpoint · module 5</p>
+    <blockquote class="cp-q" data-checkpoint="5">{{checkpoint:5}}</blockquote>
+    <details>
+      <summary>The self-check question it points to</summary>
+      <ul><li>{{selfcheck:7}}</li></ul>
+    </details>
+    <p class="cp-foot">Not answered here. Work it through with Claude in a session; the verdict goes in the progress file.</p>
+  </aside>
+</section>
+
+<!-- ===================================================================== -->
+<section class="mod" id="m6" aria-labelledby="m6-h">
+  <div class="mod-head">
+    <p class="kicker">Module 6</p>
+    <h2 id="m6-h">The validation gate, and why it failed</h2>
+  </div>
+  <div class="prose">
+    <p>The simulator was tested before anyone was allowed to trust it. The rule was committed before any real validation run existed, because a test written after seeing the runs can be bent to fit them.</p>
+    <ul>
+      <li><strong>Three real repeats</strong> of one fixed schedule at pinned capacity. Their spread is the tolerance, since a model cannot be required to be more reproducible than the system it models. The schedule is sent open loop, which is {{def:open loop}}.</li>
+      <li><strong>Bins.</strong> A bin is {{def:bin}}. Each repeat and the prediction give a p50 per bin, judged on the engine&rsquo;s own latency.</li>
+      <li><strong>A bin misses</strong> when all three repeats land on the same side of their own predictions by more than {{tol_ms}} ms.</li>
+      <li><strong>Pass:</strong> at least {{min_bins}} judged bins, and no more than half of them missing. With {{bins_judged}} judged bins, {{allowed}} misses pass and one more fails.</li>
+      <li><strong>At most two attempts:</strong> one disclosed fix, one re-validation.</li>
+    </ul>
+    <p>A model with no error at all still misses a bin when luck puts all three repeats on one side. The rule&rsquo;s authors put that chance at one in four, which is why it tolerates misses. The widget lets you see it happen.</p>
+  </div>
+
+  <div class="widget" id="w6">
+    <x-plain class="banner synth">SYNTHETIC <span>· random numbers made in your browser, not data</span></x-plain>
+    <div class="wbody">
+      <p class="note">This is a Monte Carlo: {{def:Monte Carlo}}. There are {{bins_judged}} bins, each with the same true p50 of {{mc_truth}} s (the mean of the calibrated repeats&rsquo; p50s). Each of three repeats is the truth × (1 + spread × a random number from a bell curve). The model predicts the truth × the host factor, so a factor of 1.00 is a model with the right speed. A bin misses when all three repeats are more than {{tol_ms}} ms above the prediction, or all three are more than {{tol_ms}} ms below it.</p>
+      <div class="controls">
+        <div class="ctl">
+          <label for="w6-factor">Host factor (prediction ÷ truth)</label>
+          <input id="w6-factor" type="range" min="0.8" max="1.2" step="0.01" value="1">
+          <output id="w6-out-factor" for="w6-factor"></output>
+          <div class="btns" role="group" aria-label="Set the host factor">
+            <button type="button" class="btn" id="w6-f1">Perfect, 1.00</button>
+            <button type="button" class="btn" id="w6-fe">Attempt 1 size, {{factor_engine}}</button>
+            <button type="button" class="btn" id="w6-fc">Attempt 2 size, {{factor_cal}}</button>
+          </div>
+        </div>
+        <div class="ctl">
+          <label for="w6-spread">Spread of the repeats</label>
+          <input id="w6-spread" type="range" min="0" max="15" step="0.1" value="{{spread_default}}">
+          <output id="w6-out-spread" for="w6-spread"></output>
+          <span class="note">Default {{spread_default}}%. It is the median, over bins, of the spread of the calibrated repeats&rsquo; residuals, as a share of {{mc_truth}} s. It is an estimate and may overstate the real spread.</span>
+        </div>
+        <div class="ctl">
+          <span class="lab">Run</span>
+          <div class="btns">
+            <button type="button" class="btn" id="w6-rerun">Rerun once</button>
+            <button type="button" class="btn" id="w6-many">Rerun {{mc_runs}} times</button>
+          </div>
+        </div>
+      </div>
+      <x-plain class="readouts" aria-live="polite">
+        <div class="readout"><span>Bins missed</span><b id="w6-r-miss"></b><small id="w6-r-lim"></small></div>
+        <div class="readout"><span>Verdict</span><b id="w6-r-verdict"></b><small id="w6-r-why"></small></div>
+        <div class="readout"><span>A perfect model at this spread misses</span><b id="w6-r-exp"></b><small>of bins on average</small></div>
+        <div class="readout"><span>{{mc_runs}} reruns at these settings</span><b id="w6-r-many">press the button</b><small id="w6-r-many-sub"></small></div>
+      </x-plain>
+      <div class="chart" id="w6-chart"></div>
+      <p class="note">Each column is one bin. The three dots are the repeats relative to the prediction, in milliseconds, on a scale that is linear within ±{{tol_ms}} ms and logarithmic beyond. The band is the {{tol_ms}} ms margin. Shaded columns missed.</p>
+    </div>
+  </div>
+
+  <div class="prose">
+    <p>At spread {{spread_default}}% the {{tol_ms}} ms margin is a real share of the repeats&rsquo; scatter, which puts some bins out of reach of a miss, so a perfect model misses about {{mc_perfect}}% of bins and not a quarter. Raise the spread and that approaches the one in four. At the default spread, a host factor off by a few percent puts all three repeats on one side of the prediction in nearly every bin.</p>
+    <h3>The real result</h3>
+    <p>Attempt one judged the simulator with the committed curve as measured. Attempt two first scaled the curve by two ratios measured on the worker just before the replay: its latency over the curve&rsquo;s at {{cal_lo}} and at {{cal_hi}} requests in flight, each from a closed-loop hold. Both attempts failed. The residual is {{def:residual}}, per repeat per bin.</p>
+  </div>
+
+  <div class="widget" id="w6r">
+    <x-plain class="banner measured">MEASURED − SIMULATED PREDICTION <span>· residual = real p50 − predicted p50, per bin of engine arrival time</span></x-plain>
+    <div class="wbody">
+      <div class="chart" id="w6-res"></div>
+      <div class="readouts" id="w6-verdicts"></div>
+      <p class="note">Attempt 1 used the curve as measured and attempt 2 the curve scaled to the host. One line per repeat. The scale is linear within ±{{symlog_lin}} s and logarithmic beyond, the treatment the post&rsquo;s figure uses, so the two panels share one axis. The run was cut into {{bins_total}} bins and {{bins_judged}} were judged in each attempt, and bins without a usable p50 on both sides leave a gap in the line.</p>
+    </div>
+  </div>
+
+  <div class="prose">
+    <p>Attempt one failed with {{engine_misses}} of {{bins_judged}} judged bins missing, all on the same side. The engine&rsquo;s median latency was {{pct_engine}}% below the prediction, and the largest miss, measured as the residual closest to zero among the three repeats, was {{max_engine}} s. Attempt two failed with {{cal_misses}} of {{bins_judged}} missing, all the other way. The engine&rsquo;s latency was {{pct_cal}}% above the calibrated prediction, and the largest miss was {{max_cal}} s. Calibrating moved the error across zero and did not remove it. The post says the evidence does not settle why.</p>
+  </div>
+
+  <div class="widget" id="w6h">
+    <x-plain class="banner measured">MEASURED <span>· latency on each host ÷ the curve&rsquo;s host, data/a2/post-analysis.json host_speed</span></x-plain>
+    <div class="wbody">
+      <div class="scroll"><table id="w6-hosts" class="hosts"></table></div>
+      <p class="note">{{host_count}} hosts appear in the curve, host re-measurement and validation records, and {{host_measured}} were measured for speed. That shows a spread between hosts of the same GPU model. It is not a distribution of host speeds.</p>
+    </div>
+  </div>
+
+  <aside class="checkpoint" aria-label="Checkpoint for module 6">
+    <p class="cp-label">Checkpoint · module 6</p>
+    <blockquote class="cp-q" data-checkpoint="6">{{checkpoint:6}}</blockquote>
+    <details>
+      <summary>The self-check question it points to</summary>
+      <ul><li>{{selfcheck:8}}</li></ul>
+    </details>
+    <p class="cp-foot">Not answered here. Work it through with Claude in a session; the verdict goes in the progress file.</p>
+  </aside>
+</section>
+
+<footer class="prose" style="margin-top:4rem">
+  <h3>Where every number comes from</h3>
+  <p class="note">The numbers in the text are filled in when the page is built, from <code>data/a2/post-analysis.json</code>, <code>data/a2/service-curve.json</code> and <code>data/a2/frontier-sweep.json</code>. The widgets run on the same files, embedded in the page. The post, <code>docs/post-a2.md</code>, is the authority for what was found. Progress on the checkpoints is kept in <code>docs/learning/progress.md</code>.</p>
+</footer>
+
+<script type="application/json" id="a2-data">{{data}}</script>
+<script id="a2-lib">
+{{inline:lib.js}}
+</script>
+<script id="a2-ui">
+{{inline:ui.js}}
+</script>

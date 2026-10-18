@@ -1,0 +1,482 @@
+{
+  "c_levels_list": {
+    "src": "computed",
+    "fn": "c_levels_list",
+    "fmt": "s"
+  },
+  "runs_level": {
+    "src": "computed",
+    "fn": "c_runs_per_level",
+    "fmt": "d"
+  },
+  "max_seqs": {
+    "src": "curve",
+    "path": "max_num_seqs",
+    "fmt": "d"
+  },
+  "top_c": {
+    "src": "computed",
+    "fn": "c_top_level",
+    "fmt": "d"
+  },
+  "ex_c": {
+    "src": "computed",
+    "fn": "c_excluded_level",
+    "fmt": "d"
+  },
+  "lat1": {
+    "src": "computed",
+    "fn": "c_lat_first",
+    "fmt": "f3"
+  },
+  "lat128": {
+    "src": "computed",
+    "fn": "c_lat_last",
+    "fmt": "f3"
+  },
+  "lat_ratio": {
+    "src": "computed",
+    "fn": "c_lat_ratio",
+    "fmt": "f1"
+  },
+  "tps1": {
+    "src": "computed",
+    "fn": "c_tps_first",
+    "fmt": "f1"
+  },
+  "tps128": {
+    "src": "computed",
+    "fn": "c_tps_last",
+    "fmt": "d"
+  },
+  "tps_ratio": {
+    "src": "computed",
+    "fn": "c_tps_ratio",
+    "fmt": "d"
+  },
+  "per1": {
+    "src": "computed",
+    "fn": "c_per_request_first",
+    "fmt": "f1"
+  },
+  "per128": {
+    "src": "computed",
+    "fn": "c_per_request_last",
+    "fmt": "f1"
+  },
+  "return_leg": {
+    "src": "computed",
+    "fn": "return_leg",
+    "fmt": "f1"
+  },
+  "p1_workers": {
+    "src": "computed",
+    "fn": "p1_workers",
+    "fmt": "d"
+  },
+  "p1_server50": {
+    "src": "computed",
+    "fn": "p1_server50",
+    "fmt": "f3"
+  },
+  "p1_client50": {
+    "src": "computed",
+    "fn": "p1_client50",
+    "fmt": "f2"
+  },
+  "p1_cap": {
+    "src": "computed",
+    "fn": "p1_cap",
+    "fmt": "d"
+  },
+  "p1_peak_over": {
+    "src": "computed",
+    "fn": "p1_peak_over",
+    "fmt": "d"
+  },
+  "p1_ceiling_in_flight": {
+    "src": "computed",
+    "fn": "p1_ceiling_in_flight",
+    "fmt": "d"
+  },
+  "p1_ceiling_rps": {
+    "src": "computed",
+    "fn": "p1_ceiling_rps",
+    "fmt": "f1"
+  },
+  "p1_delivered_median": {
+    "src": "computed",
+    "fn": "p1_delivered_median",
+    "fmt": "f1"
+  },
+  "p1_mean_pw": {
+    "src": "computed",
+    "fn": "p1_mean_per_worker",
+    "fmt": "f1"
+  },
+  "p1_cap_share": {
+    "src": "computed",
+    "fn": "p1_cap_share",
+    "fmt": "pct0"
+  },
+  "ow_below_min": {
+    "src": "computed",
+    "fn": "ow_below_min",
+    "fmt": "f0"
+  },
+  "ow_below_max": {
+    "src": "computed",
+    "fn": "ow_below_max",
+    "fmt": "f0"
+  },
+  "hs_lo_pct": {
+    "src": "computed",
+    "fn": "hs_lo_pct",
+    "fmt": "f0"
+  },
+  "hs_hi_pct": {
+    "src": "computed",
+    "fn": "hs_hi_pct",
+    "fmt": "f0"
+  },
+  "grid_util": {
+    "src": "computed",
+    "fn": "grid_util",
+    "fmt": "s"
+  },
+  "grid_flight": {
+    "src": "computed",
+    "fn": "grid_flight",
+    "fmt": "s"
+  },
+  "util_top": {
+    "src": "analysis",
+    "path": "simulator/h2_censoring/highest_utilization_scale_up_threshold",
+    "fmt": "f2"
+  },
+  "util_min": {
+    "src": "analysis",
+    "path": "simulator/h2_censoring/curve_gpu_util_min_over_measured_levels",
+    "fmt": "f1"
+  },
+  "util_policies": {
+    "src": "computed",
+    "fn": "util_policies",
+    "fmt": "d"
+  },
+  "util_sweeps": {
+    "src": "computed",
+    "fn": "util_all_at_cap",
+    "fmt": "d"
+  },
+  "cap": {
+    "src": "computed",
+    "fn": "sweep_cap",
+    "fmt": "d"
+  },
+  "cap_cost": {
+    "src": "analysis",
+    "path": "simulator/h2_censoring/cap_cost_replica_s",
+    "fmt": "d"
+  },
+  "cap_cost_check": {
+    "src": "computed",
+    "fn": "cap_cost_check",
+    "fmt": "d"
+  },
+  "until": {
+    "src": "computed",
+    "fn": "sweep_until",
+    "fmt": "d"
+  },
+  "cooldown": {
+    "src": "computed",
+    "fn": "sweep_cooldown",
+    "fmt": "d"
+  },
+  "every": {
+    "src": "computed",
+    "fn": "sweep_every",
+    "fmt": "d"
+  },
+  "other_a": {
+    "src": "computed",
+    "fn": "other_cost_a",
+    "fmt": "d"
+  },
+  "other_c": {
+    "src": "computed",
+    "fn": "other_cost_c",
+    "fmt": "d"
+  },
+  "other_ra": {
+    "src": "computed",
+    "fn": "other_cost_ra",
+    "fmt": "d"
+  },
+  "other_rc": {
+    "src": "computed",
+    "fn": "other_cost_rc",
+    "fmt": "d"
+  },
+  "lag_a": {
+    "src": "analysis",
+    "path": "simulator/cold_start/A/median",
+    "fmt": "f2"
+  },
+  "lag_a_n": {
+    "src": "analysis",
+    "path": "simulator/cold_start/A/n",
+    "fmt": "d"
+  },
+  "lag_c": {
+    "src": "analysis",
+    "path": "simulator/cold_start/C/median",
+    "fmt": "f2"
+  },
+  "lag_c_n": {
+    "src": "analysis",
+    "path": "simulator/cold_start/C/n",
+    "fmt": "d"
+  },
+  "sat": {
+    "src": "computed",
+    "fn": "saturation",
+    "fmt": "f1"
+  },
+  "base_pct": {
+    "src": "computed",
+    "fn": "toy_baseline_pct",
+    "fmt": "d"
+  },
+  "base": {
+    "src": "computed",
+    "fn": "toy_baseline",
+    "fmt": "f1"
+  },
+  "extra": {
+    "src": "computed",
+    "fn": "toy_extra",
+    "fmt": "f1"
+  },
+  "peak": {
+    "src": "computed",
+    "fn": "toy_peak",
+    "fmt": "f1"
+  },
+  "peak_x": {
+    "src": "computed",
+    "fn": "toy_peak_x",
+    "fmt": "f2"
+  },
+  "sustain": {
+    "src": "computed",
+    "fn": "sweep_sustain",
+    "fmt": "d"
+  },
+  "ramp": {
+    "src": "computed",
+    "fn": "ramp",
+    "fmt": "d"
+  },
+  "up_at": {
+    "src": "const",
+    "fn": "toy_up_at",
+    "fmt": "d"
+  },
+  "pol_total": {
+    "src": "computed",
+    "fn": "policies_per_sweep",
+    "fmt": "d"
+  },
+  "pol_q": {
+    "src": "computed",
+    "fn": "policies_queue",
+    "fmt": "d"
+  },
+  "pol_f": {
+    "src": "computed",
+    "fn": "policies_flight",
+    "fmt": "d"
+  },
+  "pol_u": {
+    "src": "computed",
+    "fn": "policies_util",
+    "fmt": "d"
+  },
+  "reps": {
+    "src": "computed",
+    "fn": "sweep_reps",
+    "fmt": "d"
+  },
+  "budget": {
+    "src": "computed",
+    "fn": "sweep_budget",
+    "fmt": "d"
+  },
+  "spread_a": {
+    "src": "computed",
+    "fn": "spread_a",
+    "fmt": "f2"
+  },
+  "margin_worse_a": {
+    "src": "computed",
+    "fn": "margin_worse_a",
+    "fmt": "d"
+  },
+  "margin_better_a": {
+    "src": "computed",
+    "fn": "margin_better_a",
+    "fmt": "d"
+  },
+  "ex_a_cost": {
+    "src": "computed",
+    "fn": "ex_a_cost",
+    "fmt": "d"
+  },
+  "ex_a_dmg": {
+    "src": "computed",
+    "fn": "ex_a_dmg",
+    "fmt": "d"
+  },
+  "ex_b_cost": {
+    "src": "computed",
+    "fn": "ex_b_cost",
+    "fmt": "d"
+  },
+  "ex_b_dmg": {
+    "src": "computed",
+    "fn": "ex_b_dmg",
+    "fmt": "d"
+  },
+  "tol_ms": {
+    "src": "computed",
+    "fn": "mc_tol_ms",
+    "fmt": "d"
+  },
+  "min_bins": {
+    "src": "computed",
+    "fn": "min_bins",
+    "fmt": "d"
+  },
+  "bins_judged": {
+    "src": "computed",
+    "fn": "host_bins_judged",
+    "fmt": "d"
+  },
+  "bins_total": {
+    "src": "computed",
+    "fn": "host_bins_total",
+    "fmt": "d"
+  },
+  "allowed": {
+    "src": "computed",
+    "fn": "allowed_misses",
+    "fmt": "d"
+  },
+  "mc_truth": {
+    "src": "computed",
+    "fn": "mc_truth",
+    "fmt": "f3"
+  },
+  "spread_default": {
+    "src": "computed",
+    "fn": "mc_spread_default",
+    "fmt": "f1"
+  },
+  "mc_perfect": {
+    "src": "computed",
+    "fn": "mc_perfect_miss",
+    "fmt": "f0"
+  },
+  "factor_engine": {
+    "src": "computed",
+    "fn": "factor_engine",
+    "fmt": "f2"
+  },
+  "factor_cal": {
+    "src": "computed",
+    "fn": "factor_calibrated",
+    "fmt": "f2"
+  },
+  "engine_misses": {
+    "src": "analysis",
+    "path": "validation/engine/misses",
+    "fmt": "d"
+  },
+  "cal_misses": {
+    "src": "analysis",
+    "path": "validation/calibrated/misses",
+    "fmt": "d"
+  },
+  "pct_engine": {
+    "src": "computed",
+    "fn": "pct_off_engine",
+    "fmt": "f0"
+  },
+  "pct_cal": {
+    "src": "computed",
+    "fn": "pct_off_calibrated",
+    "fmt": "f0"
+  },
+  "max_engine": {
+    "src": "analysis",
+    "path": "validation/engine/max_miss_seconds",
+    "fmt": "f2"
+  },
+  "max_cal": {
+    "src": "analysis",
+    "path": "validation/calibrated/max_miss_seconds",
+    "fmt": "f3"
+  },
+  "host_count": {
+    "src": "computed",
+    "fn": "host_count",
+    "fmt": "d"
+  },
+  "host_measured": {
+    "src": "computed",
+    "fn": "host_measured",
+    "fmt": "d"
+  },
+  "p1_w_round": {
+    "src": "computed",
+    "fn": "p1_w_round",
+    "fmt": "f2"
+  },
+  "p1_step_mid": {
+    "src": "computed",
+    "fn": "p1_step_mid",
+    "fmt": "d"
+  },
+  "hs_lvl_lo": {
+    "src": "computed",
+    "fn": "hs_lvl_lo",
+    "fmt": "d"
+  },
+  "hs_lvl_hi": {
+    "src": "computed",
+    "fn": "hs_lvl_hi",
+    "fmt": "d"
+  },
+  "mc_runs": {
+    "src": "const",
+    "fn": "mc_runs",
+    "fmt": "d"
+  },
+  "symlog_lin": {
+    "src": "const",
+    "fn": "symlog_lin",
+    "fmt": "f2"
+  },
+  "cal_lo": {
+    "src": "const",
+    "fn": "cal_lo",
+    "fmt": "d"
+  },
+  "cal_hi": {
+    "src": "const",
+    "fn": "cal_hi",
+    "fmt": "d"
+  }
+}
