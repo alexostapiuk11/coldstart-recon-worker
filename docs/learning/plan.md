@@ -175,7 +175,15 @@ made it trustworthy.
 
 # Learning plan — artifact 4, dedicate, swap or share
 
-**The material:** the post, [`docs/post-a4.md`](../post-a4.md), and its four
+**The material:** a private explainer page,
+https://claude.ai/artifact/XpK5JB3U8jYgoUsVsP6eQy (source:
+[`explainer/a4/page.template.html`](../../explainer/a4/page.template.html), built
+into `page.html` by `scripts/a4_build_explainer.py` from the committed data),
+which covers modules 1 to 7 with a prediction or an interactive in most and the
+checkpoint at the end of each; modules 0 and 8 happen in the session and are not
+on the page. Modules 2, 4 and 5 ask for a prediction before they show the chart,
+and 4 and 5 check the answers recorded in module 0. Behind it: the post,
+[`docs/post-a4.md`](../post-a4.md), and its four
 figures (`docs/figures/a4/`, each with a phone-width variant); the concepts
 behind it are in the design spec's learning guide
 (`docs/superpowers/specs/2026-08-17-multi-model-serving-economics-design.md`,

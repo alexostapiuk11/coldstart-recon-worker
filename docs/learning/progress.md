@@ -146,7 +146,9 @@ recomputation.
 
 # Artifact 4 — dedicate, swap or share
 
-The modules are in `plan.md`, under "Learning plan — artifact 4".
+The modules are in `plan.md`, under "Learning plan — artifact 4". The material
+is the private explainer page linked at the top of that section. Its modules 4
+and 5 check the predictions recorded in module 0, so do module 0 first.
 
 **Before the build, nothing was recorded.** The design spec's definition of
 done asked for §12b's modules to be worked through before each build stage;

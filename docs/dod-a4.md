@@ -28,7 +28,7 @@ part of the suite and pass.
 
 | Item | Status | Evidence |
 |---|---|---|
-| Learning-guide modules (§12b) worked through before the build stage | **UNMET / OWNER** | The plan and progress record for artifact 4 exist (`docs/learning/plan.md`, `progress.md`, `02fc6d8`), adapted to the findings, with every module `not_attempted`. The item is met when the owner has worked the modules and each checkpoint is recorded; as for artifacts 2 and 5, module 8's teach-back is placed before publication |
+| Learning-guide modules (§12b) worked through before the build stage | **UNMET / OWNER** | The plan, progress record and a private explainer page for artifact 4 exist (`docs/learning/plan.md`, `progress.md`, `explainer/a4/`), adapted to the findings, with every module `not_attempted`. The item is met when the owner has worked the modules and each checkpoint is recorded; as for artifacts 2 and 5, module 8's teach-back is placed before publication |
 | Budget decision made explicitly, with the option recorded | **UNMET / OWNER (record)** | Amendment §9 says the funding decision "still cannot be made" (2026-09-26). The spend was authorised in conversation and the account was topped up, but no file records the option chosen. `docs/spend-a4.md` states the spend, not the decision |
 | Reconnaissance completed: mechanism, split, go/no-go | met | `docs/recon-a4.md`, `docs/runbook-a4-recon.md` |
 | Model set fits all three strategies on one 24 GB card | met for the fallback | `docs/recon-a4.md` §2 (the primary did not fit; the post says so) |
