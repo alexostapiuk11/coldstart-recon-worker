@@ -1,0 +1,731 @@
+<meta charset="utf-8">
+<title>LoRA Capacity Study Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one narrow reading column, six numbered modules (the order is real: each depends on the one above),
+   a sticky module bar, and a bordered checkpoint box that closes every module. */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --fg: #1a1f27;
+  --muted: #566070;
+  --line: #d8dce3;
+  --accent: #0f6a62;
+  --accent-soft: #e3f1ef;
+  --conc: #1d6bb0;
+  --spread: #c2432a;
+  --good: #1b7a45;
+  --warn: #9a5a00;
+  --bad: #b3261e;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1217; --surface: #161b22; --fg: #e5e8ed; --muted: #98a3b1; --line: #29313b;
+    --accent: #4cc2b4; --accent-soft: #14302d; --conc: #5aa3ea; --spread: #f0805f;
+    --good: #52c07f; --warn: #e0a24a; --bad: #f2877f; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1217; --surface: #161b22; --fg: #e5e8ed; --muted: #98a3b1; --line: #29313b;
+  --accent: #4cc2b4; --accent-soft: #14302d; --conc: #5aa3ea; --spread: #f0805f;
+  --good: #52c07f; --warn: #e0a24a; --bad: #f2877f; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 64px; }
+body { background: var(--bg); color: var(--fg); font: 16px/1.6 var(--sans); padding-inline: 16px; padding-block: 0 72px; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+.wrap { max-width: 760px; margin-inline: auto; }
+h1, h2, h3 { line-height: 1.2; text-wrap: balance; margin: 0; font-weight: 600; }
+h1 { font-size: clamp(1.9rem, 5vw, 2.6rem); letter-spacing: -0.02em; }
+h2 { font-size: 1.55rem; letter-spacing: -0.01em; }
+h3 { font-size: 1.05rem; }
+p { margin: 0 0 1em; max-width: 68ch; }
+a { color: var(--accent); }
+code, .mono { font-family: var(--mono); font-size: 0.88em; }
+code { background: var(--accent-soft); padding: 0.08em 0.35em; border-radius: 3px; }
+.num { font-variant-numeric: tabular-nums; }
+
+header.top { padding-block: 40px 24px; display: flex; flex-direction: column; gap: 14px; }
+.eyebrow { font: 500 0.75rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.lede { font-size: 1.1rem; color: var(--muted); max-width: 60ch; }
+
+nav.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line);
+  margin-inline: -16px; padding-inline: 16px; }
+nav.bar .wrap { display: flex; gap: 6px; overflow-x: auto; padding-block: 10px; scrollbar-width: thin; }
+nav.bar a { flex: none; text-decoration: none; color: var(--muted); font: 500 0.82rem var(--mono); padding: 5px 10px; border: 1px solid var(--line);
+  border-radius: 4px; background: var(--surface); }
+nav.bar a:hover, nav.bar a:focus-visible, nav.bar a.on { color: var(--fg); border-color: var(--accent); outline: none; }
+
+.how { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 18px 20px; margin-block: 8px 8px; display: grid; gap: 10px; }
+.how ul { margin: 0; padding-left: 1.2em; }
+.how li { margin-bottom: 0.4em; }
+
+section.mod { padding-block: 44px 8px; border-top: 1px solid var(--line); margin-top: 36px; }
+.modhead { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+.modno { font: 500 0.85rem var(--mono); color: var(--accent); border: 1px solid var(--accent); padding: 2px 8px; border-radius: 4px; }
+.mins { font: 400 0.8rem var(--mono); color: var(--muted); margin-left: auto; }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px; margin-block: 18px; }
+.panel h3 { margin-bottom: 8px; }
+.panel .cap { color: var(--muted); font-size: 0.86rem; margin: 10px 0 0; }
+.chartbox { overflow-x: auto; }
+.chartbox svg { min-width: 560px; }
+svg { display: block; width: 100%; height: auto; max-width: 100%; }
+svg text { fill: var(--muted); font: 11px var(--mono); }
+svg .ax { stroke: var(--line); stroke-width: 1; }
+svg .grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 4; }
+svg .lc { stroke: var(--conc); fill: none; stroke-width: 2.2; }
+svg .ls { stroke: var(--spread); fill: none; stroke-width: 2.2; }
+svg .dc { fill: var(--conc); } svg .ds { fill: var(--spread); }
+svg .ec { stroke: var(--conc); stroke-width: 1.4; } svg .es { stroke: var(--spread); stroke-width: 1.4; }
+svg .gap { fill: var(--spread); fill-opacity: 0.14; }
+svg .lab-c { fill: var(--conc); font-weight: 500; } svg .lab-s { fill: var(--spread); font-weight: 500; }
+svg .tau { stroke: var(--fg); stroke-width: 1.2; stroke-dasharray: 5 4; }
+svg .band { fill: var(--accent); fill-opacity: 0.12; }
+
+.row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+label.opt { display: flex; gap: 8px; align-items: flex-start; padding: 9px 12px; border: 1px solid var(--line); border-radius: 5px; cursor: pointer; background: var(--bg); width: 100%; }
+label.opt:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+input[type="radio"], input[type="checkbox"] { accent-color: var(--accent); margin-top: 0.3em; }
+input[type="range"] { accent-color: var(--accent); width: min(100%, 360px); }
+input[type="number"] { font: 400 0.95rem var(--mono); width: 7.5em; padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); }
+button, summary { font-family: var(--sans); }
+button.btn { font: 500 0.9rem var(--sans); padding: 7px 14px; border: 1px solid var(--accent); background: var(--accent); color: var(--surface); border-radius: 5px; cursor: pointer; }
+button.btn:disabled { opacity: 0.45; cursor: default; }
+button.seg { font: 500 0.82rem var(--mono); padding: 6px 11px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); border-radius: 4px; cursor: pointer; }
+button.seg[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+.tw { overflow-x: auto; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 500 0.75rem var(--mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+td.r, th.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.pill { display: inline-block; font: 500 0.74rem var(--mono); padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.pill.good { color: var(--good); } .pill.warn { color: var(--warn); } .pill.bad { color: var(--bad); }
+
+.cp { border: 1px solid var(--accent); border-radius: 6px; padding: 16px 18px; margin-block: 26px 0; background: var(--accent-soft); }
+.cp .k { font: 500 0.75rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin-bottom: 8px; }
+.cp p { margin-bottom: 0.7em; }
+details { margin-top: 10px; }
+summary { cursor: pointer; font-weight: 500; color: var(--accent); }
+details > div { padding-top: 8px; }
+.out { font: 500 1.05rem var(--mono); font-variant-numeric: tabular-nums; }
+.kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
+.kv > div { border: 1px solid var(--line); border-radius: 5px; padding: 10px 12px; background: var(--bg); min-width: 0; }
+.kv .t { font: 400 0.72rem var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+ol.tl { margin: 0; padding-left: 1.3em; } ol.tl li { margin-bottom: 0.55em; }
+footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.88rem; }
+[hidden] { display: none !important; }
+</style>
+
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">Artifact 5 · modules 1 to 6 · private study material</div>
+  <h1>How many LoRA adapters actually fit on one GPU</h1>
+  <p class="lede">The post's result, taken apart one idea at a time. Every number here is read from the committed analysis (<code>data/a5/analysis.json</code>) or the post, and each module ends in a question you answer without looking back up the page.</p>
+</header>
+</div>
+
+<nav class="bar" aria-label="Modules"><div class="wrap">
+  <a href="#how">Start here</a><a href="#m1">1 · Adapter</a><a href="#m2">2 · Registered vs active</a><a href="#m3">3 · Interval and knee</a><a href="#m4">4 · Little's law</a><a href="#m5">5 · The gate</a><a href="#m6">6 · Cost bars</a>
+</div></nav>
+
+<main class="wrap">
+
+<section id="how" style="padding-top:28px">
+  <div class="how">
+    <h3>How this works</h3>
+    <ul>
+      <li><b>Module 0 happens before you scroll.</b> It is the diagnostic, in the session with Claude, and it records a prediction about the curve. Do it first, or module 2 loses its point.</li>
+      <li><b>Pass rule.</b> Restate the idea without this page in front of you, and have it survive one follow-up question. Recognising an explanation is not the same skill.</li>
+      <li><b>On a miss,</b> the explanation is not repeated. Claude changes the representation: a smaller example, a concrete case, a case that breaks the wrong model.</li>
+      <li><b>Module 7, teaching it back,</b> is the last check and happens in the session.</li>
+      <li><b>Ask here or there.</b> "Say that differently" and "another example" can go to anyone. "I still don't see why", the checkpoints and the teach-back go to Claude in the session, which reads the source and keeps your history in <code>docs/learning/progress.md</code>.</li>
+    </ul>
+    <div class="row"><span class="mono" style="color:var(--muted)">Time: about 12 + 15 + 15 + 12 + 25 + 12 minutes, plus modules 0 and 7. If a module overruns, cut it.</span></div>
+  </div>
+</section>
+
+<!-- ============ MODULE 1 ============ -->
+<section class="mod" id="m1">
+  <div class="modhead"><span class="modno">Module 1</span><h2>What an adapter is, and what rank sets</h2><span class="mins">10 min</span></div>
+  <p>Fine-tuning a model normally changes every weight, which gives you a whole new model. LoRA leaves the original weights frozen and trains a small pair of matrices that are added next to selected layers. What you keep is the pair: an <b>adapter</b> of megabytes, not a model of gigabytes. One base model can then host many adapters.</p>
+  <p>The pair is small because it is <b>low-rank</b>. A weight matrix of shape d<sub>in</sub> × d<sub>out</sub> gets two factors, d<sub>in</sub> × r and r × d<sub>out</sub>, where <b>r is the rank</b>. The rank is the size knob. This artifact fixes it at 16 and puts the pair on seven projections in every layer: <code>q_proj</code>, <code>k_proj</code>, <code>v_proj</code>, <code>o_proj</code>, <code>gate_proj</code>, <code>up_proj</code>, <code>down_proj</code>.</p>
+
+  <div class="panel">
+    <h3>Move the rank</h3>
+    <div class="row"><label for="rank">Rank r</label><input id="rank" type="range" min="1" max="64" value="16"><span class="out" id="rankv">16</span></div>
+    <div class="kv">
+      <div><div class="t">Frozen matrix</div><div class="out num" id="rk-w">16,777,216</div></div>
+      <div><div class="t">Adapter pair</div><div class="out num" id="rk-a">131,072</div></div>
+      <div><div class="t">Pair as share of matrix</div><div class="out num" id="rk-p">0.78%</div></div>
+    </div>
+    <p class="cap">An illustrative 4096 × 4096 projection, not a measured shape of Qwen3-4B. The pair's size is r × (d<sub>in</sub> + d<sub>out</sub>), so it grows in proportion to the rank while the frozen matrix stays put.</p>
+  </div>
+
+  <h3 style="margin-top:28px">Why the values inside the adapter do not change the cost</h3>
+  <p>The work an adapter adds is set by <b>shapes</b>, not by values. vLLM runs the kernel at the buffer rank (<code>max_lora_rank</code>), so every adapter in a slot is a 16-wide pair on the same seven projections. A dense matrix multiplication does the same arithmetic and reads the same bytes whatever numbers sit in it.</p>
+  <p>The one route from weights to serving cost is what they make the model <i>generate</i>. Here that route is shut: every request is forced to produce exactly 16 output tokens (ignore-EOS), and prefix caching is off. So random adapters measure the serving cost of any rank-16 adapter on this base model.</p>
+  <p><b>What this licenses and what it does not.</b> It licenses claims about serving cost for rank 16, these seven projections and this base. It licenses nothing about output quality, and nothing about other ranks. The argument is only an argument until the equivalence gate (module 5) checks it.</p>
+
+  <div class="cp"><div class="k">Checkpoint</div>
+    <p>Say why an adapter is megabytes beside a model of gigabytes, why serving cost depends on shapes and not on values, and what that licenses and does not license.</p>
+    <details><summary>What a passing answer contains</summary><div>
+      <p>The adapter is two thin factors per targeted projection, r × (d<sub>in</sub> + d<sub>out</sub>) numbers against d<sub>in</sub> × d<sub>out</sub>. Cost depends on shapes because the kernel does the same multiplications at the same rank for any values. The weights could only matter through what the model generates, and fixed 16-token outputs with prefix caching off shut that route. Licensed: serving cost at rank 16 on this base. Not licensed: quality, other ranks, other models.</p>
+      <p><b>Follow-up to expect:</b> "What would make that reasoning invalid?" Answer: anything that lets values change work, such as outputs of different length, or a cache that hits for one adapter's prompts and not another's.</p>
+    </div></details>
+  </div>
+</section>
+
+<!-- ============ MODULE 2 ============ -->
+<section class="mod" id="m2">
+  <div class="modhead"><span class="modno">Module 2</span><h2>Registered is not active</h2><span class="mins">15 min</span></div>
+  <p>In vLLM 0.27.1 one setting, <code>max_loras</code>, is two things at once. It is the <b>number of GPU slots</b>: weight buffers are allocated per slot, whether or not an adapter occupies it. And it is the <b>cap on distinct adapters in one batch</b>. Every sweep point here sets <code>max_loras = max_cpu_loras = N</code>, so every registered adapter is resident in a slot.</p>
+  <p>That means the configuration cannot separate registered from active. <b>Traffic does it instead.</b> The load generator runs two regimes on the same server:</p>
+  <ul>
+    <li><b style="color:var(--conc)">Concentrated.</b> Every request names the same one adapter. One adapter is active, whatever is registered.</li>
+    <li><b style="color:var(--spread)">Spread.</b> Requests go round-robin over all N adapters. At a concurrency of 64, up to min(N, 64) distinct adapters are in flight.</li>
+  </ul>
+  <p>Same slots, same memory, same server start. Different number of adapters actually in the batch.</p>
+
+  <div class="panel" id="pred">
+    <h3>Predict first</h3>
+    <p>At 64 registered slots, the concentrated regime serves about 3,127 output tokens per second. Where is the spread regime, relative to that?</p>
+    <div class="row" role="radiogroup" aria-label="Prediction" style="flex-direction:column; align-items:stretch; gap:8px">
+      <label class="opt"><input type="radio" name="pr" value="A"><span>About the same, within 5%</span></label>
+      <label class="opt"><input type="radio" name="pr" value="B"><span>Lower by 10% to 25%</span></label>
+      <label class="opt"><input type="radio" name="pr" value="C"><span>Lower by 35% to 50%</span></label>
+      <label class="opt"><input type="radio" name="pr" value="D"><span>Lower by more than 60%</span></label>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="btn" id="reveal" disabled>Show the measurement</button><span id="prmsg" class="mono" style="color:var(--muted)">Pick one to unlock the chart.</span></div>
+  </div>
+
+  <div id="m2chart" hidden>
+    <div class="panel">
+      <h3>Throughput against registered slots</h3>
+      <div class="row" style="margin-bottom:8px">
+        <button class="seg" id="t-het" aria-pressed="true">Heterogeneity cost (the gap)</button>
+        <button class="seg" id="t-reg" aria-pressed="false">Registered-slot cost (blue's slope)</button>
+      </div>
+      <div class="chartbox"><svg id="c-tput" viewBox="0 0 640 330" role="img" aria-label="Throughput in tokens per second against registered slots from 1 to 64. Concentrated falls from 3,577 to 3,127. Spread falls from 3,568 to 1,835."></svg></div>
+      <p class="cap">Medians over 23 to 24 server starts; bars are 95% bootstrap intervals of the median. The shaded gap is the heterogeneity cost. At 1 slot the two regimes coincide by construction.</p>
+    </div>
+
+    <div class="panel">
+      <h3>The two costs, in tokens per second</h3>
+      <div class="tw"><table>
+        <thead><tr><th>Slots</th><th class="r">Heterogeneity cost</th><th class="r">Registered-slot cost</th></tr></thead>
+        <tbody id="costrows"></tbody>
+      </table></div>
+      <p class="cap">Medians with 95% bootstrap intervals. Heterogeneity is paired within each start (spread minus concentrated). Registered-slot compares concentrated at N with concentrated at 1 slot, across starts.</p>
+    </div>
+  </div>
+
+  <h3 style="margin-top:26px">Why a mixed batch costs more</h3>
+  <p>A LoRA adapter adds two small matrices to each targeted projection. When a batch <b>shares one adapter</b>, every row is multiplied by the same pair: one pair of multiplications per projection over the whole batch, and the adapter's weights are read from GPU memory once per step.</p>
+  <p>When a batch <b>spans 64 adapters</b>, each row needs its own adapter's pair. The kernel splits the batch by adapter, reads 64 sets of weights per projection per step and runs 64 small multiplications instead of one larger one, at every layer of every decode step. That is the mechanism as the kernels are organised. The campaign measured the cost's size, not its breakdown inside the kernel.</p>
+  <h3>Why the concentrated regime pays too</h3>
+  <p>With the default <code>specialize_active_lora = False</code>, one dimension of the LoRA kernels' launch grid is <code>max_loras + 1</code> whatever the batch holds. Slices for empty slots exit early but are still launched. At 64 slots a concentrated batch launches 65 slices per LoRA operation, against 2 at 1 slot. This is the <b>registered-slot cost</b>. It is not KV capacity, which never binds at this request shape (module 4).</p>
+  <p><b>What was not measured.</b> A planned diagnostic would have split the registered-slot cost using <code>--specialize-active-lora</code>. At 64 slots it ran out of GPU memory during CUDA-graph capture at both budgets tried, so it was cut before the first measured run and its hypothesis (H4) withdrawn. The −450 tokens per second is reported unsplit.</p>
+
+  <div class="cp"><div class="k">Checkpoint</div>
+    <p>Say which line's slope is the registered-slot cost and which gap is the heterogeneity cost. Then say why <code>max_loras</code> being both the slot count and the in-batch cap forces the two regimes to separate the costs by traffic.</p>
+    <details><summary>What a passing answer contains</summary><div>
+      <p>The blue line's own slope is the registered-slot cost: more slots registered, the same single adapter doing the work. The red-to-blue gap at a given N is the heterogeneity cost: same slots, but N adapters active. Because one knob sets both the slot count and the in-batch cap, you cannot register 64 and cap the batch at 1 to isolate them. Traffic is the only lever left, so the experiment varies how many of the registered adapters the requests actually touch.</p>
+      <p><b>Follow-up to expect:</b> "Which is bigger?" At 64 slots the heterogeneity cost is about 2.9 times the registered-slot cost (−1,290 against −450 tokens per second).</p>
+    </div></details>
+  </div>
+</section>
+
+<!-- ============ MODULE 3 ============ -->
+<section class="mod" id="m3">
+  <div class="modhead"><span class="modno">Module 3</span><h2>Spread versus interval, then the knee</h2><span class="mins">15 min</span></div>
+  <h3>The bars</h3>
+  <p>Open by testing what you already know. A 95% bootstrap interval of the median says <b>where the median would land if the whole 24-start experiment were run again</b>. It does not say where a single start lands. Individual starts scatter more widely than the bars, and a narrow bar says the median is pinned down, not that every start behaves alike.</p>
+  <p>This is also why the heterogeneity cost is <b>paired within a start</b>. Each start runs both regimes, in a random order, so the difference is taken inside one server start and start-to-start variation cancels out of it. The registered-slot cost compares concentrated at N with concentrated at 1 slot <i>across</i> starts, so it cannot cancel that variation, and its intervals are wider relative to its size.</p>
+
+  <h3 style="margin-top:26px">The knee rule</h3>
+  <p>The knee is defined on <b>spread-regime throughput</b>, with every registered adapter active. It is the fraction of throughput lost each time the adapter count doubles, against a threshold τ = 10% fixed before any measured run. The registered rule takes the first point estimate above τ.</p>
+
+  <div class="panel">
+    <h3>Loss per doubling, with 95% intervals</h3>
+    <div class="chartbox"><svg id="c-knee" viewBox="0 0 640 300" role="img" aria-label="Throughput lost per doubling of the adapter count: 1.1%, 2.4%, 5.3%, 10.7%, 16.8%, 24.2%, with intervals, against a 10% threshold line."></svg></div>
+    <div class="row" id="knee-btns" style="margin-top:10px"></div>
+    <p id="knee-read" style="margin:12px 0 0"></p>
+  </div>
+
+  <p>The point estimate for 8 to 16 is 10.7%, which crosses 10%, so the registered rule puts the knee <b>between 8 and 16</b>. But the interval, 9.2% to 11.5%, straddles the threshold: the crossing is <b>not resolved</b>. The next two doublings are resolved, since their intervals clear 10% on the low side. If the 8-to-16 crossing were noise, the slot bound would be 16. The rule was registered to err toward fewer tenants, and here it does.</p>
+
+  <div class="panel">
+    <h3>What the knee does to the price</h3>
+    <div class="row"><span>Slot bound</span>
+      <button class="seg" data-slots="8" aria-pressed="true">8 (registered rule)</button>
+      <button class="seg" data-slots="16" aria-pressed="false">16 (if the crossing were noise)</button></div>
+    <div class="kv">
+      <div><div class="t">GPU per month</div><div class="out num">$1.1095 × 730 = $809.94</div></div>
+      <div><div class="t">Cost per tenant per month</div><div class="out num" id="slotcost">$101.24</div></div>
+    </div>
+    <p class="cap">The rate is an estimate from one billing sample. The 8 is a lower bound on tenants, so $101.24 is an upper bound on cost.</p>
+  </div>
+
+  <div class="cp"><div class="k">Checkpoint</div>
+    <p>First, without the page: what do the bars in the main chart say, and what do they not say? Then: is the knee at 8 resolved, and what happens to the dollars if it is really 16?</p>
+    <details><summary>What a passing answer contains</summary><div>
+      <p>The bars say where the median would land on a re-run of the 24-start experiment. They do not say where one start lands, because starts scatter more than medians do. The knee at 8 is not resolved: the interval for the 8-to-16 loss is 9.2% to 11.5% and contains the 10% threshold. If it were 16, tenants would double and the cost per tenant would halve, from $101.24 to $50.62.</p>
+      <p><b>Follow-up to expect:</b> "So why report 8?" The rule was registered before the data to take the first point estimate above τ, and to err toward fewer tenants. Reporting 16 after seeing the interval would be choosing the rule after the data.</p>
+    </div></details>
+  </div>
+</section>
+
+<!-- ============ MODULE 4 ============ -->
+<section class="mod" id="m4">
+  <div class="modhead"><span class="modno">Module 4</span><h2>Little's law and the three bounds</h2><span class="mins">12 min</span></div>
+  <p>Tenants per GPU is the smallest of three bounds, each computed at the last sweep point below the knee, 8 slots:</p>
+  <div class="panel"><div class="tw"><table>
+    <thead><tr><th>Bound</th><th class="r">Tenants</th><th>How</th></tr></thead>
+    <tbody>
+      <tr><td><b>Slots</b></td><td class="r">8</td><td>The slot count below the knee. A lower bound, because vLLM can also hold adapters in CPU memory and swap them into slots.</td></tr>
+      <tr><td><b>Throughput</b></td><td class="r">1,784</td><td>Measured request throughput over one tenant's peak rate, valid only because TTFT p95 meets the 1 s SLO.</td></tr>
+      <tr><td><b>Memory</b></td><td class="r">250</td><td>The KV concurrency ceiling at an 8,192-token context, through Little's law.</td></tr>
+    </tbody></table></div></div>
+
+  <h3>Little's law</h3>
+  <p>In steady state, <b>the number of requests in a system equals their arrival rate times the time each spends in it.</b> That lets you recover a time you did not measure from two counts you did. Change any input below.</p>
+
+  <div class="panel">
+    <h3>Reproduce the memory bound</h3>
+    <div class="row" style="gap:14px 22px">
+      <div><label for="l-n">In flight</label><br><input id="l-n" type="number" value="64" min="1"></div>
+      <div><label for="l-x">Completed per second</label><br><input id="l-x" type="number" value="204" min="1"></div>
+      <div><label for="l-m">Requests per month</label><br><input id="l-m" type="number" value="100000" min="1"></div>
+      <div><label for="l-p">Peak ÷ average</label><br><input id="l-p" type="number" value="3" min="1" step="0.5"></div>
+      <div><label for="l-k">KV room, requests</label><br><input id="l-k" type="number" value="9" min="1"></div>
+    </div>
+    <div class="kv">
+      <div><div class="t">Time in system</div><div class="out num" id="l-w">—</div></div>
+      <div><div class="t">One tenant's peak rate</div><div class="out num" id="l-r">—</div></div>
+      <div><div class="t">Requests one tenant keeps in the system</div><div class="out num" id="l-l">—</div></div>
+      <div><div class="t">Memory bound</div><div class="out num" id="l-t">—</div></div>
+    </div>
+    <p class="cap">Defaults are the post's: 64 in flight at 8 slots, about 204 completions a second, 730-hour month, 9 requests of KV room at 8,192 tokens. One tenant's peak is 100,000 ÷ (730 × 3,600) × 3 ≈ 0.114 requests a second. The exact inputs give 251; the post rounds the per-tenant figure to 0.036 and gets 250.</p>
+  </div>
+
+  <p>The bound is an upper estimate for a reason the post states: the time in system was measured on 29-token requests. A request that really used 8,192 tokens would stay longer, and the bound would be lower. Even so, it sits far above the slot knee of 8, so slots bind first.</p>
+
+  <h3 style="margin-top:26px">Why KV capacity cannot move latency here, and still matters</h3>
+  <p>Each slot's weight buffers take GPU memory that would otherwise hold KV cache. Capacity falls from 78,208 tokens at 1 slot to 42,864 at 64, about 45% of the cache gone. But a request here holds 29 tokens, which vLLM stores in <b>16-token blocks</b>, so each one takes two blocks, 32 tokens. Sixty-four in flight need 2,048 tokens. The scheduler never waits for KV, so the effect on TTFT or throughput at fixed concurrency is zero by construction. Memory matters as <b>capacity</b>: how many requests the GPU can hold, which becomes tenants.</p>
+
+  <div class="panel">
+    <h3>Count the cache in blocks</h3>
+    <div class="row" style="gap:14px 22px">
+      <div><label for="b-cap">KV capacity, tokens</label><br><input id="b-cap" type="number" value="42864" min="16"></div>
+      <div><label for="b-tok">Tokens per request</label><br><input id="b-tok" type="number" value="29" min="1"></div>
+      <div><label for="b-fl">In flight</label><br><input id="b-fl" type="number" value="64" min="1"></div>
+    </div>
+    <div class="kv">
+      <div><div class="t">Blocks per request</div><div class="out num" id="b-b">—</div></div>
+      <div><div class="t">Requests the cache holds</div><div class="out num" id="b-h">—</div></div>
+      <div><div class="t">KV used by the requests in flight</div><div class="out num" id="b-u">—</div></div>
+    </div>
+    <p class="cap">The engine logged 4.7% KV usage at 64 slots with 64 requests running. Counting in blocks gives 4.8%. Counting 29 tokens a request would give 4.3%, and would put the cache at 1,478 requests.</p>
+  </div>
+
+  <div class="cp"><div class="k">Checkpoint</div>
+    <p>Reproduce 0.31 s, 0.036 requests in the system per tenant, and 250 from the numbers above. Then say why KV capacity cannot move TTFT at 29-token requests and still sets a tenant bound. Last: recompute how many requests the 42,864-token cache holds at 64 slots, counting in 16-token blocks, and check it against the 4.7%.</p>
+    <details><summary>Worked answer</summary><div>
+      <p>64 ÷ 204 = 0.314 s. One tenant's peak is 0.114 requests a second, so it keeps 0.114 × 0.314 ≈ 0.036 requests in the system. A cache with room for 9 requests at 8,192 tokens divided by 0.036 gives about 250 tenants. The cache holds 42,864 ÷ 32 = 1,339 requests, and 64 × 32 = 2,048 of 42,864 tokens is 4.8%, close to the logged 4.7%. Counting 29 tokens a request instead gives 4.3%, further from it.</p>
+      <p>KV cannot move TTFT because the cache never fills: the scheduler never waits for it. It sets a tenant bound because at long contexts a tenant's requests occupy cache for as long as they are in the system, so cache room divided by that occupancy caps how many tenants fit.</p>
+      <p>The post first printed 1,478 here, dividing by 29 and ignoring block rounding. It now says 1,339.</p>
+    </div></details>
+  </div>
+</section>
+
+<!-- ============ MODULE 5 ============ -->
+<section class="mod" id="m5">
+  <div class="modhead"><span class="modno">Module 5</span><h2>The equivalence gate, and the amendments</h2><span class="mins">25 min</span></div>
+  <p>Module 1 gave an <i>argument</i> that random adapters cost the same to serve as real ones. The pre-registration also required an <i>empirical check</i> before the campaign could start: 4 real public adapters against 4 synthetic ones in the same 8-slot server, each start running two spread phases over each set in a random order.</p>
+
+  <h3>The rule</h3>
+  <ul>
+    <li><b>Statistic,</b> per start: (synthetic − real) ÷ real, for TTFT p50 and for throughput.</li>
+    <li><b>Margin</b> δ = τ ÷ 2 = ±5%. A synthetic bias smaller than that cannot move the knee by itself.</li>
+    <li><b>Pass</b> if the 90% bootstrap interval of the median statistic lies inside ±5% for both metrics. That is two one-sided tests at the 5% level.</li>
+    <li><b>Resolution check,</b> run alongside: the second real phase against the first, the same statistic. If it does not fit inside ±5%, the gate cannot resolve its own margin, and "no difference found" would mean nothing. The verdict is then <b>inconclusive</b>, not pass.</li>
+    <li><b>Fail</b> otherwise: the resolution check fits, but the statistic is not inside.</li>
+  </ul>
+  <p>The order matters. The code asks first whether both metrics are resolved. Only then does it ask whether both are inside.</p>
+
+  <div class="panel">
+    <h3>Apply the rule to each stage</h3>
+    <div class="row" id="gate-btns" style="margin-bottom:10px"></div>
+    <div class="chartbox"><svg id="c-gate" viewBox="0 0 640 300" role="img" aria-label="Interval plot of the equivalence statistic and the resolution check for TTFT p50 and throughput against a plus or minus 5 percent margin."></svg></div>
+    <p id="gate-read" style="margin:12px 0 0"></p>
+  </div>
+
+  <h3 style="margin-top:26px">How it got to 137, in order</h3>
+  <ol class="tl">
+    <li><b>The pilot, 24 starts, was inconclusive.</b> One compiled cold and was excluded, leaving 23. Single-phase TTFT varied by roughly ±10 to 15% between phases of one start, and 23 starts could not resolve ±5% through that.</li>
+    <li><b>Amendment 1,</b> written after that verdict and in response to it, enlarged the gate to 144 starts in a fresh store, with nothing else changed. The pilot is kept and not pooled.</li>
+    <li><b>The larger gate lost 52 starts to a host fault.</b> Run indices 92 to 143 all landed on one pod whose driver (570.195.03) could not run the image: CUDA <code>Error 804</code>, dead before serving a request. An endpoint restriction to CUDA 13.0 hosts did not prevent the placement, and the cause is not known. Of the 92 that ran, 4 compiled cold and were excluded.</li>
+    <li><b>The 88 usable starts were inconclusive.</b> TTFT was inside the margin, but its resolution check just missed.</li>
+    <li><b>Amendment 3</b> extended the gate by exactly 52 replacements, decided <i>after seeing the 88-start verdict</i>. Three replacements hit the same CUDA error on a host with the same driver, and a stop-on-repeated-failure guard halted the run. Those three were counted and not replaced again.</li>
+    <li><b>Final:</b> 196 scheduled, 55 failed, 4 excluded as cold compiles, <b>137 usable.</b> Verdict: pass.</li>
+  </ol>
+
+  <h3 style="margin-top:26px">Two things the order does and does not buy</h3>
+  <p>Amendment 3 is a <b>data-dependent extension</b>: the decision to run more followed a verdict the author had seen. The defence is that the 52 lost starts were a host fault that never ran a phase, so the extension restores a sample size Amendment 1 had fixed in advance rather than choosing a new one. A reader should still discount it, because the interim result was known when the extension was chosen. What makes it checkable is that the amendments were appended without editing anything above them, so git history shows the order.</p>
+  <p>The gate covered one point: 8 slots, 4 adapters of each kind. That synthetic adapters stand in for real ones at the other points rests on module 1's argument, not on a measurement at each point. The TTFT resolution check passes by 0.05 points, and its interval sits above zero: the second phase over the same real adapters ran about 2% slower. That is an order effect that was not investigated.</p>
+
+  <div class="cp"><div class="k">Checkpoint</div>
+    <p>State the rule, including why it has three verdicts. Then, from the 88-start result, give the verdict and say why. Last: what separates Amendment 3 from a forking path, what should the reader still discount, and why does the stop-on-repeated-failure guard exist?</p>
+    <details><summary>What a passing answer contains</summary><div>
+      <p>Three verdicts because "no difference found" only means something if the gate could have found a difference of the size that matters. Pass needs both metrics resolved and inside ±5%. Inconclusive means the gate could not resolve ±5% at all. Fail means it could, and the synthetic set was outside.</p>
+      <p>88 starts: TTFT statistic −1.16% [−2.54%, +0.75%] is inside, but its resolution check +2.24% [−0.11%, +5.81%] is not, since 5.81% is past 5%. So <b>inconclusive</b>, even though throughput was resolved and inside.</p>
+      <p>Amendment 3 restores a fixed sample size after a fault that never ran a phase, with the order in git. Still discount that the interim verdict was known. The guard exists because the runner had no stop on repeated failures: it kept submitting onto a bad host, which is how 52 starts were lost and, later, 3 more.</p>
+    </div></details>
+  </div>
+</section>
+
+<!-- ============ MODULE 6 ============ -->
+<section class="mod" id="m6">
+  <div class="modhead"><span class="modno">Module 6</span><h2>The cost bars, and what cannot be concluded</h2><span class="mins">12 min</span></div>
+  <p>Artifact 4 measured the other way to serve many fine-tunes: as whole models, one dedicated deployment each, or swapped on and off GPUs. The post sets its two costs next to this artifact's, all at $1.1095 per GPU-hour.</p>
+
+  <div class="panel">
+    <h3>Cost per tenant per month</h3>
+    <div class="chartbox"><svg id="c-cost" viewBox="0 0 640 230" role="img" aria-label="Dedicated 850 dollars, swapped 405 dollars, adapter 101 dollars, the last hatched as an upper bound."></svg></div>
+    <div class="tw" style="margin-top:12px"><table>
+      <thead><tr><th>Bar</th><th>Source</th><th>Model</th><th>What it rests on</th></tr></thead>
+      <tbody>
+        <tr><td><b>Dedicated</b> $850.43</td><td>Artifact 4's simulator</td><td>Qwen3-1.7B</td><td><span class="pill warn">not tested by the gate</span> Neither validated nor shown wrong.</td></tr>
+        <tr><td><b>Swapped</b> $404.97</td><td>Artifact 4's simulator</td><td>Qwen3-1.7B</td><td><span class="pill bad">depends on the failed model</span> The gate tested exactly the swap path.</td></tr>
+        <tr><td><b>Adapter</b> $101.24</td><td>This artifact</td><td>Qwen3-4B</td><td><span class="pill warn">upper bound</span> 8 tenants is a lower bound. Inherits the swapped bar's caveat when set beside it.</td></tr>
+      </tbody></table></div>
+  </div>
+
+  <h3>The simulator failed its own test</h3>
+  <p>Artifact 4 pre-registered a test its simulator had to pass before it was trusted: reproduce a real one-GPU, three-model replay at its bursty regime with Zipf skew 1.0. That is the reference point used here. The outcome was <b>failed</b>: 10 of 13 judged bins fell outside the band of three real repeats (3 agreed), the largest miss was 67.8 s, and 1 of 2 held-out interference cells passed. The swap count agreed, 11 predicted and 10 real in all three repeats. Nothing in artifact 4's cost file is validated, at this point or any other.</p>
+  <div class="panel">
+    <h3>Which way does the swapped bar err?</h3>
+    <div class="row"><button class="seg" id="sw-1" aria-pressed="true">Charged 37.8 s per swap</button><button class="seg" id="sw-2" aria-pressed="false">Charged about 25 s per swap</button></div>
+    <p id="sw-read" style="margin:12px 0 0"></p>
+  </div>
+
+  <h3>The comparison is not like for like</h3>
+  <p>Artifact 4's costs come from a simulated fleet of 20 Qwen3-1.7B models with 256-token outputs under its own traffic model. This artifact's come from Qwen3-4B with 16-token outputs at a fixed concurrency of 64. Artifact 4 moved to Qwen3-1.7B because its primary pair, Qwen3-4B and Qwen3-4B-Base as two co-resident engines, failed its own memory go/no-go (KV capacities of 9,456 and 9,520 tokens against 16,384 required). The three bars share a unit and a GPU rate and nothing else that was measured.</p>
+  <p>What the comparison can carry is the <b>shape of the choice</b>. Swapping pays per switch, in the time it takes to bring a model onto the GPU. Resident adapters never switch, and pay per co-active adapter, in throughput. A like-for-like number needs artifact 4's swap measured on Qwen3-4B, or this sweep run on Qwen3-1.7B. Neither was run.</p>
+
+  <h3 style="margin-top:26px">Limits the post states about itself</h3>
+  <ul>
+    <li>One base model, one GPU, one rank, one request shape (13 prompt and 16 output tokens at concurrency 64). The knee at another rank, model or prompt length is unmeasured.</li>
+    <li>vLLM 0.27.1, pinned by image digest, in a fast-moving area. Claims are dated 2026-10.</li>
+    <li>The all-resident case only. Swapping adapters from CPU memory is a sequel.</li>
+    <li>The registered-slot cost is unsplit; the diagnostic was cut.</li>
+    <li>The regime check is a sample: a once-a-second gauge, not a count per batch.</li>
+    <li>All 191 successful campaign starts ran on one host. Host-to-host variation is not in the intervals.</li>
+    <li>The rate, $1.1095 per GPU-hour, is an estimate from one billing sample.</li>
+    <li>The gate was extended after its result was seen, and the knee's first crossing is not resolved.</li>
+  </ul>
+
+  <div class="cp"><div class="k">Checkpoint</div>
+    <p>Against what was validated: which of the three bars rest on a failed simulator, which way each is known to err, why the model sizes differ, and why the adapter bar is an upper bound. Then name three limits the post states about itself.</p>
+    <details><summary>What a passing answer contains</summary><div>
+      <p>Dedicated and swapped come from the failed simulator; the adapter bar is this artifact's own measurement but is a bound, and inherits the swapped bar's caveat when compared. The swapped bar has no known direction of error: at the 37.8 s swap time the simulator predicted latency higher than real in every missed bin, and at about 25 s it predicted lower in every bin that still missed. The dedicated bar was not tested by the gate. The sizes differ because artifact 4's Qwen3-4B pair failed its memory go/no-go. The adapter bar is an upper bound because 8 tenants is a lower bound, since adapters could also be swapped from CPU memory.</p>
+      <p><b>Follow-up to expect:</b> "So can you say adapters beat swapping?" Artifact 4 says the ordering is wide, but it did not test whether the model's error is small enough to leave the ordering unchanged, so the comparison is only as firm as the swapped bar.</p>
+    </div></details>
+  </div>
+</section>
+
+<section class="mod" id="m7" style="padding-bottom:0">
+  <div class="modhead"><span class="modno">Module 7</span><h2>Teach it back</h2><span class="mins">30+ min</span></div>
+  <p>This one is not on this page. Draft the LinkedIn version, unaided. In the session, Claude plays someone who does not know the material and pushes on every hand-wave. The most useful thing to get right is module 5: a rule fixed before the data, a check that could not resolve its own margin, and an extension decided after seeing the interim verdict, with the order kept in git.</p>
+</section>
+
+<footer>
+  <p>Sources: <code>docs/post-a5.md</code> and <code>data/a5/analysis.json</code> at commit 2b9655e of the experiment repository; the pre-registration and its three amendments in <code>docs/experiment-a5.md</code>; the design spec's learning guide, §12b. The path through these modules and the record of what you could explain are <code>docs/learning/plan.md</code> and <code>docs/learning/progress.md</code>.</p>
+</footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var NS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs, parent, text) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (text !== undefined) e.textContent = text;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function fmt(n) { return Math.round(n).toLocaleString("en-US"); }
+
+  // ---- data: data/a5/analysis.json (sweep medians, 95% intervals) ----
+  var PTS = [
+    { n: 1,  c: 3577, cl: 3555, ch: 3598, s: 3568, sl: 3554, sh: 3582 },
+    { n: 2,  c: 3573, cl: 3559, ch: 3590, s: 3529, sl: 3509, sh: 3556 },
+    { n: 4,  c: 3543, cl: 3518, ch: 3583, s: 3443, sl: 3413, sh: 3480 },
+    { n: 8,  c: 3535, cl: 3510, ch: 3548, s: 3260, sl: 3233, sh: 3282 },
+    { n: 16, c: 3469, cl: 3453, ch: 3492, s: 2911, sl: 2889, sh: 2948 },
+    { n: 32, c: 3320, cl: 3308, ch: 3353, s: 2422, sl: 2411, sh: 2431 },
+    { n: 64, c: 3127, cl: 3100, ch: 3140, s: 1835, sl: 1824, sh: 1844 }
+  ];
+  var COSTS = [ // post table: [slots, het, hl, hh, reg, rl, rh]
+    [2, -43, -81, -31, -4, -36, 21], [4, -105, -153, -67, -34, -67, 16], [8, -284, -312, -235, -41, -77, -17],
+    [16, -574, -585, -521, -107, -135, -76], [32, -905, -941, -882, -257, -284, -219], [64, -1290, -1309, -1274, -450, -486, -425]
+  ];
+  var KNEE = [ // doubling [from, to], point, lo, hi, resolved (percent)
+    ["1 to 2", 1.1, 0.0, 2.0, false], ["2 to 4", 2.4, 1.2, 3.8, false], ["4 to 8", 5.3, 4.3, 6.6, false],
+    ["8 to 16", 10.7, 9.2, 11.5, false], ["16 to 32", 16.8, 16.1, 17.9, true], ["32 to 64", 24.2, 23.7, 24.8, true]
+  ];
+
+  // ---- module 1: rank slider ----
+  var rank = $("rank");
+  function drawRank() {
+    var r = +rank.value, d = 4096, w = d * d, a = r * (d + d);
+    $("rankv").textContent = r;
+    $("rk-w").textContent = fmt(w); $("rk-a").textContent = fmt(a);
+    $("rk-p").textContent = (100 * a / w).toFixed(2) + "%";
+  }
+  rank.addEventListener("input", drawRank); drawRank();
+
+  // ---- module 2: predict, then reveal ----
+  var radios = document.querySelectorAll('input[name="pr"]');
+  var reveal = $("reveal");
+  Array.prototype.forEach.call(radios, function (r) {
+    r.addEventListener("change", function () { reveal.disabled = false; $("prmsg").textContent = "Ready."; });
+  });
+  var TRUTH = { key: "C", text: "Spread is 41% lower than concentrated at 64 slots (1,835 against 3,127 tokens per second)." };
+  reveal.addEventListener("click", function () {
+    var pick = document.querySelector('input[name="pr"]:checked');
+    if (!pick) return;
+    $("m2chart").hidden = false;
+    $("prmsg").textContent = (pick.value === TRUTH.key ? "Your pick matches. " : "Your pick: " + pick.value + ". Measured: " + TRUTH.key + ". ") + TRUTH.text;
+    Array.prototype.forEach.call(radios, function (r) { r.disabled = true; });
+    reveal.disabled = true;
+    drawTput();
+    $("m2chart").scrollIntoView({ block: "nearest" });
+  });
+
+  var showHet = true, showReg = false;
+  $("t-het").addEventListener("click", function () { showHet = !showHet; this.setAttribute("aria-pressed", showHet); drawTput(); });
+  $("t-reg").addEventListener("click", function () { showReg = !showReg; this.setAttribute("aria-pressed", showReg); drawTput(); });
+
+  function drawTput() {
+    var svg = $("c-tput"); svg.innerHTML = "";
+    var W = 640, H = 330, L = 56, R = 120, T = 18, B = 44;
+    var x = function (i) { return L + (W - L - R) * i / (PTS.length - 1); };
+    var y0 = 1500, y1 = 3800;
+    var y = function (v) { return T + (H - T - B) * (1 - (v - y0) / (y1 - y0)); };
+    [1500, 2000, 2500, 3000, 3500].forEach(function (v) {
+      el("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), "class": "grid" }, svg);
+      el("text", { x: L - 8, y: y(v) + 4, "text-anchor": "end" }, svg, fmt(v));
+    });
+    el("line", { x1: L, x2: W - R, y1: y(y0), y2: y(y0), "class": "ax" }, svg);
+    PTS.forEach(function (p, i) { el("text", { x: x(i), y: H - B + 18, "text-anchor": "middle" }, svg, p.n); });
+    el("text", { x: (L + W - R) / 2, y: H - 6, "text-anchor": "middle" }, svg, "registered slots (doubling axis)");
+    el("text", { x: 14, y: T + 6, "text-anchor": "start" }, svg, "tokens/s");
+    if (showHet) {
+      var d = "M" + PTS.map(function (p, i) { return x(i) + "," + y(p.c); }).join(" L") +
+              " L" + PTS.slice().reverse().map(function (p) { var i = PTS.indexOf(p); return x(i) + "," + y(p.s); }).join(" L") + " Z";
+      el("path", { d: d, "class": "gap" }, svg);
+      var m = PTS[PTS.length - 1], mid = (y(m.c) + y(m.s)) / 2;
+      el("text", { x: x(6) + 12, y: mid + 4, "class": "lab-s" }, svg, "heterogeneity");
+      el("text", { x: x(6) + 12, y: mid + 18, "class": "lab-s" }, svg, "−1,290 tok/s");
+    }
+    if (showReg) {
+      var a = PTS[0], b = PTS[6];
+      el("line", { x1: x(6) + 70, x2: x(6) + 70, y1: y(a.c), y2: y(b.c), stroke: "var(--conc)", "stroke-width": 1.5 }, svg);
+      el("line", { x1: x(6) + 64, x2: x(6) + 76, y1: y(a.c), y2: y(a.c), stroke: "var(--conc)", "stroke-width": 1.5 }, svg);
+      el("line", { x1: x(6) + 64, x2: x(6) + 76, y1: y(b.c), y2: y(b.c), stroke: "var(--conc)", "stroke-width": 1.5 }, svg);
+      el("text", { x: x(6) + 78, y: (y(a.c) + y(b.c)) / 2, "class": "lab-c", "font-size": 11 }, svg, "−450");
+    }
+    [["c", "cl", "ch", "lc", "dc", "ec"], ["s", "sl", "sh", "ls", "ds", "es"]].forEach(function (k) {
+      el("path", { d: "M" + PTS.map(function (p, i) { return x(i) + "," + y(p[k[0]]); }).join(" L"), "class": k[3] }, svg);
+      PTS.forEach(function (p, i) {
+        el("line", { x1: x(i), x2: x(i), y1: y(p[k[1]]), y2: y(p[k[2]]), "class": k[5] }, svg);
+        el("circle", { cx: x(i), cy: y(p[k[0]]), r: 3.4, "class": k[4] }, svg);
+      });
+    });
+    el("text", { x: x(6) + 12, y: y(PTS[6].c) - 8, "class": "lab-c" }, svg, "concentrated");
+    el("text", { x: x(6) + 12, y: y(PTS[6].s) + 18, "class": "lab-s" }, svg, "spread");
+  }
+
+  var rows = $("costrows");
+  COSTS.forEach(function (c) {
+    var tr = document.createElement("tr");
+    var f = function (v, lo, hi) { return v + " [" + lo + ", " + hi + "]"; };
+    tr.innerHTML = "<td class='num'>" + c[0] + "</td><td class='r'>" + f(c[1], c[2], c[3]).replace(/-/g, "−") +
+      "</td><td class='r'>" + f(c[4], c[5], c[6]).replace(/-/g, "−") + "</td>";
+    rows.appendChild(tr);
+  });
+
+  // ---- module 3: knee ----
+  var kneeSel = 3;
+  function drawKnee() {
+    var svg = $("c-knee"); svg.innerHTML = "";
+    var W = 640, H = 300, L = 56, R = 20, T = 18, B = 50, ymax = 30;
+    var step = (W - L - R) / KNEE.length;
+    var x = function (i) { return L + step * (i + 0.5); };
+    var y = function (v) { return T + (H - T - B) * (1 - v / ymax); };
+    [0, 10, 20, 30].forEach(function (v) {
+      el("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), "class": v ? "grid" : "ax" }, svg);
+      el("text", { x: L - 8, y: y(v) + 4, "text-anchor": "end" }, svg, v + "%");
+    });
+    el("line", { x1: L, x2: W - R, y1: y(10), y2: y(10), "class": "tau" }, svg);
+    el("text", { x: W - R, y: y(10) - 6, "text-anchor": "end", style: "fill:var(--fg)" }, svg, "τ = 10% per doubling");
+    KNEE.forEach(function (k, i) {
+      var sel = i === kneeSel, col = k[4] ? "var(--spread)" : "var(--muted)";
+      el("rect", { x: x(i) - 22, y: y(k[1]), width: 44, height: y(0) - y(k[1]), fill: sel ? "var(--spread)" : "var(--spread)", "fill-opacity": sel ? 0.5 : 0.22 }, svg);
+      el("line", { x1: x(i), x2: x(i), y1: y(k[2]), y2: y(k[3]), stroke: "var(--fg)", "stroke-width": 1.6 }, svg);
+      el("line", { x1: x(i) - 6, x2: x(i) + 6, y1: y(k[2]), y2: y(k[2]), stroke: "var(--fg)", "stroke-width": 1.6 }, svg);
+      el("line", { x1: x(i) - 6, x2: x(i) + 6, y1: y(k[3]), y2: y(k[3]), stroke: "var(--fg)", "stroke-width": 1.6 }, svg);
+      el("text", { x: x(i), y: H - B + 18, "text-anchor": "middle" }, svg, k[0]);
+      el("text", { x: x(i), y: y(k[3]) - 6, "text-anchor": "middle" }, svg, k[1].toFixed(1) + "%");
+    });
+    el("text", { x: (L + W - R) / 2, y: H - 6, "text-anchor": "middle" }, svg, "throughput lost, spread regime, per doubling of registered adapters");
+    var k = KNEE[kneeSel], st;
+    if (k[2] > 10) st = "The whole interval is above 10%: this crossing is <b>resolved</b>.";
+    else if (k[3] < 10) st = "The whole interval is below 10%: no crossing here.";
+    else st = "The interval straddles 10%: if the experiment were re-run, the loss could land on either side. The crossing is <b>not resolved</b>.";
+    $("knee-read").innerHTML = "<b>" + k[0] + ":</b> <span class='num'>" + k[1].toFixed(1) + "% [" + k[2].toFixed(1) + "%, " + k[3].toFixed(1) + "%]</span>. " + st;
+  }
+  var kb = $("knee-btns");
+  KNEE.forEach(function (k, i) {
+    var b = document.createElement("button"); b.className = "seg"; b.textContent = k[0];
+    b.setAttribute("aria-pressed", i === kneeSel);
+    b.addEventListener("click", function () {
+      kneeSel = i; Array.prototype.forEach.call(kb.children, function (c, j) { c.setAttribute("aria-pressed", j === i); }); drawKnee();
+    });
+    kb.appendChild(b);
+  });
+  drawKnee();
+
+  Array.prototype.forEach.call(document.querySelectorAll("button[data-slots]"), function (b) {
+    b.addEventListener("click", function () {
+      Array.prototype.forEach.call(document.querySelectorAll("button[data-slots]"), function (o) { o.setAttribute("aria-pressed", o === b); });
+      $("slotcost").textContent = "$" + (1.1095 * 730 / +b.dataset.slots).toFixed(2);
+    });
+  });
+
+  // ---- module 4: calculators ----
+  function calcL() {
+    var n = +$("l-n").value, x = +$("l-x").value, m = +$("l-m").value, p = +$("l-p").value, k = +$("l-k").value;
+    if (!(n > 0 && x > 0 && m > 0 && p > 0 && k > 0)) return;
+    var w = n / x, rate = m / (730 * 3600) * p, l = rate * w;
+    $("l-w").textContent = w.toFixed(3) + " s"; $("l-r").textContent = rate.toFixed(3) + " /s";
+    $("l-l").textContent = l.toFixed(3); $("l-t").textContent = fmt(k / l);
+  }
+  ["l-n", "l-x", "l-m", "l-p", "l-k"].forEach(function (id) { $(id).addEventListener("input", calcL); }); calcL();
+  function calcB() {
+    var cap = +$("b-cap").value, tok = +$("b-tok").value, fl = +$("b-fl").value;
+    if (!(cap > 0 && tok > 0 && fl > 0)) return;
+    var blocks = Math.ceil(tok / 16), per = blocks * 16;
+    $("b-b").textContent = blocks + " (" + per + " tokens)";
+    $("b-h").textContent = fmt(Math.floor(cap / per));
+    $("b-u").textContent = (100 * fl * per / cap).toFixed(1) + "%";
+  }
+  ["b-cap", "b-tok", "b-fl"].forEach(function (id) { $(id).addEventListener("input", calcB); }); calcB();
+
+  // ---- module 5: gate stages. Intervals in percent; verdict computed by the registered rule ----
+  var DELTA = 5;
+  var STAGES = [
+    { name: "Pilot, 23 starts", ttft: [2.9, -2.7, 10.7], ttftRes: [8.9, -6.4, 11.7], tp: [-0.8, -2.2, 0.3], tpRes: [-0.6, -2.4, 1.1] },
+    { name: "First larger gate, 88 starts", ttft: [-1.16, -2.54, 0.75], ttftRes: [2.24, -0.11, 5.81], tp: [0.22, -0.35, 0.54], tpRes: [-0.31, -0.97, 0.21] },
+    { name: "Final, 137 starts", ttft: [-0.48, -1.87, 0.95], ttftRes: [2.29, 0.99, 4.95], tp: [0.19, -0.23, 0.42], tpRes: [-0.29, -0.92, 0.07] }
+  ];
+  var stage = 2;
+  function inside(iv) { return iv[1] > -DELTA && iv[2] < DELTA; }
+  function sgn(v) { return (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(2) + "%"; }
+  function drawGate() {
+    var s = STAGES[stage], svg = $("c-gate"); svg.innerHTML = "";
+    var W = 640, H = 300, L = 150, R = 24, T = 30, B = 40, lo = -13, hi = 13;
+    var x = function (v) { return L + (W - L - R) * (v - lo) / (hi - lo); };
+    var rowsG = [["TTFT p50", "statistic", s.ttft], ["TTFT p50", "resolution check", s.ttftRes], ["throughput", "statistic", s.tp], ["throughput", "resolution check", s.tpRes]];
+    var rh = (H - T - B) / rowsG.length;
+    el("rect", { x: x(-DELTA), y: T - 8, width: x(DELTA) - x(-DELTA), height: H - T - B + 8, "class": "band" }, svg);
+    el("text", { x: x(0), y: T - 14, "text-anchor": "middle", style: "fill:var(--accent)" }, svg, "margin ±5%");
+    [-10, -5, 0, 5, 10].forEach(function (v) {
+      el("line", { x1: x(v), x2: x(v), y1: T - 8, y2: H - B, "class": v ? "grid" : "ax" }, svg);
+      el("text", { x: x(v), y: H - B + 16, "text-anchor": "middle" }, svg, v + "%");
+    });
+    rowsG.forEach(function (r, i) {
+      var cy = T + rh * (i + 0.5), iv = r[2], ok = inside(iv);
+      el("text", { x: L - 10, y: cy - 3, "text-anchor": "end", style: "fill:var(--fg)" }, svg, r[0]);
+      el("text", { x: L - 10, y: cy + 11, "text-anchor": "end" }, svg, r[1]);
+      var cl = Math.max(lo, iv[1]), ch = Math.min(hi, iv[2]);
+      var col = ok ? "var(--good)" : "var(--bad)";
+      el("line", { x1: x(cl), x2: x(ch), y1: cy, y2: cy, stroke: col, "stroke-width": 3 }, svg);
+      el("line", { x1: x(cl), x2: x(cl), y1: cy - 6, y2: cy + 6, stroke: col, "stroke-width": 2 }, svg);
+      el("line", { x1: x(ch), x2: x(ch), y1: cy - 6, y2: cy + 6, stroke: col, "stroke-width": 2 }, svg);
+      el("circle", { cx: x(iv[0]), cy: cy, r: 4, fill: col }, svg);
+      el("text", { x: x(ch) + 8, y: cy + 4, style: "fill:" + col }, svg, ok ? "inside" : "outside");
+    });
+    el("text", { x: (L + W - R) / 2, y: H - 4, "text-anchor": "middle" }, svg, "(synthetic − real) ÷ real, median with 90% interval");
+    var resolved = inside(s.ttftRes) && inside(s.tpRes), allIn = inside(s.ttft) && inside(s.tp);
+    var verdict = !resolved ? "inconclusive" : allIn ? "pass" : "fail";
+    var cls = verdict === "pass" ? "good" : verdict === "fail" ? "bad" : "warn";
+    var why = !resolved
+      ? "A resolution check is outside ±5%" + (!inside(s.ttftRes) ? " (TTFT: " + sgn(s.ttftRes[1]) + " to " + sgn(s.ttftRes[2]) + ")" : "") +
+        ", so the gate cannot resolve its own margin. Whether the statistic is inside is then not asked."
+      : allIn ? "Both resolution checks and both statistics are inside ±5%." : "Resolved, but a statistic is outside ±5%.";
+    $("gate-read").innerHTML = "<span class='pill " + cls + "'>" + verdict + "</span> " + why;
+  }
+  var gb = $("gate-btns");
+  STAGES.forEach(function (s, i) {
+    var b = document.createElement("button"); b.className = "seg"; b.textContent = s.name; b.setAttribute("aria-pressed", i === stage);
+    b.addEventListener("click", function () { stage = i; Array.prototype.forEach.call(gb.children, function (c, j) { c.setAttribute("aria-pressed", j === i); }); drawGate(); });
+    gb.appendChild(b);
+  });
+  drawGate();
+
+  // ---- module 6: cost bars ----
+  (function () {
+    var svg = $("c-cost"), W = 640, H = 230, L = 96, R = 70, T = 14;
+    var x = function (v) { return L + (W - L - R) * v / 900; };
+    var bars = [["Dedicated", 850.43, "var(--muted)", false], ["Swapped", 404.97, "var(--muted)", false], ["Adapter", 101.24, "var(--accent)", true]];
+    var defs = el("defs", {}, svg), pat = el("pattern", { id: "hatch", width: 8, height: 8, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" }, defs);
+    el("rect", { width: 8, height: 8, fill: "var(--surface)" }, pat); el("rect", { width: 3, height: 8, fill: "var(--accent)" }, pat);
+    [0, 300, 600, 900].forEach(function (v) {
+      el("line", { x1: x(v), x2: x(v), y1: T, y2: 176, "class": v ? "grid" : "ax" }, svg);
+      el("text", { x: x(v), y: 194, "text-anchor": "middle" }, svg, "$" + v);
+    });
+    bars.forEach(function (b, i) {
+      var y = T + 8 + i * 52;
+      el("text", { x: L - 10, y: y + 22, "text-anchor": "end", style: "fill:var(--fg)" }, svg, b[0]);
+      el("rect", { x: x(0), y: y, width: x(b[1]) - x(0), height: 34, fill: b[3] ? "url(#hatch)" : b[2], "fill-opacity": b[3] ? 1 : 0.35, stroke: b[3] ? "var(--accent)" : "none", "stroke-width": 1.5 }, svg);
+      el("text", { x: x(b[1]) + 8, y: y + 22, style: "fill:var(--fg)" }, svg, "$" + b[1].toFixed(2));
+    });
+    el("text", { x: (L + W - R) / 2, y: 218, "text-anchor": "middle" }, svg, "dollars per tenant per month at $1.1095 per GPU-hour; hatched = upper bound");
+  })();
+  function drawSw() {
+    var two = $("sw-2").getAttribute("aria-pressed") === "true";
+    $("sw-read").innerHTML = two
+      ? "Charged at the roughly 25 s that the swaps inside the replays took (on a different pod), the simulator predicted latency <b>lower</b> than the real engine's in every bin that still missed."
+      : "Charged at the swap campaign's 37.8 s, the simulator predicted latency <b>higher</b> than the real engine's in every missed bin, always on the same side.";
+  }
+  ["sw-1", "sw-2"].forEach(function (id) {
+    $(id).addEventListener("click", function () {
+      $("sw-1").setAttribute("aria-pressed", id === "sw-1"); $("sw-2").setAttribute("aria-pressed", id === "sw-2"); drawSw();
+    });
+  });
+  drawSw();
+  $("sw-read").insertAdjacentHTML("afterend", "<p class='cap' style='color:var(--muted);font-size:.86rem;margin:8px 0 0'>So the validation does not say which way the swapped bar errs. Artifact 4 says no single fixed swap cost matches the real system.</p>");
+
+  // ---- sticky bar highlights the module in view ----
+  var links = document.querySelectorAll("nav.bar a");
+  if ("IntersectionObserver" in window) {
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) {
+        if (e.isIntersecting) Array.prototype.forEach.call(links, function (a) { a.classList.toggle("on", a.getAttribute("href") === "#" + e.target.id); });
+      });
+    }, { rootMargin: "-20% 0px -70% 0px" });
+    document.querySelectorAll("section[id]").forEach(function (s) { io.observe(s); });
+  }
+})();
+</script>

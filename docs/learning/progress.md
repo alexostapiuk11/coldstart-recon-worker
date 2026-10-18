@@ -91,7 +91,9 @@ not by re-teaching it.
 
 # Artifact 5 — how many LoRA adapters fit on one GPU
 
-The modules are in `plan.md`, under "Learning plan — artifact 5".
+The modules are in `plan.md`, under "Learning plan — artifact 5". The material
+is the private explainer page linked at the top of that section. Its module 2
+asks for a prediction before it shows the main chart, so do module 0 first.
 
 **Before the build, nothing was recorded.** The design spec's definition of
 done asked for §12b's modules to be worked through before each build stage;
