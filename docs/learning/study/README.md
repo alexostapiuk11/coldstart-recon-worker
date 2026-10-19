@@ -18,10 +18,11 @@ page (`page.html`) and a pasteable chat brief (`brief.md`). Design:
 | unit | title | min | files |
 |---|---|---|---|
 | p1 | LLM serving on a GPU | 20 | `p1/page.html`, `p1/brief.md` |
+| p2 | How these experiments earn trust | 20 | `p2/page.html`, `p2/brief.md` |
 | a1 | Where a vLLM cold start goes | 45 | `a1/page.html`, `a1/brief.md` |
+| a2 | An autoscaling simulator that failed its own test | 45 | `a2/page.html`, `a2/brief.md` |
 
-P2 (how these experiments earn trust) and the units for artifacts 2, 4, 5, 6 and 7 are
-built after the owner approves the pilot's format.
+The units for artifacts 4, 5, 6 and 7 are not built yet.
 
 ## Published pages
 
@@ -30,7 +31,9 @@ Private Artifacts.
 | unit | page |
 |---|---|
 | p1 | https://claude.ai/artifact/ERS8Z3tRWUkSD4131zgwzY |
+| p2 | https://claude.ai/artifact/A4MJnGXGWMBmi5z5ntxZBz |
 | a1 | https://claude.ai/artifact/2WmMh5z8C1bcehAmMurWQe |
+| a2 | https://claude.ai/artifact/7HwprMXHbJWfYWouMhLfDR |
 
 The published copy is the page body only (the Artifact tool adds its own document wrapper);
 the source is `docs/learning/study/<unit>/page.html`.
