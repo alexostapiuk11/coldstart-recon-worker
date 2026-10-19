@@ -18,6 +18,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from study.schema import ContentError
+
 NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
 # Keys whose strings are never numeric claims.
 NOT_CLAIMS = ("sources", "derived_numbers", "links", "when", "evidence")
@@ -48,23 +50,52 @@ def _strings(node):
             yield from _strings(v)
 
 
+def _stacked_bars(ch):
+    return [s["value"] for b in ch["bars"] for s in b["segments"]]
+
+
+def _bars(ch):
+    return [i["value"] for i in ch["items"]]
+
+
+def _interval(ch):
+    return [row[k] for row in ch["rows"] for k in ("estimate", "low", "high")]
+
+
+def _percentiles(ch):
+    return ([v["value"] for row in ch["rows"] for v in row["values"]]
+            + [row["max_label"]["value"] for row in ch["rows"] if "max_label" in row])
+
+
+# Every chart type's numeric values (they are numbers, not strings, so _strings misses
+# them). A new chart type needs an entry here; a test checks this matches CHART_TYPES.
+CHART_NUMBERS = {
+    "stacked_bars": _stacked_bars,
+    "bars": _bars,
+    "interval": _interval,
+    "percentiles": _percentiles,
+}
+
+
+def _token(v: float) -> str:
+    """A chart value as a number token, never in exponent form: 1234567 -> '1234567'."""
+    text = repr(float(v))
+    if "e" in text:
+        text = f"{float(v):f}"
+    return _normalise(text.lstrip("-"))
+
+
 def _numbers_in(node):
     out = []
     for s in _strings(node):
         out += [_normalise(t) for t in NUMBER.findall(s) if _significant(t)]
-    # chart values are numbers, not strings
-    for r in node.get("results", []) if isinstance(node, dict) else []:
+    for i, r in enumerate(node.get("results", []) if isinstance(node, dict) else []):
         ch = r["chart"]
-        if ch["type"] == "stacked_bars":
-            vals = [s["value"] for b in ch["bars"] for s in b["segments"]]
-        elif ch["type"] == "percentiles":
-            vals = [v["value"] for row in ch["rows"] for v in row["values"]]
-            vals += [row["max_label"]["value"] for row in ch["rows"] if "max_label" in row]
-        elif ch["type"] == "interval":
-            vals = [abs(row[k]) for row in ch["rows"] for k in ("estimate", "low", "high")]
-        else:
-            vals = [i["value"] for i in ch["items"]]
-        out += [_normalise(f"{v:g}") for v in vals if _significant(f"{v:g}")]
+        numbers = CHART_NUMBERS.get(ch.get("type"))
+        if numbers is None:
+            raise ContentError(f"results[{i}].chart: unknown chart type '{ch.get('type')}'; "
+                               f"known types are {', '.join(CHART_NUMBERS)}")
+        out += [t for t in map(_token, numbers(ch)) if _significant(t)]
     return out
 
 

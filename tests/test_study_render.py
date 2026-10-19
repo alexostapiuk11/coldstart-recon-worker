@@ -1543,3 +1543,29 @@ def test_missing_commits_reports_what_it_cannot_check(tmp_path, monkeypatch):
                            f"{plain}: not a git repository"]
     monkeypatch.setattr("study.trace.shutil.which", lambda name: None)
     assert missing_commits(u, repo) == ([], ["git is not on PATH"])
+
+
+# ---- trace: one registry of chart types ----
+
+def test_every_chart_type_has_a_number_reader():
+    from study.schema import CHART_TYPES
+    from study.trace import CHART_NUMBERS
+    assert set(CHART_NUMBERS) == set(CHART_TYPES)
+
+
+def test_unknown_chart_type_is_a_content_error_naming_the_type(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\n")
+    u = artifact_unit()
+    u["sources"] = [{"file": src, "section": "Title"}]
+    u["results"][0]["chart"] = {"type": "radar", "unit": "s"}
+    with pytest.raises(ContentError, match=r"results\[0\]\.chart: unknown chart type 'radar'"):
+        untraced_numbers(u)
+
+
+def test_large_chart_values_are_traced_without_an_exponent(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\n1,234,567 tokens\n")
+    u = artifact_unit()
+    u["sources"] = [{"file": src, "section": "Title"}]
+    u["results"][0]["chart"] = {"type": "bars", "unit": "tokens",
+                                "items": [{"label": "a", "value": 1234567}]}
+    assert untraced_numbers(u) == []
