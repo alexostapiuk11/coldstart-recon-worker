@@ -265,3 +265,39 @@ def test_link_fields_are_checked_even_without_requirement_ids():
     u = artifact_unit()
     u["decisions"][0]["uses"] = [{"concept": "nope", "because": "x"}]
     _fails(u, r"uses\[0\]\.concept 'nope' is not a concept id")
+
+
+def _interval():
+    return {"type": "interval", "unit": "s", "zero_label": "no difference",
+            "left_label": "B faster", "right_label": "A faster",
+            "rows": [{"label": "A minus B", "estimate": -10.39, "low": -12.5, "high": -8.25},
+                     {"label": "B minus C", "estimate": 1.5, "low": -0.5, "high": 3.25}]}
+
+
+def test_interval_chart_validates():
+    u = artifact_unit()
+    u["results"][0]["chart"] = _interval()
+    validate(u)
+
+
+def test_interval_rows_need_numbers_in_order():
+    u = artifact_unit()
+    u["results"][0]["chart"] = _interval()
+    u["results"][0]["chart"]["rows"][0]["low"] = "low"
+    _fails(u, r"rows\[0\]\.low: expected float")
+    u["results"][0]["chart"] = _interval()
+    u["results"][0]["chart"]["rows"][1]["low"] = 2.0
+    _fails(u, r"rows\[1\].*low <= estimate <= high")
+    u["results"][0]["chart"] = _interval()
+    u["results"][0]["chart"]["rows"] = []
+    _fails(u, "rows")
+    u["results"][0]["chart"] = _interval()
+    del u["results"][0]["chart"]["rows"][0]["label"]
+    _fails(u, r"rows\[0\].*'label'")
+    u["results"][0]["chart"] = _interval()
+    u["results"][0]["chart"]["zero_label"] = 0
+    _fails(u, "zero_label: expected str")
+    u["results"][0]["chart"] = dict(_interval(), shade="up")
+    _fails(u, "shade")
+    u["results"][0]["chart"] = dict(_interval(), shade="left")
+    validate(u)

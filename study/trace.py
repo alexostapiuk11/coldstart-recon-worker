@@ -47,8 +47,12 @@ def _numbers_in(node):
     # chart values are numbers, not strings
     for r in node.get("results", []) if isinstance(node, dict) else []:
         ch = r["chart"]
-        vals = ([s["value"] for b in ch["bars"] for s in b["segments"]]
-                if ch["type"] == "stacked_bars" else [i["value"] for i in ch["items"]])
+        if ch["type"] == "stacked_bars":
+            vals = [s["value"] for b in ch["bars"] for s in b["segments"]]
+        elif ch["type"] == "interval":
+            vals = [abs(row[k]) for row in ch["rows"] for k in ("estimate", "low", "high")]
+        else:
+            vals = [i["value"] for i in ch["items"]]
         out += [_normalise(f"{v:g}") for v in vals if _significant(f"{v:g}")]
     return out
 

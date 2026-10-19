@@ -91,6 +91,10 @@ def render_brief(c: dict) -> str:
                 for b in ch["bars"]:
                     parts = ", ".join(f"{s['name']} {s['value']}" for s in b["segments"])
                     out.append(f"- {b['label']}: {parts} ({ch['unit']})")
+            elif ch["type"] == "interval":
+                for row in ch["rows"]:
+                    out.append(f"- {row['label']}: {row['estimate']} {ch['unit']} "
+                               f"(interval {row['low']} to {row['high']})")
             else:
                 for i in ch["items"]:
                     out.append(f"- {i['label']}: {i['value']} {ch['unit']}")

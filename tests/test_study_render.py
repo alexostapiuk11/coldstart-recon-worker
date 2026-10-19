@@ -261,3 +261,101 @@ def test_result_supporting_several_decisions_links_to_each():
     assert 'href="#d-d0"' in page and 'href="#d-d1"' in page
     brief = render_brief(u)
     assert "- So: see decisions `d0`, `d1`" in brief
+
+
+def _interval(rows):
+    return {"type": "interval", "unit": "s", "zero_label": "no difference",
+            "left_label": "B faster", "right_label": "A faster", "rows": rows}
+
+
+def _x(out, pattern):
+    return [float(v) for v in re.findall(pattern, out)]
+
+
+def test_interval_zero_line_sits_inside_an_interval_that_crosses_zero():
+    out = chart_html(_interval([{"label": "B minus C", "estimate": 1.5, "low": -0.5,
+                                 "high": 3.25}]), "i0")
+    zero = _x(out, r'<line class="zero" x1="([\d.]+)"')[0]
+    w = re.search(r'<line class="whisker" x1="([\d.]+)" y1="[\d.]+" x2="([\d.]+)"', out)
+    lo, hi = float(w.group(1)), float(w.group(2))
+    dot = _x(out, r'<circle class="est" cx="([\d.]+)"')[0]
+    assert lo < zero < hi
+    assert lo < dot < hi and dot > zero
+
+
+def test_interval_zero_line_is_left_of_a_positive_interval_and_right_of_a_negative_one():
+    out = chart_html(_interval([{"label": "A minus B", "estimate": 10.39, "low": 8.25,
+                                 "high": 12.5}]), "i1")
+    zero = _x(out, r'<line class="zero" x1="([\d.]+)"')[0]
+    dot = _x(out, r'<circle class="est" cx="([\d.]+)"')[0]
+    w = re.search(r'<line class="whisker" x1="([\d.]+)" y1="[\d.]+" x2="([\d.]+)"', out)
+    assert zero < float(w.group(1)) < dot < float(w.group(2))
+    out = chart_html(_interval([{"label": "C minus A", "estimate": -4, "low": -6,
+                                 "high": -2}]), "i2")
+    zero = _x(out, r'<line class="zero" x1="([\d.]+)"')[0]
+    dot = _x(out, r'<circle class="est" cx="([\d.]+)"')[0]
+    assert dot < zero
+
+
+def test_interval_prints_estimate_low_high_and_the_labels():
+    out = chart_html(_interval([{"label": "A minus B", "estimate": -10.39, "low": -12.5,
+                                 "high": -8.25}]), "i3")
+    for shown in (">−10.39 s<", ">−12.5<", ">−8.25<", ">A minus B<", ">no difference<",
+                  "B faster", "A faster"):
+        assert shown in out
+    assert 'aria-label="' in out and "var(--" not in out.split("<svg")[0]
+    assert not re.search(r'(fill|stroke)="#', out)  # theme tokens via classes only
+
+
+def test_interval_text_is_never_outside_the_viewbox():
+    out = chart_html(_interval([{"label": "wide", "estimate": 1000.5, "low": 900.25,
+                                 "high": 1100.75},
+                                {"label": "narrow", "estimate": 0.5, "low": 0.25,
+                                 "high": 0.75}]), "i4")
+    width = float(re.search(r'viewBox="0 0 ([\d.]+) ([\d.]+)"', out).group(1))
+    height = float(re.search(r'viewBox="0 0 ([\d.]+) ([\d.]+)"', out).group(2))
+    for m in re.finditer(r'<text class="[^"]*" x="([\d.-]+)" y="([\d.-]+)"'
+                         r'(?: text-anchor="(\w+)")?>([^<]*)<', out):
+        x, y, anchor, txt = float(m.group(1)), float(m.group(2)), m.group(3), m.group(4)
+        w = len(txt) * 8.5
+        left = {"end": x - w, "middle": x - w / 2}.get(anchor, x)
+        assert left >= 0 and left + w <= width + 0.5, txt
+        assert 0 < y <= height, txt
+
+
+def test_brief_lists_interval_rows():
+    u = artifact_unit()
+    u["results"][0]["chart"] = _interval([{"label": "A minus B", "estimate": -10.39,
+                                           "low": -12.5, "high": -8.25}])
+    assert "- A minus B: -10.39 s (interval -12.5 to -8.25)" in render_brief(u)
+
+
+def test_interval_shades_the_named_side_of_zero_only_when_asked():
+    rows = [{"label": "A minus B", "estimate": -10.39, "low": -12.5, "high": 2.0}]
+    assert 'class="shade"' not in chart_html(_interval(rows), "i5")
+    out = chart_html(dict(_interval(rows), shade="left"), "i5")
+    zero = _x(out, r'<line class="zero" x1="([\d.]+)"')[0]
+    m = re.search(r'<rect class="shade" x="([\d.]+)" y="[\d.]+" width="([\d.]+)"', out)
+    x, w = float(m.group(1)), float(m.group(2))
+    assert abs(x + w - zero) < 0.2
+
+
+def test_interval_values_are_traced_as_unsigned_numbers(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\nDifference -10.39 s, interval [-12.50, -8.25].\n")
+    u = artifact_unit()
+    u["sources"] = [{"file": src, "section": "Title"}]
+    u["results"][0]["chart"] = _interval([{"label": "A minus B", "estimate": -10.39,
+                                           "low": -12.5, "high": -8.25}])
+    assert untraced_numbers(u) == []
+    u["results"][0]["chart"]["rows"][0]["high"] = -8.75
+    assert untraced_numbers(u) == ["8.75"]
+
+
+def test_interval_stays_narrow_enough_to_read_on_a_phone():
+    # 309 px of card on a 375 px phone; 15 px phone text must render at >= 11 px.
+    out = chart_html(dict(_interval([{"label": "(A-B) minus (B-C)", "estimate": -10.39,
+                                      "low": -12.5, "high": -8.25}]),
+                          left_label="weights cache saves more",
+                          right_label="compile cache saves more"), "i6")
+    width = float(re.search(r'viewBox="0 0 ([\d.]+)', out).group(1))
+    assert 309 / width * 15 >= 11

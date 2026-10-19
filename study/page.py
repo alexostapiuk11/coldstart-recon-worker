@@ -87,6 +87,11 @@ stroke-dasharray:4 3}.node.k-store rect{fill:var(--warnsoft);stroke:var(--warn)}
 .segtext.s0{fill:var(--t0)}.segtext.s1{fill:var(--t1)}.segtext.s2{fill:var(--t2)}
 .segtext.s3{fill:var(--t3)}.segtext.s4{fill:var(--t4)}.segtext.s5{fill:var(--t5)}
 .segtext.s6{fill:var(--t6)}.segtext.s7{fill:var(--t7)}
+.zero{stroke:var(--fg);stroke-width:1.5;stroke-dasharray:4 3}.axis{stroke:var(--line);stroke-width:1.5}
+.whisker{stroke:var(--c0);stroke-width:2.5;stroke-linecap:round}.est{fill:var(--c0);stroke:var(--card);stroke-width:2}
+.shade{fill:var(--line);opacity:.45}.inum{font-size:12px;fill:var(--muted)}
+.axlabel{font-size:12px;fill:var(--muted)}.iest{font-weight:600}
+.ilabel,.inum,.iest,.axlabel{paint-order:stroke;stroke:var(--card);stroke-width:4px;stroke-linejoin:round}
 .legend{list-style:none;padding:0;margin:6px 0;display:flex;gap:14px;flex-wrap:wrap;font-size:13px}
 .chip{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
 .flow{display:flex;gap:8px;flex-wrap:wrap;counter-reset:s}
@@ -106,7 +111,7 @@ footer.src{font-size:13px;color:var(--muted)}
 .lead{font-size:21px}.why{font-size:16px}.row b{min-width:104px}}
 @media (max-width:600px){.diagram{display:none}.diagram-text{display:block}
 h1{font-size:24px}.lead{font-size:16px}
-.blabel,.btotal{font-size:15px}.segtext{font-size:14px}}
+.blabel,.btotal,.inum{font-size:15px}.segtext,.axlabel{font-size:14px}}
 """
 
 JS = """

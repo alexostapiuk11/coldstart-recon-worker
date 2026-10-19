@@ -10,7 +10,7 @@ from study.text import wrap
 
 ARTIFACT_LEVELS = ("context", "container", "component", "dynamic")
 NODE_KINDS = ("person", "system", "external", "store", "focus")
-CHART_TYPES = ("stacked_bars", "bars")
+CHART_TYPES = ("stacked_bars", "bars", "interval")
 MAX_LABEL = 22
 MAX_SUB = 60
 SUB_LINE = 30  # the diagram wraps a node's sub text at this width ...
@@ -166,15 +166,32 @@ def _relationships(c, where):
 
 
 def _chart(ch, where):
-    """Chart dict: type, unit, bars/items, and for stacked_bars an optional bool
-    `show_totals` (default false) that prints each bar's summed total at its end."""
+    """Chart dict: type, unit, then by type:
+
+    - stacked_bars: bars of named segments, optional bool `show_totals` (default false)
+      that prints each bar's summed total at its end;
+    - bars: items, one value each;
+    - interval: rows of {label, estimate, low, high} (low <= estimate <= high), optional
+      `zero_label`, `left_label`, `right_label` and `shade` ('left' or 'right' of zero).
+    """
     kind = _get(ch, "type", str, where)
     if kind not in CHART_TYPES:
         raise ContentError(f"{where}.chart type '{kind}' not in {CHART_TYPES}")
     _get(ch, "unit", str, where)
     if "show_totals" in ch and not isinstance(ch["show_totals"], bool):
         raise ContentError(f"{where}.show_totals: expected bool")
-    if kind == "stacked_bars":
+    if kind == "interval":
+        for f in ("zero_label", "left_label", "right_label"):
+            _opt_str(ch, f, where)
+        if ch.get("shade", "left") not in ("left", "right"):
+            raise ContentError(f"{where}.shade must be 'left' or 'right'")
+        for i, row in enumerate(_items(ch, "rows", where, fields=("label",))):
+            w = f"{where}.rows[{i}]"
+            low, est, high = (_get(row, f, float, w) for f in ("low", "estimate", "high"))
+            if not low <= est <= high:
+                raise ContentError(f"{w} '{row['label']}': needs low <= estimate <= high, got "
+                                   f"{low}, {est}, {high}")
+    elif kind == "stacked_bars":
         for i, bar in enumerate(_items(ch, "bars", where, fields=("label",))):
             for j, seg in enumerate(_items(bar, "segments", f"{where}.bars[{i}]",
                                            fields=("name",))):
