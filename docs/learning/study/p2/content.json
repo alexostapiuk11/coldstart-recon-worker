@@ -30,21 +30,21 @@
     {
       "id": "interval",
       "term": "Spread versus interval",
-      "plain": "**Spread** is where single runs land. A 95% **interval** is where the **median** would land on a re-run. A **bootstrap** redraws the runs with replacement 10,000 times and keeps the middle 95% of medians.",
+      "plain": "**Spread** is where single runs land. A 95% **interval** says how far the **median** itself moves between re-runs: a plausible range for the true median. A **bootstrap** imagines the re-runs: it redraws the runs with replacement, 10,000 times, and keeps the middle 95% of medians.",
       "analogy": "",
       "why": "A1's arm A interval spans a stretch where no run landed and excludes a value where nine did."
     },
     {
       "id": "prereg",
       "term": "Pre-registration",
-      "plain": "Commit the hypotheses, analysis, exclusions and stopping rule **before the data exists**. The git timestamp is the proof.",
+      "plain": "Commit the hypotheses, analysis, exclusions and stopping rule **before the data exists**. The git timestamp is the evidence.",
       "analogy": "Sealing your prediction in an envelope before the match.",
       "why": "A1's predates its campaign data, not three paid reconnaissance captures, and says so; A6's campaign stays unread by its own rule."
     },
     {
       "id": "pairing",
       "term": "Paired, interleaved runs",
-      "plain": "Run the arms side by side in a shuffled order, so a slow hour or a drifting host hits every arm alike. Arm A today, arm B tomorrow mixes the arm with the day.",
+      "plain": "Run the arms close together in a shuffled order, so a slow hour or a drifting host hits every arm about equally. Arm A today, arm B tomorrow mixes the arm with the day.",
       "analogy": "Weighing two parcels on one scale in the same minute: if the scale drifts, the difference survives.",
       "why": "A1 ran 100 shuffled triples, one run per arm; A5 ran both traffic patterns inside every server start."
     },
@@ -58,23 +58,23 @@
     {
       "id": "amendment",
       "term": "Amendment versus forking path",
-      "plain": "An **amendment** is a dated, written rule change: what changed, why, what had been seen. A **forking path** is an unrecorded choice made after seeing the data. A change after the data is labelled post hoc.",
+      "plain": "A **forking path** is an analysis choice that depends on the data seen; unrecorded, no reader can discount it. An **amendment** is a dated, written rule change: what changed, why, what had been seen. One made after the data is still labelled post hoc.",
       "analogy": "",
-      "why": "A4's amendments were dated and made before its cell data was analysed; A5's Amendment 3 extended its gate after an inconclusive verdict, and its post says so."
+      "why": "A4's amendments are dated and say what had been seen: two came after its cell runs, before their analysis. A5's Amendment 3 extended its gate after an inconclusive verdict, and its post says so."
     },
     {
       "id": "failed",
       "term": "A failed gate is a result",
-      "plain": "Publish the failure, every miss and the likely cause, instead of the model's answer. Measured inputs stand; model numbers appear only labelled unvalidated.",
+      "plain": "Publish the failure and every miss, with what is known of the cause. Measured inputs stand; the model's numbers may appear, but only labelled unvalidated.",
       "analogy": "",
-      "why": "A2's simulator failed twice, 34 of 37 bins then 37 of 37; A4's failed with 10 of 13, so its GPU counts are not validated."
+      "why": "A2's simulator failed twice, 34 of 37 judged bins missed, then 37 of 37; A4's missed 10 of 13, so its GPU counts are not validated."
     }
   ],
   "views": [
     {
       "level": "concept",
       "title": "From claim to trust",
-      "caption": "Each step guards the next; the boxes are the cards above: [rules](p2:prereg), [spread](p2:percentiles), [intervals](p2:interval), [fair comparison](p2:pairing), [the gate](p2:gate).",
+      "caption": "A composite of the artifacts, not one artifact's path: A1 had no model, so no gate. The boxes are the cards above: [rules](p2:prereg), [spread](p2:percentiles), [intervals](p2:interval), [the gate](p2:gate), [fair comparison](p2:pairing).",
       "nodes": [
         {
           "id": "claim",
@@ -101,18 +101,18 @@
           "row": 0
         },
         {
-          "id": "pairing",
-          "label": "Compared fairly",
-          "sub": "paired, interleaved runs",
-          "kind": "system",
+          "id": "gate",
+          "label": "Model checked by gate",
+          "sub": "only where a model stands in; pass, fail or inconclusive",
+          "kind": "focus",
           "col": 2,
           "row": 1
         },
         {
-          "id": "gate",
-          "label": "Model checked by gate",
-          "sub": "pass, fail or inconclusive",
-          "kind": "focus",
+          "id": "pairing",
+          "label": "Compared fairly",
+          "sub": "paired, interleaved runs",
+          "kind": "system",
           "col": 1,
           "row": 1
         },
@@ -136,14 +136,14 @@
         },
         {
           "from": "interval",
-          "to": "pairing"
-        },
-        {
-          "from": "pairing",
           "to": "gate"
         },
         {
           "from": "gate",
+          "to": "pairing"
+        },
+        {
+          "from": "pairing",
           "to": "limits"
         }
       ]
@@ -166,7 +166,7 @@
           }
         ]
       },
-      "axis": "Width of the bootstrap interval on the median, in seconds. Same two clusters of runs; only how many fall in each changes.",
+      "axis": "Width of the bootstrap interval on the median, in seconds. Two constructed clusters, 99 runs in all; only how many fall in each changes.",
       "read_as": "Near an even split, redrawn medians land in either cluster, so the interval spans the gap. At 70/29 they all land in the big one. Width follows where the median sits, not how far runs scatter."
     },
     {
@@ -238,7 +238,7 @@
         "note": "Hollow circle: largest repeat-host run, given for A and B only."
       },
       "axis": "Seconds of total cold start, about 100 runs per set-up: p50, p90, p95.",
-      "read_as": "The order holds out to p95, yet B's largest run is longer than A's: the median ranking says nothing about the far tail."
+      "read_as": "The order holds out to p95, yet B's largest repeat-host run is longer than A's. A handful of runs, but the median ranking is not evidence about the far tail."
     },
     {
       "title": "Three gate runs that failed",
@@ -298,7 +298,7 @@
     },
     {
       "q": "Same two clusters: why does 51/48 give a 5.00 s interval and 70/29 give 0.00 s? Must intervals shrink with more runs?",
-      "a": "Near an even split the median can fall in either cluster, so the interval spans the gap. Width follows the data's shape, so no: A1's own data contradicted 'it shrinks as runs accumulate'."
+      "a": "Near an even split a redrawn median can fall in either cluster, so the interval spans the gap; at 70/29 it almost never leaves the big one. Not necessarily: it shrinks only on average, and a new run can move the split toward even. A1's own data contradicted 'it shrinks as runs accumulate'."
     },
     {
       "q": "Why don't 10,000 more resamples make an interval more trustworthy?",
@@ -310,11 +310,11 @@
     },
     {
       "q": "What separates an amendment from a forking path?",
-      "a": "The record and the timing: an amendment is dated in git and says what had been seen. A change after the data stays honest only if labelled post hoc, like A1's first-touch rule."
+      "a": "The record: an amendment is dated in git and says what had been seen, so a reader can weigh it. Recording does not make a data-dependent change neutral, so one made after the data is labelled post hoc, like A1's first-touch rule."
     },
     {
       "q": "Why interleave arms instead of running each in a block?",
-      "a": "In blocks, drift over time lands on one arm and looks like its effect, inseparable afterwards. Interleaved, drift hits every arm alike."
+      "a": "In blocks, drift over time lands on one arm and looks like its effect, inseparable afterwards. Interleaved, drift hits every arm about equally: it adds noise, not a bias."
     }
   ],
   "sources": [
