@@ -163,7 +163,10 @@ def waterfall(rows, out_path) -> Path:
             _draw(i, platform, "T_platform (not attributed)", RESIDUAL_COLOR)
             if s1 is not None:
                 _draw(i, s1, "S1 imports", "#8e6fc4")
-            _draw(i, weights, "T_weights (S2+S3)", "#2f6fd0")
+            # Launch of `vllm serve` to the engine's "Model loading took" line. That
+            # is process start-up plus loading, and start-up is most of it (arm A:
+            # 28 s of 46 s), so the segment is not called weight loading.
+            _draw(i, weights, "Server launch to model loaded (S2+S3)", "#2f6fd0")
 
             if bracket is not None:
                 present: dict[str, float] = {}
@@ -226,7 +229,9 @@ def waterfall(rows, out_path) -> Path:
                 )
 
             if s6 is not None:
-                _draw(i, s6, "S6 cold TTFT", "#4f6d7a")
+                # The S6 mark is stamped after request 1's whole reply has been read,
+                # so this is the first request's full latency, not time to first token.
+                _draw(i, s6, "S6 first request", "#4f6d7a")
         else:
             _draw(i, platform, "T_platform (not attributable)", RESIDUAL_COLOR)
             _draw(i, process, "S2→ready (engine merged phases)", "#7f8fa6")

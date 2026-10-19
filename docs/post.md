@@ -38,10 +38,11 @@ most effort. Ranked before writing anything below:
 2. **The compile cache buys KV cache capacity, not just seconds.** Transfers
    wherever memory profiling runs a real forward pass, which is everywhere in
    vLLM.
-3. **A cold compile also slows weight loading**, by more than measurement
-   noise and for reasons this experiment does not settle. Transfers as a
-   caution about attribution: the phase you name is not the only thing the
-   cache changes.
+3. **A warm compile cache also shortens the start-up that comes before the
+   weights load**, by 8.68 s [8.39, 8.99] paired within all 100 triples, while
+   vLLM's own reported loading time does not move (0.03 s [−0.10, 0.18]). The
+   reasons are not settled by this experiment. Transfers as a caution about
+   attribution: the phase you name is not the only thing the cache changes.
 4. **"Ready" and "fast" coincide here** — the pre-registered expectation was
    that they would not. Transfers as a method correction, not a law.
 5. **The absolute seconds.** Least transferable, and last: they are a property
@@ -86,26 +87,51 @@ C 0/100.
 
 ![Cold start decomposition](figures/waterfall.png)
 
-Median seconds per phase. Every row sums to that arm's median total; nothing is
-hidden in a residual.
+Median seconds per phase. Each run's phases sum to that run's `T_total` to
+within a few tens of microseconds, so no time is hidden in a residual. A column
+of *medians* is a different matter: a median is not additive, so the rows below
+do not sum to the median total. They sum to 82.49, 66.57 and 38.90 s against
+median totals of 81.12, 65.43 and 39.37 s, gaps of +1.37, +1.14 and −0.47 s that
+come from taking medians and are not unmeasured time. The stacked bars in the
+figure are these medians stacked, so each bar ends at its column sum rather than
+at the median total.
 
 | phase | A | B | C |
 |---|---:|---:|---:|
 | `T_platform` (queue, not attributable to us) | 4.37 | 4.07 | 4.83 |
 | S1 imports | 0.00 | 0.00 | 0.00 |
-| `T_weights` (S2+S3, load into HBM) | 45.83 | 30.35 | 21.34 |
+| `T_weights`: server launch to model loaded (S2+S3) | 45.83 | 30.35 | 21.34 |
 | S4b compilation | 19.01 | 18.79 | **0.33** |
 | S4c memory profiling | 0.09 | 0.11 | 0.17 |
 | S4e CUDA graph capture | 4.00 | 4.00 | 4.00 |
 | S4 unattributed (merged: S4a, S4d) | 4.46 | 4.38 | 3.83 |
 | S5 ready (health poll) | 4.43 | 4.57 | 4.10 |
-| S6 cold TTFT | 0.30 | 0.30 | 0.30 |
-| **`T_total`** | **81.12** | **65.43** | **39.37** |
+| S6 first request (request 1's whole reply, not time to first token) | 0.30 | 0.30 | 0.30 |
+| sum of the rows above | 82.49 | 66.57 | 38.90 |
+| **`T_total`** (median of the per-run totals) | **81.12** | **65.43** | **39.37** |
 
 S4a and S4d are not separately delineated by this engine build. They are shown
 merged into the unattributed row rather than dropped, and the row is drawn on
 the chart rather than left as whitespace — an unlabelled 4.4 s is exactly the
 kind of gap a reader is entitled to see.
+
+**What `T_weights` contains.** The span starts when the probe launches
+`vllm serve` and ends at vLLM's own "Model loading took" line, so it holds the
+server's start-up as well as the load. vLLM reports its own loading time on that
+line, which lets the two be separated. Medians for arms A, B and C: loading
+17.40, 4.57 and 4.54 s; start-up before it 28.19, 25.28 and 16.67 s. Most of the
+phase is start-up. In all 300 runs the engine log shows the API server banner,
+architecture resolution and engine initialisation, in that order, between the
+launch and the load line; this campaign does not time them separately. The name
+`T_weights` was fixed in the pre-registration and is kept so that every number
+here matches the committed analysis, but it should be read as "server launch to
+model loaded".
+
+**What the S6 row measures.** The probe stamps the S6 "first token" mark after
+request 1's whole reply, up to 16 tokens, has been read, so the 0.30 s row is the
+first request's full latency. The time to first token proper is the `ttft` field
+recorded with every request: 0.042 s as a median for request 1 in each arm
+(0.0422, 0.0416 and 0.0415 s).
 
 ## The distribution, not the mean
 
@@ -190,23 +216,35 @@ The paired within-host contrast for A→B is 14.93 s [13.86, 15.93], consistent
 with the pooled 15.48 s. With a single host these two estimators see nearly the
 same data, so this is a consistency check, not independent evidence.
 
+`t_weights` is the launch-to-model-loaded span described under the decomposition
+table, so the weight-cache contrast is not purely a loading contrast. Splitting
+the paired 14.93 s with vLLM's own reported loading time: 12.01 s [11.24, 12.70]
+is loading and 2.75 s [2.39, 3.04] is start-up. The weight cache acts mostly on
+loading; the compile cache's effect on this phase, below, is entirely in
+start-up.
+
 ### The part the compile cache saves that isn't compilation
 
 B→C saves 26.07 s of total cold start but only 18.46 s of compilation. The
-missing ~7.6 s is **weight loading**: arm C loads weights 8.85 s [8.37, 9.66]
-faster than arm B, paired within all 100 triples — far outside noise, on arms
-that differ only in compile cache configuration.
+missing ~7.6 s turns up in `T_weights`, the launch-to-model-loaded span: arm C
+reaches vLLM's "Model loading took" line 8.85 s [8.37, 9.66] sooner than arm B,
+paired within all 100 triples, on arms that differ only in compile cache
+configuration.
+
+That is not faster weight loading. vLLM reports its own loading time on that
+line, and it is the same in B and C: 4.57 s and 4.54 s as medians, a paired
+difference of 0.03 s [−0.10, 0.18]. The whole difference is in the start-up
+before loading begins: 8.68 s [8.39, 8.99], paired.
 
 I checked what it is not. Not host placement (one host; the contrast is
 within-triple). Not position in the triple (C ran third 40 times, B 38). Not
-the preceding arm (that effect is 1–2 s). Candidate mechanisms it *could* be —
-compile work beginning before the S3 boundary and being attributed to loading,
-or CPU contention from compilation workers during load — are hypotheses this
-campaign cannot separate. It writes its compile cache to container disk rather
-than the volume, so contention for the weight volume is ruled out.
+the preceding arm (that effect is 1–2 s). What it is, this campaign cannot say:
+nothing here times the server banner, architecture resolution and engine
+initialisation separately.
 
 Reported because the honest version of "the compile cache saves 26 seconds" is
-that **18.5 s of it is compilation and the rest is something else.**
+that **18.5 s of it is compilation and the rest is something else, in the
+server's start-up before the weights load.**
 
 ---
 
@@ -229,13 +267,19 @@ profiler is not wrong; it correctly reports less free memory, and vLLM sizes
 the cache to what it saw. The capacity loss then persists for the entire life
 of the replica — long after the compiler's memory is gone.
 
+The mechanism and the direction were registered in advance; the two values were
+not unseen. The reconnaissance captures had already logged 35,792 tokens on a
+cold compile and 43,040 on a warm one, one run each (see the timeline at the
+end). What the campaign adds is that they held in all 100 runs of every arm,
+with no run differing.
+
 ---
 
 ## Ready is already fast
 
 ![Warmup](figures/warmup.png)
 
-The pre-registered expectation, written before measurement, was "ready is not
+The pre-registered expectation, written before the campaign data, was "ready is not
 fast": that a freshly-ready replica would serve its first requests slowly.
 
 **It does not, at this configuration.** Request 1 lands 7.6–7.7 % above steady
@@ -386,24 +430,60 @@ python scripts/analyse.py --store data/campaign.jsonl > analysis.json
 python scripts/render_figures.py --store data/campaign.jsonl --out build/figures
 ```
 
+The statements about what `T_weights` contains and what the S6 row measures are
+not in `analysis.json`; a separate script derives them from the same file:
+
+```bash
+python scripts/weights_phase_check.py --store data/campaign.jsonl
+```
+
 The bootstrap is deterministically seeded, so a re-run reproduces
 `data/analysis.json` byte for byte.
 
-The pre-registration in `docs/experiment.md` was committed **2026-08-28**, four
-days before the first run on **2026-09-01T22:01 −07:00**. Every hypothesis,
-both contrasts, the exclusion rules, the stopping rule and the headline
-selection rule predate the data.
+The pre-registration in `docs/experiment.md` was committed **2026-08-28
+22:39 −07:00**. It predates the campaign data. It does not predate all paid data,
+and the difference matters.
 
-Three amendments landed after measurement began, and it is worth being exact
-about which:
+**Before it:** three reconnaissance captures of this stack, run that afternoon
+(16:28–16:32 −07:00 by the container clocks in `fixtures/vllm_logs/`), to learn
+what vLLM prints and what RunPod returns. They shaped the document. H3's premise
+(`torch.compile` took 38.96 s of a 53.73 s engine init) and H5 both come from
+them, as `docs/experiment.md` says. In particular the two KV capacities H5
+concerns, 35,792 tokens on a cold compile and 43,040 on a warm one, had already
+been seen once each. The campaign shows they hold in every run; it did not
+discover them.
 
-- **the first-touch separation rule** (32 minutes after window one) — a
-  post-hoc analysis decision, discussed above;
-- **the window spacing note** — a disclosure that the windows were hours apart
-  rather than separate days, which weakens a claim rather than enabling one;
-- **the stopping decision** — recorded after stopping, which is the only order
-  in which it can be recorded.
+**Between it and the first retained run:** two priming runs for arm C's compile
+cache and three smoke runs (`data/priming.jsonl`, `data/smoke.jsonl`, both
+2026-08-29), then a first campaign window of 27 runs on 2026-08-31 and one
+further failed arm A run, all discarded (`data/discarded-window-0.jsonl` and
+`-0b.jsonl`). The window was discarded in full when the pinned image changed; the
+cause is recorded in `docs/experiment.md`. So the first campaign run came about
+2 days 21 hours after the pre-registration. "Four days" is the rounded gap (3 days 23
+hours) to the first *retained* run, **2026-09-01T22:01 −07:00**.
 
-None of these changed a hypothesis or a contrast. The git history is the
-evidence, and it is public precisely so the ordering is checkable rather than
-asserted.
+What the ordering supports is therefore narrower than "before any paid data":
+the hypotheses, both contrasts, the exclusion rules, the stopping rule and the
+headline selection rule were fixed before any data that this post publishes.
+
+Amendments to `docs/experiment.md` after the first campaign window began, by git
+author date:
+
+- **2026-08-31 21:59 and 22:27 — two image re-pins and the campaign restart**,
+  forced by a disk-fill defect in arm A that the first window exposed;
+- **2026-09-01 21:11 — H4 scoped**: host placement is RunPod's to decide, so H4
+  may be unanswerable, and the host count is committed to be published. It was
+  written after seeing two hosts across the discarded window's 27 runs, so it
+  narrows a hypothesis in light of campaign data, not before any;
+- **2026-09-02 00:33 — the first-touch separation rule** (32 minutes after window
+  one), a post-hoc analysis decision discussed above, recorded in the same commit
+  as the flat-warmup finding;
+- **2026-09-02 19:45 — the window spacing note**, a disclosure that the windows
+  were hours apart rather than separate days, which weakens a claim rather than
+  enabling one;
+- **the stopping decision** — recorded after stopping, which is the only order in
+  which it can be recorded.
+
+None of these changed a contrast or the headline selection rule. The H4 scoping
+narrowed what one hypothesis could answer. The git history is the evidence, and it
+is public precisely so the ordering is checkable rather than asserted.
