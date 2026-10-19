@@ -799,8 +799,10 @@ def test_a_segment_name_keeps_its_colour_in_every_chart_of_a_page():
     colour = {}
     for slot, name in chips:
         assert colour.setdefault(name, slot) == slot, name  # same name, same colour
-    assert colour == {"Weights": "s0", "Everything else": "s1", "Platform": "s2",
-                      "Compile": "s3"}
+    # Weights and Compile are canonical phases with fixed slots (7 and 1); the other two
+    # names take the lowest slots no name on the page uses yet.
+    assert colour == {"Weights": "s7", "Everything else": "s0", "Platform": "s2",
+                      "Compile": "s1"}
     segs = re.findall(r'<rect class="seg (s\d)"[^>]*><title>([^:]+):', page)
     assert all(colour[n] == s for s, n in segs)
     # a chart on its own still colours by its own order
@@ -1245,3 +1247,38 @@ def test_edge_label_moves_to_the_other_side_rather_than_under_a_box():
         assert not overlaps, (x, y, anchor)
     # labels are drawn after the boxes, so a label that cannot avoid a box stays on top
     assert out.rindex('class="elabel"') > out.rindex('<g class="node')
+
+
+# ---- canonical segment colours ----
+
+def test_canonical_phases_have_one_colour_on_every_page():
+    from study.svg import CANONICAL_SEGMENT_SLOTS, segment_slots
+    page_a = segment_slots([_stacked("Platform (by subtraction)", "Compile", "First token")])
+    page_b = segment_slots([_stacked("Weights", "Everything else: scratch space and the KV cache"),
+                            _stacked("First token", "Server launch to model loaded", "Compile")])
+    for slots in (page_a, page_b):
+        for name, slot in slots.items():
+            assert slot == CANONICAL_SEGMENT_SLOTS[name], name
+    assert page_a["Compile"] == page_b["Compile"] == 1
+    assert len({k for n, k in CANONICAL_SEGMENT_SLOTS.items()
+                if not n.startswith("Everything else")}) == 8
+
+
+def test_a_canonical_slot_that_collides_in_one_chart_falls_back_to_a_free_one():
+    from study.svg import segment_slots
+    chart = _stacked("Platform (by subtraction)",
+                     "Everything else: scratch space and the KV cache",
+                     "Server launch to model loaded")
+    slots = segment_slots([chart])
+    assert slots["Platform (by subtraction)"] == 2  # first come keeps the canonical slot
+    assert slots["Server launch to model loaded"] == 0
+    assert slots["Everything else: scratch space and the KV cache"] not in (0, 2)
+    # without the clash, it keeps its canonical slot
+    alone = segment_slots([_stacked("Weights", "Everything else: scratch space and the KV cache")])
+    assert alone["Everything else: scratch space and the KV cache"] == 2
+
+
+def test_unknown_names_avoid_the_slots_canonical_phases_take_on_the_page():
+    from study.svg import segment_slots
+    slots = segment_slots([_stacked("Mystery", "Compile"), _stacked("Server launch to model loaded")])
+    assert slots == {"Compile": 1, "Server launch to model loaded": 0, "Mystery": 2}

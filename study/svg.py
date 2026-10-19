@@ -460,11 +460,50 @@ def _ghost_geometry(chart: dict) -> tuple[str, float, float] | None:
     return g["on_bar"], start, width
 
 
+# Cold-start phases and memory parts that recur across units keep one colour on every
+# page. "Everything else" shares slot 2 with the platform residual: the two never meet in
+# one chart today, and if they do, segment_slots moves the later one to a free slot.
+CANONICAL_SEGMENT_SLOTS = {
+    "Server launch to model loaded": 0,
+    "Compile": 1,
+    "Platform (by subtraction)": 2,
+    "Graph capture": 3,
+    "Memory profiling": 4,
+    "Ready check": 5,
+    "First token": 6,
+    "Weights": 7,
+    "Everything else: scratch space and the KV cache": 2,
+}
+
+
 def segment_slots(charts: list[dict]) -> dict[str, int]:
-    """One colour slot (0-7) per segment name across several stacked charts, so a name is
-    the same colour in each. Names take slots in order of first appearance; once all
-    eight are used, a new name takes the lowest slot no other name in its chart has."""
+    """One colour slot (0-7) per segment name across a page's stacked charts.
+
+    Canonical names (CANONICAL_SEGMENT_SLOTS) go first and take their fixed slot, so a
+    phase is the same colour on every page; if that slot is already used by another name
+    in the same chart, the name takes the lowest slot no name in that chart uses or
+    claims. Other names then take slots in order of first appearance: the lowest slot no
+    name on the page uses, or once all eight are used, the lowest no other name in its
+    chart has."""
     slots: dict[str, int] = {}
+    for chart in charts:
+        names = _segment_names(chart)
+        claimed = {slots[n] for n in names if n in slots}
+        wanted = [n for n in names if n not in slots and n in CANONICAL_SEGMENT_SLOTS]
+        clashed = []
+        for name in wanted:
+            k = CANONICAL_SEGMENT_SLOTS[name]
+            if k in claimed:
+                clashed.append(name)
+            else:
+                slots[name] = k
+                claimed.add(k)
+        reserved = {CANONICAL_SEGMENT_SLOTS[n] for n in names if n in CANONICAL_SEGMENT_SLOTS}
+        for name in clashed:
+            free = ([k for k in range(8) if k not in claimed | reserved]
+                    or [k for k in range(8) if k not in claimed] or [0])
+            slots[name] = free[0]
+            claimed.add(free[0])
     for chart in charts:
         names = _segment_names(chart)
         for name in names:
