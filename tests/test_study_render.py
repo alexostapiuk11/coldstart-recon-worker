@@ -520,6 +520,9 @@ def test_narrow_list_names_each_nodes_links():
     dom = _dom_ids(html)
     node = re.search(rf'id="{dom[("req", "R1")]}".*?</button>', html, re.DOTALL).group(0)
     assert "Links: D1 · D2 · D4" in node
+    # a decision lists its links in lane order: requirements, concepts, then results
+    node = re.search(rf'id="{dom[("dec", "d0")]}".*?</button>', html, re.DOTALL).group(0)
+    assert "Links: R1 · C1 · F1" in node
 
 
 def test_barycentre_order_is_deterministic_and_follows_neighbours():

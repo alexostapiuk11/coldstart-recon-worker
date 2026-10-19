@@ -341,7 +341,7 @@ def map_section(c: dict) -> str:
         linked[a].append((b, why))
         # A result's own panel already leads with its takeaway; do not repeat it per link.
         linked[b].append((a, "" if nodes[b]["kind"] == "res" else why))
-    order = {d: i for i, d in enumerate(nodes)}
+    order = {d: (LANE_ORDER.index(n["kind"]), i) for i, (d, n) in enumerate(nodes.items())}
     for links in linked.values():
         links.sort(key=lambda t: order[t[0]])
 
