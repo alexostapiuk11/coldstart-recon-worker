@@ -95,7 +95,7 @@ def render_brief(c: dict) -> str:
             out.append(line)
         out.append("")
     if c.get("views"):
-        out += ["## System views (C4)", ""]
+        out += ["## System views (C4)" if c["kind"] == "artifact" else "## Views", ""]
         for v in c["views"]:
             out += [f"### {v['title']} ({v['level']})", "", v["caption"], ""]
             labels = {n["id"]: n["label"] for n in v["nodes"]}

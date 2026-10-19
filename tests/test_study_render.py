@@ -647,3 +647,10 @@ def test_concept_with_an_id_gets_an_anchor_and_every_page_id_is_unique():
     assert len(ids) == len(set(ids))
     from study.page import CSS
     assert "section,.card[id]{scroll-margin-top:64px}" in CSS
+
+
+def test_prereq_brief_titles_its_views_without_c4():
+    from tests.study_examples import prereq_unit
+    brief = render_brief(prereq_unit())
+    assert "\n## Views\n" in brief and "(C4)" not in brief
+    assert "\n## System views (C4)\n" in render_brief(artifact_unit())

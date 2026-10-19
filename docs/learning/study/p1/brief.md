@@ -17,7 +17,7 @@ Used by: a1, a2, a4, a5
 - **Serverless GPUs**: GPU replicas added when traffic needs them and removed after. Before your code runs, the platform queues the request, finds a machine and starts a container. Think of it as: Renting kitchens as crowds come and go, paying even while one is still opening (artifact 2 counts every replica-second). Why it matters: Nothing of yours runs during the platform's part, so it is found by subtraction: total time minus the replica's own time.
 - **torch.compile and CUDA graphs**: Startup steps that pay now to be faster later. **torch.compile** makes faster GPU code and caches it on disk; **CUDA graph capture** records GPU launches for every token to replay. Why it matters: A warm compile cache cut compiling to 0.33 s; graph capture took the same time in every arm, cached or not.
 
-## System views (C4)
+## Views
 
 ### What a replica does before it answers (concept)
 
