@@ -66,8 +66,8 @@ Order, about 5 minutes per section, then recall:
 3. **Core decisions (4 to 6).** One card each: the problem, the options considered, what was
    chosen, why, and what it cost. The decision list is the page's spine; later sections
    point back to it.
-4. **Implementation flow.** From experiment design to the published claim, as one
-   left-to-right flow.
+4. **Implementation flow.** From experiment design to the published claim, as a phased
+   timeline with milestones (see "Implementation flow" below).
 5. **Results as meaning.** Each chart carries "this axis means", "read it as", and "so the
    decision was". Numbers are shown only where they derive the answer.
 6. **Interview card.** 30-second pitch, 2-minute version, and the likely hard follow-ups
@@ -77,6 +77,23 @@ Order, about 5 minutes per section, then recall:
 
 Design rules from the owner's complaints: short blocks instead of paragraphs; one diagram
 or interaction per idea; every chart annotated; no section that is only text.
+
+### Implementation flow (required for every artifact unit)
+
+The flow says how the implementation was actually done, step by step, so the owner can
+narrate it in order. Each artifact unit's `flow` has:
+
+- **Phases:** 5 to 12 steps grouped into at least two consecutive phases (for example
+  design, build, measure, analyse and publish), shown in the order written.
+- **Steps with outputs:** every step has a short label, a short detail and an `output`,
+  one line naming what concretely existed after it (for example "a frozen
+  pre-registration"); a step tied to a decision names it, and the page links the two.
+- **Milestones:** 2 to 6 steps are milestones, each with a date (`when`) and git evidence
+  (`evidence`: the commit, and its repo when that is not this one).
+- **Derived, not remembered:** steps, dates and commits come from the repo's git history
+  and plans (`git log`, the plan and spec documents), not from memory.
+- **Verified:** the schema enforces the rules above, and the per-unit evidence test checks
+  that every cited commit exists in its repo.
 
 ## Interview mode
 
