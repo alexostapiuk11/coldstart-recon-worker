@@ -25,7 +25,15 @@ built after the owner approves the pilot's format.
 
 ## Published pages
 
-Private Artifacts; URLs are added here once published.
+Private Artifacts.
+
+| unit | page |
+|---|---|
+| p1 | https://claude.ai/artifact/ERS8Z3tRWUkSD4131zgwzY |
+| a1 | https://claude.ai/artifact/2WmMh5z8C1bcehAmMurWQe |
+
+The published copy is the page body only (the Artifact tool adds its own document wrapper);
+the source is `docs/learning/study/<unit>/page.html`.
 
 ## Notes
 
