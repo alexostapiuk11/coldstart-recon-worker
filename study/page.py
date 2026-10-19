@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from study.links import link_index, req_label, traced
 from study.map import MAP_CSS, MAP_JS, has_map, map_section
-from study.schema import so_ids
+from study.schema import phased, so_ids
 from study.svg import chart_html, diagram_html, segment_slots
 from study.text import esc, inline, resolve_links, unit_url
 
@@ -129,6 +129,54 @@ opacity:.7;border-radius:2px;vertical-align:0}
 padding:10px 12px;position:relative}.step:before{counter-increment:s;content:counter(s);
 position:absolute;top:-10px;left:10px;background:var(--accent);color:var(--bg);width:20px;
 height:20px;border-radius:50%;font-size:12px;text-align:center;line-height:20px}
+.fl-sum{margin:0 0 10px}
+.fl-strip{list-style:none;padding:0;margin:0 0 18px;display:flex;flex-wrap:wrap;gap:8px}
+.fl-strip a{display:flex;flex-direction:column;gap:1px;padding:6px 12px 6px 30px;position:relative;
+border:1.5px solid var(--accent);border-radius:8px;background:var(--card);color:var(--fg);
+text-decoration:none;font-size:14px;line-height:1.35;max-width:100%}
+.fl-strip a:hover{background:var(--soft)}
+.fl-strip a:before{content:"";position:absolute;left:11px;top:50%;width:9px;height:9px;
+margin-top:-5px;background:var(--accent);transform:rotate(45deg)}
+.fl-sdate{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.fl-slabel{font-weight:600}
+.fl-tl{position:relative}
+.fl-tl:before{content:"";position:absolute;left:16.5px;top:12px;bottom:0;width:3px;opacity:.55;
+background:var(--muted)}
+.fl-phase:last-child .fl-step:last-child:after{content:"";position:absolute;left:12px;top:48px;
+bottom:0;width:12px;background:var(--bg)}
+.fl-phase{position:relative}
+.fl-band{position:relative;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px;
+margin:6px 0 10px 48px;padding:6px 0 4px;border-bottom:2px solid var(--fg)}
+.fl-band:before{content:"";position:absolute;left:-37px;top:12px;width:14px;height:14px;
+background:var(--fg);border:3px solid var(--bg);box-sizing:content-box;margin:-3px}
+.fl-band h3{margin:0;font-size:18px}
+.fl-pn{color:var(--muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.fl-pc{color:var(--muted);font-size:13px;margin-left:auto}
+.fl-steps{list-style:none;margin:0;padding:0}
+.fl-step{position:relative;padding:0 0 12px 48px;scroll-margin-top:64px}
+.fl-node{position:absolute;left:4px;top:12px;width:28px;height:28px;border-radius:50%;
+background:var(--card);border:2px solid var(--muted);color:var(--fg);font-size:13px;font-weight:700;
+display:flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums}
+.fl-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+.fl-card h4{margin:0 0 4px;font-size:16px;line-height:1.35}
+.fl-detail{color:var(--muted);font-size:15px}
+.fl-side{margin-top:8px;font-size:14px}
+.fl-side>*+*{margin-top:6px}
+.fl-out b,.fl-ev b{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;
+letter-spacing:.05em;margin-right:4px}
+.fl-when{display:inline-block;color:var(--muted);font-size:12px;border:1px solid var(--line);
+border-radius:99px;padding:0 8px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.fl-dec{display:inline-block;font-size:13px;border:1px solid var(--accent);border-radius:99px;
+padding:1px 10px;text-decoration:none;background:var(--card)}
+.fl-dec:hover{background:var(--soft)}.fl-dec b{font-weight:700}
+.fl-ev{color:var(--muted);font-size:12.5px;overflow-wrap:anywhere}
+.fl-ev code{background:transparent;padding:0;font-size:12px}
+.fl-tag{display:inline-block;background:var(--accent);color:var(--bg);font-size:11px;font-weight:700;
+letter-spacing:.08em;text-transform:uppercase;border-radius:4px;padding:1px 7px;margin-bottom:4px}
+.fl-ms .fl-node{left:0;top:8px;width:36px;height:36px;background:var(--accent);
+border-color:var(--accent);color:var(--bg);font-size:15px;box-shadow:0 0 0 4px var(--soft)}
+.fl-ms .fl-card{border:2px solid var(--accent);border-left-width:6px;background:var(--soft)}
+.fl-ms .fl-card h4{font-size:17px}
 .callout{border-left:4px solid var(--accent);padding:6px 12px;background:var(--soft);
 border-radius:0 8px 8px 0;margin:8px 0}
 .limits{border-left-color:var(--warn);background:var(--warnsoft)}
@@ -157,7 +205,11 @@ font-variant-numeric:tabular-nums}
 .links .lc{font-weight:700;font-variant-numeric:tabular-nums}.links .none{font-style:italic}
 .callout.links{font-size:15px;color:var(--fg);margin-top:10px}
 @media (min-width:1100px){body{font-size:18px}h1{font-size:36px}h2{font-size:26px}h3{font-size:18px}
-.lead{font-size:21px}.why{font-size:16px}}
+.lead{font-size:21px}.why{font-size:16px}
+.fl-card{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:4px 32px;padding:12px 18px}
+.fl-side{margin-top:0;padding-left:20px;border-left:1px solid var(--line)}
+.fl-card h4{font-size:18px}.fl-ms .fl-card h4{font-size:19px}.fl-detail{font-size:16px}
+.fl-side{font-size:15px}.fl-band h3{font-size:20px}}
 @media (max-width:600px){.diagram{display:none}.diagram-text{display:block}.dlegend{display:none}
 h1{font-size:24px}.lead{font-size:16px}
 .row{display:block}.row b{display:block;margin-bottom:1px}
@@ -342,6 +394,90 @@ def _interview(c):
         'AI chat; its last section is the interview-mode prompt.</p></section>')
 
 
+def _plain_flow(c):
+    steps = "".join(f'<div class="step"><b>{inline(s["label"])}</b>'
+                    f'<div class="why">{inline(s["detail"])}</div></div>' for s in c["flow"])
+    return (f'<section id="flow"><h2>Implementation flow</h2>'
+            f'<div class="flow">{steps}</div></section>')
+
+
+def _phases(flow):
+    """[(phase, [(step number, step), ...]), ...] in the order written; numbers run on
+    across phases from 1."""
+    out = []
+    for n, s in enumerate(flow, 1):
+        if not out or out[-1][0] != s.get("phase"):
+            out.append((s.get("phase"), []))
+        out[-1][1].append((n, s))
+    return out
+
+
+def _plural(n, word):
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+def _evidence(ev):
+    """Commits as plain monospace text: sha, then the repo when it is not this one, then
+    the note."""
+    parts = []
+    for e in ev:
+        tail = [f"in {esc(e['repo'])}"] if e.get("repo") else []
+        tail += [esc(e["note"])] if e.get("note") else []
+        parts.append(f"<code>{esc(e['commit'])}</code>" + (" " + ", ".join(tail) if tail else ""))
+    return f'<div class="fl-ev"><b>Evidence</b> {" · ".join(parts)}</div>'
+
+
+def _flow_step(n, s, codes, titles):
+    ms = bool(s.get("milestone"))
+    tag = '<span class="fl-tag">Milestone</span>' if ms else ""
+    side = []
+    if s.get("when"):
+        side.append(f'<span class="fl-when">{esc(s["when"])}</span>')
+    if s.get("output"):
+        side.append(f'<div class="fl-out"><b>Output:</b> {inline(s["output"])}</div>')
+    if s.get("decision"):
+        d = s["decision"]
+        side.append(f'<div><a class="fl-dec" href="#d-{esc(d)}"><b>Decision {codes[d]}</b> '
+                    f'{esc(titles[d])}</a></div>')
+    if s.get("evidence"):
+        side.append(_evidence(s["evidence"]))
+    return (f'<li class="fl-step{" fl-ms" if ms else ""}" id="flow-s{n}">'
+            f'<span class="fl-node" aria-hidden="true">{n}</span><div class="fl-card">'
+            f'<div class="fl-main">{tag}<h4>{inline(s["label"])}</h4>'
+            f'<div class="fl-detail">{inline(s["detail"])}</div></div>'
+            f'<div class="fl-side">{"".join(side)}</div></div></li>')
+
+
+def _flow(c):
+    """The flow as a vertical timeline: a milestone strip, then each phase as a band over
+    its steps. A unit whose flow has no phase or milestone keeps the plain cards."""
+    if not phased(c):
+        return _plain_flow(c)
+    flow = c["flow"]
+    codes = link_index(c)["dec_code"]
+    titles = {d["id"]: d["title"] for d in c.get("decisions", [])}
+    phases = _phases(flow)
+    marks = [(n, s) for n, s in enumerate(flow, 1) if s.get("milestone")]
+    strip = "".join(f'<li><a href="#flow-s{n}"><span class="fl-sdate">{esc(s["when"])}</span>'
+                    f'<span class="fl-slabel">{esc(s["label"])}</span></a></li>'
+                    for n, s in marks)
+    body = []
+    for i, (name, steps) in enumerate(phases, 1):
+        head = (f'<div class="fl-band"><span class="fl-pn">Phase {i} of {len(phases)}</span>'
+                f'<h3>{esc(name)}</h3><span class="fl-pc">{_plural(len(steps), "step")}'
+                "</span></div>")
+        items = "".join(_flow_step(n, s, codes, titles) for n, s in steps)
+        body.append(f'<div class="fl-phase">{head}<ol class="fl-steps" start="{steps[0][0]}">'
+                    f"{items}</ol></div>")
+    summary = (f'{_plural(len(flow), "step")} in {_plural(len(phases), "phase")}, '
+               f'{_plural(len(marks), "milestone")}')
+    return (f'<section id="flow"><h2>Implementation flow</h2>'
+            f'<p class="why fl-sum">{summary}. Milestones are the points where something '
+            'durable existed; jump to one:</p>'
+            f'<ol class="fl-strip" aria-label="Milestones">{strip}</ol>'
+            f'<div class="fl-tl">{"".join(body)}</div></section>')
+
+
 def _answer_first(c):
     """The 30-second answer and one chip per result, so the page opens on the conclusion."""
     pitch = c.get("interview", {}).get("pitch30")
@@ -380,10 +516,7 @@ def render_page(c: dict) -> str:
     if c.get("decisions"):
         add("decisions", "Decisions", _decisions(c))
     if c.get("flow"):
-        steps = "".join(f'<div class="step"><b>{inline(s["label"])}</b>'
-                        f'<div class="why">{inline(s["detail"])}</div></div>' for s in c["flow"])
-        add("flow", "Flow", f'<section id="flow"><h2>Implementation flow</h2>'
-            f'<div class="flow">{steps}</div></section>')
+        add("flow", "Flow", _flow(c))
     if c.get("results"):
         add("results", "Results", _results(c))
     if has_map(c):

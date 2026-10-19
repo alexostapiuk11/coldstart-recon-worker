@@ -1310,3 +1310,125 @@ def test_urls_in_links_are_not_scanned_for_numbers(tmp_path):
     u["sources"] = [{"file": src, "section": "Title"}]
     u["links"] = {"p1": "https://claude.ai/artifact/ERS8Z3tRWUkSD4131zgwzY"}
     assert untraced_numbers(u) == []
+
+
+# ---- implementation flow as a timeline ----
+
+from tests.study_examples import artifact_unit_with_flow
+
+
+def _flow(page):
+    return page.split('<section id="flow">')[1].split("</section>")[0]
+
+
+def _steps(flow):
+    """Each step's <li> HTML, in page order."""
+    return re.findall(r'<li class="fl-step[^"]*".*?</li>', flow, re.DOTALL)
+
+
+def test_plain_flow_renders_exactly_as_before():
+    flow = _flow(render_page(artifact_unit()))
+    assert flow == ('<h2>Implementation flow</h2><div class="flow">'
+                    + "".join(f'<div class="step"><b>Step {i}</b><div class="why">Detail {i}.'
+                              "</div></div>" for i in range(3))
+                    + "</div>")
+
+
+def test_phased_flow_keeps_the_section_id_and_nav_pill():
+    page = render_page(artifact_unit_with_flow())
+    assert '<a href="#flow">Flow</a>' in page
+    assert re.findall(r'<section id="([\w-]+)"', page).count("flow") == 1
+    assert '<div class="flow">' not in page
+
+
+def test_phases_are_bands_in_order_with_step_counts():
+    flow = _flow(render_page(artifact_unit_with_flow()))
+    bands = re.findall(r'<div class="fl-band">(.*?)</div>', flow, re.DOTALL)
+    names = [re.search(r"<h3>(.*?)</h3>", b).group(1) for b in bands]
+    assert names == ["Design", "Measure", "Analyse and publish"]
+    counts = [re.search(r'<span class="fl-pc">(.*?)</span>', b).group(1) for b in bands]
+    assert counts == ["2 steps", "3 steps", "3 steps"]
+    assert "Phase 1 of 3" in bands[0] and "Phase 3 of 3" in bands[2]
+    # every step sits inside its phase's list, numbered on across phases
+    phases = flow.split('<div class="fl-phase">')[1:]
+    assert [len(_steps(p)) for p in phases] == [2, 3, 3]
+    nodes = re.findall(r'<span class="fl-node" aria-hidden="true">(\d+)</span>', flow)
+    assert nodes == [str(i) for i in range(1, 9)]
+
+
+def test_each_step_shows_label_detail_output_when_and_number():
+    u = artifact_unit_with_flow()
+    steps = _steps(_flow(render_page(u)))
+    assert len(steps) == 8
+    for i, (s, li) in enumerate(zip(u["flow"], steps, strict=True), 1):
+        assert f'id="flow-s{i}"' in li
+        assert f"<h4>{esc(s['label'])}</h4>" in li
+        assert f'<div class="fl-detail">{esc(s["detail"])}</div>' in li
+        assert f'<div class="fl-out"><b>Output:</b> {esc(s["output"])}</div>' in li
+        assert f'<span class="fl-when">{esc(s["when"])}</span>' in li
+
+
+def test_milestones_are_marked_and_only_milestones():
+    u = artifact_unit_with_flow()
+    steps = _steps(_flow(render_page(u)))
+    for s, li in zip(u["flow"], steps, strict=True):
+        ms = bool(s.get("milestone"))
+        assert li.startswith('<li class="fl-step fl-ms"') == ms
+        assert ('<span class="fl-tag">Milestone</span>' in li) == ms
+
+
+def test_milestone_strip_links_each_milestone_with_its_date():
+    page = render_page(artifact_unit_with_flow())
+    flow = _flow(page)
+    strip = flow.split('<ol class="fl-strip"')[1].split("</ol>")[0]
+    items = re.findall(r'<a href="#(flow-s\d+)"><span class="fl-sdate">(.*?)</span>'
+                       r'<span class="fl-slabel">(.*?)</span></a>', strip)
+    assert items == [("flow-s2", "2026-08-28", "Pre-register the hypotheses and rules"),
+                     ("flow-s4", "2026-09-02 to 09-04", "Run interleaved triples"),
+                     ("flow-s8", "2026-09-12", "Publish what re-derives")]
+    assert flow.index("fl-strip") < flow.index("fl-tl")
+    assert "8 steps in 3 phases, 3 milestones" in flow
+
+
+def test_decision_chip_uses_the_decision_code_and_links_to_its_card():
+    page = render_page(artifact_unit_with_flow())
+    steps = _steps(_flow(page))
+    assert '<a class="fl-dec" href="#d-d1"><b>Decision D2</b> Decision 1</a>' in steps[1]
+    assert '<a class="fl-dec" href="#d-d2"><b>Decision D3</b> Decision 2</a>' in steps[2]
+    assert "fl-dec" not in steps[0]
+    assert '<span class="code">D2</span>Decision 1' in page  # the card shows the same code
+
+
+def test_evidence_is_plain_monospace_text_not_links():
+    steps = _steps(_flow(render_page(artifact_unit_with_flow())))
+    ev = steps[3].split('<div class="fl-ev">')[1].split("</div>")[0]
+    assert ev == ('<b>Evidence</b> <code>abcdef0</code> store committed · '
+                  '<code>0fedcba987</code> in ~/projects/other-repo, worker image pinned')
+    assert "<a" not in ev
+    assert "fl-ev" not in steps[4]  # no evidence, no line
+
+
+def test_every_flow_link_lands_on_an_existing_unique_id():
+    page = render_page(artifact_unit_with_flow())
+    ids = re.findall(r' id="([^"]+)"', page)
+    assert len(ids) == len(set(ids))
+    for target in _hrefs(_flow(page)):
+        assert target in ids, target
+
+
+def test_flow_text_is_escaped():
+    u = artifact_unit_with_flow()
+    u["flow"][1].update(label="<b>x</b>", output="<i>o</i>", when="<w>")
+    u["flow"][1]["evidence"][0]["note"] = "<n>"
+    flow = _flow(render_page(u))
+    for raw in ("<b>x</b>", "<i>o</i>", "<w>", "<n>"):
+        assert raw not in flow
+
+
+def test_timeline_css_is_two_columns_wide_and_one_column_on_phones():
+    from study.page import CSS
+    assert ".fl-step:not(:last-child):before" in CSS or ".fl-tl:before" in CSS
+    wide = _media(CSS, "min-width:1100px")
+    assert ".fl-card{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr)" in wide
+    assert ".fl-card{display:grid" not in CSS.split("@media")[0]
+    assert "overflow-wrap:anywhere" in CSS.split(".fl-ev{")[1].split("}")[0]
