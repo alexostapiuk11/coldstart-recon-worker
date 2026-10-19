@@ -272,8 +272,9 @@ def chart_html(chart: dict, uid: str) -> str:
             drawn = w - GAP if w > 2 * GAP else w
             p.append(f'<rect class="seg s{cls}{dim(name)}" x="{x:.1f}" y="{y + 20}" width="{drawn:.1f}" '
                      f'height="24" rx="2"><title>{esc(name)}: {_num(v)} {unit}</title></rect>')
-            # A plain bar's value is its total, shown at the tip; label stacked segments only.
-            if stacked and drawn >= len(_num(v)) * CHART_CHAR + 8:
+            # A plain bar's value is its total, shown at the tip; label stacked segments only,
+            # greyed ones too (in a muted ink), so a flat phase stays visible as a number.
+            if stacked and drawn >= len(_num(v)) * CHART_CHAR + 4:
                 p.append(f'<text class="segtext s{cls}{dim(name)}" x="{x + drawn / 2:.1f}" y="{y + 36}" '
                          f'text-anchor="middle">{_num(v)}</text>')
             x += w

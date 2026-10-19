@@ -697,3 +697,15 @@ def test_interval_against_zero_keeps_each_side_label_on_its_own_side():
                                out).group(1))
     assert axis_end > zero + 20
     assert 309 / width * 15 >= 11  # still readable on a phone
+
+
+def test_dimmed_segment_still_prints_its_value_in_a_muted_colour():
+    # a flat 4 s phase in an ~80 s bar is ~15 px wide: it must still show its "4"
+    chart = {"type": "stacked_bars", "unit": "s", "highlight": ["load"], "bars": [
+        {"label": "A", "segments": [{"name": "load", "value": 45.83},
+                                    {"name": "graph", "value": 4.0},
+                                    {"name": "rest", "value": 30.0}]}]}
+    out = chart_html(chart, "r9")
+    assert re.search(r'<text class="segtext s1 dim" [^>]*>4</text>', out)
+    from study.page import CSS
+    assert ".segtext.dim{fill:var(--muted)}" in CSS
