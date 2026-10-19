@@ -19,13 +19,22 @@ page (`page.html`) and a pasteable chat brief (`brief.md`). Design:
 |---|---|---|---|
 | p1 | LLM serving on a GPU | 20 | `p1/page.html`, `p1/brief.md` |
 | p2 | How these experiments earn trust | 20 | `p2/page.html`, `p2/brief.md` |
+| p3 | Delivery guarantees and duplicate payments | 20 | `p3/page.html`, `p3/brief.md` |
 | a1 | Where a vLLM cold start goes | 45 | `a1/page.html`, `a1/brief.md` |
 | a2 | An autoscaling simulator that failed its own test | 45 | `a2/page.html`, `a2/brief.md` |
 | a4 | Dedicate, swap or share | 45 | `a4/page.html`, `a4/brief.md` |
 | a5 | How many LoRA adapters fit on one GPU | 45 | `a5/page.html`, `a5/brief.md` |
+| a6 | Which duplicate-payment defense holds (results pending) | 45 | `a6/page.html`, `a6/brief.md` |
 | a7 | The anatomy of a matching engine's tail | 45 | `a7/page.html`, `a7/brief.md` |
 
-The unit for artifact 6 (in `~/projects/ledger-faults`) is not built yet.
+All eight units are built. A6 shows requirements, design, predictions and controls only: its
+campaign is running and its results are sealed (`~/projects/ledger-faults`, `docs/experiment.md`
+D40). When results exist, update `a6/content.json` (the predictions grid, results and limits) and
+rebuild.
+
+**While a campaign session runs** (`docs/experiment.md` A1/D37): quit Claude desktop, run no other
+Claude session, browser, build or test. These study pages were built while no campaign process was
+running.
 
 ## Published pages
 
@@ -35,10 +44,12 @@ Private Artifacts.
 |---|---|
 | p1 | https://claude.ai/artifact/ERS8Z3tRWUkSD4131zgwzY |
 | p2 | https://claude.ai/artifact/A4MJnGXGWMBmi5z5ntxZBz |
+| p3 | https://claude.ai/artifact/HspzVnu9oRQMqUjfrWUqZL |
 | a1 | https://claude.ai/artifact/2WmMh5z8C1bcehAmMurWQe |
 | a2 | https://claude.ai/artifact/7HwprMXHbJWfYWouMhLfDR |
 | a4 | https://claude.ai/artifact/RsJ9cD9eNMWorL5EgVgrat |
 | a5 | https://claude.ai/artifact/SAgFc2UtJ4GuyyRX3ZZmu2 |
+| a6 | https://claude.ai/artifact/W6LMjByKW9fJhEXnQDuA46 |
 | a7 | https://claude.ai/artifact/6mvtEiZeGL1qtiR2ySxif5 |
 
 The published copy is the page body only (the Artifact tool adds its own document wrapper);
