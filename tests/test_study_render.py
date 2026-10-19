@@ -484,14 +484,34 @@ def test_node_text_is_escaped():
     assert "<script>x" not in html and "<img src=x>" not in html
 
 
-def test_labels_fall_back_to_truncated_text_and_titles():
+def test_labels_are_card_titles_never_short_or_truncated():
     u = artifact_unit_with_links()
     del u["requirements"][0]["short"]
     u["requirements"][0]["text"] = "A requirement whose text runs well past forty characters."
-    del u["decisions"][0]["short"]
     html = map_section(u)
-    assert "A requirement whose text runs well past…" in html
-    assert '<span class="mlab">Decision 0</span>' in html
+    assert '<span class="mlab">A requirement whose text runs well past forty characters.</span>' in html
+    assert "…" not in html
+    # decisions, results and concepts ignore `short` in the map
+    assert '<span class="mlab">Decision 0</span>' in html and "Short d0" not in html
+    assert '<span class="mlab">A result</span>' in html and "Where the time goes" not in html
+    assert '<span class="mlab">Arm</span>' in html and "Arms A, B, C" not in html
+
+
+def _heading(page, anchor):
+    """(code, title) of the card with this id."""
+    h3 = re.search(rf' id="{re.escape(anchor)}"><h3>(.*?)</h3>', page).group(1)
+    m = re.fullmatch(r'<span class="code">([^<]+)</span>(.*)', h3)
+    return m.group(1), m.group(2)
+
+
+def test_every_map_label_and_code_equals_its_card_heading():
+    page = render_page(artifact_unit_with_links())
+    prefix = {"req": "req-", "dec": "d-", "res": "r-", "con": "c-"}
+    nodes = re.findall(r'class="mnode (\w+)" id="[\w-]+" data-ref="([^"]*)"[^>]*>'
+                       r'<span class="mcode">([^<]+)</span><span class="mlab">([^<]+)</span>', page)
+    assert len(nodes) == 3 + 4 + 2 + 2
+    for kind, ref, code, label in nodes:
+        assert _heading(page, prefix[kind] + ref) == (code, label), (kind, ref)
 
 
 def test_narrow_list_names_each_nodes_links():

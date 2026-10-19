@@ -18,7 +18,10 @@ SUB_LINES = 2  # ... and has room for two lines
 MAX_COL = 3
 MAX_ROW = 3
 MAX_ONE_LINE = 160
-MAX_SHORT = 40  # a map node's label
+# `short`: a requirement's name on its card and in the map; a result's answer-strip chip.
+# Decisions and concepts may still carry one (it is validated) but nothing shows it: the
+# map labels them with their card titles.
+MAX_SHORT = 40
 MAX_TAKEAWAY = 200
 
 

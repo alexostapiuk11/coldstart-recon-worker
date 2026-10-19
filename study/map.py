@@ -7,6 +7,9 @@ content order (D1, D2, ... match the decision cards); the other two columns are 
 by the barycentre of the decisions they link to, which keeps crossings low without any
 hand-written order.
 
+Each box shows its card's code and heading word for word (see _graph), wrapping to more
+lines as needed rather than truncating.
+
 Everything the reader sees is rendered here, escaped: the nodes, an edge element per
 link, and per node a <template> with its side-panel text. The JS only draws the edge
 curves from the laid-out boxes and toggles selection, so a link that is in the content
@@ -15,10 +18,10 @@ is in the HTML whether or not the JS runs.
 
 from __future__ import annotations
 
+from study.links import link_index, req_label
 from study.schema import so_ids
 from study.text import esc, inline
 
-MAX_LABEL = 40
 KIND_NAME = {"req": "Requirement", "dec": "Decision", "res": "Result", "con": "Key concept"}
 GROUP_HEAD = {
     "req": {"dec": "Decisions that meet it"},
@@ -238,41 +241,37 @@ def barycentre_order(items: list, neighbours: dict) -> list:
     return sorted(items, key=key)
 
 
-def _truncate(text: str, limit: int = MAX_LABEL) -> str:
-    if len(text) <= limit:
-        return text
-    cut = text[:limit].rsplit(" ", 1)[0].rstrip(",;:.")
-    return cut + "…"
-
-
 def _graph(c):
-    """Nodes (dicts keyed by DOM id) and edges (left DOM id, right DOM id, because)."""
+    """Nodes (dicts keyed by DOM id) and edges (left DOM id, right DOM id, because).
+
+    A node's label is its card's heading word for word, under the card's code, so a box
+    in the map and its card read the same. `short` is not used here.
+    """
+    ix = link_index(c)
     nodes = {}
 
-    def add(dom, kind, code, ref, label, title, text, note=""):
+    def add(dom, kind, code, ref, label, text, note=""):
         nodes[dom] = {"dom": dom, "kind": kind, "code": code, "ref": ref, "label": label,
-                      "title": title, "text": text, "note": note}
+                      "text": text, "note": note}
 
     req_dom, dec_dom, con_dom = {}, {}, {}
     for i, r in enumerate(c["requirements"]):
         req_dom[r["id"]] = f"m-r{i}"
         note = (f"No decision serves this requirement. {r['unlinked_reason']}"
                 if r.get("unlinked_reason") else "")
-        add(f"m-r{i}", "req", r["id"], r["id"], r.get("short") or _truncate(r["text"]),
-            r.get("short") or _truncate(r["text"]), r["text"], note)
+        add(f"m-r{i}", "req", r["id"], r["id"], req_label(r), r["text"], note)
     for i, d in enumerate(c["decisions"]):
         dec_dom[d["id"]] = f"m-d{i}"
-        add(f"m-d{i}", "dec", f"D{i + 1}", d["id"], d.get("short") or d["title"], d["title"],
+        add(f"m-d{i}", "dec", ix["dec_code"][d["id"]], d["id"], d["title"],
             d.get("why_short", ""))
     for i, r in enumerate(c.get("results", [])):
         note = (f"Supports no decision. {r['so_none_reason']}"
                 if r.get("so_none_reason") else "")
-        add(f"m-f{i}", "res", f"F{i + 1}", str(i), r.get("short") or r["title"], r["title"],
-            r.get("takeaway", ""), note)
+        add(f"m-f{i}", "res", ix["res_code"][i], str(i), r["title"], r.get("takeaway", ""),
+            note)
     for i, t in enumerate(k for k in c.get("concepts", []) if "id" in k):
         con_dom[t["id"]] = f"m-c{i}"
-        add(f"m-c{i}", "con", f"C{i + 1}", t["id"], t.get("short") or t["term"], t["term"],
-            t["plain"])
+        add(f"m-c{i}", "con", ix["con_code"][t["id"]], t["id"], t["term"], t["plain"])
 
     edges = []
     for d in c["decisions"]:
@@ -307,8 +306,8 @@ def _panel(n, linked, nodes):
     """The side-panel content for one node: its text, then its links grouped by kind."""
     kind = n["kind"]
     out = [f'<p class="mkind {kind}">{KIND_NAME[kind]} {esc(n["code"])}</p>',
-           f'<h3>{esc(n["title"])}</h3>']
-    if n["text"] and n["text"] != n["title"]:
+           f'<h3>{esc(n["label"])}</h3>']
+    if n["text"] and n["text"] != n["label"]:
         out.append(f'<p class="mtext">{inline(n["text"])}</p>')
     if n["note"]:
         out.append(f'<p class="mnote">{inline(n["note"])}</p>')
