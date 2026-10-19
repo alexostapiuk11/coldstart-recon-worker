@@ -24,7 +24,7 @@ Read first: How these experiments earn trust (P2), Delivery guarantees and dupli
 - **The four stacks and their contrasts**: Same client, topic, two consumers, schema and failure policy; only the defense differs. **N**: dual write, at-least-once (P3: atleast) consumer. **K**: dual write, consumer offsets inside a Kafka transaction. **I**: dual write, key checked in the ledger transaction. **O+I**: outbox relayed by Debezium, plus the key. **N→K**, **N→I** and **I→O+I** each add one defense. Every producer is idempotent; O+I's needs a config override.
 - **The fault matrix: nine cells, two timings**: Six faults plus a no-fault control (F0). Broker kill (F1) and pause (F2) can stress both sides; a producer blackhole (F3) and a service kill right after its source commit (F4-svc) the producer side; a random consumer kill (F4-con-r), a kill in the commit window (F4-con-t), a zombie (P3: groups) (F5) and a lost `COMMIT` reply (F6) the consumer side. **Random-time** cells (F1–F3, F4-con-r; 30 trials per stack, as for F0) ask how often; **targeted** cells (a code hook; 10 trials) ask whether.
 - **The commit-window duty cycle**: The share of a consumer's running time between its ledger `COMMIT` returning and its Kafka progress committing (`commitSync` for N and I, `commitTransaction` for K), measured in F0 trials over 20–50 s, the window random kills draw from. A random kill duplicates only if it lands inside the window, so the duty cycle should predict the F4-con-r duplicate rate (H5).
-- **Paired blocks, Newcombe and McNemar**: A **block** is one cell and one seed run on all four stacks in random order: the same fault schedule and payment stream. A void trial voids its whole block, re-run with a new seed, so analysed blocks stay paired (P2: pairing). For N vs K, only blocks where exactly one of the two had a duplicate (**discordant**) carry information: the exact McNemar test uses them, and Newcombe's paired interval (method 10) bounds the difference. Two contrasts are confirmatory: N vs K in F4-con-r (H5) and in F1+F2 (H4b).
+- **Paired blocks, Newcombe and McNemar**: A **block** is one cell and one seed run on all four stacks in random order: the same fault schedule and payment stream. A void trial voids its whole block, re-run with a new seed, so analysed blocks stay paired (P2: pairing). For N vs K, the exact McNemar test uses only blocks where exactly one of the two had a duplicate (**discordant**); Newcombe's paired interval (method 10), over all the cell's blocks, gives a plausible range for the difference. Two contrasts are confirmatory: N vs K in F4-con-r (H5) and in F1+F2 (H4b).
 - **The zero bound and the rule of three**: The trial is the unit: payments in one trial share a fault and are never pooled. If 0 of N trials show an anomaly, the per-trial probability is below 1 − 0.05^(1/N), one-sided 95%: 0.095 at N = 30, 0.259 at N = 10. The **rule of three**, about 3/N, approximates it.
 - **The detection gate, as run here**: Run after the pre-registration tag, before the campaign, and not counted in it: the checker on synthetic histories with every anomaly class planted; two positive controls (P3: controls) on **N only** (a commit-window kill must give a duplicate, a kill after the source commit a loss, each in at least 8 of 10 trials); a negative control of five no-fault trials per stack, all clean. All four must pass.
 
@@ -56,7 +56,7 @@ O+I runs consumer mode I; its service writes the outbox row in the payment's own
 
 - **Client**: 200/s open loop; assigns payment_id
 - **payment-service**: dual write (N, K, I) or outbox (O+I)
-- **Toxiproxy**: per-role broker proxies; one per consumer
+- **Toxiproxy**: per-role broker proxies; ledger-db, per consumer
 - **Kafka ×3, KRaft**: payments: 6 partitions, RF 3
 - **source-db**: payments, outbox: the authority
 - **Debezium on Connect**: WAL slot to topic; O+I only
@@ -77,12 +77,12 @@ O+I runs consumer mode I; its service writes the outbox row in the payment's own
 
 ### Inside one ledger consumer: where the defenses sit (component)
 
-Every mode runs this loop; only the key check and the Kafka step differ. K begins its transaction client-locally, commits Postgres, then sends one payments-applied record per payment and adds its offsets to the transaction before `before_kafka_commit`, so a kill there leaves a real open transaction. Hooks are named code points: disarmed, one volatile read; armed, they block until released or killed.
+Every mode runs this loop; only the key check (N and K skip it) and the Kafka step differ. K begins its transaction client-locally, commits Postgres, then sends one payments-applied record per payment and adds its offsets to the transaction before `before_kafka_commit`, so a kill there leaves a real open transaction. Hooks are named code points: disarmed, one volatile read; armed, they block until released or killed.
 
 - **Poll a batch**: 100 ms poll, up to 500 records
 - **after_poll hook**: batch in hand, no DB work (F5)
-- **Apply in Postgres**: apply_log rows, sorted increments
 - **Key check (I, O+I)**: processed ON CONFLICT, same txn
+- **Apply in Postgres**: apply_log rows, sorted increments
 - **before_ledger_commit**: statements done, COMMIT not sent (F6)
 - **Postgres COMMIT**: db_commit logged after it returns
 - **before_kafka_commit**: ledger committed, Kafka not (F4-con-t)
@@ -90,14 +90,14 @@ Every mode runs this loop; only the key check and the Kafka step differ. K begin
 - **Crash-only exit**: roll back, log, Runtime.halt(1)
 - **Event log**: JSONL: polls, commits, rebalances
 - Poll a batch → after_poll hook
-- after_poll hook → Apply in Postgres
-- Apply in Postgres → Key check (I, O+I): I, O+I
-- Key check (I, O+I) → before_ledger_commit
+- after_poll hook → Key check (I, O+I): I, O+I
+- Key check (I, O+I) → Apply in Postgres: new keys only
+- Apply in Postgres → before_ledger_commit
 - before_ledger_commit → Postgres COMMIT: COMMIT
 - Postgres COMMIT → before_kafka_commit
 - before_kafka_commit → Kafka progress
 - Kafka progress → Poll a batch: next batch
-- Kafka progress → Crash-only exit: on any error
+- Kafka progress → Crash-only exit: any error, any step
 - Postgres COMMIT → Event log: db_commit
 
 ### Observed in the detection gate (stack N), not a campaign result (dynamic)
@@ -187,7 +187,7 @@ Trial `gate_cons_1`, a positive control on N in cell F4-con-t, as `docs/gate.md`
 
 **Chosen:** Real kills, pauses and blackholes via per-role proxies; random (30) and targeted (10) cells; a check per cell
 
-**Why:** A simulated fault would be the one thing this artifact criticises in the closest prior work. Clients connect to what brokers advertise, so one bootstrap proxy would fault nothing after the first metadata response. Targeted cells ask whether, random cells how often. The manipulation check (P3: injector) reads only orchestrator, broker and process state; a failed check voids the trial and its block, and no trial is voided for what the checker found.
+**Why:** Simulated faults are what the closest prior work used. Clients connect to what brokers advertise, so one bootstrap proxy would fault nothing after the first metadata response. Targeted cells ask whether, random cells how often. The manipulation check (P3: injector) reads only orchestrator, broker and process state; a failed check voids the trial and its block, and no trial is voided for what the checker found.
 
 **Cost:** One laptop: combined KRaft, no database failover, no disk faults, no inter-broker partitions. Host contention needed two added void reasons (`host_swap_out`, then `host_degraded` in amendment A1); contention that starts after 20 s is not caught.
 
@@ -224,7 +224,7 @@ Trial `gate_cons_1`, a positive control on N in cell F4-con-t, as `docs/gate.md`
 
 **Why:** Payments in one trial share a fault, so the trial is the unit. Not reading results rules out any decision that depends on them. The implementer found the plan's φ lacked method 10's continuity correction (that is method 8); plan and code were fixed and checked against Newcombe's Table III before the campaign-v1 tag. The gate showed contention degrading 5 of 42 trials, so amendment A1 chose both the condition and a guard.
 
-**Cost:** About 50–55 h of unattended runtime, and 30 trials per stack resolve only large differences, so H5 may end inconclusive. Reconnaissance ran before the tag; one of its rules (cap refusals as `fail`) was set after seeing its data, and is disclosed. The gate's positive controls ran on N only.
+**Cost:** About 50–55 h of unattended runtime, and 30 trials per stack resolve only large differences, so H5 may end inconclusive. Reconnaissance ran before the tag; one rule (C-R, on cap refusals) was set after seeing its data, disclosed. The gate's positive controls ran on N only.
 
 ## Relationships
 
@@ -266,7 +266,7 @@ Trial `gate_cons_1`, a positive control on N in cell F4-con-t, as `docs/gate.md`
 - The design: what each stack's defense faces in each cell → `stacks` Whole pipelines, each defense at the boundary it guards, `faults` Real faults, two timings, and a check that each one landed
 - Pre-registered predictions H1–H6 (results pending) → `order` Postgres commits first; the targeted kill hits every stack in one state, `trust` Pre-register, gate the detector, pair the stacks, never peek
 - What a zero can claim (a formula, not data) → `trust` Pre-register, gate the detector, pair the stacks, never peek
-- Why H5 was predicted: K's commit step in reconnaissance (not a result) → `order` Postgres commits first; the targeted kill hits every stack in one state
+- K's commit step in reconnaissance, a day after H5 was written (not a result) → `order` Postgres commits first; the targeted kill hits every stack in one state
 
 ## Implementation flow
 
@@ -297,7 +297,7 @@ Milestones: 4. Reconnaissance A: rate, VM, K's commit step (2026-10-08 to 10-10 
 
 ### Phase 3 of 5: Reconnoitre (3 steps)
 
-4. **Reconnaissance A: rate, VM, K's commit step** [MILESTONE]: The rate rule failed first; cap refusals were redefined as `fail` after seeing that data (disclosed). VM stalls traced to the host swapping the Docker VM. `diag_k1` explained K's flat ~148 ms commit step. Values frozen, then re-verified on an 8 GB VM.
+4. **Reconnaissance A: rate, VM, K's commit step** [MILESTONE]: The rate rule failed first; after seeing that data it stopped counting cap refusals as errors (C-R, disclosed). VM stalls traced to the host swapping the Docker VM. `diag_k1` explained K's flat ~148 ms commit step. Values frozen, then re-verified on an 8 GB VM.
    - Output: docs/recon-part-a.md: 200/s, 8 GB VM, 512m heaps, swappiness 1; "Nothing here is a result."
    - When: 2026-10-08 to 10-10 (−07:00)
    - Decision: `faults` Real faults, two timings, and a check that each one landed
@@ -349,7 +349,7 @@ Milestones: 4. Reconnaissance A: rate, VM, K's commit step (2026-10-08 to 10-10 
 ### The detection gate's controls, on stack N (control, not a campaign result)
 
 - Axis: One row per control of the pre-registered gate; counts are valid trials. A positive control passes when the anomaly appears, so green here means the checker saw what it had to.
-- Read it as: Each control cleared its rule. Five trials had host CPU contention (thousands of cap refusals); per `docs/gate.md`, leaving them out, the controls still clear the pass rule: 8, 9 and 19.
+- Read it as: Each control cleared its rule. Five trials had host CPU contention (thousands of cap refusals). Without them: 8 and 9 positives, 19 clean negatives; `docs/gate.md` calls that a pass, though 19 is short of the rule's literal 20 of 20.
 - How it is computed: docs/gate.md: CONSUMER 10/10, PRODUCER 10/10, NEGATIVE 20/20, SYNTHETIC pass. 42 trials, 2 void and replaced. Contended: 2 consumer, 1 producer, 2 negative (one of them void).
 
 | trials | Pass rule | Observed | Void, replaced | Without contended (5 trials left out) |
@@ -359,12 +359,12 @@ Milestones: 4. Reconnaissance A: rate, VM, K's commit step (2026-10-08 to 10-10 
 | Negative (F0, five per stack) | 20 of 20 clean [rule fixed in advance] | 20 of 20 clean [observed in the gate, control passed] (no class flagged in any trial, all four stacks) | 1, host swap-out [observed in the gate, void] | 19 clean [observed in the gate, control passed] |
 | Synthetic checker (every class planted) | classify every class [rule fixed in advance] | 44 passed, 26 rows [observed in the gate, control passed] (one row per anomaly class and attribution row) | n/a [not applicable] | n/a [not applicable] |
 
-- Note: Gate passed 2026-10-12, after the prereg-v1 tag, before any campaign trial; not counted in the campaign. Both positive controls ran on N only.
+- Note: Gate passed 2026-10-12, after the prereg-v1 tag, before any campaign trial; not counted in the campaign.
 - So: see decisions `trust`, `checker`
 
 ### The design: what each stack's defense faces in each cell
 
-- Axis: Rows: the nine cells. Columns: stacks. Each cell names the guard that fault meets in that stack. F3 and F4-svc stress the producer side; F4-con-r to F6 the consumer side; F1 and F2 may stress both.
+- Axis: Rows: the nine cells. Columns: stacks. Each cell names the guard that fault meets in that stack.
 - Read it as: The producer-side cells pit the dual write against the outbox; the consumer-side cells pit committed offsets, the Kafka transaction and the key against one another. F0 is the in-campaign negative control.
 - How it is computed: 4 stacks × (5 cells × 30 + 4 cells × 10) = 760 trials; 760 ÷ 4 = 190 blocks (docs/experiment.md §4).
 
@@ -385,8 +385,8 @@ Milestones: 4. Reconnaissance A: rate, VM, K's commit step (2026-10-08 to 10-10 
 
 ### Pre-registered predictions H1–H6 (results pending)
 
-- Axis: One row per hypothesis, condensed from the pre-registration (§7, copied verbatim from the spec). Tone is what the prediction expects, not what happened: nothing has happened yet.
-- Read it as: H1 and H5 bet against Kafka transactions at a Postgres sink; H2 bets on the key; H3 on the outbox; H4, the broker-death cells, is stated as uncertain, and all-zero there is publishable. H6 needs cost runs that come after the campaign.
+- Axis: One row per hypothesis, condensed from pre-registration §7 (verbatim from the spec). Tone is what the prediction expects; no result has been read.
+- Read it as: H1 and H5 bet against Kafka transactions at a Postgres sink; H2 bets on the key; H3 on the outbox; H4, the broker-death cells, is stated as uncertain, and all-zero there is publishable.
 - How it is computed: Thresholds: 8 of 10 targeted trials (H1, H3); zero in every cell (H2); a paired interval on p_K − p_N that includes 0 makes H5 inconclusive; 10% on maximum rate (H6).
 
 | prediction | Stacks, cells | Prediction | Falsified if | Result |
@@ -398,7 +398,7 @@ Milestones: 4. Reconnaissance A: rate, VM, K's commit step (2026-10-08 to 10-10 
 | H5 commit window (the non-obvious one) | N vs K · F4-con-r; duty F0 [fixed in advance] | K duty cycle > N's; K dup more often [pre-registered prediction, anomaly or cost expected] (paired interval including 0: inconclusive, never 'no difference') | K's duplicate share ≤ N's [fixed in advance] | pending [results pending] |
 | H6 cost | cost runs, no fault [fixed in advance] | I's rate within 10% of N; K, O+I add p50 [pre-registered prediction] (max sustainable rate; p50 end-to-end latency; K vs O+I not predicted) | I > 10% slower; K or O+I p50 ≤ N's [fixed in advance] (with non-overlapping run ranges; overlap is inconclusive) | pending [results pending] (cost runs need new images, built after the campaign (amendment A5)) |
 
-- Note: Pre-registered at tag prereg-v1 (2026-10-12); results pending. Cells condense docs/experiment.md §7; notes carry the rest.
+- Note: Pre-registered at tag prereg-v1 (2026-10-12); results pending.
 - So: see decisions `order`, `trust`
 
 ### What a zero can claim (a formula, not data)
@@ -414,9 +414,9 @@ Milestones: 4. Reconnaissance A: rate, VM, K's commit step (2026-10-08 to 10-10 
 - Note: Computed from the formula; no trial data.
 - So: see decision `trust`
 
-### Why H5 was predicted: K's commit step in reconnaissance (not a result)
+### K's commit step in reconnaissance, a day after H5 was written (not a result)
 
-- Axis: Diagnostic `diag_k1`: stack K alone, 200/s for 120 s, no fault, unscored. Step: from `sendOffsetsToTransaction` to `commitTransaction` returning; both consumers had these medians.
+- Axis: Diagnostic `diag_k1`: stack K alone, 200/s for 120 s, no fault, unscored. Step, as diag_k1 defines it: from `sendOffsetsToTransaction` to `commitTransaction` returning (the earlier ~148 ms step was timed from the Postgres commit); both consumers alike.
 - Read it as: When a consumer sends the next transaction's offsets before the coordinator has finished the last one's markers, it is refused once with `CONCURRENT_TRANSACTIONS` and waits about 100 ms. Reconnaissance read each K consumer as near 100% busy in its commit step.
 - How it is computed: docs/recon-part-a.md: 2 vs 104 ms offset commit, 48 vs 149 ms whole step; 638 of 951 (67%) and 626 of 968 (65%) retried. Rest = step median − offset median.
 - no retry (about a third): offset commit 2, rest of the step 46 (ms, median)
@@ -425,26 +425,26 @@ Milestones: 4. Reconnaissance A: rate, VM, K's commit step (2026-10-08 to 10-10 
 
 ## Interview card
 
-**30-second pitch:** I built a fault-injection harness that asks which duplicate-payment defense holds between Kafka and a Postgres ledger: none, Kafka transactions, an idempotency key at the sink, or an outbox plus that key. Each trial kills, pauses or blackholes a real broker, process or connection, and a checker that treats the source database as the authority says whether every payment was applied exactly once and at which boundary any anomaly was born. Before measuring, a detection gate on the naive stack showed the checker catching the duplicate a commit-window kill causes and the loss a kill after the source commit causes, 10 of 10 each. The predictions were tagged before any gate or campaign trial; the campaign's results are sealed until it ends.
+**30-second pitch:** I built a fault-injection harness that asks which duplicate-payment defense holds between Kafka and a Postgres ledger: none, Kafka transactions, an idempotency key at the sink, or an outbox plus that key. Each trial kills, pauses or blackholes a real broker, process or connection, and a checker that treats the source database as the authority says whether every payment was applied exactly once and at which boundary any anomaly was born. Before the campaign, a detection gate on the naive stack showed the checker catching the duplicate a commit-window kill causes and the loss a kill after the source commit causes, 10 of 10 each. The predictions were tagged before any gate or campaign trial; the campaign's results are sealed until it ends.
 
-**2-minute version:** Teams say "exactly-once", but the usual defenses guard different boundaries: the outbox the producer side, Kafka transactions only Kafka-to-Kafka work, an idempotency key the sink. So I built four whole pipelines, each contrast adding one defense, on one laptop with public software, and a harness that injects real faults: broker kills and pauses, a producer blackhole, consumer kills at random times and at a code hook in the commit window, a zombie consumer, a lost COMMIT reply. A checker treats the source database as the authority and uses each apply's (partition, offset) to tell a redelivery from a re-send. Everything was pre-registered after reconnaissance and before the first gate or campaign trial. H1 says Kafka transactions still double-post when killed after the Postgres commit. H5, the non-obvious one, says they make a random crash more likely to double-post, because the transaction commit widens the window between the ledger commit and Kafka's progress. A detection gate on the naive stack showed the checker sees a duplicate and a loss when they happen. The 760-trial campaign is running and I don't read its anomaly output until it ends, so today I can give you the design and the bets, not the answers.
+**2-minute version:** Teams say "exactly-once", but the usual defenses guard different boundaries: the outbox the producer side, Kafka transactions only Kafka-to-Kafka work, an idempotency key the sink. So I built four whole pipelines, each contrast adding one defense, on one laptop with public software, and a harness that injects real faults: broker kills and pauses, a producer blackhole, consumer kills at random times and at a code hook in the commit window, a zombie consumer, a lost COMMIT reply. A checker treats the source database as the authority and uses each apply's (partition, offset) to tell a redelivery from a re-send. The rules were tagged after reconnaissance and before the first gate trial, with dated amendments before the first campaign trial. H1 predicts Kafka transactions still double-post when killed after the Postgres commit. H5, the non-obvious one, predicts they make a random crash more likely to double-post, because the transaction commit widens the window between the ledger commit and Kafka's progress. A detection gate on the naive stack showed the checker sees a duplicate and a loss when they happen. The 760-trial campaign is running and I don't read its anomaly output until it ends, so today I can give you the design and the bets, not the answers.
 
 **Hard follow-ups:**
 
 - Q: Do your consumers commit the database before or after Kafka, and what does that do to your duplicate rate under crashes?
-  A: Postgres first, then Kafka's progress, in every stack. A crash between the two leaves the ledger committed and the offset not, so the batch is redelivered and applied again unless the sink checks a key; the gate showed it on N, payment (1, 646) applied again 10.1 s later. Kafka first trades duplicates for losses; that I state by reasoning, not measurement. How often a random crash lands in the window depends on the time spent there: H5 predicts K spends more, and reconnaissance saw about two-thirds of K's offset commits retried after ~100 ms. The campaign will measure the rates.
+  A: Postgres first, then Kafka's progress, in every stack. A crash between the two leaves the ledger committed and the offset not, so the batch is redelivered and applied again unless the sink checks a key; the gate showed it on N, the record at (1, 646) applied again 10.1 s later. Kafka first trades duplicates for losses; that I state by reasoning, not measurement. How often a random crash lands in the window depends on the time spent there: H5 predicts K spends more, and reconnaissance saw about two-thirds of K's offset commits retried after ~100 ms. The campaign will measure the rates.
 - Q: Kafka has exactly-once. Why doesn't K solve it?
-  A: A Kafka transaction commits Kafka partitions and consumer offsets atomically; Postgres is not a participant, and KIP-939, two-phase commit with external participants, has not shipped. Kill K after its Postgres commit and before `commitTransaction`: on restart `initTransactions` aborts the transaction and the batch is redelivered, but the Postgres commit stands. H1 predicts duplicates in at least 8 of 10 such trials, and in the zombie cell; the campaign will say.
+  A: A Kafka transaction commits Kafka partitions and consumer offsets atomically; Postgres is not a participant, and KIP-939, two-phase commit with external participants, has not shipped. By the documented semantics, killing K after its Postgres commit and before `commitTransaction` makes `initTransactions` abort the transaction on restart and redeliver the batch; the Postgres commit stands. H1 predicts duplicates in at least 8 of 10 such trials, and in the zombie cell; the campaign will say.
 - Q: Why not store offsets in Postgres in the same transaction?
   A: It is correct, Kafka's docs recommend it, and it guards the consumer side as I does; as a fifth arm it would break the one-change contrasts. It deduplicates by (partition, offset), though, and an outbox relay's re-send lands at a new offset, so it would not catch O+I's relay duplicates. Only a key carried from the origin catches those.
 - Q: How do you know a zero isn't a blind checker, or a fault that never happened?
-  A: The detection gate, run after the tag: 44 synthetic tests covering 26 class and attribution rows; on N, commit-window kills gave a consumer-side duplicate in 10 of 10 trials and kills after the source commit a producer-side loss in 10 of 10; 20 of 20 no-fault trials across the four stacks were clean. Every campaign trial also passes a per-cell manipulation check that never reads the ledger; a failed one voids the block. The gap: the positive controls ran on N only.
+  A: The detection gate, run after the tag: 44 synthetic tests covering 26 class and attribution rows; on N, commit-window kills gave a consumer-side duplicate in 10 of 10 trials and kills after the source commit a producer-side loss in 10 of 10; 20 of 20 no-fault trials across the four stacks were clean. Every campaign trial also gets a per-cell manipulation check that never reads the ledger; a failed one voids the block. The gap: the positive controls ran on N only.
 - Q: Your zombie consumer: which fencing stops it, and does it stop the duplicate write?
   A: Generation fencing (KIP-447), at the offset commit. In reconnaissance on N, in all 17 F5 trials, the paused consumer's first act after unpause was a `db_commit` of the batch it held, then `CommitFailedException` about 0.1 s later. The Postgres write is another system's commit and has already happened, so fencing stops the Kafka commit, not the ledger write. Epoch fencing does not apply: each instance has its own `transactional.id`. For K the same is predicted at `TxnOffsetCommit` (H1).
 - Q: What came before your pre-registration tag?
-  A: Reconnaissance A and B: the rate, the VM, Debezium's lifecycle, the F2, F5 and F6 decision rules, and the manipulation checks on real trials. Their values were frozen into the pre-registration and none is reported as a result. One recon rule, counting cap refusals as `fail`, was set after seeing data, and that is disclosed. The tag came before any gate or campaign trial, and the analysis code and amendments A1–A4 were tagged campaign-v1 before the first campaign trial.
+  A: Reconnaissance A and B: the rate, the VM, Debezium's lifecycle, the F2, F5 and F6 decision rules, and the manipulation checks on real trials. Their values were frozen into the pre-registration and none is reported as a result. One recon rule (C-R: cap refusals are not rate-rule errors) was set after seeing data, and is disclosed. The tag came before any gate or campaign trial, and the analysis code and amendments A1–A4 were tagged campaign-v1 before the first campaign trial.
 
-**Limits (what I must not claim):** No campaign result exists yet: the campaign is running and its anomaly output is unread, so nothing here says which defense held. The gate's positive controls ran on N only; nothing yet shows K duplicating. When results exist they will hold for one laptop (combined KRaft, one Docker VM, no real network or host boundary), this configuration (acks=all, Postgres before Kafka, crash-only recovery, the classic group protocol, these versions) and these faults; no overdraft rule, so ordering is untested; no database failover, disk faults or inter-broker partitions; client retries to the API are excluded; no production fault frequency is claimed. Reconnaissance numbers come from earlier environments and are not results.
+**Limits (what I must not claim):** No campaign result is reported here: the campaign is running and its anomaly output is unread, so nothing here says which defense held. The gate's positive controls ran on N only; nothing yet shows K duplicating. When results exist they will hold for one laptop (combined KRaft, one Docker VM), this configuration (acks=all, Postgres before Kafka, crash-only recovery, the classic group protocol, these versions) and these faults; no overdraft rule, so ordering is untested; no database failover, disk faults or inter-broker partitions; client retries to the API are excluded; no production fault frequency is claimed. Reconnaissance numbers come from earlier environments and are not results.
 
 ## Recall questions
 
@@ -456,7 +456,7 @@ Milestones: 4. Reconnaissance A: rate, VM, K's commit step (2026-10-08 to 10-10 
   A: The extra apply has the same (partition, offset), (1, 646), as the first: a redelivery. A different offset for the same payment would mean a re-send, born on the producer side.
 - Q: Why pair random-time cells with targeted cells?
   A: Random faults rarely land in narrow windows, so a random zero alone would mean little. Targeted cells ask whether a defense can break at all; random cells how often it does under realistic timing.
-- Q: I shows 0 anomalies in 30 trials of a cell. What can you claim?
+- Q: Suppose I shows 0 anomalies in 30 trials of a cell. What could you claim?
   A: That its per-trial probability for that fault is below about 9.5% (one-sided 95%), on this setup. Not that the defense is safe in general.
 - Q: Why does one void trial void its whole block?
   A: So every analysed block keeps all four stacks with the same fault schedule and payment stream: the pairing the N vs K contrasts rely on. The block is re-run with a new seed.
