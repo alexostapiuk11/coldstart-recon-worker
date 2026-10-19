@@ -8,7 +8,7 @@
   "requirements": [
     {
       "text": "Split one cold start into named phases, and label what cannot be attributed instead of hiding it.",
-      "why": "The two caches act on different phases: weights on loading, compile on engine start. One \"startup\" bar would hide half the experiment. And most published cold-start numbers quietly give all the time to stages the author could see; a named bucket for \"time I cannot attribute, and why\" is more credible."
+      "why": "The two caches act on different phases: weights on loading, compile on engine start. One \"startup\" bar would hide half the experiment. And many published cold-start numbers quietly give all the time to stages the author could see; a named bucket for \"time I cannot attribute, and why\" is more credible."
     },
     {
       "text": "Change exactly one thing between the set-ups being compared.",
@@ -19,11 +19,11 @@
       "why": "Cold starts are skewed with a heavy tail, so a mean describes no real run. A claim like \"cache X matters more\" needs its own interval, not two point estimates side by side."
     },
     {
-      "text": "Fix the hypotheses, exclusion rules, stopping rule and headline rule before any paid data.",
-      "why": "The git timestamp then proves nothing was fitted to the result, and the headline cannot be picked by which result cost the most effort."
+      "text": "Fix the hypotheses, exclusion rules, stopping rule and headline rule before the first paid measurement run.",
+      "why": "The git timestamps then show the rules came before the data, later amendments are dated and labelled, and the headline cannot be picked by which result cost the most effort."
     },
     {
-      "text": "Spend GPU money only on measurement, and let anyone re-derive every number on a laptop.",
+      "text": "Run only proven code on paid GPUs, and let anyone re-derive every number on a laptop.",
       "why": "The whole budget was $200, and debugging on live GPUs is what eats it. A number a reader cannot re-derive from the committed data is one they have to take on trust."
     }
   ],
@@ -34,11 +34,11 @@
     },
     {
       "term": "Contrast, and difference of contrasts",
-      "plain": "A **contrast** is the median gap between two arms: A minus B is what the weight cache saves, B minus C is what the compile cache saves. The **difference of contrasts** is (A minus B) minus (B minus C). Negative means the compile cache saved more. It gets its own bootstrap interval, because a ranking is only a finding if that interval excludes zero."
+      "plain": "A **contrast** is the difference between two arms' medians: A minus B is what the weight cache saves, B minus C is what the compile cache saves. The **difference of contrasts** is (A minus B) minus (B minus C). Negative means the compile cache saved more. It gets its own bootstrap interval, because a ranking is only a finding if that interval excludes zero."
     },
     {
       "term": "Pre-registration",
-      "plain": "Writing the hypotheses, analysis plan, exclusion rules, stopping rule and headline rule into a committed file before the first paid run, so the git history shows they came first. Here: `docs/experiment.md`, committed four days before the first run."
+      "plain": "Writing the hypotheses, analysis plan, exclusion rules, stopping rule and headline rule into a committed file before the first paid measurement run, so the git history shows they came first. Here: `docs/experiment.md`, committed four days before the first run."
     }
   ],
   "views": [
@@ -114,7 +114,7 @@
     {
       "level": "dynamic",
       "title": "One run, in order",
-      "caption": "Follow the step numbers. Clock A (laptop) brackets the whole run; clock B (worker) times everything from process start. Platform time is the one cross-clock subtraction: total minus in-process time. A failed run is still stored as a row and never retried.",
+      "caption": "Follow the step numbers. Clock A (laptop) brackets the whole job; clock B (worker) starts when the probe starts. Platform time is total minus clock B time, so besides the queue it holds handler set-up, teardown and the driver's 5 s polling. A failed run is still stored as a row and never retried.",
       "nodes": [
         {"id": "s1", "label": "1 Schedule picks arm", "sub": "next slot in a seeded, shuffled triple", "kind": "system", "col": 0, "row": 0},
         {"id": "s2", "label": "2 Driver submits", "sub": "new run id, job input, clock A starts", "kind": "focus", "col": 1, "row": 0},
@@ -163,8 +163,8 @@
         "Run the real `vllm serve` as a subprocess, bracket it with a monotonic clock, split phases from its log, and get platform time by subtraction"
       ],
       "chosen": "Run the real `vllm serve` as a subprocess, bracket it with a monotonic clock, split phases from its log, and get platform time by subtraction",
-      "why": "The Python API would measure a startup path nobody deploys. With one clock you cannot detect that it is lying; with three (driver, worker, RunPod's API) you can bound skew and discard inconsistent runs for a named reason. Durations stay inside one clock. The only cross-clock subtraction is the platform residual: total minus in-process time.",
-      "cost": "Platform time cannot be split further; it is a named residual. Two engine sub-phases (S4a, S4d) are not delineated by this vLLM build, so they sit merged in an unattributed row. The log patterns are tied to vLLM 0.27.1."
+      "why": "The Python API would measure a startup path nobody deploys. With one clock you cannot detect that it is lying. The design names three; the implemented check compares the driver and worker clocks and discards a run whose in-process time exceeds its total. The platform residual is the one named cross-clock subtraction; total time to first token is itself the job's laptop-clock span minus the worker-clock warmup tail.",
+      "cost": "Platform time is one residual, and it holds teardown and polling lag as well as queueing. RunPod's queue and execution durations are recorded but not used to split it. Two engine sub-phases (S4a, S4d) are not delineated by this vLLM build, so they sit merged in an unattributed row. The log patterns are tied to vLLM 0.27.1."
     },
     {
       "id": "interleave",
@@ -175,7 +175,7 @@
         "Interleaved triples: one run of each arm per triple, order shuffled from a seed"
       ],
       "chosen": "Interleaved triples: one run of each arm per triple, order shuffled from a seed",
-      "why": "Blocking confounds the cache with time-of-day fleet conditions, and on a rented fleet that confound is large enough to make or erase the whole effect. The design calls interleaving its most important validity decision. Triples also allow a paired, same-host check as supporting evidence.",
+      "why": "Blocking confounds the cache with time-of-day fleet conditions, and on a rented fleet that confound can be large enough to make or erase the whole effect. The design calls interleaving its most important validity decision. Triples also allow a paired, same-host check as supporting evidence.",
       "cost": "A resumed campaign must rebuild the exact schedule, so the harness refuses a resume whose stored arms disagree with the seed. The windows ended up hours apart rather than on separate days, so drift between windows is only partly covered; the post says so."
     },
     {
@@ -215,13 +215,13 @@
         "p50, p90, p95 and a full ECDF, no p99, and H4 reported as unanswerable"
       ],
       "chosen": "p50, p90, p95 and a full ECDF, no p99, and H4 reported as unanswerable",
-      "why": "A mean is pulled by the tail. At 100 runs a p99 is one or two observations, not an estimate. Before any data, the pre-registration committed to publishing the host count whatever it was, with no quiet omission. The same single host made every triple host-complete, so the paired check is fully supplied.",
+      "why": "A mean is pulled by the tail. At 100 runs a p99 is one or two observations, not an estimate. Before the published campaign began (a discarded window had already shown runs piling onto one host), the pre-registration committed to publishing the host count whatever it was. The same single host made every triple host-complete, so the paired check is fully supplied.",
       "cost": "The far tail stays unresolved: the post can say that B's largest runs were longer than A's, but not why. The question of whether host placement drives the tail is lost."
     }
   ],
   "flow": [
-    {"label": "Capture, then build offline", "detail": "A cheap reconnaissance run saves real vLLM logs and RunPod responses as fixtures. Parser, clocks, store and analysis are built and tested against them and a free stub, so paid runs only use proven code."},
-    {"label": "Pre-register", "detail": "Hypotheses H1 to H5, both contrasts, exclusion rules, stopping rule and headline rule go into `docs/experiment.md`, committed before the first paid run."},
+    {"label": "Capture, then build offline", "detail": "A cheap reconnaissance run saves real vLLM logs and RunPod responses as fixtures. Parser, clocks, store and analysis are built and tested against them and a free stub. A disk-fill defect still cost one paid 27-run window, which was discarded."},
+    {"label": "Pre-register", "detail": "Hypotheses H1 to H5, both contrasts, exclusion rules, stopping rule and headline rule go into `docs/experiment.md`, committed before the first paid measurement run."},
     {"label": "Prime arm C", "detail": "Two arm C runs warm the compile cache on the volume. They go to a separate store and never count."},
     {"label": "Run interleaved triples", "detail": "100 seeded triples, 300 runs, one job in flight. Every pinned setting is fixed; any change ends the experiment instead of continuing across it."},
     {"label": "Store, never retry", "detail": "One JSON line per run, appended as it lands. A failure is its own row and counts in the failure table; nothing is retried in place."},
@@ -237,7 +237,7 @@
         "bars": [
           {"label": "A: nothing cached", "segments": [
             {"name": "Platform (by subtraction)", "value": 4.37},
-            {"name": "Weights into GPU", "value": 45.83},
+            {"name": "Server launch to model loaded", "value": 45.83},
             {"name": "Compile", "value": 19.01},
             {"name": "Memory profiling", "value": 0.09},
             {"name": "Graph capture", "value": 4.00},
@@ -247,7 +247,7 @@
           ]},
           {"label": "B: weights cached", "segments": [
             {"name": "Platform (by subtraction)", "value": 4.07},
-            {"name": "Weights into GPU", "value": 30.35},
+            {"name": "Server launch to model loaded", "value": 30.35},
             {"name": "Compile", "value": 18.79},
             {"name": "Memory profiling", "value": 0.11},
             {"name": "Graph capture", "value": 4.00},
@@ -257,7 +257,7 @@
           ]},
           {"label": "C: weights + compile", "segments": [
             {"name": "Platform (by subtraction)", "value": 4.83},
-            {"name": "Weights into GPU", "value": 21.34},
+            {"name": "Server launch to model loaded", "value": 21.34},
             {"name": "Compile", "value": 0.33},
             {"name": "Memory profiling", "value": 0.17},
             {"name": "Graph capture", "value": 4.00},
@@ -267,8 +267,8 @@
           ]}
         ]
       },
-      "axis": "Seconds, median per phase, 100 runs per arm. Imports (0.00 s in every arm) are left out. Each segment is its own median, so the figure at a bar's end is the sum of the segment medians, close to but not the arm's median total (81.12, 65.43 and 39.37 s).",
-      "read_as": "The weights segment shrinks from A to B to C, and the compile segment almost vanishes in C (19.01 to 0.33 s). Graph capture is a flat 4.00 s everywhere: it depends on the shapes captured, not on what was cached. Note that C's weights are faster than B's although only the compile cache differs: that is the unexplained part.",
+      "axis": "Seconds, median per phase, 100 runs per arm. Each segment is its own median, so the segments do not add up to the arm's median total (81.12, 65.43 and 39.37 s). Imports are not shown: their mark is taken before vLLM is launched, so import time sits inside the launch segment.",
+      "read_as": "The launch segment (the post calls it T_weights) runs from starting `vllm serve` to vLLM's \"Model loading took\" line, so it holds process start-up as well as weights. vLLM's own loading time is 17.40 s in A, and 4.57 and 4.54 s in B and C. The compile segment almost vanishes in C (19.01 to 0.33 s). Graph capture is a flat 4.00 s everywhere: it depends on the shapes captured, not on what was cached.",
       "so": "arms"
     },
     {
@@ -282,7 +282,7 @@
         ]
       },
       "axis": "Median seconds of total cold start saved by each cache: the two contrasts on the same unit.",
-      "read_as": "The compile cache saves about 10 s more per cold start. The difference of contrasts is −10.39 s, 95% bootstrap [−20.30, −5.54]: the interval never crosses zero, which is what licenses the ranking. Of the compile cache's 26.07 s, only 18.46 s is compilation; arm C also loads weights 8.85 s faster than B, for reasons this campaign cannot separate.",
+      "read_as": "The compile cache saves about 10 s more per cold start. The difference of contrasts is −10.39 s, 95% bootstrap [−20.30, −5.54]: the interval never crosses zero, which is what licenses the ranking. Of the compile cache's 26.07 s, only 18.46 s is compilation. C also reaches \"model loaded\" 8.85 s sooner than B (paired): that gap opens before loading begins, and this campaign does not explain it.",
       "so": "rank"
     },
     {
@@ -302,16 +302,16 @@
   ],
   "interview": {
     "pitch30": "I measured where the time goes when a vLLM server starts cold on a rented GPU, and which of two caches is worth warming: the model weights or the engine's compiled code. I ran three set-ups that differ in one thing only, interleaved, about a hundred times each, and split every start into phases. The compile cache bought more than the weight cache, and it also left more memory for serving.",
-    "pitch120": "Everyone talks about caching the weights. But vLLM also compiles parts of the model at startup and caches that on disk, and that second cache is almost invisible unless you have operated the engine. So I asked which one matters more. I set up three arms that differ only in cache configuration: nothing cached, weights on a network volume, and weights plus a warm compile cache. I ran them as shuffled triples so platform drift could not pose as an arm effect, and I wrote down the hypotheses, the exclusion rules and how I would pick the headline before spending anything. The measuring code ran the real `vllm serve` and read its log, with one clock inside the worker and one on my laptop, so the time the platform takes before my code exists is a named residual, not hidden. The answer: warming the compile cache saved about 10 seconds more per cold start than caching the weights, and the interval on that difference never crossed zero. It also left about a fifth more KV cache, because profiling no longer ran next to the compiler's memory. What it cannot tell you is anything about other hardware, or whether host placement drives the tail: every run landed on one machine, and I reported that rather than dropping the question.",
+    "pitch120": "Everyone talks about caching the weights. But vLLM also compiles parts of the model at startup and caches that on disk, and that second cache is almost invisible unless you have operated the engine. So I asked which one matters more. I set up three arms that differ only in cache configuration: nothing cached, weights on a network volume, and weights plus a warm compile cache. I ran them as shuffled triples so platform drift could not pose as an arm effect, and I wrote down the hypotheses, the exclusion rules and how I would pick the headline before the first paid measurement run. The measuring code ran the real `vllm serve` and read its log, with one clock inside the worker and one on my laptop, so everything outside the worker clock, platform start-up included, is a named residual, not hidden. The answer: warming the compile cache saved about 10 seconds more per cold start than caching the weights, and the interval on that difference never crossed zero. It also left about a fifth more KV cache, because profiling no longer ran next to the compiler's memory. What it cannot tell you is anything about other hardware, or whether host placement drives the tail: every run landed on one machine, and I reported that rather than dropping the question.",
     "followups": [
       {"q": "Why three arms and not two, or four?", "a": "Two arms (hub vs volume) only test the weight cache, and that was the fallback if this vLLM had not compiled at startup; it does. A to B isolates weights, B to C isolates compile with weights held fixed. The fourth cell, weights cold but compile warm, has no operational meaning. A baked-image arm would just move the bytes into the image pull, which I cannot observe."},
-      {"q": "Why pre-register a one-person experiment?", "a": "Because the git timestamp is the only evidence that the hypotheses and the headline rule came before the data. It was committed four days before the first run. Three amendments landed later and are labelled: the first-touch separation rule, written about half an hour after window one showed a 2174 s platform time; a note that the windows were hours apart; and the stopping decision. None changed a hypothesis or a contrast."},
-      {"q": "What surprised you?", "a": "Two things. The compile cache also made weight loading faster, 8.85 s faster in C than in B, on arms that differ only in compile cache; I ruled out host, position in the triple and the volume, but cannot say which mechanism it is. And \"ready is not fast\" was wrong here: vLLM does its warmup before answering health, so the first request is already near steady state."},
-      {"q": "What would you do differently?", "a": "What the record flags. The host question failed: a serially-submitting driver kept landing on the one machine that had the image cached, and no endpoint setting changes that. The windows were hours apart, not separate days. And the first window was thrown out because arm A's per-run weights filled the worker disk and only arm A failed, which would have biased the contrast by survivorship; the worker now empties cold directories before and after each run."},
+      {"q": "Why pre-register a one-person experiment?", "a": "Because the git timestamp is the only evidence that the hypotheses and the headline rule came before the data. It was committed four days before the first run. Later amendments are labelled: the first-touch separation rule, written about half an hour after window one showed a 2174 s platform time, with a note on reporting the flat warmup in the same commit; the window-spacing note; and the stopping decision. None changed a hypothesis or a contrast."},
+      {"q": "What surprised you?", "a": "Two things. C reached \"model loaded\" 8.85 s sooner than B, on arms that differ only in compile cache. It is not weight loading: vLLM's own loading time is the same in B and C (4.57 vs 4.54 s). The gap opens before loading begins; not host, not position in the triple, and this campaign does not explain it. And \"ready is not fast\" was wrong here: vLLM does its warmup before answering health, so the first request is already near steady state."},
+      {"q": "What would you do differently?", "a": "What the record flags. The host question failed: a serially-submitting driver kept landing on the one machine that had the image cached, and no endpoint setting changes that. The windows were hours apart, not separate days. And the first window was thrown out because arm A's per-run weights filled the worker disk, so A failed 40% of its runs against 0% for B, which would have biased the contrast by survivorship; the worker now empties cold directories before and after each run."},
       {"q": "What does this not tell you?", "a": "The seconds for any other GPU, model, engine version, region or provider. Anything about many replicas starting at once and contending for the same volume; every run was one replica alone. Anything past p95. And whether host placement drives the tail."},
       {"q": "So should everyone warm the compile cache?", "a": "It is the better buy and the more fragile one. It costs nothing to store, but any change to engine version, model, hardware or flags invalidates it, so every upgrade pays the cold compile again unless warming is built into the deploy. The weight cache is a volume you rent every month whether you scale or not."}
     ],
-    "limits": "One provider, one GPU model, one model, one engine version, one region, one host. The seconds do not transfer; the mechanisms do. H4 (does host placement drive the tail?) is unanswerable: all 300 runs landed on one host. Single replica, no contention. Nothing reported past p95. The first-touch rule that set aside the 2266.6 s run was written after seeing the data, and is disclosed as post hoc. Why C also loads weights faster is not settled."
+    "limits": "One provider, one GPU model, one model, one engine version, one region, one host. The seconds do not transfer; the mechanisms do. H4 (does host placement drive the tail?) is unanswerable: all 300 runs landed on one host. Single replica, no contention. No percentile past p95; beyond it only single runs are shown. The first-touch rule that keeps the 2266.6 s run out of the ECDF (it stays in the medians) was written after seeing the data, and is disclosed as post hoc. Why C reaches \"model loaded\" 8.85 s sooner than B is not settled."
   },
   "recall": [
     {"q": "Why are there three arms and not four?", "a": "The fourth cell, weights cold with compile warm, has no operational meaning, so measuring it fills a table without answering a question. A baked-image arm was also excluded: it moves the weight bytes into the image pull, which is inside the platform residual the harness cannot see."},
@@ -319,7 +319,7 @@
     {"q": "Why is arm C primed outside the campaign?", "a": "Otherwise its early runs compile cold and its later runs do not, making the arm a mixture whose effect grows with run index and looks like a trend."},
     {"q": "Why does the handler check the compile cache before the engine starts, not after?", "a": "A cold compile creates the cache directory as it finishes. Checked afterwards, every healthy cold run would look warm and be discarded, and a real leak would pass unseen."},
     {"q": "Why is the difference of contrasts computed on total cold start?", "a": "It subtracts one contrast from the other, so both must be in one unit. Weight time minus compile time would difference two different quantities."},
-    {"q": "Why can platform time only be obtained by subtraction?", "a": "Queueing, finding a machine, creating the container and pulling the image all happen before any measuring code exists. It is total time on the laptop clock minus in-process time on the worker clock, the one allowed cross-clock subtraction."},
+    {"q": "Why can platform time only be obtained by subtraction?", "a": "Queueing, finding a machine, creating the container and pulling the image all happen before any measuring code exists. So it is total time on the laptop clock minus time on the worker clock. That residual also holds handler set-up, teardown and the driver's 5 s polling; RunPod's own queue delay was only about 0.13 s."},
     {"q": "Why is a failed run never retried in place?", "a": "A retry quietly replaces slow or unlucky runs with faster ones and makes the distribution look better than it is. Failures are their own rows and are counted per arm."},
     {"q": "Why does the warm compile cache leave more KV cache?", "a": "vLLM sizes the KV cache from free memory measured during a profiling pass. On a cold arm the compiler's working set is resident during that pass, so less memory looks free, and the smaller cache stays for the replica's life."}
   ],
@@ -366,9 +366,17 @@
     {"file": "harness/scheduler.py", "section": "def build_schedule"},
     {"file": "harness/recorder.py", "section": "class StageRecorder"},
     {"file": "harness/vllm_logs.py", "section": "MERGED: list[str] = [\"S4a\", \"S4d\"]"},
-    {"file": "harness/stats.py", "section": "def bootstrap_contrast_difference"}
+    {"file": "harness/stats.py", "section": "def bootstrap_contrast_difference"},
+    {"file": "coldstart/checks.py", "section": "def check_consistency"},
+    {"file": "coldstart/analysis/metrics.py", "section": "t_total = t_total_job - warmup_tail"},
+    {"file": "harness/runpod/submitter.py", "section": "poll_interval: float = 5.0"},
+    {"file": "data/campaign.jsonl", "section": "Model loading took"}
   ],
   "derived_numbers": [
+    {"value": "17.40", "how": "Median over arm A of vLLM's own \"Model loading took ... seconds\" figure, computed from the log lines in data/campaign.jsonl."},
+    {"value": "4.57", "how": "Median over arm B of vLLM's own \"Model loading took ... seconds\" figure, computed from data/campaign.jsonl (it coincides with arm B's S5 ready median in docs/post.md)."},
+    {"value": "4.54", "how": "Median over arm C of vLLM's own \"Model loading took ... seconds\" figure, computed from data/campaign.jsonl."},
+    {"value": "0.13", "how": "Median of RunPod's delayTime (clock_C.delay_ms) across all arms, computed from data/campaign.jsonl."},
     {"value": "0.3", "how": "Chart value 0.30 s (S6 cold TTFT, every arm) from docs/post.md, The decomposition; the trace check formats chart values without trailing zeros."},
     {"value": "4.1", "how": "Chart value 4.10 s (S5 ready, arm C) from docs/post.md, The decomposition; the trace check formats chart values without trailing zeros."}
   ]
