@@ -709,3 +709,36 @@ def test_dimmed_segment_still_prints_its_value_in_a_muted_colour():
     assert re.search(r'<text class="segtext s1 dim" [^>]*>4</text>', out)
     from study.page import CSS
     assert ".segtext.dim{fill:var(--muted)}" in CSS
+
+
+def _stacked(*names):
+    return {"type": "stacked_bars", "unit": "s", "bars": [
+        {"label": "A", "segments": [{"name": n, "value": 10.0} for n in names]}]}
+
+
+def test_a_segment_name_keeps_its_colour_in_every_chart_of_a_page():
+    u = artifact_unit()
+    first = dict(u["results"][0], chart=_stacked("Weights", "Everything else"))
+    second = dict(u["results"][0], title="Second",
+                  chart=_stacked("Platform", "Everything else", "Compile"))
+    u["results"] = [first, second]
+    page = render_page(u)
+    chips = re.findall(r'<span class="chip (s\d)"></span>([^<]+)<', page)
+    colour = {}
+    for slot, name in chips:
+        assert colour.setdefault(name, slot) == slot, name  # same name, same colour
+    assert colour == {"Weights": "s0", "Everything else": "s1", "Platform": "s2",
+                      "Compile": "s3"}
+    segs = re.findall(r'<rect class="seg (s\d)"[^>]*><title>([^:]+):', page)
+    assert all(colour[n] == s for s, n in segs)
+    # a chart on its own still colours by its own order
+    alone = chart_html(second["chart"], "r1")
+    assert re.findall(r'<span class="chip (s\d)"></span>', alone) == ["s0", "s1", "s2"]
+
+
+def test_segment_slots_avoid_a_clash_inside_one_chart_once_eight_are_used():
+    from study.svg import segment_slots
+    nine = [f"n{i}" for i in range(9)]
+    slots = segment_slots([_stacked(*nine[:8]), _stacked("n0", "n8")])
+    assert [slots[n] for n in nine[:8]] == list(range(8))
+    assert slots["n8"] != slots["n0"]

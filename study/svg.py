@@ -227,8 +227,32 @@ def interval_html(chart: dict) -> str:
     return "".join(p)
 
 
-def chart_html(chart: dict, uid: str) -> str:
+def _segment_names(chart: dict) -> list[str]:
+    return list(dict.fromkeys(s["name"] for b in chart["bars"] for s in b["segments"]))
+
+
+def segment_slots(charts: list[dict]) -> dict[str, int]:
+    """One colour slot (0-7) per segment name across several stacked charts, so a name is
+    the same colour in each. Names take slots in order of first appearance; once all
+    eight are used, a new name takes the lowest slot no other name in its chart has."""
+    slots: dict[str, int] = {}
+    for chart in charts:
+        names = _segment_names(chart)
+        for name in names:
+            if name in slots:
+                continue
+            taken = {slots[n] for n in names if n in slots}
+            free = [k for k in range(8) if k not in set(slots.values())]
+            free = free or [k for k in range(8) if k not in taken]
+            slots[name] = free[0] if free else len(slots) % 8
+    return slots
+
+
+def chart_html(chart: dict, uid: str, slots: dict[str, int] | None = None) -> str:
     """Horizontal bars. `stacked_bars` stacks named segments; `bars` is one bar per item.
+
+    `slots` maps a segment name to its colour slot (see segment_slots); without it a
+    stacked chart colours its segments by their order in the chart.
 
     A plain bar prints its value at the tip. A stacked bar prints its summed total there
     only if the chart dict has `"show_totals": true`: a sum of per-phase medians is not
@@ -246,6 +270,7 @@ def chart_html(chart: dict, uid: str) -> str:
         bars = [(i["label"], [(i["label"], i["value"])]) for i in chart["items"]]
     totals = [sum(v for _, v in segs) for _, segs in bars]
     names = list(dict.fromkeys(n for _, segs in bars for n, _ in segs))
+    slot = slots or {n: i % 8 for i, n in enumerate(names)}
     full, pitch = 340.0, 58
     scale = full / max(totals)
     height = len(bars) * pitch + 4
@@ -267,7 +292,7 @@ def chart_html(chart: dict, uid: str) -> str:
         x = 0.0
         for name, v in segs:
             w = v * scale
-            cls = names.index(name) % 8 if stacked else 0
+            cls = slot[name] if stacked else 0
             # A 2 px surface gap separates touching segments; a sliver keeps its width.
             drawn = w - GAP if w > 2 * GAP else w
             p.append(f'<rect class="seg s{cls}{dim(name)}" x="{x:.1f}" y="{y + 20}" width="{drawn:.1f}" '
@@ -284,8 +309,8 @@ def chart_html(chart: dict, uid: str) -> str:
     p.append("</svg>")
     legend = ""
     if stacked:
-        chips = "".join(f'<li><span class="chip s{i % 8}{dim(n)}"></span>{esc(n)}</li>'
-                        for i, n in enumerate(names))
+        chips = "".join(f'<li><span class="chip s{slot[n]}{dim(n)}"></span>{esc(n)}</li>'
+                        for n in names)
         legend = f'<ul class="legend">{chips}</ul>'
     if chart.get("deltas"):
         items = "".join(f'<li><b>{esc(d["between"])}</b> {inline(d["text"])}</li>'

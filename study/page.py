@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from study.map import MAP_CSS, MAP_JS, has_map, map_section
 from study.schema import so_ids
-from study.svg import chart_html, diagram_html
+from study.svg import chart_html, diagram_html, segment_slots
 from study.text import esc, inline
 
 CSS = """
@@ -203,6 +203,9 @@ def _decisions(c):
 
 def _results(c):
     titles = {d["id"]: d["title"] for d in c.get("decisions", [])}
+    # One colour per segment name across the page's stacked charts.
+    slots = segment_slots([r["chart"] for r in c["results"]
+                           if r["chart"]["type"] == "stacked_bars"])
     cards = []
     for i, r in enumerate(c["results"]):
         so = ""
@@ -211,7 +214,7 @@ def _results(c):
             so = f'<div class="callout">So: {links}</div>'
         cards.append(
             f'<div class="card" id="r-{i}"><h3>{esc(r["title"])}</h3>'
-            f'{chart_html(r["chart"], f"r{i}")}'
+            f'{chart_html(r["chart"], f"r{i}", slots)}'
             f'<div class="row"><b>Axis</b><div>{inline(r["axis"])}</div></div>'
             f'<div class="row"><b>Read it as</b><div>{inline(r["read_as"])}</div></div>{so}</div>')
     return (f'<section id="results"><h2>Results, as meaning</h2>'
