@@ -26,6 +26,7 @@ PLOT_H = 210  # plot height
 PAD = 10  # inner x padding, so a marker at either end clears the axes
 LINE = 18  # pitch of one line of chart text
 TITLE_CHARS = int(W / CHART_CHAR)
+DIRECT_LABELS = 4  # an xy chart prints each series' last value up to this many series
 NEST = 0.45  # how much larger each enclosing marker is drawn where markers coincide
 
 
@@ -330,12 +331,15 @@ class Frame:
         return first
 
     def place_near(self, cls: str, px: float, py: float, text: str,
-                   marks: list[tuple]) -> None:
-        """Label the point (px, py): right of it, above, below or left; then at its
-        corners; then further out, joined to the point by a thin leader line (see place)."""
-        near = [(px + 9, py + 5, "start"), (px, py - 11, "middle"), (px, py + 22, "middle"),
-                (px - 9, py + 5, "end"), (px + 9, py - 9, "start"), (px - 9, py - 9, "end"),
-                (px + 9, py + 19, "start"), (px - 9, py + 19, "end")]
+                   marks: list[tuple], s: float = 1.0) -> None:
+        """Label the point (px, py), whose marker is drawn at scale s: right of it, above,
+        below or left; then at its corners; then further out, joined to the point by a
+        thin leader line (see place)."""
+        e = 7 * (s - 1)  # a larger (nesting) marker pushes its label out
+        near = [(px + 9 + e, py + 5, "start"), (px, py - 11 - e, "middle"),
+                (px, py + 22 + e, "middle"), (px - 9 - e, py + 5, "end"),
+                (px + 9 + e, py - 9 - e, "start"), (px - 9 - e, py - 9 - e, "end"),
+                (px + 9 + e, py + 19 + e, "start"), (px - 9 - e, py + 19 + e, "end")]
         far = [(px, py - 30, "middle"), (px, py + 41, "middle"), (px - 34, py + 5, "end"),
                (px + 34, py + 5, "start"), (px, py - 48, "middle"), (px, py + 59, "middle"),
                (px - 34, py - 22, "end"), (px - 34, py + 32, "end"),
@@ -466,11 +470,13 @@ def xy_html(chart: dict) -> str:
             coords.append((px, py, sizes[k][j]))
         px, py, p = pts[-1]
         if not any(t == val(p["y"]) and abs(x - px) < 4 and abs(y - py) < 4
-                   for x, y, t in ends):  # two series ending on one point: one label
-            ends.append((px, py, val(p["y"])))
+                   for x, y, t, _ in ends):  # two series ending on one point: one label
+            ends.append((px, py, val(p["y"]), sizes[k][-1]))
     f.finish(coords)
-    for px, py, text in ends:
-        f.place_near("xyv", px, py, text, coords)
+    # Direct labels for up to four series (dataviz); five or six rely on the legend and
+    # each marker's tooltip, since six crowded end values cannot be matched to lines.
+    for px, py, text, size in ends if len(series) <= DIRECT_LABELS else []:
+        f.place_near("xyv", px, py, text, coords, size)
 
     summary = "; ".join(
         f"{s['name']}: {len(s['points'])} point{'s' if len(s['points']) != 1 else ''}, "
@@ -562,7 +568,8 @@ def scatter_html(chart: dict) -> str:
     for (x, y), per in spots.items():
         for _, label in per.values():
             if label:
-                f.place_near("xypl", f.x(x), f.y(y), label, coords)
+                f.place_near("xypl", f.x(x), f.y(y), label, coords,
+                             1.0 + NEST * (len(per) - 1))
 
     parts = []
     for k, g in enumerate(groups):

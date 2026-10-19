@@ -1902,3 +1902,82 @@ def test_scatter_values_are_traced(tmp_path):
     ch["frontier"]["points"][1]["y"] = 14.3
     ch["refs"][0]["x"] = 3100
     assert untraced_numbers(u) == ["14.3", "3100"]
+
+
+# ---- builder fixes: italic, zero bar, nav cue, phone text size, near-equal percentiles ----
+
+def test_inline_single_asterisks_are_italic_and_bold_still_works():
+    assert inline("a *b* **c** `d`") == "a <em>b</em> <strong>c</strong> <code>d</code>"
+    assert inline("**bold** then *it*, *two words*") == (
+        "<strong>bold</strong> then <em>it</em>, <em>two words</em>")
+    assert inline("2 * 3 * 4") == "2 * 3 * 4"  # a spaced asterisk is not markup
+    assert "<em><script>" not in inline("*<script>*")
+
+
+def test_a_zero_bar_draws_a_thin_tick_and_its_label():
+    chart = {"type": "bars", "unit": "tokens",
+             "items": [{"label": "cold", "value": 35792}, {"label": "warm", "value": 0}]}
+    out = chart_html(chart, "z0")
+    ticks = re.findall(r'<rect class="seg s0" x="0.0" y="(\d+)" width="2.0"', out)
+    assert len(ticks) == 1
+    label = [t for t in _texts(out) if t[4] == "0 tokens"]
+    assert label and label[0][1] > 2
+
+
+def test_phone_nav_scrolls_with_an_edge_fade_and_room_for_the_last_pill():
+    from study.page import CSS, JS
+    phone = _media(CSS, "max-width:600px")
+    assert "nav.pills{flex-wrap:nowrap;overflow-x:auto" in phone
+    assert "mask-image:" in phone and "-webkit-mask-image:" in phone
+    assert 'nav.pills::after{content:"";flex:none;width:32px}' in phone
+    assert 'nav.pills[data-more=""]' in phone  # no fade once nothing is hidden
+    assert "dataset.more" in JS
+
+
+def _phone_font_sizes():
+    """{class: font size} from the phone media query."""
+    from study.page import CSS
+    sizes = {}
+    for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", _media(CSS, "max-width:600px") + "}"):
+        m = re.search(r"font-size:(\d+)px", body)
+        for s in sel.split(","):
+            if m and re.fullmatch(r"\.[\w-]+", s.strip()):
+                sizes[s.strip()[1:]] = int(m.group(1))
+    return sizes
+
+
+def test_every_chart_text_renders_at_12px_or_more_on_a_375px_phone():
+    sizes = _phone_font_sizes()
+    charts = [
+        artifact_unit()["results"][0]["chart"],
+        {"type": "bars", "unit": "tokens", "items": [{"label": "cold", "value": 35792}]},
+        _pct(), xy_chart(), scatter_chart(refs=[{"x": 3095, "label": "budget"}]),
+        dict(_interval([{"label": "(A-B) minus (B-C)", "estimate": -10.39, "low": -12.5,
+                         "high": -8.25}]), zero_label="no difference",
+             left_label="weights cache saves more", right_label="compile cache saves more"),
+    ]
+    for chart in charts:
+        out = chart_html(chart, "f0")
+        width = float(re.search(r'viewBox="0 0 ([\d.]+)', out).group(1))
+        for cls, *_ in _texts(out):
+            size = max(sizes.get(c, 0) for c in cls.split())
+            assert 309 / width * size >= 12, (chart["type"], cls, width, size)
+
+
+def test_near_equal_percentile_marks_are_offset_so_both_show():
+    out = chart_html(_pct(), "q0")
+    marks = {(m.group(3), m.group(4)): float(m.group(2)) for m in re.finditer(
+        r'<path class="pdot pk\d" data-x="([\d.]+)" data-y="([\d.]+)"[^>]*><title>(\w+): (\w+)',
+        out)}
+    assert abs(marks[("A", "p90")] - marks[("A", "p95")]) >= 8
+    line_y = float(re.search(r'<line class="prange" x1="[\d.]+" y1="([\d.]+)"', out).group(1))
+    assert marks[("A", "p50")] == line_y  # a mark with room stays on the line
+
+
+def test_xy_prints_last_values_for_up_to_four_series_only():
+    def chart(n):
+        return xy_chart(series=[{"name": f"s{k}", "points": [{"x": 0, "y": k},
+                                                             {"x": 1, "y": k + 10}]}
+                                for k in range(n)])
+    assert len([t for t in _texts(chart_html(chart(4), "e4")) if "xyv" in t[0]]) == 4
+    assert [t for t in _texts(chart_html(chart(5), "e5")) if "xyv" in t[0]] == []

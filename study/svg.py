@@ -18,6 +18,9 @@ GAP = 2  # surface gap between stacked segments (dataviz mark spec)
 CHAR = 6.2  # estimated width of one 11 px edge-label character
 LABEL_CHARS = 18  # edge labels wrap at this many characters
 CHART_CHAR = 8.5  # width allowance per chart-text character (phone CSS sets up to 15 px)
+# The widest chart viewBox: a 375 px phone's card is 309 px wide, and phone CSS sets chart
+# text at 15 units, so 309 / 386 * 15 = 12 px.
+PHONE_W = 386
 
 
 def _clip(cx, cy, tx, ty, hw, hh):
@@ -215,7 +218,8 @@ def interval_html(chart: dict) -> str:
     highs = [f(r["high"]) for f, r in zip(fmts, rows)]
     left_pad = max(len(t) for t in lows) * CHART_CHAR + 10
     right_pad = max(len(t) for t in highs) * CHART_CHAR + 10
-    plot = 280.0
+    # The plot gives up width so the viewBox stays within PHONE_W (down to 200 units).
+    plot = max(200.0, min(280.0, PHONE_W - left_pad - right_pad))
     lo = min(0.0, *(r["low"] for r in rows))
     hi = max(0.0, *(r["high"] for r in rows))
     span = hi - lo or 1.0
@@ -308,7 +312,7 @@ def interval_html(chart: dict) -> str:
     return "".join(p) + caption
 
 
-P_LEFT, P_PLOT, P_RIGHT = 14, 360, 16  # percentile chart margins and plot width
+P_LEFT, P_PLOT, P_RIGHT = 14, 356, 16  # percentile chart margins and plot width (386)
 P_LANE = 17  # vertical step between stacked labels of one row
 SHAPES = 4  # percentile marks cycle through four shapes and colours (--c0, c1, c6, c3)
 
@@ -359,6 +363,23 @@ def _lanes(items: list[tuple[float, str]], width: float) -> list[tuple[str, int,
     return out
 
 
+def _offsets(xs: list[float], near: float = 12.0, step: float = 10.0) -> list[float]:
+    """A vertical offset per mark: 0, except in a run of marks whose neighbours sit less
+    than `near` units apart (96.3 and 96.4 on one axis), which spread `step` units apart
+    about the line, so each mark shows. In the order given."""
+    order = sorted(range(len(xs)), key=lambda i: xs[i])
+    out = [0.0] * len(xs)
+    run = [order[0]] if order else []
+    for i in order[1:] + [None]:
+        if i is not None and xs[i] - xs[run[-1]] < near:
+            run.append(i)
+            continue
+        for j, m in enumerate(run):
+            out[m] = (j - (len(run) - 1) / 2) * step if len(run) > 1 else 0.0
+        run = [i]
+    return out
+
+
 def percentiles_html(chart: dict) -> str:
     """One row per label on one shared axis from zero: a thin line from the row's lowest
     to its highest percentile, a mark per percentile (one shape and colour per percentile
@@ -389,7 +410,9 @@ def percentiles_html(chart: dict) -> str:
         below = 1 + max([lane for side, lane, _ in placed.values() if side == "below"],
                         default=-1)
         body.append(f'<text class="blabel" x="0" y="{y + 14:.1f}">{esc(r["label"])}</text>')
-        cy = y + 20 + P_LANE * above + 10
+        dy = _offsets([x(v["value"]) for v in r["values"]])
+        o = max(abs(d) for d in dy)  # labels move out by as much as a mark moves
+        cy = y + 20 + P_LANE * above + 10 + o
         vals = [v["value"] for v in r["values"]]
         body.append(f'<line class="prange" x1="{x(min(vals)):.1f}" y1="{cy:.1f}" '
                     f'x2="{x(max(vals)):.1f}" y2="{cy:.1f}"/>')
@@ -399,17 +422,19 @@ def percentiles_html(chart: dict) -> str:
             body.append(f'<circle class="pmax" cx="{x(m["value"]):.1f}" cy="{cy:.1f}" r="6">'
                         f'<title>{esc(r["label"])}: {esc(m["text"])} {_num(m["value"])} '
                         f'{esc(unit)}</title></circle>')
-        for v in r["values"]:
+        for v, d in zip(r["values"], dy):
             k = names.index(v["name"]) % SHAPES
             body.append(f'<path class="pdot pk{k}" data-x="{x(v["value"]):.1f}" '
-                        f'd="{_mark(k, x(v["value"]), cy)}"><title>{esc(r["label"])}: '
+                        f'data-y="{cy + d:.1f}" '
+                        f'd="{_mark(k, x(v["value"]), cy + d)}"><title>{esc(r["label"])}: '
                         f'{esc(v["name"])} {_num(v["value"])} {esc(unit)}</title></path>')
         for i, (side, lane, ax) in placed.items():
-            ty = cy - 12 - P_LANE * lane if side == "above" else cy + 24 + P_LANE * lane
+            ty = (cy - 12 - o - P_LANE * lane if side == "above"
+                  else cy + 24 + o + P_LANE * lane)
             cls = "pnum pmaxt" if m and i == len(items) - 1 else "pnum"
             body.append(f'<text class="{cls}" x="{ax:.1f}" y="{ty:.1f}" '
                         f'text-anchor="middle">{esc(items[i][1])}</text>')
-        y = cy + 10 + P_LANE * below + (10 if below else 4)
+        y = cy + 10 + o + P_LANE * below + (10 if below else 4)
     axis_y = y + 4
     ticks = _ticks(hi)
     grid = "".join(f'<line class="pgrid" x1="{x(t):.1f}" y1="0" x2="{x(t):.1f}" '
@@ -545,7 +570,6 @@ def chart_html(chart: dict, uid: str, slots: dict[str, int] | None = None) -> st
     slot = slots or {n: i % 8 for i, n in enumerate(names)}
     full, pitch = 340.0, 58
     ghost = _ghost_geometry(chart) if stacked else None
-    scale = full / max(totals + ([ghost[1] + ghost[2]] if ghost else []))
     # The bar with a ghost outline gets an extra line under it for the outline's caption.
     tops, y = [], 0
     for label, _ in bars:
@@ -563,6 +587,10 @@ def chart_html(chart: dict, uid: str, slots: dict[str, int] | None = None) -> st
     # Leave room after the longest bar for the longest end label, so none is clipped.
     tail = (max(len(f"{_num(t)} {chart['unit']}") for t in totals) * CHART_CHAR + 6
             if show_end else 0)
+    # Keep the viewBox within PHONE_W, so phone text renders at 12 px or more; the bars
+    # give up length to the end labels, down to 200 units.
+    full = max(200.0, min(full, PHONE_W - 6 - tail))
+    scale = full / max(totals + ([ghost[1] + ghost[2]] if ghost else []))
     width = round(full + 6 + tail)
     p = [(f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
           f'aria-label="{unit} by bar" xmlns="http://www.w3.org/2000/svg">')]
@@ -572,8 +600,11 @@ def chart_html(chart: dict, uid: str, slots: dict[str, int] | None = None) -> st
         for name, v, members in segs:
             w = v * scale
             cls = slot[name] if stacked else 0
-            # A 2 px surface gap separates touching segments; a sliver keeps its width.
+            # A 2 px surface gap separates touching segments; a sliver keeps its width. A
+            # plain bar is never thinner than a 2 px tick, so a zero still shows a mark.
             drawn = w - GAP if w > 2 * GAP else w
+            if not stacked:
+                drawn = max(drawn, 2.0)
             parts = (" (" + " + ".join(f"{esc(m)} {_num(mv)}" for m, mv in members) + ")"
                      if len(members) > 1 else "")
             p.append(f'<rect class="seg s{cls}{dim(name)}" x="{x:.1f}" y="{y + 20}" width="{drawn:.1f}" '
@@ -585,7 +616,7 @@ def chart_html(chart: dict, uid: str, slots: dict[str, int] | None = None) -> st
                          f'text-anchor="middle">{_num(v)}</text>')
             x += w
         if show_end:
-            p.append(f'<text class="btotal" x="{x + 6:.1f}" y="{y + 36}">'
+            p.append(f'<text class="btotal" x="{max(x, 2.0) + 6:.1f}" y="{y + 36}">'
                      f'{_num(total)} {unit}</text>')
         if ghost and label == ghost[0]:
             g = chart["ghost"]

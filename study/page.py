@@ -231,13 +231,31 @@ font-variant-numeric:tabular-nums}
 @media (max-width:600px){.diagram{display:none}.diagram-text{display:block}.dlegend{display:none}
 h1{font-size:24px}.lead{font-size:16px}
 .row{display:block}.row b{display:block;margin-bottom:1px}
-nav.pills{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+nav.pills{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+--fadeL:#000;--fadeR:transparent;
+-webkit-mask-image:linear-gradient(#000,#000),linear-gradient(to right,var(--fadeL),#000 36px,#000 calc(100% - 36px),var(--fadeR));
+mask-image:linear-gradient(#000,#000),linear-gradient(to right,var(--fadeL),#000 36px,#000 calc(100% - 36px),var(--fadeR));
+-webkit-mask-size:100% 1px,100% 100%;mask-size:100% 1px,100% 100%;
+-webkit-mask-position:0 100%,0 0;mask-position:0 100%,0 0;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat}
+nav.pills[data-more=""]{-webkit-mask-image:none;mask-image:none}
+nav.pills[data-more~="left"]{--fadeL:transparent}nav.pills[data-more="left"]{--fadeR:#000}
+nav.pills::after{content:"";flex:none;width:32px}
 nav.pills::-webkit-scrollbar{display:none}nav.pills a{flex:none}
-.blabel,.btotal,.inum,.pnum,.gcap{font-size:15px}.segtext,.axlabel{font-size:14px}
+.blabel,.btotal,.inum,.pnum,.gcap,.segtext,.axlabel{font-size:15px}
 .xyt,.xyax,.xyv,.xyrt,.xybt,.xyn,.xypl,.xyfl{font-size:15px}}
 """
 
 JS = """
+for (const n of document.querySelectorAll('nav.pills')) {
+  // Which edges hide pills: the phone CSS fades those edges, and none once all fit.
+  const mark = () => { const more = [];
+    if (n.scrollLeft > 2) more.push('left');
+    if (n.scrollLeft + n.clientWidth < n.scrollWidth - 2) more.push('right');
+    n.dataset.more = more.join(' '); };
+  n.addEventListener('scroll', mark, {passive: true});
+  addEventListener('resize', mark);
+  mark();
+}
 for (const g of document.querySelectorAll('[data-tabs]')) {
   const tabs = g.querySelectorAll('[role=tab]'), panels = g.querySelectorAll('[role=tabpanel]');
   const show = i => { tabs.forEach((t, j) => t.setAttribute('aria-selected', j === i));

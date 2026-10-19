@@ -24,12 +24,18 @@ def _anchor(m: re.Match) -> str:
     return f'<a href="{url}" target="_blank" rel="noopener">{text}</a>'
 
 
+# *italic*: single asterisks hugging their words (so "2 * 3" stays), not inside a word,
+# and never part of a ** pair (bold is replaced first).
+_ITALIC = re.compile(r"(?<![*\w])\*(?=[^\s*])([^*]*?[^\s*])\*(?![*\w])")
+
+
 def inline(s: str) -> str:
-    """Escape, then turn **bold**, `code` and resolved unit links into tags. Nothing else
-    is interpreted."""
+    """Escape, then turn **bold**, *italic*, `code` and resolved unit links into tags.
+    Nothing else is interpreted."""
     out = html.escape(str(s), quote=True)
     out = _RESOLVED.sub(_anchor, out)
     out = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", out)
+    out = _ITALIC.sub(r"<em>\1</em>", out)
     return re.sub(r"`(.+?)`", r"<code>\1</code>", out)
 
 
