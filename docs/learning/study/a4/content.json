@@ -1,0 +1,2446 @@
+{
+  "id": "a4",
+  "kind": "artifact",
+  "title": "Dedicate, swap or share: placing twenty small models on GPUs, and a simulator that missed its own test",
+  "short_title": "Placing Twenty Models",
+  "minutes": 45,
+  "question": "Twenty small models on rented RTX 4090s: dedicate a GPU to each, swap models through a shared pool, or co-locate two per GPU? Which is cheapest as popularity skew and arrival timing change? The answer comes from a simulator that failed its pre-registered [validation gate](p2:gate).",
+  "requirements": [
+    {
+      "id": "R1",
+      "short": "One sizing rule for all three",
+      "text": "Size every strategy by the same rule: hot models pinned the same way, then the smallest fleet that meets the SLO.",
+      "why": "If only some strategies may give a hot model extra GPUs, the rule, not the measurement, decides the high-skew result (scope amendment §7)."
+    },
+    {
+      "id": "R2",
+      "short": "Every tenant meets the SLO",
+      "text": "Hold the latency target for every popularity decile of models, not only for all requests together.",
+      "why": "Popular models send most requests, so an aggregate [p99](p2:percentiles) can pass while some tenants fail (design §8)."
+    },
+    {
+      "id": "R3",
+      "short": "Skew and arrival timing, apart",
+      "text": "Sweep popularity skew at two arrival regimes that give each model the same long-run share.",
+      "why": "Swapping with LRU follows whether a model's requests come together in time, not how often they come; skew alone misses that (design §7)."
+    },
+    {
+      "id": "R4",
+      "short": "Measure primitives, simulate fleets",
+      "text": "Measure on the GPU what a swap, a co-located neighbour and a memory split cost; simulate only traffic, fleet dynamics and queueing.",
+      "why": "They are the design's only hardware contacts; interference \"cannot be reasoned to\" (design, module 2)."
+    },
+    {
+      "id": "R5",
+      "short": "Rules first; trust only after a gate",
+      "text": "Fix every rule before the data it governs, with dated [amendments](p2:amendment); trust the simulator only if it reproduces a real replay, and publish a miss.",
+      "why": "Fleet numbers are a model's; only a test fixed in advance separates a finding from model error ([a failed gate is a result](p2:failed))."
+    },
+    {
+      "id": "R6",
+      "short": "Answer in GPUs and dollars",
+      "text": "State the result as a decision rule in GPUs and monthly dollars, with every conversion assumption published.",
+      "why": "The portfolio requires money too, and readers must be able to substitute their own rate."
+    }
+  ],
+  "concepts": [
+    {
+      "id": "zipf",
+      "short": "Zipf skew and hot models",
+      "term": "Zipf skew, and hot models",
+      "plain": "The k-th most popular of 20 models gets a share proportional to 1 / k to the power s. At **s = 2.0** the hottest model carries about 62.7% (a scope-amendment estimate). Total load: one GPU's measured throughput, 8.89 requests per second. A model above 0.7 of a GPU is **hot** and gets pinned GPUs in every strategy."
+    },
+    {
+      "id": "regimes",
+      "short": "Spread vs bursty arrivals",
+      "term": "Spread and bursty arrivals",
+      "plain": "Same long-run share per model, different timing. **Spread**: random (Poisson) arrivals, each labelled independently. **Bursty**: each model is ON in bursts of about 120 s, a fifth of the time. In a burst its load is five times its average, so bursty sizing uses that ON-period load."
+    },
+    {
+      "id": "swap",
+      "short": "A swap, and LRU",
+      "term": "A swap, and the LRU pool",
+      "plain": "Stop one [vLLM](p1:vllm) engine, wait for its memory to free, start the next model's engine until it answers health: median **37.8 s** over 16 warm swaps, [compile cache](p1:compile) hit. The swap strategy's pool evicts the **least recently used** model. Sleep mode (5.0 s) was measured, never simulated."
+    },
+    {
+      "id": "coloc",
+      "short": "Co-location and the KV split",
+      "term": "Co-location and the KV split",
+      "plain": "Two engines on one card, 45% of its memory each. The [KV cache](p1:kvcache) falls from **168,464** tokens alone to **55,104** (pinned): 82 requests of 2,048 tokens at once, against 26. It shrinks 3.1 times while the memory share shrinks 2.0 times, because the [weights](p1:weights) and graph buffers come out of the smaller budget first."
+    },
+    {
+      "id": "slo",
+      "short": "SLO and per-decile p99",
+      "term": "The SLO, per popularity decile",
+      "plain": "**SLO: p99 at most 75.6 s**, twice the median swap. A **decile** is 2 of the 20 models by popularity. Its p99 is taken in each simulated run, then the median over 30 runs. A fleet size passes only if all ten deciles meet the SLO."
+    },
+    {
+      "id": "gate",
+      "short": "This gate: one GPU, three tenants",
+      "term": "The validation gate, as used here",
+      "plain": "Three tenants on **one GPU**, a 900 s bursty trace of 1,562 requests with real swaps, replayed **three times**. Per 30 s bin, the simulator's median latency must fall inside the three repeats' band. Pass: at least 10 judged bins, at most half missing, swap count within the real range ±1. Co-location gets only two **held-out** interference cells."
+    }
+  ],
+  "views": [
+    {
+      "level": "context",
+      "title": "Who and what the study touches",
+      "caption": "One RunPod endpoint rents one RTX 4090 at a time; checkpoints come from a network volume. Artifact 1 is a reference line; artifact 5 reads this study's unvalidated cost per tenant.",
+      "nodes": [
+        {
+          "id": "author",
+          "label": "Author",
+          "sub": "designs, runs, publishes the miss",
+          "kind": "person",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "id": "study",
+          "label": "Placement study",
+          "sub": "simulator, gate, three measured primitives",
+          "kind": "focus",
+          "col": 1,
+          "row": 0
+        },
+        {
+          "id": "reader",
+          "label": "Reader",
+          "sub": "platform engineers and managers",
+          "kind": "person",
+          "col": 2,
+          "row": 0
+        },
+        {
+          "id": "volume",
+          "label": "Network volume",
+          "sub": "Qwen3 checkpoints, read offline",
+          "kind": "store",
+          "col": 1,
+          "row": 2
+        },
+        {
+          "id": "runpod",
+          "label": "RunPod serverless",
+          "sub": "one RTX 4090, EU-RO-1",
+          "kind": "external",
+          "col": 1,
+          "row": 1
+        },
+        {
+          "id": "a5",
+          "label": "Artifact 5",
+          "sub": "reads cost per tenant per month",
+          "kind": "system",
+          "col": 2,
+          "row": 1
+        },
+        {
+          "id": "a1",
+          "label": "Artifact 1 stages",
+          "sub": "8B cold-start medians, a reference",
+          "kind": "store",
+          "col": 0,
+          "row": 1
+        }
+      ],
+      "edges": [
+        {
+          "from": "author",
+          "to": "study",
+          "label": "designs, runs"
+        },
+        {
+          "from": "study",
+          "to": "reader",
+          "label": "draft post + data"
+        },
+        {
+          "from": "study",
+          "to": "runpod",
+          "label": "248 paid jobs"
+        },
+        {
+          "from": "runpod",
+          "to": "volume",
+          "label": "loads weights"
+        },
+        {
+          "from": "study",
+          "to": "a5",
+          "label": "cost_per_tenant.json"
+        },
+        {
+          "from": "a1",
+          "to": "study",
+          "label": "reference bar"
+        }
+      ]
+    },
+    {
+      "level": "container",
+      "title": "The runnable parts",
+      "caption": "The laptop submits one job at a time; the worker runs a cell, swap, sleep switch or replay. After the stores everything is laptop CPU: the simulator, then one analysis file for figures, cost file and post.",
+      "nodes": [
+        {
+          "id": "driver",
+          "label": "Campaign driver",
+          "sub": "laptop: committed design to jobs",
+          "kind": "focus",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "id": "endpoint",
+          "label": "RunPod endpoint",
+          "sub": "0 to 1 worker, pinned settings",
+          "kind": "external",
+          "col": 1,
+          "row": 0
+        },
+        {
+          "id": "worker",
+          "label": "Measure handler",
+          "sub": "cell, swap, sleep or replay job",
+          "kind": "system",
+          "col": 2,
+          "row": 0
+        },
+        {
+          "id": "engines",
+          "label": "vLLM engines",
+          "sub": "one, two co-resident, or swapped",
+          "kind": "external",
+          "col": 3,
+          "row": 0
+        },
+        {
+          "id": "stores",
+          "label": "data/a4 stores",
+          "sub": "cells, swaps, sleep, replays (JSONL)",
+          "kind": "store",
+          "col": 0,
+          "row": 1
+        },
+        {
+          "id": "sim",
+          "label": "Placement simulator",
+          "sub": "CPU only, measured inputs",
+          "kind": "focus",
+          "col": 1,
+          "row": 1
+        },
+        {
+          "id": "analysis",
+          "label": "Analysis",
+          "sub": "analysis.json: sizes, verdict, money",
+          "kind": "system",
+          "col": 1,
+          "row": 2
+        },
+        {
+          "id": "post",
+          "label": "Figures + post draft",
+          "sub": "numbers rendered, never retyped",
+          "kind": "system",
+          "col": 2,
+          "row": 2
+        }
+      ],
+      "edges": [
+        {
+          "from": "driver",
+          "to": "endpoint",
+          "label": "one job at a time"
+        },
+        {
+          "from": "endpoint",
+          "to": "worker",
+          "label": "starts"
+        },
+        {
+          "from": "worker",
+          "to": "engines",
+          "label": "starts, loads, times"
+        },
+        {
+          "from": "driver",
+          "to": "stores",
+          "label": "appends a record"
+        },
+        {
+          "from": "stores",
+          "to": "sim",
+          "label": "curve, surface, swaps"
+        },
+        {
+          "from": "sim",
+          "to": "analysis",
+          "label": "sized fleets"
+        },
+        {
+          "from": "stores",
+          "to": "analysis",
+          "label": "replays for the gate"
+        },
+        {
+          "from": "analysis",
+          "to": "post",
+          "label": "one file"
+        }
+      ]
+    },
+    {
+      "level": "component",
+      "title": "Inside the simulator (placement/)",
+      "caption": "Every fleet size of every strategy runs the same 30 traces (common random numbers), so strategies differ only in placement. Sizing then picks, per strategy, the smallest fleet whose every decile meets the SLO; swap and co-locate search only up to dedicate's size.",
+      "nodes": [
+        {
+          "id": "traffic",
+          "label": "Traffic generator",
+          "sub": "Zipf labels; spread or bursty",
+          "kind": "system",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "id": "families",
+          "label": "Placement families",
+          "sub": "hot rule, then fleets by GPU count",
+          "kind": "system",
+          "col": 2,
+          "row": 0
+        },
+        {
+          "id": "inputs",
+          "label": "Measured inputs",
+          "sub": "solo curve, pair surface, 16 swaps",
+          "kind": "store",
+          "col": 0,
+          "row": 1
+        },
+        {
+          "id": "evaluate",
+          "label": "Grid-point evaluation",
+          "sub": "every fleet, 30 runs, same traces",
+          "kind": "system",
+          "col": 1,
+          "row": 0
+        },
+        {
+          "id": "loop",
+          "label": "Event loop",
+          "sub": "route by residency, LRU swap, drain-out",
+          "kind": "focus",
+          "col": 1,
+          "row": 1
+        },
+        {
+          "id": "tails",
+          "label": "Per-decile p99",
+          "sub": "withheld below the sample floor",
+          "kind": "system",
+          "col": 2,
+          "row": 1
+        },
+        {
+          "id": "money",
+          "label": "Crossover + money",
+          "sub": "cheapest per skew; monthly dollars",
+          "kind": "system",
+          "col": 1,
+          "row": 2
+        },
+        {
+          "id": "sizing",
+          "label": "Sizing",
+          "sub": "smallest fleet meeting SLO per decile",
+          "kind": "focus",
+          "col": 2,
+          "row": 2
+        }
+      ],
+      "edges": [
+        {
+          "from": "traffic",
+          "to": "evaluate",
+          "label": "one trace per run"
+        },
+        {
+          "from": "families",
+          "to": "evaluate",
+          "label": "fleets, smallest first"
+        },
+        {
+          "from": "evaluate",
+          "to": "loop",
+          "label": "a fleet and a trace"
+        },
+        {
+          "from": "inputs",
+          "to": "loop",
+          "label": "service and swap times"
+        },
+        {
+          "from": "loop",
+          "to": "tails",
+          "label": "latencies"
+        },
+        {
+          "from": "tails",
+          "to": "sizing",
+          "label": "decile p99s"
+        },
+        {
+          "from": "sizing",
+          "to": "money",
+          "label": "GPUs per strategy"
+        }
+      ]
+    },
+    {
+      "level": "dynamic",
+      "title": "One swap inside the simulator, in order",
+      "caption": "This path, on one GPU, is what the gate replayed. The swap is a fixed stall of the GPU; nothing models what a swap costs the requests around it, the term the diagnosis says is missing.",
+      "nodes": [
+        {
+          "id": "s1",
+          "label": "1 Request for model x",
+          "sub": "x is on no GPU; it waits in its queue",
+          "kind": "system",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "id": "s2",
+          "label": "2 Pick the LRU victim",
+          "sub": "the pool GPU used longest ago",
+          "kind": "system",
+          "col": 1,
+          "row": 0
+        },
+        {
+          "id": "s3",
+          "label": "3 Victim drains",
+          "sub": "admits nothing; in-flight finish",
+          "kind": "system",
+          "col": 2,
+          "row": 0
+        },
+        {
+          "id": "s4",
+          "label": "4 Swap starts",
+          "sub": "GPU stalls a drawn time, median 37.8 s",
+          "kind": "focus",
+          "col": 3,
+          "row": 0
+        },
+        {
+          "id": "s5",
+          "label": "5 Two queues wait",
+          "sub": "model x, and the evicted model",
+          "kind": "system",
+          "col": 3,
+          "row": 1
+        },
+        {
+          "id": "s6",
+          "label": "6 Swap done",
+          "sub": "x resident; its queue is dispatched",
+          "kind": "system",
+          "col": 2,
+          "row": 1
+        },
+        {
+          "id": "s7",
+          "label": "7 Service time",
+          "sub": "solo curve at dispatch, then frozen",
+          "kind": "system",
+          "col": 1,
+          "row": 1
+        },
+        {
+          "id": "s8",
+          "label": "8 Latency recorded",
+          "sub": "arrival to done; every request served",
+          "kind": "store",
+          "col": 0,
+          "row": 1
+        }
+      ],
+      "edges": [
+        {
+          "from": "s1",
+          "to": "s2",
+          "label": "no swap pending"
+        },
+        {
+          "from": "s2",
+          "to": "s3",
+          "label": "victim chosen"
+        },
+        {
+          "from": "s3",
+          "to": "s4",
+          "label": "last one done"
+        },
+        {
+          "from": "s4",
+          "to": "s5",
+          "label": "meanwhile"
+        },
+        {
+          "from": "s5",
+          "to": "s6",
+          "label": "stall ends"
+        },
+        {
+          "from": "s6",
+          "to": "s7",
+          "label": "dispatch"
+        },
+        {
+          "from": "s7",
+          "to": "s8",
+          "label": "done"
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "newsim",
+      "title": "A new fleet simulator, fed three measured primitives",
+      "problem": "The question is about fleets of 10 to 25 GPUs and 20 models; the August design planned to extend artifact 2's simulator.",
+      "options": [
+        "Extend artifact 2's simulator with a model dimension (the August design)",
+        "Assume co-located models each get half the GPU",
+        "A new loop with GPU identity: route by residency, swap by LRU, serve every request; swap, interference and KV split measured"
+      ],
+      "chosen": "A new loop with GPU identity: route by residency, swap by LRU, serve every request; swap, interference and KV split measured",
+      "why": "Artifact 2's loop has no replica identity, and placement is exactly which GPU holds which model; changing it would also change artifact 2's code mid-experiment. The half-the-GPU guess is \"almost certainly wrong in both directions\" (design), so it was measured. Every request is served, because dropping unfinished ones would drop the cold-tail requests stuck behind swaps.",
+      "why_short": "Artifact 2's loop has no GPU identity, and placement is which GPU holds which model; the half-a-GPU guess had to be measured.",
+      "cost": "A new loop to build. Service time is frozen at dispatch, capacity is the top measured concurrency, and neighbour load between 0 and 16 is interpolated, not measured.",
+      "cost_short": "A new loop to build; service time frozen at dispatch; neighbour load 1 to 15 interpolated, not measured.",
+      "short": "New simulator, measured inputs",
+      "serves": [
+        {
+          "req": "R4",
+          "because": "The three primitives enter as measurements."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "swap",
+          "because": "A swap is a stall drawn from 16 measured swaps."
+        },
+        {
+          "concept": "coloc",
+          "because": "Co-located latency comes from the measured surface."
+        }
+      ]
+    },
+    {
+      "id": "sizing",
+      "title": "One sizing rule for every strategy, judged per decile",
+      "problem": "At equal GPU counts the strategies cost the same, so each needs its own fleet size, by a rule that cannot decide the result by itself.",
+      "options": [
+        "Compare the strategies at one fixed number of GPUs",
+        "Let only some strategies replicate hot models",
+        "Size on the aggregate p99 of all requests",
+        "In the bursty regime, let every strategy search up to a common cap",
+        "One hot-model rule for all three; the smallest fleet whose every decile meets the SLO; bursty sizing on ON-period load"
+      ],
+      "chosen": "One hot-model rule for all three; the smallest fleet whose every decile meets the SLO; bursty sizing on ON-period load",
+      "why": "Hot models get pinned GPUs in every strategy, so strategies differ only in how the rest are placed. The aggregate p99 is mostly popular models' requests: an aggregate rule gives swap 9 GPUs at the reference point while the two hottest deciles sit at 87.7 and 77.2 s. On average load, a placeholder sweep left every bursty strategy dominated; the owner chose ON-period load.",
+      "why_short": "Hot models are pinned alike in all three, and a fleet passes only if every decile meets the SLO: the aggregate hides the hottest tenants.",
+      "cost": "Swap needs one GPU more at the reference point. Swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie unless both others miss below it. Bursty s = 0.6 is not evaluable: a decile had too few requests for a p99.",
+      "cost_short": "Swap needs a GPU more; dedicating can at best tie by construction; bursty s = 0.6 is not evaluable.",
+      "short": "One rule, every decile",
+      "serves": [
+        {
+          "req": "R1",
+          "because": "Same hot-model rule and SLO search for all three."
+        },
+        {
+          "req": "R2",
+          "because": "All ten deciles must meet the SLO."
+        },
+        {
+          "req": "R6",
+          "because": "A sized fleet is a GPU count, priced at a published rate."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "slo",
+          "because": "The SLO is applied decile by decile."
+        },
+        {
+          "concept": "zipf",
+          "because": "Skew decides which models are hot."
+        }
+      ]
+    },
+    {
+      "id": "regimes",
+      "title": "Two arrival regimes with the same per-model shares",
+      "problem": "Skew says how often each model is asked for, not whether its requests come together. Swapping by LRU depends on the second.",
+      "options": [
+        "Sweep Zipf skew alone",
+        "At each skew, a spread regime (independent arrivals) and a bursty one (ON about a fifth of the time, 120 s bursts), with identical long-run shares"
+      ],
+      "chosen": "At each skew, a spread regime (independent arrivals) and a bursty one (ON about a fifth of the time, 120 s bursts), with identical long-run shares",
+      "why": "Both generators take the same shares, so only clustering in time differs; skew alone \"would earn the correct objection that the analysis ignores locality\" (design §7). The simulator put the boundary between the regimes, with no crossover along skew in either.",
+      "why_short": "LRU swapping follows whether a model's requests cluster in time, not how often they come, so skew alone would miss the mechanism.",
+      "cost": "Only two regimes were built, so the data cannot say where between them the winner changes. The gate's trace used a third shape (180 s bursts at duty 0.25).",
+      "cost_short": "Only two regimes: the data cannot place the boundary between them.",
+      "short": "Two arrival regimes",
+      "serves": [
+        {
+          "req": "R3",
+          "because": "Same shares, different clustering."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "regimes",
+          "because": "The two regimes differ only in timing."
+        },
+        {
+          "concept": "zipf",
+          "because": "Both regimes are swept over the same six skews."
+        }
+      ]
+    },
+    {
+      "id": "model",
+      "title": "A small model, picked by a go/no-go, with KV that binds",
+      "problem": "Two of artifact 1's 8B models (about 16 GB each) do not fit a 24 GB card, and at the earlier short request the KV cache never fills.",
+      "options": [
+        "Artifact 1's Qwen3-8B",
+        "A different card for the co-location arm",
+        "Keep the inherited short request",
+        "Qwen3-4B, falling back to Qwen3-1.7B, by a go/no-go fixed before reconnaissance; a request long enough that the split's KV binds"
+      ],
+      "chosen": "Qwen3-4B, falling back to Qwen3-1.7B, by a go/no-go fixed before reconnaissance; a request long enough that the split's KV binds",
+      "why": "A different card would confound strategy with hardware. Pass: both engines healthy at 45% of memory, each with at least 16,384 KV tokens. The 4B pair left 9,456 and 9,520; the 1.7B pair passed. The shape rule chose 1,792 input and 256 output tokens: 26 requests fit a split engine, 82 a lone one.",
+      "why_short": "Two 8B models do not fit one card, and a short request never fills the KV cache; a go/no-go fixed in advance picked the size.",
+      "cost": "A small-model result (3.8 GiB of weights); swap and co-location costs scale with size. Two warm engines did not fit at 45% each, so their KV was pinned to 55,104 tokens by a signed amendment.",
+      "cost_short": "A small-model result, and the pair's KV had to be pinned by an amendment to fit at all.",
+      "short": "Small model, KV that binds",
+      "serves": [
+        {
+          "req": "R4",
+          "because": "All three strategies fit one card class."
+        },
+        {
+          "req": "R5",
+          "because": "Criterion and fallback committed before reconnaissance."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "coloc",
+          "because": "The shape makes the split's KV ceiling bind."
+        }
+      ]
+    },
+    {
+      "id": "screen",
+      "title": "Load and SLO from a ranking-blind screen",
+      "problem": "On placeholder inputs both regimes came out degenerate: the 4 s SLO was shorter than one swap. Load and SLO decide whether the strategies can differ at all.",
+      "options": [
+        "Keep the placeholder design point (four GPUs of load, a 4 s SLO)",
+        "A screen over 3 loads × 3 SLO multiples of the swap median that scores how many strategies each grid point tells apart, never which is cheaper"
+      ],
+      "chosen": "A screen over 3 loads × 3 SLO multiples of the swap median that scores how many strategies each grid point tells apart, never which is cheaper",
+      "why": "A count of distinct fleet sizes cannot favour a strategy. Ties went to the earlier candidate: one GPU of load and twice the swap median, 75.6 s with the measured swaps. The screen's data was committed before the values it set.",
+      "why_short": "Counting how many strategies a point tells apart cannot favour one; the placeholder SLO was shorter than a swap.",
+      "cost": "Twice a swap absorbs a swap, which favours swapping: at the reference point swap delivers about 45 s p99, the others 4 to 5 s. The measured sweep ran at this one SLO, and the screen ran on placeholder engines.",
+      "cost_short": "Twice a swap favours swapping, and the measured sweep ran at that one SLO.",
+      "short": "Ranking-blind load and SLO",
+      "serves": [
+        {
+          "req": "R5",
+          "because": "Rule fixed before reconnaissance, output before measuring."
+        },
+        {
+          "req": "R1",
+          "because": "One SLO and one load apply to all three strategies."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "slo",
+          "because": "The SLO is a multiple of the swap median."
+        },
+        {
+          "concept": "swap",
+          "because": "The swap median sets the SLO's seconds."
+        }
+      ]
+    },
+    {
+      "id": "gate",
+      "title": "Hold the simulator to a one-GPU replay; publish the miss",
+      "problem": "Fleet numbers mean something only if the simulator reproduces a real system; the design scaled artifact 2's gate down to one GPU.",
+      "options": [
+        "Trust the simulator because its inputs are measured",
+        "Draw each predicted swap from the measured distribution",
+        "After the failure, re-validate with the swap time calibrated",
+        "Three real replays of one 900 s bursty trace; predict with the median measured swap; publish whatever the verdict"
+      ],
+      "chosen": "Three real replays of one 900 s bursty trace; predict with the median measured swap; publish whatever the verdict",
+      "why": "A model cannot be held tighter than three real repeats' spread, and a fixed swap time keeps the prediction deterministic. It failed: 10 of 13 judged bins outside, always too slow. Recalibrating would not rescue it: charged each repeat's own swaps, 12 of 13 still miss, the other way.",
+      "why_short": "Three real repeats set the tolerance and a fixed swap keeps the prediction deterministic; the verdict is published either way.",
+      "cost": "No fleet size is validated: the gate tested one GPU, three tenants and swapping only, at a burst shape and load the sweep did not use; co-location had two held-out cells, one missed. The diagnosis is exploratory.",
+      "cost_short": "Failed, so GPU counts are unvalidated; co-location was never replayed and one of two held-out cells missed.",
+      "short": "One-GPU replay gate",
+      "serves": [
+        {
+          "req": "R5",
+          "because": "Rule fixed before the replays; the failed verdict stands."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "gate",
+          "because": "Three repeats, 30 s bins, at most half missing."
+        },
+        {
+          "concept": "swap",
+          "because": "Each swap was charged the 37.8 s median."
+        }
+      ]
+    }
+  ],
+  "flow": [
+    {
+      "phase": "Design",
+      "label": "Frame three strategies, two regimes, one gate",
+      "detail": "Dedicate, swap with LRU, or co-locate; Zipf skew at two arrival regimes; three measured primitives; a one-GPU replay gate. Approved, not funded.",
+      "output": "the design spec and its definition of done",
+      "when": "2026-08-18",
+      "evidence": [
+        {
+          "commit": "2a44aa0ead",
+          "note": "design spec"
+        }
+      ],
+      "decision": "regimes"
+    },
+    {
+      "phase": "Design",
+      "label": "Reconcile with the code; plan three stages",
+      "detail": "Scope amendment: a new simulator, one sizing rule, Qwen3-4B with a 1.7B fallback. Then plans 1 to 3, a timeline, and §14: bursty sizing on ON-period load.",
+      "output": "scope amendment, three plans, the §14 decision",
+      "when": "2026-10-03 to 10-04",
+      "evidence": [
+        {
+          "commit": "ffad6449c4",
+          "note": "scope amendment, plan 1"
+        },
+        {
+          "commit": "0fa8786b50",
+          "note": "plans 2, 3, timeline, §14"
+        }
+      ],
+      "decision": "newsim"
+    },
+    {
+      "phase": "Build with no GPU",
+      "label": "Build simulator, worker jobs and analysis offline",
+      "detail": "Traffic, placement families, event loop, sizing; swap, cell and replay jobs; screen, gate, analysis, figures. The sweep refuses placeholder inputs unless told.",
+      "output": "placement/ and placement_measure/, run end to end on placeholders",
+      "when": "2026-10-04",
+      "evidence": [
+        {
+          "commit": "a338f3d232",
+          "note": "simulator"
+        },
+        {
+          "commit": "d7ac7fda0d",
+          "note": "per-decile sizing"
+        },
+        {
+          "commit": "5681fde3c9",
+          "note": "replay driver"
+        },
+        {
+          "commit": "291c7a0cac",
+          "note": "validation gate"
+        },
+        {
+          "commit": "dab943ca6e",
+          "note": "one analysis script"
+        }
+      ],
+      "decision": "sizing"
+    },
+    {
+      "phase": "Build with no GPU",
+      "label": "Pre-register step 1, then step 2's rules",
+      "detail": "Step 1 (models, memory split, go/no-go) landed among the first code commits, before reconnaissance; step 2's rules that evening.",
+      "output": "docs/experiment-a4.md: step 1 and step 2's rules",
+      "milestone": true,
+      "when": "2026-10-04",
+      "evidence": [
+        {
+          "commit": "c356e4b609",
+          "note": "step 1, before reconnaissance"
+        },
+        {
+          "commit": "39e88f9753",
+          "note": "step 2 rules"
+        }
+      ],
+      "decision": "model"
+    },
+    {
+      "phase": "Reconnaissance",
+      "label": "Reconnaissance: 4B fails, 1.7B passes",
+      "detail": "Two 4B engines left 9,456 and 9,520 KV tokens of 16,384 needed; the 1.7B pair passed, a pre-registered branch. Eviction missed its threshold, so swaps are warm only.",
+      "output": "docs/recon-a4.md: Qwen3-1.7B, warm swaps, sleep mode works",
+      "when": "2026-10-05",
+      "evidence": [
+        {
+          "commit": "dcd528cb99",
+          "note": "jobs rebuilt for the fallback"
+        },
+        {
+          "commit": "c60602db50",
+          "note": "captures and record"
+        }
+      ],
+      "decision": "model"
+    },
+    {
+      "phase": "Reconnaissance",
+      "label": "Screen load and SLO; fix step 2's values",
+      "detail": "On placeholder engines and recon's swaps, the screen chose one GPU of load and twice the swap median. Values committed before the first measurement run.",
+      "output": "data/a4/screen.json; step 2 values: 1,792 + 256 tokens, grids, the gate",
+      "milestone": true,
+      "when": "2026-10-05",
+      "evidence": [
+        {
+          "commit": "d16ff5edb1",
+          "note": "screen"
+        },
+        {
+          "commit": "b17c8aca20",
+          "note": "step 2 values"
+        }
+      ],
+      "decision": "screen"
+    },
+    {
+      "phase": "Measure",
+      "label": "Pin the pair's KV after the first cells fail",
+      "detail": "Two engines that both hit the compile cache ran out of memory. KV pinned to the registered 55,104 tokens; a probe confirmed it; the owner signed.",
+      "output": "amendment 2026-10-05 and kvpin-probe.jsonl",
+      "when": "2026-10-05",
+      "evidence": [
+        {
+          "commit": "8e8b3ac7de",
+          "note": "drafted"
+        },
+        {
+          "commit": "4ccbbadc3c",
+          "note": "signed after the probe"
+        }
+      ],
+      "decision": "model"
+    },
+    {
+      "phase": "Measure",
+      "label": "Cells, swaps, sleep; two amendments, re-runs",
+      "detail": "A saturated neighbour now counts and its ramp wait may lengthen: 44 re-runs, one batch lost to a zero balance.",
+      "output": "28 cells with 3+ valid repeats, 16 swaps, 8 sleep switches",
+      "milestone": true,
+      "when": "2026-10-05 to 10-06",
+      "evidence": [
+        {
+          "commit": "b8b74ac0b1",
+          "note": "validity and ramp amendments"
+        },
+        {
+          "commit": "4778350b74",
+          "note": "cells, swaps, sleep stored"
+        },
+        {
+          "commit": "2389defca2",
+          "note": "failed for want of credit"
+        },
+        {
+          "commit": "f5efb1c632",
+          "note": "every cell 3+ valid"
+        }
+      ],
+      "decision": "newsim"
+    },
+    {
+      "phase": "Validate",
+      "label": "Replay three times; the gate fails",
+      "detail": "Three real replays on one pod: 10 of 13 judged bins outside the band, the prediction always slower. Swaps: 11 predicted, 10 real.",
+      "output": "replay.jsonl; a failed verdict",
+      "milestone": true,
+      "when": "2026-10-06",
+      "evidence": [
+        {
+          "commit": "8e40c92a28",
+          "note": "validation trace"
+        },
+        {
+          "commit": "e3ab099c8d",
+          "note": "three replays"
+        }
+      ],
+      "decision": "gate"
+    },
+    {
+      "phase": "Validate",
+      "label": "Diagnose the miss; keep the verdict",
+      "detail": "Exploratory: a 30% faster curve does not close it; replay swaps took about 25 s, not 37.8; at their own swap time 12 of 13 still miss.",
+      "output": "the swap-cost finding; analysis.json keeps the failed verdict",
+      "when": "2026-10-07",
+      "evidence": [
+        {
+          "commit": "300c689eac",
+          "note": "diagnosis, exploratory"
+        },
+        {
+          "commit": "21c8962516",
+          "note": "analysis: gate failed, one cell missed"
+        }
+      ],
+      "decision": "gate"
+    },
+    {
+      "phase": "Write up",
+      "label": "Figures, spend, draft post; sensitivity run",
+      "detail": "Figures, billing-API spend and the draft post; after review, an exploratory interference sensitivity run. Unpublished: it waits on artifact 2's post.",
+      "output": "post-a4.md (draft), spend-a4.md, dod-a4.md, the sensitivity finding",
+      "milestone": true,
+      "when": "2026-10-07",
+      "evidence": [
+        {
+          "commit": "4f61a48675",
+          "note": "figures"
+        },
+        {
+          "commit": "9251b059ae",
+          "note": "final billing read"
+        },
+        {
+          "commit": "d8c44702aa",
+          "note": "post draft"
+        },
+        {
+          "commit": "6ca0f654ef",
+          "note": "review edits, sensitivity finding"
+        }
+      ],
+      "decision": "gate"
+    }
+  ],
+  "results": [
+    {
+      "title": "UNVALIDATED: GPUs each strategy needs, by skew and regime",
+      "short": "UNVALIDATED: GPUs by skew and regime",
+      "chart": {
+        "type": "xy",
+        "unit": "GPUs",
+        "x_label": "Zipf skew s",
+        "y_label": "GPUs to meet the SLO in every decile",
+        "y_from_zero": true,
+        "series": [
+          {
+            "name": "spread: dedicate",
+            "points": [
+              {
+                "x": 0.6,
+                "y": 20
+              },
+              {
+                "x": 0.8,
+                "y": 20
+              },
+              {
+                "x": 1.0,
+                "y": 20
+              },
+              {
+                "x": 1.25,
+                "y": 20
+              },
+              {
+                "x": 1.5,
+                "y": 20
+              },
+              {
+                "x": 2.0,
+                "y": 20
+              }
+            ]
+          },
+          {
+            "name": "spread: swap",
+            "points": [
+              {
+                "x": 0.6,
+                "y": 13
+              },
+              {
+                "x": 0.8,
+                "y": 13
+              },
+              {
+                "x": 1.0,
+                "y": 13
+              },
+              {
+                "x": 1.25,
+                "y": 18
+              },
+              {
+                "x": 1.5,
+                "y": 17
+              },
+              {
+                "x": 2.0,
+                "y": 15
+              }
+            ]
+          },
+          {
+            "name": "spread: co-locate",
+            "points": [
+              {
+                "x": 0.6,
+                "y": 10
+              },
+              {
+                "x": 0.8,
+                "y": 10
+              },
+              {
+                "x": 1.0,
+                "y": 10
+              },
+              {
+                "x": 1.25,
+                "y": 10
+              },
+              {
+                "x": 1.5,
+                "y": 10
+              },
+              {
+                "x": 2.0,
+                "y": 10
+              }
+            ]
+          },
+          {
+            "name": "bursty: dedicate",
+            "points": [
+              {
+                "x": 0.8,
+                "y": 21
+              },
+              {
+                "x": 1.0,
+                "y": 21
+              },
+              {
+                "x": 1.25,
+                "y": 23
+              },
+              {
+                "x": 1.5,
+                "y": 24
+              },
+              {
+                "x": 2.0,
+                "y": 25
+              }
+            ]
+          },
+          {
+            "name": "bursty: swap",
+            "points": [
+              {
+                "x": 0.8,
+                "y": 9
+              },
+              {
+                "x": 1.0,
+                "y": 10
+              },
+              {
+                "x": 1.25,
+                "y": 12
+              },
+              {
+                "x": 1.5,
+                "y": 13
+              },
+              {
+                "x": 2.0,
+                "y": 13
+              }
+            ]
+          },
+          {
+            "name": "bursty: co-locate",
+            "points": [
+              {
+                "x": 0.8,
+                "y": 12
+              },
+              {
+                "x": 1.0,
+                "y": 12
+              },
+              {
+                "x": 1.25,
+                "y": 14
+              },
+              {
+                "x": 1.5,
+                "y": 15
+              },
+              {
+                "x": 2.0,
+                "y": 16
+              }
+            ]
+          }
+        ],
+        "refs": [
+          {
+            "x": 1.0,
+            "label": "reference point; the gate's skew"
+          }
+        ],
+        "note": "SIMULATED, FAILED VALIDATION. Bursty s = 0.6 is not evaluable: some decile had too few requests for a p99 in some run."
+      },
+      "axis": "Simulated by a model that failed its gate. Each point: the smallest fleet whose every popularity decile meets the 75.6 s p99 SLO, over 30 runs.",
+      "read_as": "In each regime one strategy is cheapest at every skew: co-locate when spread, swap when bursty. Dedicating is never cheapest, at about twice the cheapest. Spread swap's peak at s = 1.25 was not diagnosed.",
+      "so": [
+        "sizing",
+        "regimes"
+      ],
+      "takeaway": "How traffic arrives picks the winner, not skew. The ordering is wide; the counts are not validated.",
+      "arithmetic": "Reference point, bursty s = 1.0: 21, 10, 12 GPUs. One GPU-month = $1.1095 × 730 h = $809.935; 21 × 809.935 / 20 tenants = $850.43; dedicate costs $8,909.28 a month more than swap."
+    },
+    {
+      "title": "UNVALIDATED: sizing on the aggregate p99 hides the hottest tenants",
+      "short": "UNVALIDATED: aggregate hides hot tenants",
+      "chart": {
+        "type": "xy",
+        "unit": "s",
+        "x_label": "popularity decile (1 = hottest two models)",
+        "y_label": "p99, median of 30 runs",
+        "y_from_zero": true,
+        "series": [
+          {
+            "name": "swap, 9 GPUs: sized on the aggregate p99",
+            "points": [
+              {
+                "x": 1,
+                "y": 87.7
+              },
+              {
+                "x": 2,
+                "y": 77.2
+              },
+              {
+                "x": 3,
+                "y": 61.7
+              },
+              {
+                "x": 4,
+                "y": 54.8
+              },
+              {
+                "x": 5,
+                "y": 51.4
+              },
+              {
+                "x": 6,
+                "y": 58.0
+              },
+              {
+                "x": 7,
+                "y": 52.9
+              },
+              {
+                "x": 8,
+                "y": 51.1
+              },
+              {
+                "x": 9,
+                "y": 54.2
+              },
+              {
+                "x": 10,
+                "y": 55.6
+              }
+            ]
+          },
+          {
+            "name": "swap, 10 GPUs: sized per decile",
+            "points": [
+              {
+                "x": 1,
+                "y": 44.6
+              },
+              {
+                "x": 2,
+                "y": 56.8
+              },
+              {
+                "x": 3,
+                "y": 46.5
+              },
+              {
+                "x": 4,
+                "y": 43.8
+              },
+              {
+                "x": 5,
+                "y": 44.0
+              },
+              {
+                "x": 6,
+                "y": 39.9
+              },
+              {
+                "x": 7,
+                "y": 40.1
+              },
+              {
+                "x": 8,
+                "y": 39.7
+              },
+              {
+                "x": 9,
+                "y": 41.7
+              },
+              {
+                "x": 10,
+                "y": 46.5
+              }
+            ]
+          }
+        ],
+        "refs": [
+          {
+            "y": 75.6,
+            "label": "SLO 75.6 s"
+          }
+        ],
+        "note": "SIMULATED, FAILED VALIDATION. Swap at the reference point, bursty s = 1.0."
+      },
+      "axis": "Simulated. Swap's p99 per decile at 9 GPUs (what an aggregate-p99 rule picks) and at 10 (the per-decile rule).",
+      "read_as": "At 9 GPUs deciles 1 and 2 breach (87.7 and 77.2 s); the coldest does not. The design expected the cold tail to suffer; the post does not explain why the hottest do.",
+      "so": "sizing",
+      "takeaway": "An aggregate p99 that passes can hide tenants that fail.",
+      "arithmetic": "A decile is 2 of 20 models: each run's p99, then the median over 30 runs."
+    },
+    {
+      "title": "Measured: a busy neighbour roughly doubles latency at every load",
+      "short": "Busy neighbour: about 2× slower",
+      "chart": {
+        "type": "xy",
+        "unit": "s",
+        "x_label": "own requests in flight",
+        "y_label": "median latency per request",
+        "x_log": true,
+        "y_from_zero": true,
+        "series": [
+          {
+            "name": "alone, full memory",
+            "points": [
+              {
+                "x": 1,
+                "y": 1.27
+              },
+              {
+                "x": 2,
+                "y": 1.5
+              },
+              {
+                "x": 4,
+                "y": 1.68
+              },
+              {
+                "x": 8,
+                "y": 2.06
+              },
+              {
+                "x": 16,
+                "y": 2.83
+              },
+              {
+                "x": 32,
+                "y": 4.35
+              },
+              {
+                "x": 64,
+                "y": 7.66
+              },
+              {
+                "x": 128,
+                "y": 14.39
+              }
+            ]
+          },
+          {
+            "name": "split, neighbour idle",
+            "points": [
+              {
+                "x": 1,
+                "y": 1.27
+              },
+              {
+                "x": 2,
+                "y": 1.5
+              },
+              {
+                "x": 4,
+                "y": 1.68
+              },
+              {
+                "x": 8,
+                "y": 2.06
+              },
+              {
+                "x": 16,
+                "y": 2.83
+              },
+              {
+                "x": 32,
+                "y": 4.3
+              },
+              {
+                "x": 64,
+                "y": 8.63
+              }
+            ]
+          },
+          {
+            "name": "split, neighbour at 16",
+            "points": [
+              {
+                "x": 1,
+                "y": 2.95
+              },
+              {
+                "x": 2,
+                "y": 3.16
+              },
+              {
+                "x": 4,
+                "y": 3.43
+              },
+              {
+                "x": 8,
+                "y": 4.51
+              },
+              {
+                "x": 16,
+                "y": 6.13
+              },
+              {
+                "x": 32,
+                "y": 8.99
+              },
+              {
+                "x": 64,
+                "y": 18.0
+              }
+            ]
+          },
+          {
+            "name": "split, neighbour at 64",
+            "points": [
+              {
+                "x": 1,
+                "y": 3.02
+              },
+              {
+                "x": 2,
+                "y": 3.27
+              },
+              {
+                "x": 4,
+                "y": 3.56
+              },
+              {
+                "x": 8,
+                "y": 4.68
+              },
+              {
+                "x": 16,
+                "y": 6.36
+              },
+              {
+                "x": 32,
+                "y": 9.33
+              },
+              {
+                "x": 64,
+                "y": 18.68
+              }
+            ]
+          },
+          {
+            "name": "held out: measured",
+            "style": "points",
+            "points": [
+              {
+                "x": 24,
+                "y": 8.07
+              },
+              {
+                "x": 48,
+                "y": 16.54
+              }
+            ]
+          },
+          {
+            "name": "held out: surface's prediction",
+            "style": "points",
+            "points": [
+              {
+                "x": 24,
+                "y": 7.85
+              },
+              {
+                "x": 48,
+                "y": 13.77
+              }
+            ]
+          }
+        ],
+        "refs": [
+          {
+            "x": 26,
+            "label": "KV ceiling, split"
+          },
+          {
+            "x": 82,
+            "label": "KV ceiling, alone"
+          }
+        ],
+        "note": "Held-out cells: own 24 with neighbour 48 (passed), own 48 with neighbour 24 (missed)."
+      },
+      "axis": "Measured on RunPod: median latency of 1,792 + 256-token requests, 3 or more runs per point. Split: two engines at 45% of memory, KV pinned to 55,104 tokens.",
+      "read_as": "A busy neighbour makes a model 2.0 to 2.4 times slower at every load, even one request; 32 and 64 match because the neighbour sits at its ceiling. An idle neighbour costs nothing up to 32.",
+      "so": [
+        "newsim",
+        "model"
+      ],
+      "takeaway": "Sharing a card costs a busy model more than half the card, and under a third of the requests in flight.",
+      "arithmetic": "Own 1: 2.95 / 1.27 = 2.3. KV: 168,464 / 2,048 = 82 requests alone, 55,104 / 2,048 = 26 split; 168,464 / 55,104 = 3.1 while the memory share falls 2.0 times."
+    },
+    {
+      "title": "Measured: where a 37.8 s swap goes",
+      "short": "A swap is mostly process start",
+      "chart": {
+        "type": "stacked_bars",
+        "unit": "s",
+        "bars": [
+          {
+            "label": "Swap, 1.7B",
+            "segments": [
+              {
+                "name": "Teardown",
+                "value": 0.8
+              },
+              {
+                "name": "Memory release",
+                "value": 0.04
+              },
+              {
+                "name": "Process start, imports, health",
+                "value": 27.8
+              },
+              {
+                "name": "Weight load",
+                "value": 2.2
+              },
+              {
+                "name": "Engine init, rest",
+                "value": 6.8
+              },
+              {
+                "name": "torch.compile (cache hit)",
+                "value": 0.3
+              }
+            ]
+          },
+          {
+            "label": "Cold start, 8B (A1)",
+            "segments": [
+              {
+                "name": "Platform (not in a swap)",
+                "value": 4.8
+              },
+              {
+                "name": "Launch to model loaded",
+                "value": 21.3
+              },
+              {
+                "name": "Engine init (S4)",
+                "value": 8.6
+              },
+              {
+                "name": "Health check (S5)",
+                "value": 4.1
+              },
+              {
+                "name": "First request",
+                "value": 0.3
+              }
+            ]
+          }
+        ],
+        "merge": [
+          {
+            "names": [
+              "Teardown",
+              "Memory release"
+            ],
+            "label": "Teardown + release"
+          },
+          {
+            "names": [
+              "Weight load",
+              "Engine init, rest",
+              "torch.compile (cache hit)"
+            ],
+            "label": "Weights, init, compile"
+          },
+          {
+            "names": [
+              "Engine init (S4)",
+              "Health check (S5)",
+              "First request"
+            ],
+            "label": "Init, health, first request"
+          }
+        ],
+        "highlight": [
+          "Process start, imports, health",
+          "Platform (not in a swap)"
+        ]
+      },
+      "axis": "Median seconds per stage. Swap: 16 warm swaps of Qwen3-1.7B. Cold start: artifact 1's arm C [cold start](p1:coldstart) (Qwen3-8B), a reference, not a baseline.",
+      "read_as": "A swap skips platform scheduling and compiling (a cache hit) but re-pays process start, imports and the health check: 27.8 of 37.8 s. Artifact 1's launch segment also holds process start.",
+      "so": "newsim",
+      "takeaway": "For a model this small, a swap is about as long as artifact 1's 8B cold start: process start dominates. Sleep mode (5.0 s) was never simulated.",
+      "arithmetic": "Stage medians: 0.8 + 0.04 + 27.8 + 2.2 + 6.8 + 0.3 = 37.94 s, not the 37.8 s median swap (medians do not add). Cold start: 4.8 + 21.3 + 8.6 + 4.1 + 0.3 = 39.1 s."
+    },
+    {
+      "title": "The gate: the simulator against three real replays",
+      "short": "Gate failed: 10 of 13 bins miss",
+      "chart": {
+        "type": "xy",
+        "unit": "s",
+        "x_label": "start of 30 s bin, scheduled arrival (s)",
+        "y_label": "median latency in the bin",
+        "y_from_zero": true,
+        "series": [
+          {
+            "name": "simulator's prediction",
+            "style": "points",
+            "points": [
+              {
+                "x": 0.0,
+                "y": 31
+              },
+              {
+                "x": 30.0,
+                "y": 10
+              },
+              {
+                "x": 60.0,
+                "y": 70
+              },
+              {
+                "x": 90.0,
+                "y": 67
+              },
+              {
+                "x": 120.0,
+                "y": 121
+              },
+              {
+                "x": 150.0,
+                "y": 135
+              },
+              {
+                "x": 180.0,
+                "y": 166
+              },
+              {
+                "x": 330.0,
+                "y": 54
+              },
+              {
+                "x": 360.0,
+                "y": 36
+              },
+              {
+                "x": 690.0,
+                "y": 34
+              },
+              {
+                "x": 720.0,
+                "y": 23
+              },
+              {
+                "x": 750.0,
+                "y": 13
+              },
+              {
+                "x": 780.0,
+                "y": 7
+              }
+            ]
+          },
+          {
+            "name": "real: fastest of 3 repeats",
+            "style": "points",
+            "points": [
+              {
+                "x": 0.0,
+                "y": 20
+              },
+              {
+                "x": 30.0,
+                "y": 2
+              },
+              {
+                "x": 60.0,
+                "y": 44
+              },
+              {
+                "x": 90.0,
+                "y": 55
+              },
+              {
+                "x": 120.0,
+                "y": 67
+              },
+              {
+                "x": 150.0,
+                "y": 85
+              },
+              {
+                "x": 180.0,
+                "y": 90
+              },
+              {
+                "x": 330.0,
+                "y": 27
+              },
+              {
+                "x": 360.0,
+                "y": 5
+              },
+              {
+                "x": 690.0,
+                "y": 28
+              },
+              {
+                "x": 720.0,
+                "y": 20
+              },
+              {
+                "x": 750.0,
+                "y": 13
+              },
+              {
+                "x": 780.0,
+                "y": 4
+              }
+            ]
+          },
+          {
+            "name": "real: slowest of 3 repeats",
+            "style": "points",
+            "points": [
+              {
+                "x": 0.0,
+                "y": 24
+              },
+              {
+                "x": 30.0,
+                "y": 2
+              },
+              {
+                "x": 60.0,
+                "y": 53
+              },
+              {
+                "x": 90.0,
+                "y": 65
+              },
+              {
+                "x": 120.0,
+                "y": 80
+              },
+              {
+                "x": 150.0,
+                "y": 89
+              },
+              {
+                "x": 180.0,
+                "y": 98
+              },
+              {
+                "x": 330.0,
+                "y": 28
+              },
+              {
+                "x": 360.0,
+                "y": 6
+              },
+              {
+                "x": 690.0,
+                "y": 31
+              },
+              {
+                "x": 720.0,
+                "y": 23
+              },
+              {
+                "x": 750.0,
+                "y": 16
+              },
+              {
+                "x": 780.0,
+                "y": 8
+              }
+            ]
+          }
+        ],
+        "note": "Judged bins only, rounded to whole seconds; 16 bins had too few requests to judge. The band is fastest to slowest of the three real repeats."
+      },
+      "axis": "One GPU, three tenants, a 900 s bursty trace with real swaps. Predicted: the simulator, every swap at 37.8 s. Real: three repeats on one pod.",
+      "read_as": "All ten misses sit above the band: the simulator predicted the engine slower, by up to 67.8 s. Three late bins agree. The swap count agreed (11 against 10); the latency did not.",
+      "so": "gate",
+      "takeaway": "Failed by the rule fixed in advance; the exploratory diagnosis blames the swap time charged and a gap in the model.",
+      "arithmetic": "Pass needs at least 10 judged bins and at most half missing: 10 / 13 = 0.77. Largest miss, bin 180 to 210 s: 166.1 − 98.3 = 67.8 s."
+    },
+    {
+      "title": "EXPLORATORY, SIMULATED: how much interference co-locating can absorb",
+      "short": "Exploratory: interference headroom",
+      "chart": {
+        "type": "xy",
+        "unit": "GPUs",
+        "x_label": "busy-neighbour latency, times the measured (step surface)",
+        "y_label": "GPUs to meet the SLO",
+        "y_from_zero": true,
+        "series": [
+          {
+            "name": "spread: dedicate",
+            "points": [
+              {
+                "x": 1,
+                "y": 20
+              },
+              {
+                "x": 4,
+                "y": 20
+              },
+              {
+                "x": 8,
+                "y": 20
+              }
+            ]
+          },
+          {
+            "name": "spread: swap",
+            "points": [
+              {
+                "x": 1,
+                "y": 13
+              },
+              {
+                "x": 4,
+                "y": 13
+              },
+              {
+                "x": 8,
+                "y": 13
+              }
+            ]
+          },
+          {
+            "name": "spread: co-locate",
+            "points": [
+              {
+                "x": 1,
+                "y": 10
+              },
+              {
+                "x": 4,
+                "y": 12
+              },
+              {
+                "x": 8,
+                "y": 16
+              }
+            ]
+          },
+          {
+            "name": "bursty: dedicate",
+            "points": [
+              {
+                "x": 1,
+                "y": 21
+              },
+              {
+                "x": 4,
+                "y": 21
+              },
+              {
+                "x": 8,
+                "y": 21
+              }
+            ]
+          },
+          {
+            "name": "bursty: swap",
+            "points": [
+              {
+                "x": 1,
+                "y": 10
+              },
+              {
+                "x": 4,
+                "y": 10
+              },
+              {
+                "x": 8,
+                "y": 10
+              }
+            ]
+          },
+          {
+            "name": "bursty: co-locate",
+            "points": [
+              {
+                "x": 1,
+                "y": 12
+              },
+              {
+                "x": 4,
+                "y": 20
+              },
+              {
+                "x": 8,
+                "y": 21
+              }
+            ]
+          }
+        ],
+        "note": "EXPLORATORY: one skew (s = 1.0), 6 runs, one SLO, after the analysis. The multipliers are not measurements."
+      },
+      "axis": "Simulated, exploratory. At 1, any busy neighbour costs what a neighbour at 16 costs (the worst reading of the unmeasured range); then that latency times 4 or 8.",
+      "read_as": "At 1 the fleets match the registered surface, so the unmeasured range does not matter at this SLO. Bursty co-locate loses to swap at 4 times; spread survives 4 times by one GPU and loses at 8.",
+      "so": "newsim",
+      "takeaway": "Co-locating wins on SLO headroom, not on low load. The bursty regime has the least room.",
+      "arithmetic": "Bursty co-locate 12 → 20 GPUs at 4 times (swap stays 10); spread 10 → 12 at 4 times and 16 at 8 times (swap 13)."
+    }
+  ],
+  "interview": {
+    "pitch30": "I asked how to place twenty small LLMs on rented GPUs: give each its own GPU, swap models in and out of a shared pool, or pair them on one card. I measured what the hardware charges for a swap and for a busy neighbour, and fed that into a fleet simulator. Its answer: how traffic arrives picks the winner, not how skewed it is. Pair models when requests are spread out, swap when they come in bursts; dedicating was never cheapest. But the simulator failed its own pre-registered test, 10 of 13 bins, so I publish the GPU counts as unvalidated.",
+    "pitch120": "Serving many models means deciding placement. For 20 small models on RTX 4090s I compared dedicating a GPU each, swapping through a shared LRU pool, and co-locating two per GPU, across Zipf skew and two arrival patterns with the same per-model shares, spread and bursty. On the GPU I measured a swap (median 37.8 s, mostly process start), a busy neighbour (2.0 to 2.4 times slower) and the memory split (KV cache 168,464 down to 55,104 tokens). A new simulator sized each strategy to the smallest fleet where every popularity decile meets a 75.6 s p99, because aggregate sizing let the hottest tenants breach. Result: co-locate when spread, swap when bursty, dedicating about twice the cheapest. But my pre-registered gate, three real replays on one GPU, failed: 10 of 13 bins outside the band. Afterwards I found the simulator charged 37.8 s per swap where the replay pod took about 25 s, and even at that 12 of 13 still missed: it lacks a term for what a swap costs nearby requests. So the ordering is wide and the counts are unvalidated. The paid runs cost $25.23.",
+    "followups": [
+      {
+        "q": "Why trust a simulator that failed its gate?",
+        "a": "For GPU counts, I don't: the gate failed at its one point (one GPU, three tenants, swapping only), the fleets are 10 to 25 GPUs, and co-location had two held-out cells, one missed. The ordering is wide, about twice, but I did not test whether the model's error leaves it unchanged. The measured swap, slowdown and KV split stand."
+      },
+      {
+        "q": "Why is dedicating never cheapest?",
+        "a": "Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). The finding is the margin: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs."
+      },
+      {
+        "q": "What would change the winner?",
+        "a": "Arrival timing (only two regimes built); the SLO (twice a swap favours swapping, and the sweep ran at one SLO); interference (exploratory: four times the penalty loses co-location the bursty regime, eight the spread one); model size (a 1.7B result)."
+      },
+      {
+        "q": "Why did the gate fail?",
+        "a": "Exploratory, after the verdict. A host up to 30% faster does not close it. The gate charged 37.8 s per swap; replay swaps took about 25 s. Charged that, the simulator is too fast and 12 of 13 bins still miss: it has no term for what a swap costs nearby requests."
+      },
+      {
+        "q": "You switched models and changed rules mid-campaign. Isn't that moving the goalposts?",
+        "a": "The 1.7B switch was a branch committed before reconnaissance. The KV pin came after the first co-located runs crashed, before any valid co-located data, confirmed by a probe and signed; the validity and ramp amendments came before the cells were analysed. All dated in git; the re-runs cost 7.45 unplanned GPU-hours."
+      },
+      {
+        "q": "What would you do next?",
+        "a": "Measure what a swap costs the requests around it, on one pod with the replay's own requests: the missing term. A recalibrated re-run would not pass. Co-location needs its own replay."
+      }
+    ],
+    "limits": "Every GPU count, dollar figure and the decision rule are from a simulator that failed its gate (10 of 13 bins), at one GPU, three tenants and swapping only, with a burst shape and load the sweep did not use; co-location had two held-out cells, one missed, and no replay. Whether the model's error leaves the ordering unchanged was not tested. Qwen3-1.7B, not the registered 4B; one size and request shape; LRU only; one GPU class and datacenter; warm swaps only; swap time varies about 50% by pod; one SLO, twice a swap, which favours swapping; two arrival regimes. Sleep mode measured, never simulated. The diagnosis and the interference sensitivity are exploratory. The post is an unpublished draft."
+  },
+  "recall": [
+    {
+      "q": "Why can the strategies not be compared at the same number of GPUs?",
+      "a": "At equal counts they cost the same by construction. Each is sized to its smallest fleet meeting the SLO, and cost follows from that count."
+    },
+    {
+      "q": "Spread and bursty traffic give each model the same share. What differs, and what does it change?",
+      "a": "Timing. In a burst one swap-in serves many requests; scattered, a model is loaded, evicted and loaded again (design module 4). Simulated: swap cheapest when bursty, co-locate when spread."
+    },
+    {
+      "q": "At the reference point, what does sizing on the aggregate p99 get wrong?",
+      "a": "It picks 9 GPUs for swap, and the two hottest deciles breach (87.7 and 77.2 s against 75.6 s); per-decile sizing needs 10. R2."
+    },
+    {
+      "q": "Which cold-start stages does a swap skip, and what does it still pay?",
+      "a": "It skips platform scheduling and compiling (a cache hit). It re-pays process start, imports and the health check, 27.8 of 37.8 s."
+    },
+    {
+      "q": "Splitting memory halves each engine's share. Why does its KV cache shrink 3.1 times?",
+      "a": "Weights and graph buffers are fixed and come out of the smaller budget first: 168,464 to 55,104 tokens, 82 to 26 requests."
+    },
+    {
+      "q": "A busy neighbour makes a model about twice as slow. Why does co-locating still halve the fleet?",
+      "a": "SLO headroom, not low load: 3 to 6 s against 75.6 s. In the exploratory run it held at the worst reading of the unmeasured range."
+    },
+    {
+      "q": "Why can dedicating at best tie under this sizing rule?",
+      "a": "Swap and co-locate search only up to dedicate's size, where their layouts become dedicate's; dedicating wins only if both miss below it. The margin is the finding."
+    },
+    {
+      "q": "The gate charged 37.8 s per swap; the replay pod's swaps took about 25 s. Why does charging 25 s not rescue the gate?",
+      "a": "Then it predicts faster than real and 12 of 13 bins still miss: no fixed swap cost matches, because the model has no term for a swap's effect on nearby requests."
+    },
+    {
+      "q": "What did the gate test, and what did it never test?",
+      "a": "One GPU, three tenants, swapping, 180 s bursts at 0.3 of a GPU. Never co-location (two held-out cells), never a multi-GPU fleet, never the swept 120 s bursts."
+    },
+    {
+      "q": "Which requirement breaks if the GPU counts are presented as findings, and what may be said instead?",
+      "a": "R5. The ordering may be called wide but unvalidated; the measured primitives stand."
+    }
+  ],
+  "sources": [
+    {
+      "file": "docs/post-a4.md",
+      "section": "## The crossover"
+    },
+    {
+      "file": "docs/post-a4.md",
+      "section": "## Why the naive answer is wrong"
+    },
+    {
+      "file": "docs/post-a4.md",
+      "section": "### A swap"
+    },
+    {
+      "file": "docs/post-a4.md",
+      "section": "### Co-location"
+    },
+    {
+      "file": "docs/post-a4.md",
+      "section": "### The KV split"
+    },
+    {
+      "file": "docs/post-a4.md",
+      "section": "## Method"
+    },
+    {
+      "file": "docs/post-a4.md",
+      "section": "### The amendments"
+    },
+    {
+      "file": "docs/post-a4.md",
+      "section": "### The validation, and its failure"
+    },
+    {
+      "file": "docs/post-a4.md",
+      "section": "## Where the boundary moves"
+    },
+    {
+      "file": "docs/post-a4.md",
+      "section": "## Limits"
+    },
+    {
+      "file": "docs/post-a4.md",
+      "section": "## Reproduce it"
+    },
+    {
+      "file": "docs/post-a4.md",
+      "section": "## Next"
+    },
+    {
+      "file": "docs/experiment-a4.md",
+      "section": "### The go/no-go"
+    },
+    {
+      "file": "docs/experiment-a4.md",
+      "section": "### The owner's decision on scope amendment §14"
+    },
+    {
+      "file": "docs/experiment-a4.md",
+      "section": "### The simulated design"
+    },
+    {
+      "file": "docs/experiment-a4.md",
+      "section": "### The validation gate"
+    },
+    {
+      "file": "docs/experiment-a4.md",
+      "section": "## Step 2, part 2 — values, fixed before the first measurement run"
+    },
+    {
+      "file": "docs/experiment-a4.md",
+      "section": "## Amendment, 2026-10-05: the co-located pair's KV memory is pinned"
+    },
+    {
+      "file": "docs/experiment-a4.md",
+      "section": "## Amendment, 2026-10-06 (validity): a neighbour above one engine's capacity counts when it sat at capacity"
+    },
+    {
+      "file": "docs/experiment-a4.md",
+      "section": "## Amendment, 2026-10-06 (ramp window): the neighbour's ramp wait can be lengthened"
+    },
+    {
+      "file": "docs/findings-a4-validation-swap-cost.md",
+      "section": "## What it does not explain"
+    },
+    {
+      "file": "docs/findings-a4-interference-sensitivity.md",
+      "section": "## Result: GPUs the co-located fleet needs, with the other two for reference"
+    },
+    {
+      "file": "docs/recon-a4.md",
+      "section": "## 2. Go/no-go (`coresidency-primary`, `coresidency-fallback`)"
+    },
+    {
+      "file": "docs/recon-a4.md",
+      "section": "## 4. Page cache (`swaps-cache`)"
+    },
+    {
+      "file": "docs/spend-a4.md",
+      "section": "## What the plan's estimate missed"
+    },
+    {
+      "file": "docs/dod-a4.md",
+      "section": "## What stops publication"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-multi-model-serving-economics-design.md",
+      "section": "### The co-location constraint that sets the model class"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-multi-model-serving-economics-design.md",
+      "section": "### 5.2 Co-location interference"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-multi-model-serving-economics-design.md",
+      "section": "## 7. Traffic model"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-multi-model-serving-economics-design.md",
+      "section": "### The per-decile breakdown is the portfolio signature on a new axis"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-multi-model-serving-economics-design.md",
+      "section": "## 9. Validation"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-multi-model-serving-economics-design.md",
+      "section": "| Simulator not credible | Replay validation gate; interference curve as a second check |"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-multi-model-serving-economics-design.md",
+      "section": "### Module 2 — What sharing a GPU actually contends for"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-multi-model-serving-economics-design.md",
+      "section": "### Module 4 — Frequency is not locality"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-multi-model-serving-economics-design.md",
+      "section": "### Business framing — required"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-09-26-multi-model-serving-economics-scope.md",
+      "section": "### 1c. Not used — and the August spec implied they would be"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-09-26-multi-model-serving-economics-scope.md",
+      "section": "## 4. Request shape — at the inherited shape, KV never binds"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-09-26-multi-model-serving-economics-scope.md",
+      "section": "## 7. The simulator, restated"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-09-26-multi-model-serving-economics-scope.md",
+      "section": "## 14. Found while writing plan 1 — decided by the owner, 2026-10-04"
+    },
+    {
+      "file": "docs/superpowers/plans/2026-10-04-artifact-4-plan-3.md",
+      "section": "A fixed swap time keeps the prediction deterministic"
+    },
+    {
+      "file": "docs/superpowers/plans/2026-10-04-artifact-4-implementation-timeline.md",
+      "section": "## The order, and what can run in parallel"
+    },
+    {
+      "file": "placement/fleet.py",
+      "section": "Both of the latter\n  reach dedicate's capacity at dedicate's M, which bounds the sizing search."
+    },
+    {
+      "file": "placement/sizing.py",
+      "section": "def size("
+    },
+    {
+      "file": "placement/sim.py",
+      "section": "Drain-out, not censoring"
+    },
+    {
+      "file": "placement/evaluate.py",
+      "section": "Common random numbers"
+    },
+    {
+      "file": "placement/screen.py",
+      "section": "It says whether the strategies can be told apart; it says nothing about which"
+    },
+    {
+      "file": "placement/colocated.py",
+      "section": "interpolated bilinearly between them"
+    },
+    {
+      "file": "placement/traffic.py",
+      "section": "Frequency and locality are separate axes"
+    },
+    {
+      "file": "placement/validation.py",
+      "section": "Bins are keyed by SCHEDULED arrival"
+    },
+    {
+      "file": "placement_measure/swap.py",
+      "section": "One process-level swap"
+    },
+    {
+      "file": "worker/a4_measure_handler.py",
+      "section": "one swap or one co-location cell per job"
+    },
+    {
+      "file": "scripts/a4_measure.py",
+      "section": "Run one of artifact 4's measurement campaigns on a RunPod endpoint."
+    }
+  ],
+  "derived_numbers": [
+    {
+      "value": "87.7",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].aggregate_rule.swap.decile_p99[0] = 87.6538 s, to one decimal (swap at 9 GPUs, decile 1)."
+    },
+    {
+      "value": "77.2",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].aggregate_rule.swap.decile_p99[1] = 77.1683 s, to one decimal (swap at 9 GPUs, decile 2)."
+    },
+    {
+      "value": "61.7",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].aggregate_rule.swap.decile_p99[2] = 61.6735 s, to one decimal (swap at 9 GPUs, decile 3)."
+    },
+    {
+      "value": "54.8",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].aggregate_rule.swap.decile_p99[3] = 54.7912 s, to one decimal (swap at 9 GPUs, decile 4)."
+    },
+    {
+      "value": "51.4",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].aggregate_rule.swap.decile_p99[4] = 51.4283 s, to one decimal (swap at 9 GPUs, decile 5)."
+    },
+    {
+      "value": "58.0",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].aggregate_rule.swap.decile_p99[5] = 58.0092 s, to one decimal (swap at 9 GPUs, decile 6)."
+    },
+    {
+      "value": "52.9",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].aggregate_rule.swap.decile_p99[6] = 52.9081 s, to one decimal (swap at 9 GPUs, decile 7)."
+    },
+    {
+      "value": "51.1",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].aggregate_rule.swap.decile_p99[7] = 51.0575 s, to one decimal (swap at 9 GPUs, decile 8)."
+    },
+    {
+      "value": "54.2",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].aggregate_rule.swap.decile_p99[8] = 54.2495 s, to one decimal (swap at 9 GPUs, decile 9)."
+    },
+    {
+      "value": "55.6",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].aggregate_rule.swap.decile_p99[9] = 55.6460 s, to one decimal (swap at 9 GPUs, decile 10)."
+    },
+    {
+      "value": "44.6",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].strategies.swap.decile_p99[0] = 44.6043 s, to one decimal (swap at 10 GPUs, decile 1)."
+    },
+    {
+      "value": "56.8",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].strategies.swap.decile_p99[1] = 56.8079 s, to one decimal (swap at 10 GPUs, decile 2)."
+    },
+    {
+      "value": "46.5",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].strategies.swap.decile_p99[2] = 46.5211 s, to one decimal (swap at 10 GPUs, decile 3)."
+    },
+    {
+      "value": "43.8",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].strategies.swap.decile_p99[3] = 43.8286 s, to one decimal (swap at 10 GPUs, decile 4)."
+    },
+    {
+      "value": "44.0",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].strategies.swap.decile_p99[4] = 43.9779 s, to one decimal (swap at 10 GPUs, decile 5)."
+    },
+    {
+      "value": "39.9",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].strategies.swap.decile_p99[5] = 39.9431 s, to one decimal (swap at 10 GPUs, decile 6)."
+    },
+    {
+      "value": "40.1",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].strategies.swap.decile_p99[6] = 40.1161 s, to one decimal (swap at 10 GPUs, decile 7)."
+    },
+    {
+      "value": "39.7",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].strategies.swap.decile_p99[7] = 39.6700 s, to one decimal (swap at 10 GPUs, decile 8)."
+    },
+    {
+      "value": "41.7",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].strategies.swap.decile_p99[8] = 41.6766 s, to one decimal (swap at 10 GPUs, decile 9)."
+    },
+    {
+      "value": "1.27",
+      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 1: latency 1.2657 s, to two decimals."
+    },
+    {
+      "value": "1.5",
+      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 2: latency 1.4955 s, to two decimals."
+    },
+    {
+      "value": "1.68",
+      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 4: latency 1.6807 s, to two decimals."
+    },
+    {
+      "value": "2.06",
+      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 8: latency 2.0616 s, to two decimals."
+    },
+    {
+      "value": "2.83",
+      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 16: latency 2.8323 s, to two decimals."
+    },
+    {
+      "value": "4.35",
+      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 32: latency 4.3452 s, to two decimals."
+    },
+    {
+      "value": "7.66",
+      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 64: latency 7.6578 s, to two decimals."
+    },
+    {
+      "value": "14.39",
+      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 128: latency 14.3907 s, to two decimals."
+    },
+    {
+      "value": "4.3",
+      "how": "data/a4/analysis.json inputs.surface.latency, own 32, neighbour 0: 4.3004 s, to two decimals."
+    },
+    {
+      "value": "8.63",
+      "how": "data/a4/analysis.json inputs.surface.latency, own 64, neighbour 0: 8.6308 s, to two decimals."
+    },
+    {
+      "value": "2.95",
+      "how": "data/a4/analysis.json inputs.surface.latency, own 1, neighbour 16: 2.9487 s, to two decimals."
+    },
+    {
+      "value": "3.16",
+      "how": "data/a4/analysis.json inputs.surface.latency, own 2, neighbour 16: 3.1628 s, to two decimals."
+    },
+    {
+      "value": "3.43",
+      "how": "data/a4/analysis.json inputs.surface.latency, own 4, neighbour 16: 3.4328 s, to two decimals."
+    },
+    {
+      "value": "4.51",
+      "how": "data/a4/analysis.json inputs.surface.latency, own 8, neighbour 16: 4.5098 s, to two decimals."
+    },
+    {
+      "value": "6.13",
+      "how": "data/a4/analysis.json inputs.surface.latency, own 16, neighbour 16: 6.1300 s, to two decimals."
+    },
+    {
+      "value": "8.99",
+      "how": "data/a4/analysis.json inputs.surface.latency, own 32, neighbour 16: 8.9903 s, to two decimals."
+    },
+    {
+      "value": "18.0",
+      "how": "data/a4/analysis.json inputs.surface.latency, own 64, neighbour 16: 18.0038 s, to two decimals."
+    },
+    {
+      "value": "3.02",
+      "how": "data/a4/analysis.json inputs.surface.latency, own 1, neighbour 64: 3.0191 s, to two decimals."
+    },
+    {
+      "value": "3.27",
+      "how": "data/a4/analysis.json inputs.surface.latency, own 2, neighbour 64: 3.2706 s, to two decimals."
+    },
+    {
+      "value": "3.56",
+      "how": "data/a4/analysis.json inputs.surface.latency, own 4, neighbour 64: 3.5579 s, to two decimals."
+    },
+    {
+      "value": "4.68",
+      "how": "data/a4/analysis.json inputs.surface.latency, own 8, neighbour 64: 4.6776 s, to two decimals."
+    },
+    {
+      "value": "6.36",
+      "how": "data/a4/analysis.json inputs.surface.latency, own 16, neighbour 64: 6.3649 s, to two decimals."
+    },
+    {
+      "value": "9.33",
+      "how": "data/a4/analysis.json inputs.surface.latency, own 32, neighbour 64: 9.3272 s, to two decimals."
+    },
+    {
+      "value": "18.68",
+      "how": "data/a4/analysis.json inputs.surface.latency, own 64, neighbour 64: 18.6754 s, to two decimals."
+    },
+    {
+      "value": "8.07",
+      "how": "data/a4/analysis.json held_out[pair:o24:n48].median = 8.0690 s, to two decimals."
+    },
+    {
+      "value": "7.85",
+      "how": "data/a4/analysis.json held_out[pair:o24:n48].predicted = 7.8453 s, to two decimals."
+    },
+    {
+      "value": "16.54",
+      "how": "data/a4/analysis.json held_out[pair:o48:n24].median = 16.5443 s, to two decimals."
+    },
+    {
+      "value": "13.77",
+      "how": "data/a4/analysis.json held_out[pair:o48:n24].predicted = 13.7703 s, to two decimals."
+    },
+    {
+      "value": "121",
+      "how": "data/a4/analysis.json validation.bins[start=120].predicted = 120.89 s, to whole seconds."
+    },
+    {
+      "value": "120",
+      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 120 s of the 900 s trace."
+    },
+    {
+      "value": "135",
+      "how": "data/a4/analysis.json validation.bins[start=150].predicted = 134.86 s, to whole seconds."
+    },
+    {
+      "value": "150",
+      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 150 s of the 900 s trace."
+    },
+    {
+      "value": "166",
+      "how": "data/a4/analysis.json validation.bins[start=180].predicted = 166.12 s, to whole seconds."
+    },
+    {
+      "value": "180",
+      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 180 s of the 900 s trace."
+    },
+    {
+      "value": "330",
+      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 330 s of the 900 s trace."
+    },
+    {
+      "value": "360",
+      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 360 s of the 900 s trace."
+    },
+    {
+      "value": "690",
+      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 690 s of the 900 s trace."
+    },
+    {
+      "value": "720",
+      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 720 s of the 900 s trace."
+    },
+    {
+      "value": "750",
+      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 750 s of the 900 s trace."
+    },
+    {
+      "value": "780",
+      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 780 s of the 900 s trace."
+    },
+    {
+      "value": "809.935",
+      "how": "One GPU-month: $1.1095 per hour (docs/experiment-a4.md, Step 2 part 2) x 730 hours (docs/post-a4.md) = $809.935."
+    },
+    {
+      "value": "2.3",
+      "how": "Own concurrency 1: 2.9487 s with a neighbour at 16 over 1.2650 s with it idle (data/a4/analysis.json inputs.surface.latency row own 1) = 2.33; the post says about 2.3."
+    },
+    {
+      "value": "0.77",
+      "how": "10 / 13 judged bins missing = 0.769 (docs/post-a4.md), against the 0.5 allowed."
+    },
+    {
+      "value": "166.1",
+      "how": "data/a4/analysis.json validation.bins[start=180].predicted = 166.12 s, to one decimal."
+    },
+    {
+      "value": "98.3",
+      "how": "data/a4/analysis.json validation.bins[start=180].hi = 98.34 s, to one decimal; 166.1 - 98.3 = 67.8, the post's largest miss."
+    },
+    {
+      "value": "210",
+      "how": "data/a4/analysis.json validation.bins[start=180].end = 210 s: the bin with the largest miss runs from 180 to 210 s of the trace."
+    },
+    {
+      "value": "8.6",
+      "how": "Artifact 1 arm C median S4 bracket, data/a4/analysis.json inputs.a1_reference.stages.t_s4_bracket = 8.552 s (drawn as 8.6 in docs/figures/a4/swap_stages.png)."
+    },
+    {
+      "value": "4.1",
+      "how": "Artifact 1 arm C median S5, data/a4/analysis.json inputs.a1_reference.stages.t_s5 = 4.097 s."
+    },
+    {
+      "value": "37.94",
+      "how": "Sum of the post's six rounded stage medians: 0.8 + 0.04 + 27.8 + 2.2 + 6.8 + 0.3 (docs/post-a4.md, A swap)."
+    },
+    {
+      "value": "0.84",
+      "how": "Teardown 0.8 s + memory release 0.04 s, the post's stage table (docs/post-a4.md, A swap), merged into one segment."
+    },
+    {
+      "value": "9.3",
+      "how": "Weight load 2.2 + engine init, rest 6.8 + torch.compile 0.3 s, the post's stage table, merged into one segment."
+    },
+    {
+      "value": "13.0",
+      "how": "Artifact 1 arm C: engine init 8.6 + health 4.1 + first request 0.3 s (data/a4/analysis.json inputs.a1_reference.stages), merged into one segment."
+    }
+  ],
+  "links": {
+    "p1": "https://claude.ai/artifact/ERS8Z3tRWUkSD4131zgwzY",
+    "p2": "https://claude.ai/artifact/A4MJnGXGWMBmi5z5ntxZBz"
+  },
+  "prereqs": [
+    {
+      "unit": "p1",
+      "label": "LLM serving on a GPU"
+    },
+    {
+      "unit": "p2",
+      "label": "How these experiments earn trust"
+    }
+  ]
+}
