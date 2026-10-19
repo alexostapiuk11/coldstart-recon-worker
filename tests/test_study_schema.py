@@ -415,3 +415,32 @@ def test_ghost_fields_are_checked():
     bad({"segment": "compile", "from_bar": "B", "on_bar": "Y"}, r"ghost\.on_bar 'Y' is not a bar")
     bad({"segment": "compile", "from_bar": "B", "on_bar": "B"}, r"ghost.*two different bars")
     bad({"segment": "compile", "from_bar": "B"}, r"ghost.*'on_bar'")
+
+
+def test_links_and_prereqs_validate():
+    u = artifact_unit()
+    u["links"] = {"p1": "https://claude.ai/artifact/abc"}
+    u["prereqs"] = [{"unit": "p1", "label": "LLM serving on a GPU"}]
+    u["decisions"][0]["why"] = "See [the KV cache](p1:kvcache) and [arms](x1:arms)."
+    validate(u)
+
+
+def test_links_and_prereqs_are_checked():
+    u = artifact_unit()
+    u["links"] = {"p1": "http://example.com"}
+    _fails(u, r"links\.p1 must begin with https://")
+    u["links"] = ["p1"]
+    _fails(u, r"links: expected dict")
+    u = artifact_unit()
+    u["prereqs"] = [{"unit": "p1", "label": " "}]
+    _fails(u, r"prereqs\[0\]\.label is empty")
+    u["prereqs"] = [{"label": "x"}]
+    _fails(u, r"prereqs\[0\].*'unit'")
+
+
+def test_an_inline_link_must_name_a_known_unit():
+    u = artifact_unit()
+    u["decisions"][1]["why"] = "See [the KV cache](p9:kvcache)."
+    _fails(u, r"decisions\[1\]\.why: link to unknown unit 'p9'")
+    u["prereqs"] = [{"unit": "p9", "label": "Nine"}]
+    validate(u)

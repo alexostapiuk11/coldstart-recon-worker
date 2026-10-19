@@ -1064,3 +1064,73 @@ def test_brief_notes_merge_and_ghost():
     assert "- B: load 30.35, compile 18.79, rest 8.0 (s)" in brief
     assert "- Drawn as one segment, Other: compile + rest" in brief
     assert "- On bar C, a dashed outline shows where load sat in B (30.35 s)" in brief
+
+
+# ---- cross-page links ----
+
+import pytest
+
+from study.schema import ContentError
+from study.text import resolve_links
+
+
+def _linked_unit(**top):
+    u = artifact_unit()
+    u.update(top)
+    u["decisions"][0]["why_short"] = "Built on the [KV <cache>](p1:kvcache), see **this**."
+    u["decisions"][0]["why"] = u["decisions"][0]["why_short"]
+    u["decisions"][0]["title"] = "Use the [KV cache](p1:kvcache)"
+    u["question"] = "Does [this arm](x1:arms) hold?"
+    return u
+
+
+def test_inline_link_resolves_to_a_relative_page_by_default():
+    page = render_page(_linked_unit(prereqs=[{"unit": "p1", "label": "LLM serving"}]))
+    assert ('Built on the <a href="../p1/page.html#c-kvcache" target="_blank" '
+            'rel="noopener">KV &lt;cache&gt;</a>, see <strong>this</strong>.') in page
+    # a link to this unit's own concept stays on the page
+    assert 'Does <a href="#c-arms">this arm</a> hold?' in page
+    # an escaped-only field shows the link text
+    assert '<h3>Use the KV cache</h3>' in page
+
+
+def test_inline_link_uses_the_published_url_when_known():
+    page = render_page(_linked_unit(links={"p1": "https://claude.ai/artifact/a\"b"}))
+    assert ('<a href="https://claude.ai/artifact/a&quot;b#c-kvcache" target="_blank" '
+            'rel="noopener">KV &lt;cache&gt;</a>') in page
+
+
+def test_brief_writes_links_as_text():
+    brief = render_brief(_linked_unit(prereqs=[{"unit": "p1", "label": "LLM serving"}]))
+    assert "Built on the KV <cache> (P1: kvcache), see **this**." in brief
+    assert "### Use the KV cache (P1: kvcache)" in brief
+    assert "Read first: LLM serving (P1)." in brief
+
+
+def test_unknown_unit_in_a_link_fails_to_render():
+    u = artifact_unit()
+    u["decisions"][0]["why"] = "See [x](p9:kvcache)."
+    with pytest.raises(ContentError, match="p9"):
+        render_page(u)
+    with pytest.raises(ContentError, match="p9"):
+        render_brief(u)
+
+
+def test_resolve_does_not_change_the_input_and_inline_stays_stateless():
+    u = _linked_unit(prereqs=[{"unit": "p1", "label": "LLM serving"}])
+    before = repr(u)
+    resolve_links(u, "page")
+    assert repr(u) == before
+    # a raw markdown link is not a link: only resolved unit links are
+    assert "<a " not in inline("[x](https://evil.example) [y](javascript:alert(1))")
+
+
+def test_read_first_banner_sits_under_the_title():
+    page = render_page(_linked_unit(prereqs=[{"unit": "p1", "label": "LLM serving on a GPU"}],
+                                    links={"p1": "https://claude.ai/artifact/p1"}))
+    hero = page.split('<header class="hero">')[1].split("</header>")[0]
+    banner = re.search(r'<div class="readfirst">(.*?)</div>', hero).group(1)
+    assert banner == ('<b>Read first:</b> <a href="https://claude.ai/artifact/p1" '
+                      'target="_blank" rel="noopener">LLM serving on a GPU</a>')
+    assert hero.index("</h1>") < hero.index('class="readfirst"')
+    assert 'class="readfirst"' not in render_page(artifact_unit())

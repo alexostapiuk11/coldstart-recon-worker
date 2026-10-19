@@ -15,7 +15,7 @@ from study.links import link_index, req_label, traced
 from study.map import MAP_CSS, MAP_JS, has_map, map_section
 from study.schema import so_ids
 from study.svg import chart_html, diagram_html, segment_slots
-from study.text import esc, inline
+from study.text import esc, inline, resolve_links, unit_url
 
 CSS = """
 :root{--bg:#fafaf7;--fg:#1d2330;--muted:#5b6475;--card:#fff;--line:#d9dce3;
@@ -132,6 +132,9 @@ padding:8px 12px;margin:6px 0}summary{cursor:pointer;font-weight:600}
 code{font-size:.92em;background:var(--soft);padding:1px 5px;border-radius:4px}
 footer.src{font-size:13px;color:var(--muted)}
 .hero .lead,.answer{max-width:1100px}
+.readfirst{display:inline-block;font-size:15px;background:var(--card);border:1px solid var(--line);
+border-left:4px solid var(--warn);border-radius:0 8px 8px 0;padding:5px 12px;margin:0 0 8px}
+.readfirst b{color:var(--muted);font-weight:600;margin-right:4px}
 .answer{border-left:4px solid var(--accent);background:var(--soft);border-radius:0 10px 10px 0;
 padding:10px 14px;margin:10px 0 4px}.answer p{margin:4px 0 8px}
 .akicker{color:var(--muted);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
@@ -335,7 +338,17 @@ def _answer_first(c):
             f'<p>{inline(pitch)}</p><div class="achips">{chips}</div></div>')
 
 
+def _read_first(c):
+    """A banner under the title linking each prerequisite page (new tab)."""
+    if not c.get("prereqs"):
+        return ""
+    links = " · ".join(f'<a href="{esc(unit_url(c, p["unit"]))}" target="_blank" '
+                       f'rel="noopener">{esc(p["label"])}</a>' for p in c["prereqs"])
+    return f'<div class="readfirst"><b>Read first:</b> {links}</div>'
+
+
 def render_page(c: dict) -> str:
+    c = resolve_links(c, "page")
     art = c["kind"] == "artifact"
     sections, nav = [], []
 
@@ -381,6 +394,6 @@ def render_page(c: dict) -> str:
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<title>{esc(c["short_title"])}</title><style>{css}</style></head><body><main>'
         f'<header class="hero"><div class="kicker">Study page · about {c["minutes"]} min</div>'
-        f'<h1>{esc(c["title"])}</h1>{lead}</header>'
+        f'<h1>{esc(c["title"])}</h1>{_read_first(c)}{lead}</header>'
         f'<nav class="pills">{"".join(nav)}</nav>{"".join(sections)}</main>'
         f'<script>{js}</script></body></html>')

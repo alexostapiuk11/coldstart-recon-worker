@@ -6,7 +6,7 @@ here, naming the field, instead of producing a broken page.
 
 from __future__ import annotations
 
-from study.text import wrap
+from study.text import SENTINELS, known_units, unknown_link_units, wrap
 
 ARTIFACT_LEVELS = ("context", "container", "component", "dynamic")
 NODE_KINDS = ("person", "system", "external", "store", "focus")
@@ -342,6 +342,37 @@ def _view(v, where, allowed):
                 raise ContentError(f"{where}.edges[{i}]: edge {end} is not a node id")
 
 
+def _cross_page(c, where):
+    """Optional `links` {unit: https URL} and `prereqs` [{unit, label}], and every
+    [text](unit:concept) link in the content's strings naming a known unit."""
+    if "links" in c:
+        for unit, url in _get(c, "links", dict, where).items():
+            if not isinstance(url, str) or not url.startswith("https://"):
+                raise ContentError(f"{where}.links.{unit} must begin with https://")
+    if "prereqs" in c:
+        for i, p in enumerate(_items(c, "prereqs", where, fields=("unit", "label"))):
+            if not p["label"].strip():
+                raise ContentError(f"{where}.prereqs[{i}].label is empty")
+    known = known_units(c)
+
+    def walk(node, path):
+        if isinstance(node, str):
+            if any(ch in node for ch in SENTINELS):
+                raise ContentError(f"{path}: contains a control character")
+            for unit in unknown_link_units(node, known):
+                raise ContentError(f"{path}: link to unknown unit '{unit}'; add it to "
+                                   "`links` or `prereqs`")
+        elif isinstance(node, dict):
+            for k, v in node.items():
+                if k not in ("sources", "links"):
+                    walk(v, f"{path}.{k}")
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                walk(v, f"{path}[{i}]")
+
+    walk({k: v for k, v in c.items() if k != "id"}, where)
+
+
 def validate(c: dict) -> None:
     """Raise ContentError if the unit cannot be rendered. Return None otherwise."""
     for f in ("id", "title"):
@@ -406,3 +437,4 @@ def validate(c: dict) -> None:
             _get(t, "why", str, f"{where}.concepts[{i}]")
         _items(c, "used_by", where, at_least=1)
     _relationships(c, where)
+    _cross_page(c, where)

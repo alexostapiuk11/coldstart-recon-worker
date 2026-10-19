@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from study.schema import merged_segments, so_ids
+from study.text import resolve_links
 
 INTERVIEW_PROMPT = """\
 You are my interview coach. The brief above is the only ground truth about my project;
@@ -77,11 +78,15 @@ def _bullets(items):
 
 
 def render_brief(c: dict) -> str:
+    c = resolve_links(c, "brief")
     out = [f"# {c['title']}: chat brief", ""]
     how = ("Paste this whole file into an AI chat, then paste the prompt at the end (it is "
            "already the last section). Ask clarifying questions about anything below. "
            f"About {c['minutes']} minutes to study.")
     out += ["## How to use this brief", "", how, ""]
+    if c.get("prereqs"):
+        out += ["Read first: " + ", ".join(f"{p['label']} ({p['unit'].upper()})"
+                                           for p in c["prereqs"]) + ".", ""]
     if c["kind"] == "artifact":
         out += ["## Why it exists", "", f"**Question:** {c['question']}", "",
                 "**Requirements that drove everything:**", ""]
