@@ -114,6 +114,20 @@ def _fit(x: float, text: str, width: float, anchor: str = "middle") -> float:
     return x + max(0.0, -left) - max(0.0, left + w - width)
 
 
+def _split(text: str) -> list[str]:
+    """Two lines, split at the word break that makes the longer line shortest."""
+    words = text.split()
+    if len(words) < 2:
+        return [text]
+    cuts = [(" ".join(words[:i]), " ".join(words[i:])) for i in range(1, len(words))]
+    return list(min(cuts, key=lambda c: max(len(c[0]), len(c[1]))))
+
+
+def _half(text: str) -> int:
+    """Characters in the longer line of _split(text)."""
+    return max(len(line) for line in _split(text))
+
+
 def interval_html(chart: dict) -> str:
     """One row per estimate: a dot at the estimate, a whisker from low to high, and a
     labelled zero line, on one horizontal axis that always includes zero.
@@ -130,15 +144,28 @@ def interval_html(chart: dict) -> str:
     plot = 280.0
     lo = min(0.0, *(r["low"] for r in rows))
     hi = max(0.0, *(r["high"] for r in rows))
-    pad = (hi - lo) * 0.06 or 1.0
-    lo, hi = lo - pad, hi + pad
+    span = hi - lo or 1.0
+    lo, hi = lo - span * 0.06, hi + span * 0.06
     left_txt = f"\u2190 {chart['left_label']}" if chart.get("left_label") else ""
     right_txt = f"{chart['right_label']} \u2192" if chart.get("right_label") else ""
-    # Long side labels stack on two lines instead of widening the chart: a wider viewBox
-    # shrinks every label on a phone below a readable size.
-    width = max(left_pad + plot + right_pad,
-                max(len(r["label"]) for r in rows) * CHART_CHAR + 4,
-                len(left_txt) * CHART_CHAR + 4, len(right_txt) * CHART_CHAR + 4)
+    # Each side label sits on its own side of zero, on two lines if it must. When the
+    # data hugs zero, the axis runs on past zero (at least a fifth of the data span) so
+    # that side exists on the chart and has room for the longer half of its label.
+    need_l = (_half(left_txt) * CHART_CHAR + 8) if left_txt else 0.0
+    need_r = (_half(right_txt) * CHART_CHAR + 8) if right_txt else 0.0
+    if left_txt:
+        lo = min(lo, -span * 0.2)
+    if right_txt:
+        hi = max(hi, span * 0.2)
+    f_r = min(0.6, max(0.0, need_r - right_pad) / plot)  # share of the plot right of zero
+    if hi / (hi - lo) < f_r:
+        hi = -f_r * lo / (1 - f_r)
+    f_l = min(0.6, max(0.0, need_l - left_pad) / plot)  # share of the plot left of zero
+    if -lo / (hi - lo) < f_l:
+        lo = -f_l * hi / (1 - f_l)
+    # A wider viewBox shrinks every label on a phone below a readable size, so long side
+    # labels wrap instead of widening the chart.
+    width = max(left_pad + plot + right_pad, max(len(r["label"]) for r in rows) * CHART_CHAR + 4)
 
     def x(v):
         return left_pad + (v - lo) / (hi - lo) * plot
@@ -148,11 +175,16 @@ def interval_html(chart: dict) -> str:
     top = 26 if zero_txt else 6
     pitch = 66
     axis_y = top + len(rows) * pitch + 2
-    # Side labels sit either side of zero; if they would collide, the right one drops a line.
-    lx = _fit(x0 - 8, left_txt, width, "end")
-    rx = _fit(x0 + 8, right_txt, width, "start")
-    two_lines = bool(left_txt and right_txt and rx < lx + 8)
-    height = axis_y + (20 if left_txt or right_txt else 4) + (18 if two_lines else 0) + 4
+
+    def side(txt, room):
+        if not txt or len(txt) * CHART_CHAR <= room:
+            return [txt] if txt else []
+        return _split(txt)
+
+    l_lines = side(left_txt, x0 - 8)
+    r_lines = side(right_txt, width - x0 - 8)
+    n_lines = max(len(l_lines), len(r_lines))
+    height = axis_y + 18 * n_lines + 6
     summary = "; ".join(f"{r['label']}: {_signed(r['estimate'])} {unit}, from "
                         f"{_signed(r['low'])} to {_signed(r['high'])}" for r in rows)
     p = [(f'<svg class="chart interval" viewBox="0 0 {width:.0f} {height:.0f}" role="img" '
@@ -185,13 +217,12 @@ def interval_html(chart: dict) -> str:
         p.append(f'<text class="inum" x="{xh + 8:.1f}" y="{y + 39}">{highs[i]}</text>')
         p.append(f'<text class="btotal iest" x="{_fit(xe, est, width):.1f}" y="{y + 60}" '
                  f'text-anchor="middle">{esc(est)}</text>')
-    if left_txt:
-        p.append(f'<text class="axlabel" x="{lx:.1f}" y="{axis_y + 18}" '
-                 f'text-anchor="end">{esc(left_txt)}</text>')
-    if right_txt:
-        ry = axis_y + 18 + (18 if two_lines else 0)
-        rx = _fit(x0 + 8, right_txt, width, "start")
-        p.append(f'<text class="axlabel" x="{rx:.1f}" y="{ry}">{esc(right_txt)}</text>')
+    for k, line in enumerate(l_lines):
+        p.append(f'<text class="axlabel sidel" x="{x0 - 8:.1f}" y="{axis_y + 18 + 18 * k}" '
+                 f'text-anchor="end">{esc(line)}</text>')
+    for k, line in enumerate(r_lines):
+        p.append(f'<text class="axlabel sider" x="{x0 + 8:.1f}" y="{axis_y + 18 + 18 * k}" '
+                 f'text-anchor="start">{esc(line)}</text>')
     p.append("</svg>")
     return "".join(p)
 

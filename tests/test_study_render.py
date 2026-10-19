@@ -666,3 +666,34 @@ def test_phone_list_keeps_focus_emphasis_and_marks_external_nodes():
     assert "<strong>" not in items[0] and "<strong>" not in items[2]
     from study.page import CSS
     assert ".kmark{" in CSS
+
+
+def _texts(out):
+    """(classes, x, y, anchor, text) for every <text> in a chart."""
+    return [(m.group(1), float(m.group(2)), float(m.group(3)), m.group(4) or "start", m.group(5))
+            for m in re.finditer(r'<text class="([^"]*)" x="([\d.-]+)" y="([\d.-]+)"'
+                                 r'(?: text-anchor="(\w+)")?>([^<]*)<', out)]
+
+
+def test_interval_against_zero_keeps_each_side_label_on_its_own_side():
+    out = chart_html(dict(_interval([{"label": "(A − B) − (B − C), total cold start",
+                                      "estimate": -10.39, "low": -20.30, "high": -5.54}]),
+                          left_label="compile cache saves more",
+                          right_label="weight cache saves more"), "i7")
+    zero = _x(out, r'<line class="zero" x1="([\d.]+)"')[0]
+    width = float(re.search(r'viewBox="0 0 ([\d.]+)', out).group(1))
+    texts = _texts(out)
+    left = [t for t in texts if "sidel" in t[0]]
+    right = [t for t in texts if "sider" in t[0]]
+    assert left and right
+    for _, x, _, anchor, txt in left:
+        assert anchor == "end" and x <= zero, txt  # right edge of the left label
+    for _, x, _, anchor, txt in right:
+        assert anchor == "start" and x >= zero, txt
+        assert x + len(txt) * 8.5 <= width + 0.5, txt
+    assert "weight cache saves more" in " ".join(t[4] for t in right)
+    # the axis runs past zero, so the empty side is visibly there
+    axis_end = float(re.search(r'<line class="axis" x1="[\d.]+" y1="[\d.]+" x2="([\d.]+)"',
+                               out).group(1))
+    assert axis_end > zero + 20
+    assert 309 / width * 15 >= 11  # still readable on a phone
