@@ -129,7 +129,7 @@ Clock A (laptop) runs from step 2; clock B (worker) starts between steps 4 and 5
 
 **Why:** A to B isolates the weight cache. B to C isolates the compile cache with weight handling held constant. The configuration is one frozen object that sets two paths, so the single-variable claim is true by structure. A baked image only moves the bytes into the image pull, inside the platform residual the harness cannot split, so it would flatter the weight time unseen. Nobody warms a compile cache while re-downloading weights, so the fourth cell answers no question.
 
-**Cost:** Arm C exists only because a trial run before measuring showed this vLLM compiles at startup. A warm arm needs a primed volume, and a test has to check that the arms differ nowhere else.
+**Cost:** A warm arm needs a primed volume, and a test has to check that the arms differ nowhere else.
 
 ### Measure from outside the engine
 
@@ -228,7 +228,7 @@ Clock A (laptop) runs from step 2; clock B (worker) starts between steps 4 and 5
   - `rank` Rank the caches by the difference's interval: Leading with what transfers furthest, a rule committed before data, stops the headline being picked afterwards.
   - `shape` Report the shape, and what it cannot answer: H4 was fixed in advance, so it is reported as unanswerable instead of quietly dropped.
 - R5: Run on paid GPUs only code already tested offline, and let anyone re-derive every number on a laptop.
-  - No decision: It is met by process: the flow step "Capture, then build offline" tests the code on recorded logs, API responses and a free fake engine before paid runs, and "Publish what re-derives" re-derives every figure with no GPU.
+  - No decision: It is met by process: in the flow, "Build against the captures; prove it end to end" tests the code on recorded logs and a free fake engine before any campaign run, and "Analyse from the committed store" re-derives every number with no GPU.
 
 **Decisions and the concepts they use:**
 
@@ -252,13 +252,70 @@ Clock A (laptop) runs from step 2; clock B (worker) starts between steps 4 and 5
 
 ## Implementation flow
 
-1. **Capture, then build offline**: Real vLLM logs and RunPod responses from a cheap trial run are saved as test inputs; the code is tested on them and on a free fake engine. A disk-fill defect still cost one discarded 27-run window.
-2. **Pre-register**: Hypotheses, contrasts and rules are committed in `docs/experiment.md` before the first paid measurement run.
-3. **Prime arm C**: Two arm C runs go to a separate store and never count; the second must show compile under one second. Each run checks its compile cache before the engine starts, because a cold compile creates it as it finishes.
-4. **Run interleaved triples**: 100 seeded triples, one job in flight. Any change to a pinned setting ends the experiment.
-5. **Store, never retry**: One JSON line per run, appended as it lands. A failure is its own row, never retried: a retry would swap slow or unlucky runs for faster ones.
-6. **Partition, then analyse**: A gate sorts rows into publishable, discarded and failed before any statistic; then seeded bootstrap intervals (10,000 iterations).
-7. **Publish what re-derives**: Figures and the post come from the committed store; a re-run reproduces the analysis byte for byte, with no GPU.
+10 steps in 5 phases, 5 milestones.
+
+Milestones: 4. Build against the captures; prove it end to end (2026-08-28); 5. Pre-register the rules (2026-08-28); 7. Discard the first window and restart (2026-08-31); 8. Run 100 interleaved triples (2026-09-02 to 09-04 UTC); 10. Write up, gate and date the post (2026-09-03 to 09-17).
+
+### Phase 1 of 5: Design (1 step)
+
+1. **Specify one variable at three levels**: Three arms differing only in cache configuration, named phases and two clocks; then a task-by-task harness plan.
+   - Output: the design spec and the harness plan, before any code
+   - When: 2026-08-17 to 08-19
+   - Decision: `arms` Three arms, one variable
+   - Evidence: c778863484 (design spec); ddcce86605 (harness plan)
+
+### Phase 2 of 5: Build and prove offline (3 steps)
+
+2. **Build the harness core with no GPU**: Recorder, store, seeded scheduler, clock checks, statistics and figures, tested on a laptop. A cross-module review found five blocking defects, all fixed.
+   - Output: a laptop-tested core with a gate deciding which rows are publishable
+   - When: 2026-08-19 to 08-20
+   - Evidence: 23de7208dc (triple scheduler); bcbca83168 (five defects recorded); 2293b17181 (publishability gate)
+3. **Capture three real cold starts**: The one paid step before the pre-registration: engine logs and API responses saved verbatim. vLLM compiles at startup, so arm C stays.
+   - Output: fixtures/: three engine logs and three platform status payloads
+   - When: 2026-08-28
+   - Evidence: 5e10909133
+4. **Build against the captures; prove it end to end** [MILESTONE]: Log parser, platform clock, a probe around `vllm serve` and a free stub replaying the real logs; a synthetic campaign through it recovers the known effects.
+   - Output: tests/test_end_to_end.py: the whole pipeline runs with no GPU
+   - When: 2026-08-28
+   - Decision: `clocks` Measure from outside the engine
+   - Evidence: 55e44e2154 (log parser); 5c8d29ae22 (probe); 3ed2379328 (end-to-end validation)
+
+### Phase 3 of 5: Prepare the paid run (2 steps)
+
+5. **Pre-register the rules** [MILESTONE]: Hypotheses, contrasts, and the exclusion, stopping and headline rules, committed before any priming or campaign run; the captures shaped it.
+   - Output: docs/experiment.md, changed afterwards only by dated amendments
+   - When: 2026-08-28
+   - Decision: `rank` Rank the caches by the difference's interval
+   - Evidence: 95dd30726b
+6. **Guard the arms, prime arm C, smoke-test**: A run whose compile cache, read before the engine starts, contradicts its arm is discarded. Two priming runs and a smoke triple, never counted, exposed two defects that were fixed first.
+   - Output: data/priming.jsonl and data/smoke.jsonl, outside the campaign store
+   - When: 2026-08-28 to 08-29
+   - Decision: `state` Check each arm's cache state
+   - Evidence: b60122abf7 (arm-state discard); ea58eb9651 (state read before the engine); bee70f6d91 (poll budget; priming runs); 7ee1f08f2d (engine log kept; smoke runs)
+
+### Phase 4 of 5: Measure (2 steps)
+
+7. **Discard the first window and restart** [MILESTONE]: Arm A lost 3 of its 9 runs to a full worker disk. The fix changed the pinned image, so the 27-run window was discarded whole, not spliced.
+   - Output: data/discarded-window-0.jsonl, kept as evidence; a re-pinned image
+   - When: 2026-08-31
+   - Evidence: 740e1eafaf (cleanup fix; window stored); 7d2313ffad (re-pin; restart recorded); 4d7b4017a0 (restart's first run failed too; purge at start)
+8. **Run 100 interleaved triples** [MILESTONE]: Seeded triples, one job in flight, one JSON line per run, no retries. Three windows hours apart, all on one host.
+   - Output: data/campaign.jsonl: 300 runs, 100 per arm, no failures, no discards
+   - When: 2026-09-02 to 09-04 UTC
+   - Decision: `interleave` Interleave the arms in random triples
+   - Evidence: 68ece63079 (window 1); e2ffd6b2dd (window 2); 83ec68fb36 (complete)
+
+### Phase 5 of 5: Analyse and publish (2 steps)
+
+9. **Analyse from the committed store**: The gate partitions rows before any statistic; seeded bootstrap intervals follow. A first-touch rule, added after window one, keeps one image-pull run out of the ECDF.
+   - Output: data/analysis.json (a re-run reproduces it byte for byte) and the four figures
+   - When: 2026-09-02 to 09-03
+   - Decision: `shape` Report the shape, and what it cannot answer
+   - Evidence: b82c59243b (first-touch rule, post hoc); 46df9b9e02 (economics); 94ba821567 (figures)
+10. **Write up, gate and date the post** [MILESTONE]: The headline follows the pre-registered rule; the pre-publish gate caught two wrong claims. Every number re-derives with no GPU.
+   - Output: docs/post.md with byline, permanent slug and date
+   - When: 2026-09-03 to 09-17
+   - Evidence: fe773ec78f (post written); bc10b41bed (date corrected to 2026-09-17)
 
 ## Results as meaning
 
@@ -299,8 +356,8 @@ Clock A (laptop) runs from step 2; clock B (worker) starts between steps 4 and 5
 ### Which cache bought more: the interval on the difference
 
 - Axis: Weight-cache saving minus compile-cache saving: seconds of total cold start, 95% bootstrap interval.
-- Read it as: The whole interval, −20.30 to −5.54 s, lies left of zero, which licenses the ranking; the pre-registration requires this interval before any ranking claim.
-- How it is computed: 15.68 − 26.07 = −10.39 s (contrasts use unrounded medians, so they differ from differences of the rounded totals 81.12, 65.43, 39.37 s); the interval comes from 10,000 resamples of the runs.
+- Read it as: The whole interval, −20.30 to −5.54 s, lies left of zero, which licenses the ranking.
+- How it is computed: 15.68 − 26.07 = −10.39 s, on unrounded medians; the interval comes from 10,000 resamples of the runs.
 - (A − B) − (B − C), total cold start: -10.39 s (interval -20.3 to -5.54)
 - So: see decision `rank`
 

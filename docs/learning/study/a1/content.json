@@ -35,7 +35,7 @@
       "short": "Tested code, laptop-checkable numbers",
       "text": "Run on paid GPUs only code already tested offline, and let anyone re-derive every number on a laptop.",
       "why": "The whole budget was $200, and debugging on live GPUs eats it. A number a reader cannot re-derive must be taken on trust.",
-      "unlinked_reason": "It is met by process: the flow step \"Capture, then build offline\" tests the code on recorded logs, API responses and a free fake engine before paid runs, and \"Publish what re-derives\" re-derives every figure with no GPU."
+      "unlinked_reason": "It is met by process: in the flow, \"Build against the captures; prove it end to end\" tests the code on recorded logs and a free fake engine before any campaign run, and \"Analyse from the committed store\" re-derives every number with no GPU."
     }
   ],
   "concepts": [
@@ -539,7 +539,7 @@
       ],
       "chosen": "One variable, cache configuration, at three levels: A, B, C",
       "why": "A to B isolates the weight cache. B to C isolates the compile cache with weight handling held constant. The configuration is one frozen object that sets two paths, so the single-variable claim is true by structure. A baked image only moves the bytes into the image pull, inside the platform residual the harness cannot split, so it would flatter the weight time unseen. Nobody warms a compile cache while re-downloading weights, so the fourth cell answers no question.",
-      "cost": "Arm C exists only because a trial run before measuring showed this vLLM compiles at startup. A warm arm needs a primed volume, and a test has to check that the arms differ nowhere else.",
+      "cost": "A warm arm needs a primed volume, and a test has to check that the arms differ nowhere else.",
       "why_short": "A to B isolates the weight cache, B to C the compile cache; one frozen configuration makes the single-variable claim true by structure.",
       "cost_short": "Arm C needs a primed volume, and a test checks that the arms differ nowhere else.",
       "short": "One variable, three arms",
@@ -719,34 +719,203 @@
   ],
   "flow": [
     {
-      "label": "Capture, then build offline",
-      "detail": "Real vLLM logs and RunPod responses from a cheap trial run are saved as test inputs; the code is tested on them and on a free fake engine. A disk-fill defect still cost one discarded 27-run window."
+      "phase": "Design",
+      "label": "Specify one variable at three levels",
+      "detail": "Three arms differing only in cache configuration, named phases and two clocks; then a task-by-task harness plan.",
+      "output": "the design spec and the harness plan, before any code",
+      "when": "2026-08-17 to 08-19",
+      "evidence": [
+        {
+          "commit": "c778863484",
+          "note": "design spec"
+        },
+        {
+          "commit": "ddcce86605",
+          "note": "harness plan"
+        }
+      ],
+      "decision": "arms"
     },
     {
-      "label": "Pre-register",
-      "detail": "Hypotheses, contrasts and rules are committed in `docs/experiment.md` before the first paid measurement run."
+      "phase": "Build and prove offline",
+      "label": "Build the harness core with no GPU",
+      "detail": "Recorder, store, seeded scheduler, clock checks, statistics and figures, tested on a laptop. A cross-module review found five blocking defects, all fixed.",
+      "output": "a laptop-tested core with a gate deciding which rows are publishable",
+      "when": "2026-08-19 to 08-20",
+      "evidence": [
+        {
+          "commit": "23de7208dc",
+          "note": "triple scheduler"
+        },
+        {
+          "commit": "bcbca83168",
+          "note": "five defects recorded"
+        },
+        {
+          "commit": "2293b17181",
+          "note": "publishability gate"
+        }
+      ]
     },
     {
-      "label": "Prime arm C",
-      "detail": "Two arm C runs go to a separate store and never count; the second must show compile under one second. Each run checks its compile cache before the engine starts, because a cold compile creates it as it finishes.",
+      "phase": "Build and prove offline",
+      "label": "Capture three real cold starts",
+      "detail": "The one paid step before the pre-registration: engine logs and API responses saved verbatim. vLLM compiles at startup, so arm C stays.",
+      "output": "fixtures/: three engine logs and three platform status payloads",
+      "when": "2026-08-28",
+      "evidence": [
+        {
+          "commit": "5e10909133"
+        }
+      ]
+    },
+    {
+      "phase": "Build and prove offline",
+      "label": "Build against the captures; prove it end to end",
+      "detail": "Log parser, platform clock, a probe around `vllm serve` and a free stub replaying the real logs; a synthetic campaign through it recovers the known effects.",
+      "output": "tests/test_end_to_end.py: the whole pipeline runs with no GPU",
+      "milestone": true,
+      "when": "2026-08-28",
+      "evidence": [
+        {
+          "commit": "55e44e2154",
+          "note": "log parser"
+        },
+        {
+          "commit": "5c8d29ae22",
+          "note": "probe"
+        },
+        {
+          "commit": "3ed2379328",
+          "note": "end-to-end validation"
+        }
+      ],
+      "decision": "clocks"
+    },
+    {
+      "phase": "Prepare the paid run",
+      "label": "Pre-register the rules",
+      "detail": "Hypotheses, contrasts, and the exclusion, stopping and headline rules, committed before any priming or campaign run; the captures shaped it.",
+      "output": "docs/experiment.md, changed afterwards only by dated amendments",
+      "milestone": true,
+      "when": "2026-08-28",
+      "evidence": [
+        {
+          "commit": "95dd30726b"
+        }
+      ],
+      "decision": "rank"
+    },
+    {
+      "phase": "Prepare the paid run",
+      "label": "Guard the arms, prime arm C, smoke-test",
+      "detail": "A run whose compile cache, read before the engine starts, contradicts its arm is discarded. Two priming runs and a smoke triple, never counted, exposed two defects that were fixed first.",
+      "output": "data/priming.jsonl and data/smoke.jsonl, outside the campaign store",
+      "when": "2026-08-28 to 08-29",
+      "evidence": [
+        {
+          "commit": "b60122abf7",
+          "note": "arm-state discard"
+        },
+        {
+          "commit": "ea58eb9651",
+          "note": "state read before the engine"
+        },
+        {
+          "commit": "bee70f6d91",
+          "note": "poll budget; priming runs"
+        },
+        {
+          "commit": "7ee1f08f2d",
+          "note": "engine log kept; smoke runs"
+        }
+      ],
       "decision": "state"
     },
     {
-      "label": "Run interleaved triples",
-      "detail": "100 seeded triples, one job in flight. Any change to a pinned setting ends the experiment.",
+      "phase": "Measure",
+      "label": "Discard the first window and restart",
+      "detail": "Arm A lost 3 of its 9 runs to a full worker disk. The fix changed the pinned image, so the 27-run window was discarded whole, not spliced.",
+      "output": "data/discarded-window-0.jsonl, kept as evidence; a re-pinned image",
+      "milestone": true,
+      "when": "2026-08-31",
+      "evidence": [
+        {
+          "commit": "740e1eafaf",
+          "note": "cleanup fix; window stored"
+        },
+        {
+          "commit": "7d2313ffad",
+          "note": "re-pin; restart recorded"
+        },
+        {
+          "commit": "4d7b4017a0",
+          "note": "restart's first run failed too; purge at start"
+        }
+      ]
+    },
+    {
+      "phase": "Measure",
+      "label": "Run 100 interleaved triples",
+      "detail": "Seeded triples, one job in flight, one JSON line per run, no retries. Three windows hours apart, all on one host.",
+      "output": "data/campaign.jsonl: 300 runs, 100 per arm, no failures, no discards",
+      "milestone": true,
+      "when": "2026-09-02 to 09-04 UTC",
+      "evidence": [
+        {
+          "commit": "68ece63079",
+          "note": "window 1"
+        },
+        {
+          "commit": "e2ffd6b2dd",
+          "note": "window 2"
+        },
+        {
+          "commit": "83ec68fb36",
+          "note": "complete"
+        }
+      ],
       "decision": "interleave"
     },
     {
-      "label": "Store, never retry",
-      "detail": "One JSON line per run, appended as it lands. A failure is its own row, never retried: a retry would swap slow or unlucky runs for faster ones."
+      "phase": "Analyse and publish",
+      "label": "Analyse from the committed store",
+      "detail": "The gate partitions rows before any statistic; seeded bootstrap intervals follow. A first-touch rule, added after window one, keeps one image-pull run out of the ECDF.",
+      "output": "data/analysis.json (a re-run reproduces it byte for byte) and the four figures",
+      "when": "2026-09-02 to 09-03",
+      "evidence": [
+        {
+          "commit": "b82c59243b",
+          "note": "first-touch rule, post hoc"
+        },
+        {
+          "commit": "46df9b9e02",
+          "note": "economics"
+        },
+        {
+          "commit": "94ba821567",
+          "note": "figures"
+        }
+      ],
+      "decision": "shape"
     },
     {
-      "label": "Partition, then analyse",
-      "detail": "A gate sorts rows into publishable, discarded and failed before any statistic; then seeded bootstrap intervals (10,000 iterations)."
-    },
-    {
-      "label": "Publish what re-derives",
-      "detail": "Figures and the post come from the committed store; a re-run reproduces the analysis byte for byte, with no GPU."
+      "phase": "Analyse and publish",
+      "label": "Write up, gate and date the post",
+      "detail": "The headline follows the pre-registered rule; the pre-publish gate caught two wrong claims. Every number re-derives with no GPU.",
+      "output": "docs/post.md with byline, permanent slug and date",
+      "milestone": true,
+      "when": "2026-09-03 to 09-17",
+      "evidence": [
+        {
+          "commit": "fe773ec78f",
+          "note": "post written"
+        },
+        {
+          "commit": "bc10b41bed",
+          "note": "date corrected to 2026-09-17"
+        }
+      ]
     }
   ],
   "results": [
@@ -1032,10 +1201,10 @@
         "shade": "left"
       },
       "axis": "Weight-cache saving minus compile-cache saving: seconds of total cold start, 95% bootstrap interval.",
-      "read_as": "The whole interval, −20.30 to −5.54 s, lies left of zero, which licenses the ranking; the pre-registration requires this interval before any ranking claim.",
+      "read_as": "The whole interval, −20.30 to −5.54 s, lies left of zero, which licenses the ranking.",
       "so": "rank",
       "takeaway": "The compile cache saves more, about 10 s per cold start, and the interval never crosses zero, so the ranking is a finding, not a reading of two bars.",
-      "arithmetic": "15.68 − 26.07 = −10.39 s (contrasts use unrounded medians, so they differ from differences of the rounded totals 81.12, 65.43, 39.37 s); the interval comes from 10,000 resamples of the runs."
+      "arithmetic": "15.68 − 26.07 = −10.39 s, on unrounded medians; the interval comes from 10,000 resamples of the runs."
     },
     {
       "title": "KV cache left for serving, by arm",
