@@ -8,21 +8,21 @@ Paste this whole file into an AI chat, then paste the prompt at the end (it is a
 
 Used by: a6
 
-- **At-least-once, and exactly-once effect**: **At-least-once**: a message may repeat, never be lost. Exactly-once *delivery* over a network that drops acknowledgements is impossible; systems give exactly-once **effect**: repeats made harmless. Think of it as: A courier who redelivers whenever unsure you signed: you never miss a parcel, sometimes you get two. Why it matters: Every A6 pipeline is at-least-once underneath. Its stacks, **N** (naive), **K** (Kafka transactions), **I** (key at the sink) and **O+I** (outbox plus key), differ in where repeats are made harmless.
-- **Offsets, committed after the work**: A consumer's progress in a partition is an **offset**: the next position to read. A6's consumers commit it only after their Postgres commit, so a crash in between restarts them at the old offset and the batch is applied again. Think of it as: A bookmark moved only after you finish the chapter: fall asleep first and you reread the chapter. Why it matters: That gap is the **commit window**. Cell F4-con-t kills a consumer exactly there; it is how A6 plants a known duplicate.
-- **Idempotent producer versus transactions**: An **idempotent producer** lets the broker drop a retried batch it already wrote, within one producer session; a restarted process or a relay re-sending is new to it. A Kafka **transaction** commits Kafka writes and consumer offsets atomically; Postgres is not a participant. Why it matters: So K can still apply a batch twice: dying after its Postgres commit and before `commitTransaction` aborts the transaction and redelivers the batch, but the Postgres commit stands. A6's H1 tests this.
-- **Consumer groups, rebalances, zombies**: A group splits partitions among live members. One silent past `session.timeout.ms` loses them and a new **generation** starts; an offset commit from an old generation is rejected: **generation fencing**. A **zombie**, paused and woken with a batch in hand, can still write outside Kafka. Think of it as: A worker dozes off holding a task; it is reassigned. He wakes and finishes it anyway, and only his timesheet is rejected. Why it matters: Cell F5 makes one. In reconnaissance on N it wrote its batch to Postgres, then failed its offset commit, in all 17 F5 trials. **Epoch fencing** does not apply: each instance has its own `transactional.id`.
+- **At-least-once, and exactly-once effect**: **At-least-once**: a message may repeat, never be lost. Exactly-once *delivery* over a network that drops acknowledgements is impossible; systems give exactly-once **effect**: repeats made harmless. Think of it as: A courier who redelivers whenever unsure you signed: you never miss a parcel, sometimes you get two. Why it matters: A6's consumers are all at-least-once; dual-write producers can also lose. Its stacks, **N** (naive), **K** (Kafka transactions), **I** (key at the sink) and **O+I** (outbox plus key), differ in where, and whether, repeats are made harmless.
+- **Offsets, committed after the work**: A consumer's progress in a partition is an **offset**: the next position to read. A6's consumers commit it only after their Postgres commit, so a crash in between means the batch is redelivered from the old offset. Think of it as: A bookmark moved only after you finish the chapter: fall asleep first and you reread the chapter. Why it matters: That gap is the **commit window**. Cell F4-con-t kills a consumer exactly there; on N it is the detection gate's planted duplicate.
+- **Idempotent producer versus transactions**: An **idempotent producer** lets the broker drop a retried batch it already wrote, within one producer session; a restarted process or a relay re-sending is new to it. A Kafka **transaction** commits Kafka writes and consumer offsets atomically; Postgres is not a participant. Why it matters: So K can still apply a batch twice: die between its Postgres commit and `commitTransaction`, and the batch is redelivered while the Postgres commit stands. A6's H1 tests this.
+- **Consumer groups, rebalances, zombies**: A group splits partitions among live members. One silent past `session.timeout.ms` loses them and a new **generation** starts; an offset commit from an old generation is rejected: **generation fencing**. A **zombie**, paused and woken with a batch in hand, can still write outside Kafka. Think of it as: A worker dozes off holding a task; it is reassigned. He wakes and finishes it anyway, and only his timesheet is rejected. Why it matters: Cell F5 makes one. In reconnaissance on N it wrote its batch to Postgres, then failed its offset commit, in all 17 F5 trials. On K, **epoch fencing** does not apply: each instance has its own `transactional.id`.
 - **The dual write, and the outbox**: Commit the database, then send to Kafka: two commits in two systems. A crash or send timeout between them leaves a recorded payment never published. The **outbox** writes the payment and an 'event to publish' row in one transaction; a relay (Debezium, reading the database log) publishes it later, **at least once**. Think of it as: Diary, then a text to a friend: if the phone dies in between, the friend never hears. The outbox writes the text in the diary; a courier sends it, maybe twice. Why it matters: N, K and I dual-write; cell F4-svc kills the service right after its source commit. O+I's outbox moves duplicates downstream rather than removing them, so it still needs the key.
 - **Idempotency key at the sink**: A unique `payment_id`, assigned at the origin, inserted into a `processed` table in **the same transaction** as the balance update: a repeat conflicts and is skipped. It breaks if the key is made downstream, or check and write are separate transactions. Think of it as: A ticket barcode printed at purchase and scanned at the gate: a second scan is refused. A barcode printed at the gate would defeat it. Why it matters: Why not dedupe by Kafka offset? A relay's re-send lands at a **new** offset; only a key carried from the origin catches it. I and O+I bet on this key.
-- **Checking a history: ok, fail, info**: As Jepsen does, record each request as **ok**, **fail** (provably never reached the service) or **info** (a timeout or 5xx: may or may not have happened). With unique IDs and commuting increments, counting each ID in source, topic and apply log is a complete check. Think of it as: A payment page that timed out: the money may or may not have gone; only the statement says. Why it matters: A6's source database is the authority and resolves every info. The apply log keeps each apply's `(partition, offset)`: same offset means a redelivery, a new offset a re-send.
+- **Checking a history: ok, fail, info**: Jepsen-style, record each request as **ok**, **fail** (here: provably never reached the service) or **info** (a timeout or 5xx: may or may not have happened). With unique IDs and commuting increments, counting each ID in source, topic and apply log is a complete check. Think of it as: A payment page that timed out: the money may or may not have gone; only the statement says. Why it matters: A6's source database is the authority and resolves every info. The apply log keeps each apply's `(partition, offset)`: same offset means a redelivery, a new offset a re-send.
 - **Real faults, and checking they landed**: **SIGKILL** ends a process with no cleanup. **`docker pause`** freezes it; it wakes unaware time passed. A Toxiproxy **blackhole** keeps a connection open and drops the bytes; disabling a proxy instead resets connections, which fail fast: a different fault. The seed fixes the **schedule**, not the outcome. Why it matters: A **manipulation check**, reading only orchestrator, broker and process state, confirms each A6 trial's fault took effect. A trial is void if not, and never because of what the checker found.
-- **Positive and negative controls**: A zero means something only if the harness can see a nonzero. A **positive control** runs a case that must produce the anomaly; a **negative control**, one that must produce none. Think of it as: Testing a smoke alarm with test smoke before trusting its silence. Why it matters: A6's detection gate, run before the campaign, planted a duplicate and a loss on N, ran no-fault trials on every stack and tested the checker on synthetic histories. It passed. Its positive controls cover N only, not K.
+- **Positive and negative controls**: A zero means something only if the harness can see a nonzero. A **positive control** runs a case that must produce the anomaly; a **negative control**, one that must produce none. Think of it as: Testing a smoke alarm with test smoke before trusting its silence. Why it matters: A6's detection gate, run before the campaign, planted a duplicate and a loss on N only, ran no-fault trials on every stack and tested the checker on synthetic histories. It passed.
 
 ## Views
 
 ### Where a duplicate can enter (concept)
 
-Three places can send a payment again: (1) the producer retrying, (2) the outbox relay re-reading after a crash, at a new offset, and (3) redelivery to a restarted consumer, at the same offset. The key is checked at the end.
+Two routes repeat a payment: the outbox relay re-reading after a crash, at a new offset, and redelivery to a restarted consumer, at the same offset. The producer's own retries are dropped by the broker. The key is checked last.
 
 - **Client**: assigns payment_id at the origin
 - **payment-service**: commits the source; sends in N, K, I
@@ -33,20 +33,20 @@ Three places can send a payment again: (1) the producer retrying, (2) the outbox
 - **ledger-db**: balances, apply log; key in I, O+I
 - Client → payment-service: HTTP
 - payment-service → source-db: commit
-- payment-service → Kafka: send: retry 1
+- payment-service → Kafka: send: retries deduped
 - source-db → Outbox relay: outbox rows
-- Outbox relay → Kafka: re-send: retry 2
-- Kafka → Ledger consumer: redeliver: retry 3
+- Outbox relay → Kafka: re-send: new offset
+- Kafka → Ledger consumer: redeliver: same offset
 - Ledger consumer → ledger-db: apply, COMMIT
 
 ### One batch, two commits (concept)
 
-Every A6 consumer commits Postgres first, then Kafka's record of progress. A crash in between is the commit window: the ledger has the batch, the offset does not.
+Every A6 consumer commits Postgres, then its Kafka progress. A crash in between is the commit window: the ledger has the batch, the offset does not.
 
 - **Poll a batch**: records with (partition, offset)
 - **Apply in Postgres**: balances, apply log; key check in I, O+I
 - **Postgres COMMIT**: the ledger now has the batch
-- **Commit offset**: N, I: commitSync; K: commitTransaction
+- **Commit offset**: N, I, O+I: commitSync; K: commitTransaction
 - **Crash in between**: ledger committed, offset not
 - **Restart**: resumes at the last committed offset
 - **Same batch again**: applied twice unless the key skips it

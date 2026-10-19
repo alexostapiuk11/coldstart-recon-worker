@@ -13,28 +13,28 @@
       "term": "At-least-once, and exactly-once effect",
       "plain": "**At-least-once**: a message may repeat, never be lost. Exactly-once *delivery* over a network that drops acknowledgements is impossible; systems give exactly-once **effect**: repeats made harmless.",
       "analogy": "A courier who redelivers whenever unsure you signed: you never miss a parcel, sometimes you get two.",
-      "why": "Every A6 pipeline is at-least-once underneath. Its stacks, **N** (naive), **K** (Kafka transactions), **I** (key at the sink) and **O+I** (outbox plus key), differ in where repeats are made harmless."
+      "why": "A6's consumers are all at-least-once; dual-write producers can also lose. Its stacks, **N** (naive), **K** (Kafka transactions), **I** (key at the sink) and **O+I** (outbox plus key), differ in where, and whether, repeats are made harmless."
     },
     {
       "id": "offsets",
       "term": "Offsets, committed after the work",
-      "plain": "A consumer's progress in a partition is an **offset**: the next position to read. A6's consumers commit it only after their Postgres commit, so a crash in between restarts them at the old offset and the batch is applied again.",
+      "plain": "A consumer's progress in a partition is an **offset**: the next position to read. A6's consumers commit it only after their Postgres commit, so a crash in between means the batch is redelivered from the old offset.",
       "analogy": "A bookmark moved only after you finish the chapter: fall asleep first and you reread the chapter.",
-      "why": "That gap is the **commit window**. Cell F4-con-t kills a consumer exactly there; it is how A6 plants a known duplicate."
+      "why": "That gap is the **commit window**. Cell F4-con-t kills a consumer exactly there; on N it is the detection gate's planted duplicate."
     },
     {
       "id": "idempotence",
       "term": "Idempotent producer versus transactions",
       "plain": "An **idempotent producer** lets the broker drop a retried batch it already wrote, within one producer session; a restarted process or a relay re-sending is new to it. A Kafka **transaction** commits Kafka writes and consumer offsets atomically; Postgres is not a participant.",
       "analogy": "",
-      "why": "So K can still apply a batch twice: dying after its Postgres commit and before `commitTransaction` aborts the transaction and redelivers the batch, but the Postgres commit stands. A6's H1 tests this."
+      "why": "So K can still apply a batch twice: die between its Postgres commit and `commitTransaction`, and the batch is redelivered while the Postgres commit stands. A6's H1 tests this."
     },
     {
       "id": "groups",
       "term": "Consumer groups, rebalances, zombies",
       "plain": "A group splits partitions among live members. One silent past `session.timeout.ms` loses them and a new **generation** starts; an offset commit from an old generation is rejected: **generation fencing**. A **zombie**, paused and woken with a batch in hand, can still write outside Kafka.",
       "analogy": "A worker dozes off holding a task; it is reassigned. He wakes and finishes it anyway, and only his timesheet is rejected.",
-      "why": "Cell F5 makes one. In reconnaissance on N it wrote its batch to Postgres, then failed its offset commit, in all 17 F5 trials. **Epoch fencing** does not apply: each instance has its own `transactional.id`."
+      "why": "Cell F5 makes one. In reconnaissance on N it wrote its batch to Postgres, then failed its offset commit, in all 17 F5 trials. On K, **epoch fencing** does not apply: each instance has its own `transactional.id`."
     },
     {
       "id": "dualwrite",
@@ -53,7 +53,7 @@
     {
       "id": "history",
       "term": "Checking a history: ok, fail, info",
-      "plain": "As Jepsen does, record each request as **ok**, **fail** (provably never reached the service) or **info** (a timeout or 5xx: may or may not have happened). With unique IDs and commuting increments, counting each ID in source, topic and apply log is a complete check.",
+      "plain": "Jepsen-style, record each request as **ok**, **fail** (here: provably never reached the service) or **info** (a timeout or 5xx: may or may not have happened). With unique IDs and commuting increments, counting each ID in source, topic and apply log is a complete check.",
       "analogy": "A payment page that timed out: the money may or may not have gone; only the statement says.",
       "why": "A6's source database is the authority and resolves every info. The apply log keeps each apply's `(partition, offset)`: same offset means a redelivery, a new offset a re-send."
     },
@@ -69,14 +69,14 @@
       "term": "Positive and negative controls",
       "plain": "A zero means something only if the harness can see a nonzero. A **positive control** runs a case that must produce the anomaly; a **negative control**, one that must produce none.",
       "analogy": "Testing a smoke alarm with test smoke before trusting its silence.",
-      "why": "A6's detection gate, run before the campaign, planted a duplicate and a loss on N, ran no-fault trials on every stack and tested the checker on synthetic histories. It passed. Its positive controls cover N only, not K."
+      "why": "A6's detection gate, run before the campaign, planted a duplicate and a loss on N only, ran no-fault trials on every stack and tested the checker on synthetic histories. It passed."
     }
   ],
   "views": [
     {
       "level": "concept",
       "title": "Where a duplicate can enter",
-      "caption": "Three places can send a payment again: (1) the [producer](p3:idempotence) retrying, (2) the [outbox relay](p3:dualwrite) re-reading after a crash, at a new offset, and (3) [redelivery](p3:offsets) to a restarted consumer, at the same offset. The [key](p3:key) is checked at the end.",
+      "caption": "Two routes repeat a payment: the [outbox relay](p3:dualwrite) re-reading after a crash, at a new offset, and [redelivery](p3:offsets) to a restarted consumer, at the same offset. The [producer](p3:idempotence)'s own retries are dropped by the broker. The [key](p3:key) is checked last.",
       "nodes": [
         {
           "id": "client",
@@ -149,7 +149,7 @@
         {
           "from": "svc",
           "to": "kafka",
-          "label": "send: retry 1"
+          "label": "send: retries deduped"
         },
         {
           "from": "src",
@@ -159,12 +159,12 @@
         {
           "from": "relay",
           "to": "kafka",
-          "label": "re-send: retry 2"
+          "label": "re-send: new offset"
         },
         {
           "from": "kafka",
           "to": "cons",
-          "label": "redeliver: retry 3"
+          "label": "redeliver: same offset"
         },
         {
           "from": "cons",
@@ -176,7 +176,7 @@
     {
       "level": "concept",
       "title": "One batch, two commits",
-      "caption": "Every A6 consumer commits Postgres first, then Kafka's record of progress. A crash in between is the [commit window](p3:offsets): the ledger has the batch, the offset does not.",
+      "caption": "Every A6 consumer commits Postgres, then its Kafka progress. A crash in between is the [commit window](p3:offsets): the ledger has the batch, the offset does not.",
       "nodes": [
         {
           "id": "poll",
@@ -205,7 +205,7 @@
         {
           "id": "off",
           "label": "Commit offset",
-          "sub": "N, I: commitSync; K: commitTransaction",
+          "sub": "N, I, O+I: commitSync; K: commitTransaction",
           "kind": "system",
           "col": 3,
           "row": 0
