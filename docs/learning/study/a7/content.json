@@ -1,0 +1,1822 @@
+{
+  "id": "a7",
+  "kind": "artifact",
+  "title": "The anatomy of a matching engine's tail",
+  "short_title": "Matching Engine Tail",
+  "minutes": 45,
+  "question": "Under open-loop load on commodity hardware, where do a deterministic Java matching pipeline's slowest 0.01% of messages spend their time, how much do the hand-off design and the durability policy move that tail, and how much of it is the JVM launch and the host? Three rented bare-metal servers, one JVM per run, no network; nothing comparable to kernel-bypass or FPGA systems.",
+  "requirements": [
+    {
+      "id": "R1",
+      "short": "Attribute the tail, name the rest",
+      "text": "Credit each message in a run's slowest 0.01% to measured causes, test inferred causes against a null, and publish what no cause covers as a residual.",
+      "why": "A search of public writing found latency trees with no distributions (Coinbase) and engines that exclude journaling (exchange-core), not an attributed p99.99 with its blind part named."
+    },
+    {
+      "id": "R2",
+      "short": "Open-loop, one clock, no network",
+      "text": "Score every message from its intended send time on a schedule fixed in advance, with every stamp from one host's clock and no network.",
+      "why": "A generator that waits for responses under-samples stalls ([coordinated omission](a7:co)); stamps from different clocks cannot be subtracted."
+    },
+    {
+      "id": "R3",
+      "short": "One swapped object per experiment",
+      "text": "E1 swaps only the `Channel` (all three hand-offs at once); E2 swaps only the `Durability`, its hand-off fixed at ring + busy-spin in advance.",
+      "why": "Then any difference comes from that one object; picking E2's hand-off from E1's winner would make the design depend on data."
+    },
+    {
+      "id": "R4",
+      "short": "Rules fixed before the campaign",
+      "text": "Commit H1 to H6 with thresholds and decision rules, plus exclusion, stopping and headline rules, before the first campaign fork.",
+      "why": "Six of eight verdicts came out fails or mixed; only a timestamped [pre-registration](p2:prereg) shows they were not chosen after the data."
+    },
+    {
+      "id": "R5",
+      "short": "Intervals over launches",
+      "text": "The JVM launch on one host is the unit: contrasts within rounds, [intervals](p2:interval) over rounds, per host and pooled.",
+      "why": "Messages from one JVM share its JIT decisions, memory layout and host; an interval over them looks tight and means little."
+    },
+    {
+      "id": "R6",
+      "short": "Correctness checked, every fork",
+      "text": "Every fork: replay reproduces the live output hashes, and at D2 and D3 no response leaves before its order is durable; host settings read back every round.",
+      "why": "A fast wrong engine, a leaky gate or a silently reverted setting would void every latency number."
+    }
+  ],
+  "concepts": [
+    {
+      "id": "co",
+      "short": "Coordinated omission",
+      "term": "Coordinated omission, open versus closed loop",
+      "plain": "**Closed loop**: send the next request when the last response arrives. During a stall it sends one request instead of the many that were due, so the stall is sampled once and the tail under-reported (Gil Tene named this). **Open loop**: send times are fixed in advance and latency runs from the **intended** time, so a generator that falls behind counts against the system."
+    },
+    {
+      "id": "hdr",
+      "short": "p99.99 and its samples",
+      "term": "HdrHistogram and what a p99.99 rests on",
+      "plain": "[p99.99](p2:percentiles): the latency 99.99% of messages stay at or under. **HdrHistogram** keeps 3 significant digits over a huge range and merges without loss. A percentile is reported only with at least 100 samples above it: 2,000,000 messages leave 200 above p99.99, so p99.999 and the maximum never are."
+    },
+    {
+      "id": "ring",
+      "short": "Ring, queue, spin, park",
+      "term": "The Disruptor ring, the queue, and wait strategies",
+      "plain": "**Ring buffer**: a preallocated array with sequence counters; one producer and one consumer need no lock and allocate nothing. `ArrayBlockingQueue`: one lock; a thread that finds it held enqueues a node (allocates) and parks. **Wait strategy**: what an idle consumer does, **busy-spin** (poll in a loop, burning a core) or **park** (sleep until woken)."
+    },
+    {
+      "id": "fsync",
+      "short": "Page cache, fdatasync, group commit",
+      "term": "Page-cache write, fdatasync, group commit",
+      "plain": "`write` lands in the **page cache**: it survives a killed JVM, not a power loss. `fdatasync` returns once data is on stable storage; a drive with a volatile write cache must flush first (these report none, VWC 0). **D0** no journal; **D1** page-cache write, response not gated; **D2** group commit: up to 4,096 entries per `fdatasync`; **D3** one `fdatasync` per order."
+    },
+    {
+      "id": "safepoint",
+      "short": "Safepoints and G1 pauses",
+      "term": "JVM safepoints and G1 pauses",
+      "plain": "Some JVM operations stop **every** Java thread: GC pauses, some deoptimisation. So a thread that allocates nothing still stops when another thread's allocation triggers a collection; a **handshake** stops one thread. Here: G1 with one GC thread on the housekeeping core. The generator stops too, but latency runs from the intended time, so the stop counts."
+    },
+    {
+      "id": "replay",
+      "short": "Replay determinism",
+      "term": "Deterministic replay and the hash gate",
+      "plain": "One thread over a totally ordered input, depending on nothing else: replaying the input rebuilds the same state. Breakers: hash-ordered iteration, clock reads, floating-point prices, threads in the core; the engine has none. The matcher's rolling output hash, checkpointed every million sequence numbers, must reappear when a fresh matcher replays the journal."
+    },
+    {
+      "id": "attribution",
+      "short": "Tail attribution vs a null",
+      "term": "Tail attribution against a shifted null",
+      "plain": "**Excess**: a tail message's latency minus the fork's median. **Busy period**: back to when the in-flight count last rose above its median. A cause is credited if it covers **at least 50% of the excess**: durability wait and matcher path from the message's own stamps; safepoints and **sentinel gaps** (idle polls over 5 µs apart) by time in the busy period, checked against a **null** of 200 circular shifts. Credits are non-exclusive; uncredited is **residual**."
+    }
+  ],
+  "views": [
+    {
+      "level": "context",
+      "title": "Who and what the study touches",
+      "caption": "The laptop builds and tests, never produces data. Three rented hosts run the campaign; each host's second NVMe drive holds only the journal. Prior art is credited where methods are borrowed.",
+      "nodes": [
+        {
+          "id": "laptop",
+          "label": "Laptop",
+          "sub": "build and tests; never data",
+          "kind": "system",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "id": "prior",
+          "label": "Prior art",
+          "sub": "LMAX, exchange-core, Tene",
+          "kind": "store",
+          "col": 1,
+          "row": 0
+        },
+        {
+          "id": "author",
+          "label": "Author",
+          "sub": "designs, pre-registers",
+          "kind": "person",
+          "col": 0,
+          "row": 1
+        },
+        {
+          "id": "study",
+          "label": "Matching-engine tail",
+          "sub": "Java pipeline, Python analysis",
+          "kind": "focus",
+          "col": 1,
+          "row": 1
+        },
+        {
+          "id": "reader",
+          "label": "Reader",
+          "sub": "platform, trading-firm engineers",
+          "kind": "person",
+          "col": 2,
+          "row": 1
+        },
+        {
+          "id": "vultr",
+          "label": "Vultr bare metal ×3",
+          "sub": "EPYC 4245P, six cores",
+          "kind": "external",
+          "col": 1,
+          "row": 2
+        },
+        {
+          "id": "drive",
+          "label": "Journal NVMe drive",
+          "sub": "one per host; VWC 0",
+          "kind": "store",
+          "col": 2,
+          "row": 2
+        }
+      ],
+      "edges": [
+        {
+          "from": "author",
+          "to": "study",
+          "label": "designs, runs"
+        },
+        {
+          "from": "study",
+          "to": "reader",
+          "label": "post + data"
+        },
+        {
+          "from": "laptop",
+          "to": "study",
+          "label": "tested code"
+        },
+        {
+          "from": "prior",
+          "to": "study",
+          "label": "methods credited"
+        },
+        {
+          "from": "study",
+          "to": "vultr",
+          "label": "840 forks"
+        },
+        {
+          "from": "vultr",
+          "to": "drive",
+          "label": "write, fdatasync"
+        }
+      ]
+    },
+    {
+      "level": "container",
+      "title": "One fork: five threads, three swapped channels",
+      "caption": "One JVM per fork, one thread per isolated core. The wire ring is fixed; E1 swaps the three `Channel`s, E2 the `Durability`. Output releases when matched and, at D2 and D3, once the durable sequence reaches the order: latency is the slower branch, not the sum.",
+      "nodes": [
+        {
+          "id": "gen",
+          "label": "Generator (core 1)",
+          "sub": "Poisson schedule, on time",
+          "kind": "system",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "id": "gw",
+          "label": "Gateway (core 2)",
+          "sub": "decode, sequence, fan-out",
+          "kind": "system",
+          "col": 1,
+          "row": 0
+        },
+        {
+          "id": "match",
+          "label": "Matcher (core 3)",
+          "sub": "8 books, price-time",
+          "kind": "focus",
+          "col": 2,
+          "row": 0
+        },
+        {
+          "id": "out",
+          "label": "Output (core 5)",
+          "sub": "releases; D2, D3 wait",
+          "kind": "system",
+          "col": 3,
+          "row": 0
+        },
+        {
+          "id": "stream",
+          "label": "Stream file",
+          "sub": "45M frames, pre-encoded",
+          "kind": "store",
+          "col": 0,
+          "row": 1
+        },
+        {
+          "id": "jrn",
+          "label": "Journaler (core 4)",
+          "sub": "Durability D0 to D3",
+          "kind": "focus",
+          "col": 2,
+          "row": 1
+        },
+        {
+          "id": "hk",
+          "label": "Core 0 housekeeping",
+          "sub": "OS, IRQs, GC and JIT",
+          "kind": "external",
+          "col": 0,
+          "row": 2
+        },
+        {
+          "id": "journal",
+          "label": "Journal file",
+          "sub": "own drive, pre-written",
+          "kind": "store",
+          "col": 2,
+          "row": 2
+        }
+      ],
+      "edges": [
+        {
+          "from": "stream",
+          "to": "gen",
+          "label": "frames"
+        },
+        {
+          "from": "gen",
+          "to": "gw",
+          "label": "wire ring (fixed)"
+        },
+        {
+          "from": "gw",
+          "to": "match",
+          "label": "Channel"
+        },
+        {
+          "from": "gw",
+          "to": "jrn",
+          "label": "Channel"
+        },
+        {
+          "from": "match",
+          "to": "out",
+          "label": "Channel"
+        },
+        {
+          "from": "jrn",
+          "to": "out",
+          "label": "durable seq"
+        },
+        {
+          "from": "jrn",
+          "to": "journal",
+          "label": "write, fdatasync"
+        }
+      ]
+    },
+    {
+      "level": "component",
+      "title": "Inside the attribution instrument",
+      "caption": "The host post-processes the stamps after each window; tail rows, histograms and event logs come home. The non-exclusive credit matrix decides H6; the exclusive bars are for the figure only.",
+      "nodes": [
+        {
+          "id": "stamps",
+          "label": "Stamp store",
+          "sub": "every stage, every message",
+          "kind": "system",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "id": "post",
+          "label": "Post-processor",
+          "sub": "on host: tail, busy start",
+          "kind": "system",
+          "col": 1,
+          "row": 0
+        },
+        {
+          "id": "tail",
+          "label": "Tail rows",
+          "sub": "at or above p99.99",
+          "kind": "system",
+          "col": 2,
+          "row": 0
+        },
+        {
+          "id": "excess",
+          "label": "Excess, busy period",
+          "sub": "latency minus median",
+          "kind": "system",
+          "col": 3,
+          "row": 0
+        },
+        {
+          "id": "sent",
+          "label": "Sentinels",
+          "sub": "idle polls over 5 µs apart",
+          "kind": "store",
+          "col": 1,
+          "row": 1
+        },
+        {
+          "id": "credit",
+          "label": "Credit rules",
+          "sub": "a cause covers half the excess",
+          "kind": "focus",
+          "col": 3,
+          "row": 1
+        },
+        {
+          "id": "logs",
+          "label": "JVM logs",
+          "sub": "safepoints, same clock",
+          "kind": "store",
+          "col": 1,
+          "row": 2
+        },
+        {
+          "id": "matrix",
+          "label": "Credit matrix",
+          "sub": "shares + residual; H6",
+          "kind": "focus",
+          "col": 3,
+          "row": 2
+        },
+        {
+          "id": "null",
+          "label": "Shifted null",
+          "sub": "200 circular shifts",
+          "kind": "system",
+          "col": 1,
+          "row": 3
+        },
+        {
+          "id": "bars",
+          "label": "Exclusive bars",
+          "sub": "first cause; figure only",
+          "kind": "system",
+          "col": 3,
+          "row": 3
+        }
+      ],
+      "edges": [
+        {
+          "from": "stamps",
+          "to": "post"
+        },
+        {
+          "from": "post",
+          "to": "tail",
+          "label": "rows"
+        },
+        {
+          "from": "tail",
+          "to": "excess"
+        },
+        {
+          "from": "excess",
+          "to": "credit"
+        },
+        {
+          "from": "sent",
+          "to": "credit",
+          "label": "gaps"
+        },
+        {
+          "from": "logs",
+          "to": "credit",
+          "label": "overlap"
+        },
+        {
+          "from": "logs",
+          "to": "null",
+          "label": "shifted"
+        },
+        {
+          "from": "null",
+          "to": "matrix",
+          "label": "chance level"
+        },
+        {
+          "from": "credit",
+          "to": "matrix"
+        },
+        {
+          "from": "matrix",
+          "to": "bars"
+        }
+      ]
+    },
+    {
+      "level": "dynamic",
+      "title": "One message, generator to response",
+      "caption": "1 to 6 run inside the fork; 7 is the score; 8 runs after the window. Steps 4 and 5 run side by side; at D0 and D1 the output never waits for 5.",
+      "nodes": [
+        {
+          "id": "s1",
+          "label": "1 Due at its time",
+          "sub": "generator stamps intended",
+          "kind": "system",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "id": "s2",
+          "label": "2 Onto the wire ring",
+          "sub": "stamped just before write",
+          "kind": "system",
+          "col": 1,
+          "row": 0
+        },
+        {
+          "id": "s3",
+          "label": "3 Decode, sequence",
+          "sub": "gateway fans out",
+          "kind": "system",
+          "col": 2,
+          "row": 0
+        },
+        {
+          "id": "s4",
+          "label": "4 Match",
+          "sub": "price-time; stamp matched",
+          "kind": "focus",
+          "col": 3,
+          "row": 0
+        },
+        {
+          "id": "s5",
+          "label": "5 Journal it",
+          "sub": "D2 batch sync; D3 own sync",
+          "kind": "focus",
+          "col": 2,
+          "row": 1
+        },
+        {
+          "id": "s6",
+          "label": "6 Release",
+          "sub": "D2, D3 wait for durable seq",
+          "kind": "system",
+          "col": 3,
+          "row": 1
+        },
+        {
+          "id": "s7",
+          "label": "7 Score it",
+          "sub": "released − intended",
+          "kind": "system",
+          "col": 3,
+          "row": 2
+        },
+        {
+          "id": "s8",
+          "label": "8 Check the fork",
+          "sub": "replay hashes; gating",
+          "kind": "store",
+          "col": 2,
+          "row": 2
+        }
+      ],
+      "edges": [
+        {
+          "from": "s1",
+          "to": "s2"
+        },
+        {
+          "from": "s2",
+          "to": "s3"
+        },
+        {
+          "from": "s3",
+          "to": "s4",
+          "label": "Channel"
+        },
+        {
+          "from": "s3",
+          "to": "s5",
+          "label": "Channel"
+        },
+        {
+          "from": "s4",
+          "to": "s6",
+          "label": "Channel"
+        },
+        {
+          "from": "s5",
+          "to": "s6",
+          "label": "durable seq"
+        },
+        {
+          "from": "s6",
+          "to": "s7"
+        },
+        {
+          "from": "s7",
+          "to": "s8",
+          "label": "after the window"
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "topo",
+      "title": "Journal beside the matcher; release gated by sequence number",
+      "problem": "The journal must sit somewhere relative to matching, and the queue and the ring must be swappable in the same places.",
+      "options": [
+        "LMAX multicast: one ring, matcher and journaler consuming the same slots",
+        "Serial write-ahead: gateway, journal, matcher, output in a line",
+        "Symmetric channels: the gateway fans out to matcher and journaler at every level; output waits for both at D2 and D3"
+      ],
+      "chosen": "Symmetric channels: the gateway fans out to matcher and journaler at every level; output waits for both at D2 and D3",
+      "why": "`ArrayBlockingQueue` cannot multicast, so a multicast ring would give the queue arms another topology, not one swapped object. Serial write-ahead puts durability on the path and inflates its penalty. Beside the matcher, latency is the slower branch, and D0 keeps the fan-out, so D0 against D1 isolates the journal I/O.",
+      "cost": "At D0 and D1 a response can leave before its order reaches the page cache, so a process crash can lose an answered order (3 of 10 laptop kills at D1 failed the crash check). Power loss could not be tested on rented hardware.",
+      "why_short": "A multicast ring cannot hold a queue arm; serial write-ahead inflates durability's penalty; beside the matcher, latency is the slower branch.",
+      "cost_short": "D0 and D1 can release an order a process crash then loses; power loss was never tested.",
+      "short": "Journal beside the matcher",
+      "serves": [
+        {
+          "req": "R3",
+          "because": "One `Channel` type at every hand-off, and D0 keeps the fan-out."
+        },
+        {
+          "req": "R6",
+          "because": "Release waits on the durable sequence, checked by sequence number on every message."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "replay",
+          "because": "The journal holds the sequenced input that replay rebuilds from."
+        },
+        {
+          "concept": "fsync",
+          "because": "Where the journal sits decides whether a sync is on the response path."
+        }
+      ]
+    },
+    {
+      "id": "open",
+      "title": "Open-loop from a fixed schedule, stamped in one clock",
+      "problem": "A tail is only as honest as where its clock starts.",
+      "options": [
+        "Closed loop: send the next order when the response arrives",
+        "Closed-loop demonstration cells beside the open-loop ones",
+        "A Poisson schedule fixed before the run; latency from the intended send time; every stage stamped by one host's clock"
+      ],
+      "chosen": "A Poisson schedule fixed before the run; latency from the intended send time; every stage stamped by one host's clock",
+      "why": "Closed loop is [coordinated omission](a7:co); demonstration cells were cut for build hours, with Tene cited instead. Stamps on one message make each stage a subtraction, in one host's clock. Frames are pre-encoded, so the generator computes nothing in the window.",
+      "cost": "Full stamping added 134–139 ns at the median and 141–166 ns at p99.99 in one calibration cell (exploratory), not netted out. Generator lag includes wire-ring backpressure. No network is measured.",
+      "why_short": "Closed loop samples a stall once; stamps on one message in one clock make every stage a subtraction.",
+      "cost_short": "Stamps cost about 0.14 µs, measured in one cell and not netted out; no network hop is measured.",
+      "short": "Open-loop, one clock",
+      "serves": [
+        {
+          "req": "R2",
+          "because": "Latency from the intended time; every stamp one host's `nanoTime`."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "co",
+          "because": "The fixed schedule exists to defeat coordinated omission."
+        },
+        {
+          "concept": "hdr",
+          "because": "Each stage's distribution is a per-fork HdrHistogram."
+        }
+      ]
+    },
+    {
+      "id": "e1",
+      "title": "Split the hand-off into structure and wait strategy",
+      "problem": "The 2011 Disruptor paper does not say which wait strategy its run used, so its ring-versus-queue gap cannot be split into structure and waiting.",
+      "options": [
+        "Ring against queue only, the original framing",
+        "Pick E2's hand-off from E1's winner",
+        "A 2×2: `ArrayBlockingQueue` or Disruptor ring, each parking or spinning, same slots and capacity (4,096), at three rates"
+      ],
+      "chosen": "A 2×2: `ArrayBlockingQueue` or Disruptor ring, each parking or spinning, same slots and capacity (4,096), at three rates",
+      "why": "Only a 2×2 splits the gap. **Structure includes its lock**: the queue's lock parks and allocates under contention even in the spin arm, so that is measured per thread, not removed. E2 stays at ring + busy-spin whatever E1 shows.",
+      "cost": "The park arms differ by construction: a ring + park producer facing a full ring sleeps about 50 µs of timer slack; a queue + park producer is signalled. One queue tested. Spinning keeps three of six cores busy: $0.205/h per host.",
+      "why_short": "Only a 2×2 can split the 2011 ring-versus-queue gap into structure and waiting; the queue's lock counts as structure.",
+      "cost_short": "The park arms differ in more than structure; one queue tested; spinning costs three cores per host.",
+      "short": "Structure × wait strategy",
+      "serves": [
+        {
+          "req": "R3",
+          "because": "All three channels swap together; E2's hand-off was fixed before E1 ran."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "ring",
+          "because": "The factors are structure (ring, queue) and wait strategy (spin, park)."
+        },
+        {
+          "concept": "safepoint",
+          "because": "The queue allocates under contention, so its arms meet G1 pauses."
+        }
+      ]
+    },
+    {
+      "id": "e2",
+      "title": "Sweep durability where per-order sync can keep up",
+      "problem": "One `fdatasync` per order caps D3 near one order per sync, so at E1's rates D3 would saturate everywhere.",
+      "options": [
+        "One rate set for both experiments",
+        "Make D3's saturation a hypothesis",
+        "D0 to D3 at 5,000, 20,000 and 100,000/s; D3's ceiling stated as arithmetic; a recon rule for slow drives"
+      ],
+      "chosen": "D0 to D3 at 5,000, 20,000 and 100,000/s; D3's ceiling stated as arithmetic; a recon rule for slow drives",
+      "why": "The senior review found one rate set left D3 saturated at every hypothesis rate. Arithmetic stays arithmetic: 1 ÷ fio's median put D3's ceiling near 68,200/s, between 20,000 and 100,000. A pre-written journal makes `fdatasync` flush data, not allocation metadata.",
+      "cost": "Sizes are drive-specific. Saturated D3 forks sustained 23,929–23,979/s, 35% of the arithmetic, and the pipeline's median sync (23.5 µs) sat above fio's 14.7 µs, unexplained. NVMe interrupts land on the journaler's core. Power loss untested.",
+      "why_short": "Rates where D3 can stay unsaturated make the durability hypotheses testable; D3's limit is arithmetic, not a hypothesis.",
+      "cost_short": "Drive-specific sizes; D3 reached only 35% of the arithmetic ceiling, unexplained; power loss untested.",
+      "short": "Durability at its own rates",
+      "serves": [
+        {
+          "req": "R3",
+          "because": "Four `Durability` implementations behind one interface."
+        },
+        {
+          "req": "R4",
+          "because": "Rates, recon rule and D3's arithmetic were written down before the campaign."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "fsync",
+          "because": "The four levels are four write-and-sync policies."
+        }
+      ]
+    },
+    {
+      "id": "attr",
+      "title": "Credit causes by coverage of the excess, against a shifted null",
+      "problem": "Slow messages overlap more of everything because they last longer, so overlap alone proves nothing.",
+      "options": [
+        "Credit a cause whenever it overlaps a tail message",
+        "One exclusive precedence order, used for the tests too",
+        "Independent credits for causes covering at least 50% of the excess; a shifted null; a published residual"
+      ],
+      "chosen": "Independent credits for causes covering at least 50% of the excess; a shifted null; a published residual",
+      "why": "The design review found overlap biased by each message's length, messages queued behind an ended stall filed as \"queueing\", and precedence partly deciding H6. Coverage of the excess removes most length bias, busy periods catch the queued messages, independent credits keep order out of tests. Planted cases were recovered before any real bundle.",
+      "cost": "At D0 and D1, 6.66%–10.1% of tail messages stayed residual. Sentinels see gaps only between idle polls, so the gap null is a lower bound. Handshakes are uncredited (their log lines name no thread). One safepoint can also count as a gap.",
+      "why_short": "Overlap is biased by a message's own length; coverage of the excess plus a shifted null removes most of that bias.",
+      "cost_short": "A residual up to about a tenth of the tail, lower-bound nulls for gaps, uncredited handshakes.",
+      "short": "Coverage plus a null",
+      "serves": [
+        {
+          "req": "R1",
+          "because": "Independent credits, a null for inferred causes, the residual published."
+        },
+        {
+          "req": "R4",
+          "because": "The 50% rule, the 5 µs gap and the null were fixed before any host ran."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "attribution",
+          "because": "This decision is the attribution method."
+        },
+        {
+          "concept": "safepoint",
+          "because": "Safepoints are an inferred cause the null tests."
+        }
+      ]
+    },
+    {
+      "id": "unit",
+      "title": "The launch is the unit; intervals over rounds",
+      "problem": "A fork holds millions of messages, so an interval from them is tiny and assumes they are independent.",
+      "options": [
+        "Intervals over the messages of one long run",
+        "A percentile bootstrap over the ten rounds",
+        "Resampling forks across rounds",
+        "Launches as the unit: 10 rounds × 28 forks × 3 hosts, contrasts within rounds, intervals over rounds, same-seed replicates"
+      ],
+      "chosen": "Launches as the unit: 10 rounds × 28 forks × 3 hosts, contrasts within rounds, intervals over rounds, same-seed replicates",
+      "why": "Messages in one JVM share its JIT decisions, layout and host. Same-seed replicates change only the launch (H4). A round is one host in one stretch of time, [paired](p2:pairing) like earlier artifacts. With ten blocks a percentile bootstrap of a median under-covers; resampling across rounds breaks the pairing.",
+      "cost": "Hosts share each round's seed, so the 30 blocks are not independent, and the intervals (2nd and 9th of ten values, 97.9%) are coarse. H5 is descriptive; generalising rests on n = 3 hosts.",
+      "why_short": "Messages from one JVM are not independent samples; launches and rounds are the honest units.",
+      "cost_short": "Coarse distribution-free intervals; n = 3 hosts; nothing reported past p99.99.",
+      "short": "Launch as the unit",
+      "serves": [
+        {
+          "req": "R5",
+          "because": "Every interval is over rounds or launches, never messages."
+        },
+        {
+          "req": "R4",
+          "because": "Pooling, interval and each decision rule were committed first."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "hdr",
+          "because": "Each fork contributes one p99.99, resting on at least 200 samples."
+        }
+      ]
+    }
+  ],
+  "flow": [
+    {
+      "phase": "Design",
+      "label": "Specify, get it reviewed, approve",
+      "detail": "First spec, a senior review (approve with fixes: E2's rates, attribution against a null, the queue's lock as structure), revision 3 approved, four plans.",
+      "output": "the approved design: H1–H6 with thresholds and decision rules, before any host was rented",
+      "milestone": true,
+      "when": "2026-10-08 (−07:00)",
+      "evidence": [
+        {
+          "commit": "c829d008da",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "first spec"
+        },
+        {
+          "commit": "90cbf1dba0",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "revision 2 after review"
+        },
+        {
+          "commit": "f48ba453fa",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "approved, revision 3"
+        }
+      ],
+      "decision": "attr"
+    },
+    {
+      "phase": "Build offline",
+      "label": "Build the engine and pipeline on the laptop",
+      "detail": "Engine with a differential test against a reference engine; four `Channel` kinds; four durability levels; stamps; post-processor. Laptop runs are not data; a D1 crash check failed 3 of 10 kills, so D1's check became informational.",
+      "output": "engine and pipeline, 390 tests green; laptop runs at five rates (not data)",
+      "when": "2026-10-08 to 10-09 (−07:00)",
+      "evidence": [
+        {
+          "commit": "011d333429",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "plan 1 exit"
+        },
+        {
+          "commit": "e751cd54c2",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "D1 not crash-safe"
+        }
+      ],
+      "decision": "topo"
+    },
+    {
+      "phase": "Build offline",
+      "label": "Amendment 1, before any host",
+      "detail": "Plan 1 showed the design silent or wrong in places: the tail's tie rule, the busy period, the queue + spin lock-park row, timeouts. Hypotheses unchanged.",
+      "output": "a dated [amendment](p2:amendment) approved with no data collected, so nothing in it is post hoc",
+      "when": "2026-10-09 (−07:00)",
+      "evidence": [
+        {
+          "commit": "a62454e8d4",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "amendment 1"
+        }
+      ],
+      "decision": "attr"
+    },
+    {
+      "phase": "Build offline",
+      "label": "Finish the analysis on planted cases",
+      "detail": "Attribution, the shifted null and H1–H6 in code, recovering a planted stall, null event, backlog echo and slow match. Plan 2's laptop round: D3 timed out on macOS.",
+      "output": "mtail/: every verdict computed from synthetic bundles before any real bundle",
+      "when": "2026-10-09 (−07:00)",
+      "evidence": [
+        {
+          "commit": "af66b995b2",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "four planted cases"
+        },
+        {
+          "commit": "5ed0a641fd",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "plan 2 exit"
+        }
+      ],
+      "decision": "unit"
+    },
+    {
+      "phase": "Reconnoitre and pre-register",
+      "label": "Rent the hosts; reconnaissance on h1",
+      "detail": "turbostat found boost not capped (cores near 5.4 GHz); NVMe names swapped across a reboot: both fixed. fio: about 14.7 µs per sync. Single forks per rate on h1, not data; the D3 probe at 100,000/s saturated near 23,900/s.",
+      "output": "docs/recon.md: 23 of 23 read-back checks on three hosts, three deviations, recon rule keeps 5,000/s",
+      "when": "2026-10-09 to 10-10 (−07:00)",
+      "evidence": [
+        {
+          "commit": "f84c0b8c8f",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "journal by drive serial"
+        },
+        {
+          "commit": "8c9a0bde82",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "boost off"
+        },
+        {
+          "commit": "6a06617c90",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "D3 probe saturates"
+        }
+      ],
+      "decision": "e2"
+    },
+    {
+      "phase": "Reconnoitre and pre-register",
+      "label": "Pre-register and tag",
+      "detail": "Hypotheses from the design, amendment 1, recon outcomes and three deviations, approved; code pinned. Tagged after the recon forks, 3 min 41 s before the first campaign fork.",
+      "output": "docs/experiment.md at tag `a7-prereg`; no amendment since",
+      "milestone": true,
+      "when": "2026-10-10 11:24 (−07:00)",
+      "evidence": [
+        {
+          "commit": "ea1240011e",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "tag a7-prereg, 18:24:42Z"
+        }
+      ],
+      "decision": "unit"
+    },
+    {
+      "phase": "Measure",
+      "label": "Run 840 forks on three hosts",
+      "detail": "28 forks per round, 10 rounds per host in seeded orders, read-back before every round. No stop, no host-check failure, no fork re-run.",
+      "output": "840 forks, 0 failed, 30 saturated (exactly D3 at 100,000/s, as predicted); hosts destroyed after",
+      "milestone": true,
+      "when": "2026-10-10 to 10-11 (UTC)",
+      "evidence": [
+        {
+          "commit": "c6fa16a23e",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "launched 18:28Z"
+        },
+        {
+          "commit": "17b2e52949",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "data committed"
+        }
+      ],
+      "decision": "e1"
+    },
+    {
+      "phase": "Analyse and publish",
+      "label": "Analyse, then rank before drafting",
+      "detail": "analysis.json, byte-identical across two runs; every verdict copied into results-a7.md; the headline ranked by the pre-registered rule before any draft.",
+      "output": "data/a7/analysis.json and docs/results-a7.md: H2 leads, H4 never leads",
+      "milestone": true,
+      "when": "2026-10-11 (−07:00)",
+      "evidence": [
+        {
+          "commit": "a83741b1d7",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "analysis.json"
+        },
+        {
+          "commit": "ee30b86bd2",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "results-a7.md"
+        },
+        {
+          "commit": "e1c2794a62",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "headline ranking"
+        }
+      ],
+      "decision": "unit"
+    },
+    {
+      "phase": "Analyse and publish",
+      "label": "Draft, review, add the post hoc GC check",
+      "detail": "Unverified prior-art claims corrected or cut. Review: the queue's load dependence is partly G1 pauses crossing the p99.99 rank, and \"met\" means the median launch; added as post hoc.",
+      "output": "docs/post.md and data/a7/exploratory-gc.json, labelled post hoc; no verdict changed",
+      "when": "2026-10-11 (−07:00)",
+      "evidence": [
+        {
+          "commit": "cb9b36192c",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "draft"
+        },
+        {
+          "commit": "9598a22ccb",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "G1 pauses, post hoc"
+        }
+      ],
+      "decision": "e1"
+    },
+    {
+      "phase": "Analyse and publish",
+      "label": "Pass the pre-publish gate",
+      "detail": "Honesty constraints line by line, number drift test, byte-identical re-analysis and figures, tag before first fork. README and LICENSE tripped the pinned-code guard; fixed.",
+      "output": "every controller check passes; final bill, post URL and licence holder deferred by the owner",
+      "milestone": true,
+      "when": "2026-10-11 to 10-18 (−07:00)",
+      "evidence": [
+        {
+          "commit": "5072c8ae75",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "controller checks"
+        },
+        {
+          "commit": "6e291d89ea",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "gate passed"
+        },
+        {
+          "commit": "25b0bb8d95",
+          "repo": "~/projects/matching-engine-tail",
+          "note": "merged"
+        }
+      ],
+      "decision": "e2"
+    }
+  ],
+  "results": [
+    {
+      "title": "Who owns the tail, by durability level",
+      "short": "Sync on the path: it is the tail",
+      "chart": {
+        "type": "stacked_bars",
+        "unit": "% of tail messages",
+        "highlight": [
+          "Durability wait",
+          "Matcher path"
+        ],
+        "show_totals": false,
+        "bars": [
+          {
+            "label": "D0 no journal",
+            "segments": [
+              {
+                "name": "Matcher path",
+                "value": 91.8
+              },
+              {
+                "name": "Host hiccup",
+                "value": 0.3
+              },
+              {
+                "name": "Residual",
+                "value": 7.9
+              }
+            ]
+          },
+          {
+            "label": "D1 page cache",
+            "segments": [
+              {
+                "name": "Matcher path",
+                "value": 90.1
+              },
+              {
+                "name": "Host hiccup",
+                "value": 0.3
+              },
+              {
+                "name": "Residual",
+                "value": 9.6
+              }
+            ]
+          },
+          {
+            "label": "D2 group commit",
+            "segments": [
+              {
+                "name": "Durability wait",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "label": "D3 per-order sync",
+            "segments": [
+              {
+                "name": "Durability wait",
+                "value": 100
+              }
+            ]
+          }
+        ],
+        "deltas": [
+          {
+            "between": "D1 → D2",
+            "text": "An fdatasync enters the response path: durability wait takes the whole tail, and p99.99 goes from 1.39 to 72.1 µs."
+          }
+        ]
+      },
+      "axis": "Host h1, ring + busy-spin, 20,000/s, about 2,000 tail messages per level over 10 forks. Each message goes to its first credited cause in a fixed order: a figure-only view. h2 and h3 look the same.",
+      "read_as": "No sync on the path: the match stage and its queue are the tail. A sync on the path: durability wait is all of it. At D3, arrival burst was also credited on 100%, a tie the bars hide.",
+      "so": [
+        "attr",
+        "e2"
+      ],
+      "takeaway": "Which stage owns the tail flips with durability. H1 fails: the matcher path, queue wait included, is 56.7%–60.5% of a tail message at D0 and D1.",
+      "arithmetic": "results-a7.md §8.2 as percent. Non-exclusive matcher-path credit at D0 and D1: 89.1%–93.1%. Engine service alone: 35.1%–45.1% of a 1.39 µs tail."
+    },
+    {
+      "title": "Hand-off p99.99 against load: ring or queue, spin or park",
+      "short": "Load decides which choice matters",
+      "chart": {
+        "type": "xy",
+        "unit": "µs",
+        "x_label": "offered rate, messages/s",
+        "y_label": "p99.99, all hosts' forks",
+        "x_log": true,
+        "y_from_zero": true,
+        "series": [
+          {
+            "name": "ring + busy-spin",
+            "style": "line",
+            "points": [
+              {
+                "x": 10000,
+                "y": 1.43,
+                "lo": 1.42,
+                "hi": 1.45
+              },
+              {
+                "x": 100000,
+                "y": 1.39,
+                "lo": 1.38,
+                "hi": 1.41
+              },
+              {
+                "x": 500000,
+                "y": 1.53,
+                "lo": 1.52,
+                "hi": 1.55
+              }
+            ]
+          },
+          {
+            "name": "ring + park",
+            "style": "line",
+            "points": [
+              {
+                "x": 10000,
+                "y": 5.32,
+                "lo": 5.27,
+                "hi": 5.38
+              },
+              {
+                "x": 100000,
+                "y": 5.15,
+                "lo": 5.12,
+                "hi": 5.18
+              },
+              {
+                "x": 500000,
+                "y": 5.56,
+                "lo": 5.53,
+                "hi": 5.58
+              }
+            ]
+          },
+          {
+            "name": "queue + busy-spin",
+            "style": "line",
+            "points": [
+              {
+                "x": 10000,
+                "y": 4.08,
+                "lo": 4.04,
+                "hi": 4.13
+              },
+              {
+                "x": 100000,
+                "y": 5.5,
+                "lo": 5.33,
+                "hi": 5.79
+              },
+              {
+                "x": 500000,
+                "y": 2160,
+                "lo": 1980,
+                "hi": 2220
+              }
+            ]
+          },
+          {
+            "name": "queue + park",
+            "style": "line",
+            "points": [
+              {
+                "x": 10000,
+                "y": 6.13,
+                "lo": 5.66,
+                "hi": 6.52
+              },
+              {
+                "x": 100000,
+                "y": 8.09,
+                "lo": 7.78,
+                "hi": 12.8
+              },
+              {
+                "x": 500000,
+                "y": 2020,
+                "lo": 1950,
+                "hi": 2280
+              }
+            ]
+          }
+        ],
+        "note": "Linear axis: every point below 8.1 µs sits on its floor; those values are in the read-as line. Whiskers: 95% interval over 30 forks."
+      },
+      "axis": "E1 at D1, 30 forks per point over three hosts. Queue: `ArrayBlockingQueue`; ring: the Disruptor. H2's D: the wait strategy's effect minus the structure's, in log p99.99; D > 0 means waiting matters more.",
+      "read_as": "10,000/s: spinning 1.43 and 4.08 µs, parking 5.32 and 6.13; waiting matters more (D +0.257, holds). 500,000/s: the queue arms jump to milliseconds (D −5.957, fails). 100,000/s: mixed. No arm saturated.",
+      "so": "e1",
+      "takeaway": "H2, \"waiting beats structure at every rate\", fails: true at low load, reversed at high load, where the queue's lock and allocation set the tail.",
+      "arithmetic": "Post \"Ring or spin?\" table; 2.16 and 2.02 ms drawn as 2,160 and 2,020 µs. D's 97.9% intervals: +0.176 to +0.282, −0.128 to +0.052, −5.996 to −5.813."
+    },
+    {
+      "title": "Group commit and per-order sync against the page-cache write",
+      "short": "Group commit: 52× here, not 2×",
+      "chart": {
+        "type": "xy",
+        "unit": "× D1's p99.99",
+        "x_label": "offered rate, messages/s",
+        "y_label": "p99.99 ratio to the page-cache write",
+        "x_log": true,
+        "y_from_zero": true,
+        "series": [
+          {
+            "name": "D2 group commit ÷ D1",
+            "style": "points",
+            "points": [
+              {
+                "x": 5000,
+                "y": 44.9,
+                "lo": 44.4,
+                "hi": 46.0
+              },
+              {
+                "x": 20000,
+                "y": 52.0,
+                "lo": 50.0,
+                "hi": 53.6
+              }
+            ]
+          },
+          {
+            "name": "D3 per-order sync ÷ D1",
+            "style": "points",
+            "points": [
+              {
+                "x": 5000,
+                "y": 65.0,
+                "lo": 64.1,
+                "hi": 66.9
+              }
+            ]
+          }
+        ],
+        "refs": [
+          {
+            "y": 2,
+            "label": "H3a predicted D2 under 2.00×"
+          },
+          {
+            "y": 10,
+            "label": "H3b predicted D3 over 10.0×"
+          }
+        ],
+        "note": "Whiskers: 97.9% interval over ten rounds."
+      },
+      "axis": "E2, ring + busy-spin, ratios within a round on one host. Pooled p99.99 at 20,000/s: 1.39 µs at D1, 72.1 at D2, 197 at D3; D0 and D1 overlap.",
+      "read_as": "Both refs are pre-registered predictions. Group commit sits about 50× above the page-cache write: H3a fails at both rates, on every host. Per-order sync is over 10×: H3b holds.",
+      "so": "e2",
+      "takeaway": "52× is this setup at 20,000/s, not a property of group commit: the direction transfers; the size depends on these drives and the tiny ungated tail.",
+      "arithmetic": "72.1 ÷ 1.39 = 51.9; the reported 52.0× is e to the median within-round log ratio. D3 at 100,000/s saturated, as arithmetic said, and is in no test."
+    },
+    {
+      "title": "Every pre-registered verdict, as it came out",
+      "short": "Four fail, two mixed, two hold",
+      "chart": {
+        "type": "bars",
+        "unit": "verdicts",
+        "items": [
+          {
+            "label": "fails: H1, H2, H3a, H6b",
+            "value": 4
+          },
+          {
+            "label": "mixed: H5, H6a",
+            "value": 2
+          },
+          {
+            "label": "holds: H3b, H4",
+            "value": 2
+          }
+        ]
+      },
+      "axis": "Eight verdicts (H3 and H6 have two parts), each by its pre-registered rule. Default: holds if the pooled interval supports it and all hosts agree; fails if it contradicts it; else mixed.",
+      "read_as": "Fails: H1, H2 (holds, mixed, fails by rate), H3a, H6b (0 of 12 pairs). Mixed: H5; H6a (9 of 12, misses tied with arrival burst). Holds: H3b, H4.",
+      "so": "unit",
+      "takeaway": "[Failed predictions are results](p2:failed): load decides the hand-off, durability decides the anatomy, group commit is not near the page cache.",
+      "arithmetic": "Post \"Every verdict, as it came out\"; results-a7.md §4. 72 of 75 (host, cell) pairs eligible; the rest are D3 at 100,000/s."
+    },
+    {
+      "title": "One run's precision against launch-to-launch spread (H4)",
+      "short": "Launches vary 5.6–8.9× a run's error",
+      "chart": {
+        "type": "bars",
+        "unit": "× within-run standard error",
+        "items": [
+          {
+            "label": "h1",
+            "value": 5.64
+          },
+          {
+            "label": "h2",
+            "value": 8.9
+          },
+          {
+            "label": "h3",
+            "value": 5.87
+          },
+          {
+            "label": "pre-registered threshold",
+            "value": 2
+          }
+        ]
+      },
+      "axis": "D1 at 100,000/s. Each round, three extra same-seed forks ran back to back: same code, input and host. Bar: SD of log p99.99 across them ÷ the error one fork implies if its messages were independent.",
+      "read_as": "Launches differed by about 2–3% at p99.99 (SD 0.0175–0.0279), several times one run's own error, on all hosts: H4 holds.",
+      "so": "unit",
+      "takeaway": "One run's tight interval is not an estimate; every interval here is over launches. A known JVM lesson, demonstrated, never the headline.",
+      "arithmetic": "results-a7.md §4.5: h1 0.0175 ÷ 0.00311 = 5.64. That launches differ in JIT and memory layout is the author's reading, not tested."
+    },
+    {
+      "title": "EXPLORATORY, POST HOC: when do the queue's G1 pauses reach the p99.99?",
+      "short": "POST HOC: GC pauses cross the rank",
+      "chart": {
+        "type": "xy",
+        "unit": "messages",
+        "x_label": "offered rate, messages/s",
+        "y_label": "messages per window",
+        "x_log": true,
+        "y_from_zero": true,
+        "series": [
+          {
+            "name": "delayed by the window's G1 pauses (arithmetic)",
+            "style": "line",
+            "points": [
+              {
+                "x": 10000,
+                "y": 27
+              },
+              {
+                "x": 100000,
+                "y": 500
+              },
+              {
+                "x": 500000,
+                "y": 7500
+              }
+            ]
+          },
+          {
+            "name": "p99.99 rank: 0.01% of the window",
+            "style": "line",
+            "points": [
+              {
+                "x": 10000,
+                "y": 200
+              },
+              {
+                "x": 100000,
+                "y": 600
+              },
+              {
+                "x": 500000,
+                "y": 3000
+              }
+            ]
+          }
+        ],
+        "note": "Arithmetic, not measurement: rate × pause length × pauses, per window. Changes no verdict."
+      },
+      "axis": "E1's queue arms. Counted after the analysis: every in-window safepoint there was a G1 allocation pause, median 2.49–2.68 ms; the ring arms had none.",
+      "read_as": "A p99.99 registers a pause once the messages it delays outnumber 0.01% of the window: not at 10,000/s, nearly at 100,000/s, far past at 500,000/s. Measured: queue + park over 100 µs in 0, 9 and 30 of 30 launches.",
+      "so": "e1",
+      "takeaway": "Part of H2's load dependence is whether G1 pauses reach the p99.99 rank. Post hoc, and partly configuration: one GC thread on a shared core.",
+      "arithmetic": "Pauses per window, queue + park: 1, 2, 5–7. Ring arms: 0 of 180 launches over 100 µs. 97.2%–99.1% of the queue arms' gap time lies inside pauses."
+    }
+  ],
+  "interview": {
+    "pitch30": "I built a deterministic Java matching engine, ran it open-loop as one in-process pipeline on three rented bare-metal servers, and attributed its slowest messages to causes, with rules fixed before the campaign. The lead finding: which hand-off decision sets the tail depends on load. At low load, spinning versus parking matters more than ring versus queue; at 500,000 messages a second the queue's tail goes to milliseconds while the ring's stays in single microseconds. And once an fdatasync is on the response path, waiting for it is the whole tail.",
+    "pitch120": "In 2011 the Disruptor paper showed a ring beating a queue, but not whether that was the data structure or the consumer spinning instead of sleeping. I built a deterministic matching engine in Java, eight order books behind a sequencer and a journal, as one pipeline of five pinned threads, and drove it open-loop, every message scored from its intended send time. Two experiments: ring or `ArrayBlockingQueue` crossed with spin or park, and four durability levels from no journal to an fdatasync per order. Six hypotheses pre-registered, 840 JVM launches on three hosts, tail messages attributed against a shifted null with the residual published. Most predictions did not hold, and those are the findings. At 10,000 messages a second waiting mattered more than structure; at 500,000 the queue went to about two milliseconds while the spinning ring stayed at 1.53 µs, and a post hoc count showed G1 pauses crossing the p99.99 rank. With no sync on the path the match stage is the tail; with one, durability wait is all of it, and group commit came out 52 times the page-cache write here, against a predicted under 2. And launches of the same JVM differed several times more than one run's interval admits.",
+    "followups": [
+      {
+        "q": "Your queue's millisecond tail at 500,000/s: is that the queue, or your one-GC-thread collector setup?",
+        "a": "Both, separably. The allocation is structural: the queue's lock makes a contending thread enqueue a node and park, while the ring arms allocated nothing on the matcher, journaler and output threads. The pause length is partly configuration: one G1 thread on a core shared with the OS and JIT. The breakdown is post hoc (every queue-arm safepoint a G1 allocation pause, medians 2.49 to 2.68 ms). A better-tuned JVM was not tested."
+      },
+      {
+        "q": "Why `ArrayBlockingQueue` at all? Does \"ring beats queue\" still mean anything?",
+        "a": "It is the queue the 2011 comparison used, and the question was structure against waiting, with the lock counted as structure. So the claim is ring against `ArrayBlockingQueue`, one JDK, one collector. No lock-free, non-allocating queue was tested; I would not claim the ring beats queues in general."
+      },
+      {
+        "q": "Your drives sync in about 15 µs. What does that tell me about my hardware, and what did you test about power loss?",
+        "a": "Only the direction transfers. These drives report no volatile write cache; one published measurement puts a consumer drive with a write-back cache at 1,643 µs against 24 µs for an enterprise one, so check the write-cache bit. Power loss was not tested: the crash check kills the JVM, which proves process-crash safety only, and at D1 a pass is timing."
+      },
+      {
+        "q": "The workload is synthetic, Poisson and thin. Which conclusions move with real order flow?",
+        "a": "Not tested; the sequel fits an IEX workload with a Nasdaq ITCH oracle. Arrivals were Poisson on purpose, since bursts would confound the rate factor, and the books are thin, about 264 resting orders over 8 symbols. The matcher's cost depends on how many levels a crossing order touches, so matcher-path numbers depend on book shape."
+      },
+      {
+        "q": "How much of what you measured is your own instrumentation?",
+        "a": "Stamping cost 134–139 ns at the median and 141–166 ns at p99.99 in one calibration cell, exploratory and not netted out, large against a 1.39 µs tail. Logs are synchronous. Sentinels see gaps only between idle polls, handshakes are uncredited, and 6.66%–10.1% of the ungated tail is residual."
+      },
+      {
+        "q": "How do you know the rules came before the data?",
+        "a": "The hypotheses are in the design approved 2026-10-08, before any host was rented; amendment 1 changed definitions with no data collected. Reconnaissance ran single forks on h1, not data; its D3 probe had already saturated near 23,900/s, which the pre-registration records. Tag 18:24:42Z on 2026-10-10, first campaign fork 18:28:23Z, no amendment since."
+      }
+    ],
+    "limits": "Three hosts of one server type and one provider, identical journal drives: n = 3. Synthetic workload, Poisson arrivals, no fills. In-process, no network. One JDK and one collector (G1, one GC thread); one queue. Process crash tested, power loss not. D3's arithmetic is not a measurement (35% reached). Coarse money: three rates, the median launch; a 1.00× tax means invisible to the grid. Attribution floor: the residual, sentinel blind spots, lower-bound nulls, uncredited handshakes. Stamp cost and synchronous logs not netted out. The GC breakdown is post hoc."
+  },
+  "recall": [
+    {
+      "q": "Why does a closed-loop load generator under-report the tail, and where does this pipeline start each message's clock?",
+      "a": "It waits for each response, so a stall is sampled once instead of once per message that was due. Here the schedule is fixed first and latency is released minus intended, so a late generator counts against the system."
+    },
+    {
+      "q": "Why does the gateway fan out to the journaler even at D0, and what contrast does that make clean?",
+      "a": "So D0 and D1 differ only in the journal I/O (D0 consumes and discards). On these hosts the write cost nothing visible: 1.38 against 1.39 µs at 20,000/s."
+    },
+    {
+      "q": "At D2, what does a response wait for, and how is \"no response before durable\" checked without trusting clocks?",
+      "a": "The match and the journaler's durable sequence reaching its own. The output records the durable sequence it saw at release; every message must show one at least its own sequence number."
+    },
+    {
+      "q": "An `ArrayBlockingQueue` polled in a spin loop: how can it still park, and why does that matter at 500,000/s?",
+      "a": "Its one lock: a contending thread enqueues a node and parks, which allocates. The allocations trigger G1 pauses that stop every thread, and at 500,000/s those delay more messages than the p99.99 rank (post hoc)."
+    },
+    {
+      "q": "Why does a 2.68 ms G1 pause at 10,000/s not show in the queue + park arm's 6.13 µs p99.99?",
+      "a": "A p99.99 sees a pause only if the messages it delays outnumber 0.01% of the window: about 27 against a rank of 200 in 2,000,000 messages (arithmetic, not measurement)."
+    },
+    {
+      "q": "Why is \"group commit costs 52×\" not a property of group commit?",
+      "a": "It is this setup at 20,000/s: a tiny ungated tail (1.39 µs) against 72.1 µs, on drives that sync in about 15 µs with no volatile cache. The direction transfers; the size does not."
+    },
+    {
+      "q": "Why did D3 saturate at 100,000/s, and why was that never a hypothesis?",
+      "a": "One `fdatasync` per order: 1 ÷ 14.7 µs is about 68,200/s, and the pipeline sustained about 23,900/s. Arithmetic decided it and reconnaissance had seen it, so it was a stated prediction and the cell left every test."
+    },
+    {
+      "q": "A tail message overlaps a safepoint. When is the safepoint credited, and why not on overlap alone?",
+      "a": "Only if safepoint time inside its busy period covers at least half its excess over the median. Slow messages overlap more of everything; coverage removes most of that bias, and the shifted null gives chance."
+    },
+    {
+      "q": "A colleague shows one fork's very tight interval on p99.99 and calls it the answer. What do you say?",
+      "a": "That interval assumes independent messages. Same-seed launches differed 5.64× to 8.90× more than one run's own error (H4), so honest intervals are over launches or rounds."
+    }
+  ],
+  "sources": [
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "## The headline"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "## The tail anatomy"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "## Related work"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "## What each stage costs"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "## What durability costs in the tail"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "**What D2 buys that D1 does not.**"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "**Why `fdatasync`'s cost depends on the drive.**"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "## Ring or spin?"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "**What those safepoints were (exploratory, post hoc).**"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "**The two park arms differ by construction, and not only in structure.**"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "**What busy-spinning trades.**"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "**What a safepoint is.**"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "## Which unit is independent"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "## What I could not attribute"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "## Method"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "**Load, and coordinated omission.**"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "**What breaks determinism in Java,**"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "## Results"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "**Every verdict, as it came out.**"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "## Limits"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "## Reproduce it"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "**Pre-registration and amendments.**"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "## Next"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "### Money assumptions"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "### Segments"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "### Numbers"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/results-a7.md",
+      "section": "## 2. Integrity (`checks`)"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/results-a7.md",
+      "section": "## 4. Verdicts (`verdicts`)"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/results-a7.md",
+      "section": "### 4.2 H2: **fails**"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/results-a7.md",
+      "section": "### 4.3 H3a: **fails**"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/results-a7.md",
+      "section": "### 4.5 H4: **holds**"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/results-a7.md",
+      "section": "### 4.6 H5: **mixed**"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/results-a7.md",
+      "section": "#### H6a: **mixed**"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/results-a7.md",
+      "section": "### 8.2 `exclusive_shares` (figure only, never used in a test)"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/results-a7.md",
+      "section": "### 11.1 `stamp_overhead` (CAL vs SHARED, per host)"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/results-a7.md",
+      "section": "### 11.2 `fio_vs_d3`"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/results-a7.md",
+      "section": "## Headline ranking (spec §5.12, docs/experiment.md §8)"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/results-a7.md",
+      "section": "## Exploratory, post hoc: G1 pauses, per-launch SLO misses, sentinel gaps in the E1 queue arms"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/results-a7.md",
+      "section": "## Post review (plan 4 Task 11), 2026-10-11"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/experiment.md",
+      "section": "## 1. What is pinned"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/experiment.md",
+      "section": "## 2. Cells and rates"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/experiment.md",
+      "section": "## 3. Saturation rule and pair exclusion"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/experiment.md",
+      "section": "## 4. Hypotheses H1–H6"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/experiment.md",
+      "section": "### D3 saturating is not a hypothesis"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/experiment.md",
+      "section": "## 5. Tail attribution"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/experiment.md",
+      "section": "## 6. Statistics"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/experiment.md",
+      "section": "## 7. Exclusion and stopping rules"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/experiment.md",
+      "section": "## 8. Headline selection rule"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/experiment.md",
+      "section": "## 11. Reconnaissance outcomes that shaped this document"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/recon.md",
+      "section": "### Fixes after the first read-back, and h1 passing"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/recon.md",
+      "section": "### Spec deviations to approve at GATE 2"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/recon.md",
+      "section": "## Task 5: characterise (h2, h3 first; h1 after its recon forks)"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/recon.md",
+      "section": "**4g — one fork per rate, end to end (h1, `CODE_SHA` db22d27).**"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/campaign.md",
+      "section": "## Launch (plan 4 Task 2)"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/campaign.md",
+      "section": "## Checks (plan 4 Task 3)"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/campaign.md",
+      "section": "## Analysis (plan 4 Task 6 Step 1), 2026-10-11"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/campaign.md",
+      "section": "## Exploratory GC and gap check (plan 4 Task 11), 2026-10-11"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/verification-a7.md",
+      "section": "## Summary"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/prepublish-a7.md",
+      "section": "## 7. Test suites and build"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/prepublish-a7.md",
+      "section": "## 11. Pre-registration tag predates the first measured fork"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/plan-1-exit.md",
+      "section": "## 3. Step 3: crash check and the cross-language fixture"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/plan-1-exit.md",
+      "section": "## 5. Deviations from plan 1 during execution"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/plan-2-exit.md",
+      "section": "## 6. Notes for plan 3"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/spend.md",
+      "section": "## Upper bound from host lifetimes (plan 4 Task 11, 2026-10-11)"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### The prior-art problem, and the answer to it"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### Out of scope"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### Fixed constraints"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### 4.1 Pipeline"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### 4.4 Allocation, checked rather than assumed"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### 4.5 The journal"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### 4.6 Correctness checks"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### 4.12 Local development loop"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### 5.2 Factors"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### 5.6 Tail attribution"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### 5.7 Statistical treatment"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### Module 1 — The order book and price-time priority"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### Module 4 — HdrHistogram"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### Module 7 — Ring buffers, wait strategies, locks and memory ordering"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "## Appendix B — Decisions taken in the design dialogue"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "## Appendix C — Senior review, 2026-10-08, and its disposition"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-09-matching-engine-latency-amendment-1.md",
+      "section": "**Origin:** executing plan 1 (engine and pipeline)"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-09-matching-engine-latency-amendment-1.md",
+      "section": "## 6. Sentinels and the `ABQ_SPIN` arm (amends §5.6)"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/pipeline/src/main/java/mtail/pipeline/fork/ForkWiring.java",
+      "section": "public final class ForkWiring implements AutoCloseable"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/pipeline/src/main/java/mtail/pipeline/stage/OutputStage.java",
+      "section": "public final class OutputStage implements Runnable"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/pipeline/src/main/java/mtail/pipeline/durability/D2GroupCommit.java",
+      "section": "final class D2GroupCommit implements Durability"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/mtail/attribution.py",
+      "section": "def credits(b: dict, *, events: dict | None = None)"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/mtail/nulls.py",
+      "section": "def enrichment(observed: float, null: list[float]) -> dict:"
+    }
+  ],
+  "derived_numbers": [
+    {
+      "value": "91.8",
+      "how": "docs/results-a7.md §8.2 exclusive_shares, h1, E2-RING_SPIN-D0-20000, matcher_path 0.917536016, as a percent to one decimal."
+    },
+    {
+      "value": "7.9",
+      "how": "docs/results-a7.md §8.2, h1, E2-RING_SPIN-D0-20000, residual 0.0794833582 as a percent (7.95, shown as 7.9 so the bar sums to 100.0)."
+    },
+    {
+      "value": "90.1",
+      "how": "docs/results-a7.md §8.2, h1, E2-RING_SPIN-D1-20000, matcher_path 0.900896414, as a percent."
+    },
+    {
+      "value": "9.6",
+      "how": "docs/results-a7.md §8.2, h1, E2-RING_SPIN-D1-20000, residual 0.0961155378, as a percent."
+    },
+    {
+      "value": "0.3",
+      "how": "docs/results-a7.md §8.2, h1, hiccup 0.00298062593 (D0) and 0.00298804781 (D1) at 20,000/s, as a percent."
+    },
+    {
+      "value": "2160",
+      "how": "docs/post.md 'Ring or spin?': queue + busy-spin p99.99 at 500,000/s, 2.16 ms, in µs."
+    },
+    {
+      "value": "1980",
+      "how": "docs/post.md 'Ring or spin?': that cell's interval low end, 1.98 ms, in µs."
+    },
+    {
+      "value": "2220",
+      "how": "docs/post.md 'Ring or spin?': that cell's interval high end, 2.22 ms, in µs."
+    },
+    {
+      "value": "2020",
+      "how": "docs/post.md 'Ring or spin?': queue + park p99.99 at 500,000/s, 2.02 ms, in µs."
+    },
+    {
+      "value": "1950",
+      "how": "docs/post.md 'Ring or spin?': that cell's interval low end, 1.95 ms, in µs."
+    },
+    {
+      "value": "2280",
+      "how": "docs/post.md 'Ring or spin?': that cell's interval high end, 2.28 ms, in µs."
+    },
+    {
+      "value": "51.9",
+      "how": "72.1 / 1.39 = 51.87: D2 over D1 pooled p99.99 at 20,000/s from docs/post.md; the reported 52.0x is exp(3.95028547), the pooled median log ratio in docs/results-a7.md §4.3."
+    },
+    {
+      "value": "0.14",
+      "how": "The stamp overhead at the median, 134-139 ns (docs/post.md 'What each stage costs'), in µs to two decimals."
+    },
+    {
+      "value": "0.00311",
+      "how": "docs/results-a7.md §4.5, h1 se 0.00310776644, to three significant digits; 0.0175359639 / 0.00310776644 = 5.643."
+    },
+    {
+      "value": "5.6",
+      "how": "The H4 ratio range's low end, 5.64 (h1, docs/post.md 'Which unit is independent'), to one decimal, in the result's short label."
+    }
+  ],
+  "links": {
+    "p2": "https://claude.ai/artifact/A4MJnGXGWMBmi5z5ntxZBz"
+  },
+  "prereqs": [
+    {
+      "unit": "p2",
+      "label": "How these experiments earn trust"
+    }
+  ]
+}
