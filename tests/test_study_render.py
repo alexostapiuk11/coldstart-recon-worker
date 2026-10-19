@@ -154,3 +154,50 @@ def test_prereq_page_skips_artifact_sections():
     from tests.study_examples import prereq_unit
     ids = re.findall(r'<section id="([\w-]+)"', render_page(prereq_unit()))
     assert ids == ["concepts", "views", "recall", "sources"]
+
+
+from pathlib import Path
+
+from study.trace import missing_sections, untraced_numbers
+
+
+def _write(tmp_path, name, text):
+    p = Path(tmp_path) / name
+    p.write_text(text)
+    return str(p)
+
+
+def test_numbers_in_sources_are_traced_and_others_flagged(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\nMedian 81.12 s and 35,792 tokens.\n")
+    u = artifact_unit()
+    u["results"] = []
+    u["sources"] = [{"file": src, "section": "Title"}]
+    u["question"] = "Is 81.12 real, and 35792, and 12.34?"
+    flagged = untraced_numbers(u)
+    assert flagged == ["12.34"]
+
+
+def test_small_integers_and_years_are_ignored(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\nnothing numeric\n")
+    u = artifact_unit()
+    u["results"] = []
+    u["sources"] = [{"file": src, "section": "Title"}]
+    u["question"] = "Three arms, 4 phases, 300 runs in 2026?"
+    assert untraced_numbers(u) == ["300"]
+
+
+def test_derived_numbers_must_be_declared_with_a_how(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\n")
+    u = artifact_unit()
+    u["results"] = []
+    u["sources"] = [{"file": src, "section": "Title"}]
+    u["question"] = "About 10.39 s."
+    u["derived_numbers"] = [{"value": "10.39", "how": "difference of two medians"}]
+    assert untraced_numbers(u) == []
+
+
+def test_missing_section_is_reported(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\n")
+    u = artifact_unit()
+    u["sources"] = [{"file": src, "section": "Title"}, {"file": src, "section": "Nowhere"}]
+    assert missing_sections(u) == [f"{src}: Nowhere"]
