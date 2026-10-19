@@ -54,3 +54,45 @@ def test_simple_bars_chart():
              "items": [{"label": "cold", "value": 35792}, {"label": "warm", "value": 43040}]}
     out = chart_html(chart, "r1")
     assert "35,792" in out and "43,040" in out
+
+
+from study.brief import INTERVIEW_PROMPT, render_brief
+
+
+def test_brief_has_every_section_in_order():
+    brief = render_brief(artifact_unit())
+    heads = [ln for ln in brief.splitlines() if ln.startswith("## ")]
+    assert heads == [
+        "## How to use this brief",
+        "## Why it exists",
+        "## Need to know first",
+        "## System views (C4)",
+        "## Core decisions",
+        "## Implementation flow",
+        "## Results as meaning",
+        "## Interview card",
+        "## Recall questions",
+        "## Sources",
+        "## Interview mode (paste this to an AI chat)",
+    ]
+
+
+def test_brief_states_views_as_text_and_decisions_with_options():
+    brief = render_brief(artifact_unit())
+    assert "Harness → GPU worker: submits 3 jobs" in brief
+    assert "**Chosen:** Option one" in brief
+    assert "**Cost:** A cost." in brief
+
+
+def test_brief_ends_with_the_prompt_and_prompt_has_the_settings():
+    brief = render_brief(artifact_unit())
+    assert brief.rstrip().endswith(INTERVIEW_PROMPT.rstrip())
+    for setting in ("AUDIENCE", "DEPTH", "MODE", "One question at a time"):
+        assert setting in INTERVIEW_PROMPT
+
+
+def test_prereq_brief_skips_artifact_only_sections():
+    from tests.study_examples import prereq_unit
+    brief = render_brief(prereq_unit())
+    assert "## Core decisions" not in brief and "## Interview card" not in brief
+    assert "## Concepts" in brief and "Used by: a1" in brief
