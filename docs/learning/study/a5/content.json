@@ -73,13 +73,13 @@
       "id": "littles",
       "short": "Little's law, for tenants",
       "term": "Little's law, as used here",
-      "plain": "**Requests in the system = arrival rate × time each spends there.** At 8 slots, 64 in flight and about 204 completed a second means about 0.31 s each. One tenant at peak, 0.114 requests a second, keeps about 0.036 requests in the system; KV room for 9 long (8,192-token) requests then fits 250 tenants."
+      "plain": "**Requests in the system = arrival rate × time each spends there.** At 8 slots, 64 in flight and about 204 completed a second means about 0.31 s each. One tenant at peak, 0.114 requests a second, keeps about 0.036 requests in the system; KV room for 9 long (8,192-token) requests then fits 250 tenants. A real long request would stay longer than 0.31 s, so that bound is generous."
     },
     {
       "id": "verdicts",
       "short": "Gate verdicts",
       "term": "Equivalence gate: pass, fail, inconclusive",
-      "plain": "Per start: (synthetic − real) / real for TTFT p50 and throughput. **Pass**: the median's 90% interval lies inside ±5% for both. **Resolution check**: the second real phase against the first must also fit ±5%; if not, the gate could not have seen a 5% difference, so the verdict is **inconclusive**, not pass. Resolved but outside: **fail**."
+      "plain": "Per start: (synthetic − real) / real for TTFT p50 and throughput. **Pass**: the median's 90% interval lies inside ±5% for both. **Resolution check**: the second real phase against the first must also fit ±5%; if not, the gate cannot resolve its own ±5% margin, so the verdict is **inconclusive**, not pass. Resolved but not inside: **fail**."
     }
   ],
   "views": [
@@ -414,7 +414,7 @@
     {
       "level": "dynamic",
       "title": "One sweep server start, in order",
-      "caption": "Steps 1 and 8 run on the laptop, 2 to 7 in the rented container. The regimes differ only in step 6, inside one start: which adapters the load generator lists. KV capacity is read in step 4, never measured under load.",
+      "caption": "Steps 1 and 8 run on the laptop, 2 to 7 in the rented container. The regimes differ only in step 6, inside one start: which adapters the load generator lists. KV capacity and the warm/cold reading come from the startup log the container returns, parsed on the laptop in step 8; KV is never measured under load.",
       "nodes": [
         {
           "id": "s1",
@@ -442,8 +442,8 @@
         },
         {
           "id": "s4",
-          "label": "4 Read startup log",
-          "sub": "KV tokens; compile under 1 s = warm",
+          "label": "4 Keep startup log",
+          "sub": "KV tokens, compile time: parsed later",
           "kind": "system",
           "col": 3,
           "row": 0
@@ -475,7 +475,7 @@
         {
           "id": "s8",
           "label": "8 Record appended",
-          "sub": "one line in the store; failures kept",
+          "sub": "log parsed; one line; failures kept",
           "kind": "store",
           "col": 0,
           "row": 1
@@ -500,7 +500,7 @@
         {
           "from": "s4",
           "to": "s5",
-          "label": "warm"
+          "label": "ready"
         },
         {
           "from": "s5",
@@ -533,7 +533,7 @@
       ],
       "chosen": "Run both regimes in every start: one adapter, then all N round-robin, in a shuffled order",
       "why": "Same slots, memory and start; only how many adapters the batch mixes differs, so spread minus concentrated is a difference inside one start, and start-to-start variation cancels out of it. Swapping is the resident-versus-swapped mode the design put out of scope. Random assignment of 64 requests over 64 adapters reaches about 40.6 distinct on average; round-robin keeps up to min(N, 64) in flight.",
-      "cost": "The registered-slot cost compares different starts, against 1 slot. The check that the regimes differed reads vLLM's running-adapters gauge once a second: a sample of scheduler state, not a count per batch. The gauge also adds cost to the spread regime; 24 control starts with it off bound that at +17 tokens/s [−19, +57].",
+      "cost": "The registered-slot cost compares different starts, against 1 slot. The check that the regimes differed reads vLLM's running-adapters gauge once a second: a sample of scheduler state, not a count per batch. By vLLM's source the gauge may add cost to the spread regime; 24 control starts with it off put gauge-on minus gauge-off at +17 tokens/s [−19, +57]: no cost detected, at most about 19 tokens/s.",
       "why_short": "vLLM's one knob cannot separate the two counts; traffic can, with slots, memory and the start held fixed.",
       "cost_short": "The slot cost is compared across starts; the manipulation check is a once-a-second sample; the gauge adds a small cost.",
       "short": "Split by traffic, in one start",
@@ -544,7 +544,7 @@
         },
         {
           "req": "R5",
-          "because": "Both regimes share one start's slots, memory and compile state, so nothing but the active count changes between them."
+          "because": "Both regimes share one start's slots, memory and compile state, so only the active count (and the gauge's small, bounded cost) changes between them."
         }
       ],
       "uses": [
@@ -564,7 +564,7 @@
       "problem": "The design claimed the cost was \"dominated by batch heterogeneity, not by memory\". Reading vLLM's source showed two flaws: at 29-token requests the KV cache can never fill, and the one-adapter regime also pays a kernel cost that grows with slots.",
       "options": [
         "Call the one-adapter regime's slowdown memory, as the August design did",
-        "Split the slot cost with a `--specialize-active-lora` diagnostic at 1, 16 and 64 slots",
+        "Also split the slot cost with a `--specialize-active-lora` diagnostic at 1, 16 and 64 slots (planned; cut when it ran out of memory)",
         "Three parts: heterogeneity cost, registered-slot cost, and memory as a capacity ceiling"
       ],
       "chosen": "Three parts: heterogeneity cost, registered-slot cost, and memory as a capacity ceiling",
@@ -602,9 +602,9 @@
         "4 real vs 4 synthetic in one 8-slot server: the median difference's 90% interval inside ±5%, plus a real-vs-real resolution check"
       ],
       "chosen": "4 real vs 4 synthetic in one 8-slot server: the median difference's 90% interval inside ±5%, plus a real-vs-real resolution check",
-      "why": "Cost is set by shape: vLLM computes at the buffer rank, and a dense multiply does the same work for any values. Ignore-EOS (always 16 output tokens) and prefix caching off close the one path from weights to cost, what the model generates. The margin is half the knee threshold, so a passing bias cannot move the knee by itself. Artifact 2's band does not fit one number, and a per-start margin would have made the gate nearly impossible to fail.",
+      "why": "Cost is set by shape: vLLM computes at the buffer rank, and a dense multiply does the same work for any values. Ignore-EOS (always 16 output tokens) and prefix caching off close the one known path from weights to cost, what the model generates. The margin is half the knee threshold, so a passing bias cannot move the knee by itself. Artifact 2's band does not fit one number, and a per-start margin would have made the gate nearly impossible to fail.",
       "cost": "The gate tested one point, 8 slots; the other sweep points rest on the shape argument. It licenses serving cost at rank 16, these seven modules and this base model, nothing about output quality or other ranks. Single-phase TTFT turned out to vary ±10–15% within a start, so the resolution check needed far more starts than planned.",
-      "why_short": "Shape sets serving cost, but the claim is checked against real adapters, with a margin tied to the knee and a check that the gate can see 5%.",
+      "why_short": "Shape sets serving cost, but the claim is checked against real adapters, with a margin tied to the knee and a check that the gate can resolve 5%.",
       "cost_short": "One point tested; licenses nothing about quality or other ranks; the noisy resolution check needed many more starts.",
       "short": "Synthetic, licensed by a gate",
       "serves": [
@@ -640,7 +640,7 @@
       ],
       "chosen": "144 starts in a fresh store (Amendment 1), then replace exactly the 52 lost starts (Amendment 3)",
       "why": "The pilot showed noise, not bias: no drift by phase position, real and synthetic phases a few milliseconds apart. Scaling the pilot's interval widths by the square root of the count, 144 scheduled starts (about 139 usable) were estimated to narrow the resolution check enough, with no guarantee; an earlier 72-start sizing had left that check out. The 52 losses died before serving a request (CUDA Error 804, driver 570.195.03), so replacing them restores the size Amendment 1 fixed rather than choosing a new one.",
-      "cost": "Both amendments were written after a verdict, in response to it. Amendment 1 had said the gate would not run a third time; Amendment 3 extended the second run instead, decided after seeing the 88-start result. The final TTFT resolution check passes by 0.05 points and sits above zero: the second real phase ran about 2% slower than the first, an order effect not investigated.",
+      "cost": "Both amendments were written after a verdict, in response to it. Amendment 1 had said an inconclusive larger gate meant the August fallback, with no third run under it; Amendment 3 extended the second run instead, decided after seeing the 88-start result. The final TTFT resolution check passes by 0.05 points and sits above zero: the second real phase's TTFT p50 ran about 2% higher than the first's, an order effect not investigated.",
       "why_short": "Both misses were noise and a host fault, not adapter bias; more starts, then exact replacements, restored the size fixed beforehand.",
       "cost_short": "Two data-dependent extensions, disclosed; the final check passes by 0.05 points with an uninvestigated order effect.",
       "short": "Enlarge, then replace",
@@ -679,7 +679,7 @@
       "serves": [
         {
           "req": "R3",
-          "because": "τ, the curve and the rule were committed before the data, so the headline count could not be chosen afterwards."
+          "because": "The curve and rule (harness amendment) and τ (pre-registration, after reconnaissance) were committed before the first measured run, so the headline count could not be chosen afterwards."
         },
         {
           "req": "R4",
@@ -700,7 +700,7 @@
     {
       "id": "cost",
       "title": "Price adapters beside whole models, labelled",
-      "problem": "The business answer compares cost per tenant three ways, but artifact 4's dedicated and swapped costs come from its simulator, and artifact 4 moved to Qwen3-1.7B after its Qwen3-4B pair failed a memory check.",
+      "problem": "The business answer compares cost per tenant three ways, and the August design made a shared base model with artifact 4 a hard dependency. But artifact 4's dedicated and swapped costs come from its simulator, and artifact 4 moved to Qwen3-1.7B after its Qwen3-4B pair failed a memory check.",
       "options": [
         "Publish without artifact 4's costs (the plan stops instead)",
         "Move this artifact to Qwen3-1.7B to match artifact 4",
@@ -708,7 +708,7 @@
       ],
       "chosen": "Keep Qwen3-4B; three bars at one rate, labelled not like-for-like and resting on a failed simulator",
       "why": "One shared rate, $1.1095 per GPU-hour (Amendment 2), and code that refuses a table at another rate. What the comparison can carry is the shape of the choice: swapping pays per switch, resident adapters pay per co-active adapter.",
-      "cost": "The bars share a unit and a rate and nothing else measured: different model sizes, output lengths and traffic. Artifact 4's simulator failed its gate at exactly this point (10 of 13 bins missed), so the swapped bar's error direction is unknown and the dedicated bar is untested; the adapter bar, set beside them, inherits that.",
+      "cost": "The bars share a unit and a rate and nothing else measured: different model sizes, output lengths and traffic. Artifact 4's simulator failed its gate at exactly this point (10 of 13 bins missed), so the swapped bar's error direction is unknown and the dedicated bar was not tested by that gate; the adapter bar, set beside them, inherits that.",
       "why_short": "The three-way table is the business answer, so it is shown, at one shared rate, with its limits on its face.",
       "cost_short": "The neighbouring bars come from a simulator that failed validation, on a smaller model: not a like-for-like price list.",
       "short": "Three bars, labelled",
@@ -1106,7 +1106,7 @@
       "axis": "Measured: m(N) = 1 − T(N) / T(N/2), with T the spread regime's median throughput (every registered adapter active).",
       "read_as": "The first point above the line is 16, so the knee lies between 8 and 16 and the slot bound is 8. The point at 16 crosses; its whisker, 9.2 to 11.5, does not clear 10%.",
       "so": "knee",
-      "takeaway": "Past about 8 co-active adapters each doubling costs more than a tenth of the GPU's throughput, by a rule fixed before the data; the first crossing is not resolved.",
+      "takeaway": "Past about 8 co-active adapters each doubling costs more than a tenth of the GPU's throughput, by a rule fixed before the first measured run; the first crossing is not resolved.",
       "arithmetic": "At 16: 1 − 2,911 / 3,260 = 10.7%. Rounded to one decimal, the 2-slot whisker's low end is 0.0 (0.03%)."
     },
     {
@@ -1129,7 +1129,7 @@
             "high": -425
           },
           {
-            "label": "Gauge's own share of the first",
+            "label": "Gauge: on minus off",
             "estimate": 17,
             "low": -19,
             "high": 57
@@ -1140,7 +1140,7 @@
         "right_label": "gained"
       },
       "axis": "Measured, 95% bootstrap intervals of the median. Heterogeneity: paired within each of 24 starts. Registered-slot: concentrated at 64 slots against at 1 slot, across starts. Gauge: the heterogeneity cost with the gauge on minus 24 control starts with stats logging off.",
-      "read_as": "The two costs' intervals are far apart, so H2 holds: the batch's mix costs more than the slots. The gauge's interval straddles zero: at most about 57 tokens/s of the 1,290.",
+      "read_as": "The two costs' intervals are far apart, so H2 holds: the batch's mix costs more than the slots. The gauge's interval straddles zero; a gauge cost would show as negative, and the interval allows at most about 19 tokens/s of one (57 either way) against the 1,290.",
       "so": [
         "regimes",
         "memory"
@@ -1149,7 +1149,7 @@
       "arithmetic": "1,290 / 450 = 2.87, the post's 2.9. The slot cost is unsplit: the diagnostic that would separate the launch grid ran out of memory."
     },
     {
-      "title": "The equivalence gate, three times: could it see 5%?",
+      "title": "The equivalence gate, three times: could it resolve 5%?",
       "short": "Gate passed at 137 starts",
       "chart": {
         "type": "interval",
@@ -1208,7 +1208,7 @@
         "gate",
         "amend"
       ],
-      "takeaway": "Synthetic adapters were never measurably different from real ones; what took 137 starts was a gate able to see a 5% difference at all.",
+      "takeaway": "No run's interval excluded zero difference between synthetic and real adapters; what took 137 starts was a resolution check that fit inside ±5%.",
       "arithmetic": "196 scheduled − 55 failed − 4 cold compiles = 137 usable. Margin = τ / 2 = 0.05. Final resolution check: 5 − 4.95 = 0.05 points to spare."
     },
     {
@@ -1271,7 +1271,7 @@
         "knee"
       ],
       "takeaway": "Adapters cost memory, but at this shape memory is capacity, not speed. Tenant bounds at 8 slots: 8 by slots, 250 by memory, 1,784 by throughput; slots bind.",
-      "arithmetic": "42,864 / 32 (two 16-token blocks per 29-token request) = 1,339. Memory bound = throughput bound × 9 / 64 = 1,784 × 9 / 64 = 250.9, rounded down: 250."
+      "arithmetic": "42,864 / 32 (two 16-token blocks per 29-token request) = 1,339; analysis.json's own field still divides by 29 (1,478). Memory bound = unfloored throughput bound × 9 / 64 = 1,784.6 × 9 / 64 = 250.96, rounded down: 250."
     },
     {
       "title": "UNVALIDATED NEIGHBOURS: cost per tenant per month",
@@ -1295,27 +1295,27 @@
         ]
       },
       "axis": "All at $1.1095 per GPU-hour. Dedicated and swapped: artifact 4's simulator, Qwen3-1.7B, bursty regime, s = 1.0, which failed its validation (10 of 13 bins missed). Adapter: this artifact's measurement, Qwen3-4B.",
-      "read_as": "Not like-for-like: different model sizes, output lengths and traffic. The adapter bar is an upper bound because tenants are a lower bound; the swapped bar's error direction is unknown; the dedicated bar was never tested.",
+      "read_as": "Not like-for-like: different model sizes, output lengths and traffic. The adapter bar is an upper bound because tenants are a lower bound; the swapped bar's error direction is unknown; the dedicated bar was not tested by artifact 4's gate.",
       "so": "cost",
-      "takeaway": "Only the adapter bar is measured here. The comparison shows the shape of the choice, per-switch against per-co-active-adapter, not a price list.",
+      "takeaway": "Only the adapter bar rests on this artifact's measurement. The comparison shows the shape of the choice, per-switch against per-co-active-adapter, not a price list.",
       "arithmetic": "$1.1095 × 730 h / 8 tenants = $101.24. If the 8-to-16 crossing were noise: 16 tenants, half that."
     }
   ],
   "interview": {
-    "pitch30": "I measured how many customers' LoRA fine-tunes one GPU can serve on a shared base model, and found the cost is not how many adapters you load but how many share a batch. I split the two by running every server start with the load on one adapter and spread over all of them; at the top of the sweep, mixing cost about three times what holding the adapters did. By a knee rule fixed in advance that gives 8 tenants per GPU, a lower bound. Synthetic adapters were licensed by a pre-registered gate that needed two disclosed extensions before it could pass.",
-    "pitch120": "Products that give each customer a fine-tune serve them as LoRA adapters on one base model, and people ask how many adapters fit. That mixes two costs: adapters held in GPU slots, and adapters active in the same batch. In vLLM one setting sets both, so I separated them by traffic: every server start ran its load once on a single adapter and once round-robin over all registered ones, so the gap is paired inside the start. I swept 1 to 64 adapters on Qwen3-4B on one RTX 4090, 24 starts per point. The adapters were synthetic, which I only used after a pre-registered equivalence gate against 4 real ones. That gate came back inconclusive twice, once from phase-to-phase noise and once after a bad host killed 52 starts, and I extended it through two post-hoc amendments, disclosed as such, until it passed. At 64 adapters, mixing cost 1,290 tokens a second against 450 for holding the slots. KV capacity fell 45% but never bound at this request shape. By the knee rule, each doubling past 8 co-active adapters costs over a tenth of throughput: 8 tenants per GPU, about $101 a month each as an upper bound. The comparison with whole-model serving leans on artifact 4's simulator, which failed its validation, so I don't present those bars as findings.",
+    "pitch30": "I measured how many customers' LoRA fine-tunes one GPU can serve on a shared base model, and found the cost is mostly how many share a batch, not how many you load. I split the two by running every server start with the load on one adapter and spread over all of them; at the top of the sweep, mixing cost about three times what holding the adapters did. By a knee rule fixed in advance that gives 8 tenants per GPU, a lower bound. Synthetic adapters were licensed by a pre-registered gate that needed two disclosed extensions before it could pass.",
+    "pitch120": "Products that give each customer a fine-tune serve them as LoRA adapters on one base model, and people ask how many adapters fit. That mixes two costs: adapters held in GPU slots, and adapters active in the same batch. In vLLM one setting sets both, so I separated them by traffic: every server start ran its load on a single adapter and round-robin over all registered ones, two phases each in shuffled order, so the gap is paired inside the start. I swept 1 to 64 adapters on Qwen3-4B on one RTX 4090, 24 starts per point. The adapters were synthetic, which I only used after a pre-registered equivalence gate against 4 real ones. That gate came back inconclusive twice, once from phase-to-phase noise and once after a bad host killed 52 starts, and I extended it through two post-hoc amendments, disclosed as such, until it passed. At 64 adapters, mixing cost 1,290 tokens a second against 450 for holding the slots. KV capacity fell 45% but never bound at this request shape. By the knee rule's point estimates, each doubling past 8 co-active adapters costs over a tenth of throughput, though the first crossing is unresolved: 8 tenants per GPU, about $101 a month each as an upper bound. The comparison with whole-model serving leans on artifact 4's simulator, which failed its validation, so I don't present those bars as findings.",
     "followups": [
       {
         "q": "Why synthetic adapters, and what does that license?",
-        "a": "There are not 64 public rank-16 adapters on the seven projections for Qwen3-4B: 7 of 261 qualified. Serving cost is set by shape: vLLM computes at the buffer rank, and a dense multiply does the same work for any values. The one path from values to cost, what the model generates, is closed by ignore-EOS and prefix caching off. The gate then checked it at 8 slots. It licenses serving cost at this rank, these modules, this base; nothing about quality or other ranks."
+        "a": "There are not 64 public rank-16 adapters on the seven projections for Qwen3-4B: 7 of 261 qualified. Serving cost is set by shape: vLLM computes at the buffer rank, and a dense multiply does the same work for any values. The one known path from values to cost, what the model generates, is closed by ignore-EOS and prefix caching off. The gate then checked it at 8 slots. It licenses serving cost at this rank, these modules, this base; nothing about quality or other ranks."
       },
       {
         "q": "Wasn't Amendment 3 a forking path?",
-        "a": "It was data-dependent, and the post says so: I decided it after seeing the 88-start verdict. What bounds it: only the count changed, by exactly the 52 starts a host fault killed before any phase ran, back toward the size Amendment 1 had fixed; the 3 replacements that failed again were counted, not replaced; the margin and rule never moved. Amendment 1 was post-hoc too, and the final resolution check passes by only 0.05 points."
+        "a": "It was data-dependent, and the post says so: I decided it after seeing the 88-start verdict. What bounds it: only the count changed, by exactly the 52 starts a host fault killed before any phase ran, back toward the size Amendment 1 had fixed; the 3 replacements that failed again were counted, not replaced; the margin and rule never moved. What it does not undo: Amendment 1 had said an inconclusive larger gate meant the August fallback, Amendment 1 was post-hoc too, and the final resolution check passes by only 0.05 points."
       },
       {
         "q": "Why don't the cost bars count as a finding?",
-        "a": "Dedicated and swapped come from artifact 4's simulator, which failed its pre-registered validation at exactly this operating point: 10 of 13 bins outside the band of three real repeats, 1 of 2 held-out cells passed. Its swap cost fits no single value, so the swapped bar's error direction is unknown; dedicated was never tested by the gate. The bars also cross model sizes, Qwen3-1.7B against 4B. Only the adapter bar is measured, and it is an upper bound."
+        "a": "Dedicated and swapped come from artifact 4's simulator, which failed its pre-registered validation at exactly this operating point: 10 of 13 bins outside the band of three real repeats, 1 of 2 held-out cells passed. Its swap cost fits no single value, so the swapped bar's error direction is unknown; dedicated was never tested by the gate. The bars also cross model sizes, Qwen3-1.7B against 4B. Only the adapter bar rests on a measurement, and it is an upper bound."
       },
       {
         "q": "Is 8 tenants per GPU robust?",
@@ -1323,14 +1323,14 @@
       },
       {
         "q": "If memory isn't the cost, why does KV capacity fall 45%?",
-        "a": "Each slot's weight buffers take memory the KV cache would use: 78,208 tokens at 1 slot, 42,864 at 64. But a request here holds 29 tokens, two 16-token blocks, so 64 in flight use about 2,048; the scheduler never waits for KV. Memory matters as capacity: at an 8,192-token context the cache holds 9 requests at 8 slots, a bound of 250 tenants, and for long contexts it would bind before throughput."
+        "a": "Each slot's weight buffers take memory the KV cache would use: 78,208 tokens at 1 slot, 42,864 at 64. But a request here holds 29 tokens, two 16-token blocks, so 64 in flight use about 2,048; the scheduler never waits for KV. Memory matters as capacity: at an 8,192-token context the cache holds 9 requests at 8 slots, a bound of 250 tenants, and for long contexts it would bind before throughput. That bound is generous: it uses the 29-token requests' time in system."
       },
       {
         "q": "What would you do differently?",
         "a": "Build the failure-streak stop before the first paid run: without it, one bad host consumed 52 gate starts. Size the gate for its resolution check, not only its main interval: an earlier 72-start sizing left the check out, and the pilot's 24 could not resolve ±5% through phase-to-phase TTFT noise. Then the sequels the post names: rank as a variable, and resident versus swapped adapters, which turns the lower bound on tenants into a measurement."
       }
     ],
-    "limits": "One base model (Qwen3-4B), one RTX 4090, rank 16 on seven projections, one short request shape (13 prompt + 16 output tokens at 64 in flight), vLLM 0.27.1: the numbers do not transfer; the mechanism may. All adapters resident in GPU slots, so tenants are a lower bound and the adapter cost an upper bound. The registered-slot cost is unsplit (the diagnostic ran out of memory; H4 withdrawn). The gate tested one point (8 slots), was extended twice after its result was seen, and its TTFT resolution check passes by 0.05 points with an uninvestigated order effect. The knee's first crossing is unresolved. The regime check samples the scheduler once a second. All 191 campaign starts ran on one host. The dedicated and swapped costs come from artifact 4's simulator, which failed validation, on a smaller model; the rate is one billing sample."
+    "limits": "One base model (Qwen3-4B), one RTX 4090, rank 16 on seven projections, one short request shape (13 prompt + 16 output tokens at 64 in flight), vLLM 0.27.1, whose source the launch-grid and gauge explanations were read from: the numbers do not transfer, and the knee elsewhere is unmeasured. All adapters resident in GPU slots, so tenants are a lower bound and the adapter cost an upper bound. The registered-slot cost is unsplit (the diagnostic ran out of memory; H4 withdrawn). The gate tested one point (8 slots), was extended twice after its result was seen, and its TTFT resolution check passes by 0.05 points with an uninvestigated order effect. The knee's first crossing is unresolved. The regime check samples the scheduler once a second. All 191 campaign starts ran on one host, so host-to-host variation is not in the intervals. 55 gate starts and 1 campaign start failed and 4 gate starts were excluded as cold, all counted. The dedicated and swapped costs come from artifact 4's simulator, which failed validation, on a smaller model; the rate is one billing sample."
   },
   "recall": [
     {
@@ -1343,7 +1343,7 @@
     },
     {
       "q": "Why does the one-adapter regime slow down too as slots grow, and why is that not memory?",
-      "a": "The LoRA kernels launch `max_loras + 1` slices whatever the batch holds; empty slots' slices exit early but are launched (65 at 64 slots, 2 at 1). KV never binds at 29-token requests, so memory cannot be it. What else scales with slots is unknown: the diagnostic was cut."
+      "a": "One known slot-proportional cost: the LoRA kernels launch `max_loras + 1` slices whatever the batch holds; empty slots' slices exit early but are launched (65 at 64 slots, 2 at 1). KV never binds at 29-token requests, so memory cannot be it. How much the launch grid explains is unmeasured: the diagnostic was cut."
     },
     {
       "q": "Why is the heterogeneity cost paired within a start, and the registered-slot cost not?",
@@ -1351,11 +1351,11 @@
     },
     {
       "q": "The gate's real-vs-real check fits inside ±5% but synthetic vs real does not. What is the verdict, and what happens?",
-      "a": "Fail: the gate could resolve 5% and found a difference. That would be a publishable finding, and the design's fallback applies: public adapters only, at the count that qualifies, with a smaller sweep."
+      "a": "Fail: the gate can resolve ±5%, yet could not show synthetic within ±5% of real. The design calls that a publishable finding, and its fallback applies: public adapters only, at the count that qualifies, with a smaller sweep."
     },
     {
       "q": "Why can random weights stand in for trained adapters, and which two settings close the remaining gap?",
-      "a": "The work is set by shape (rank at the buffer rank, the seven projections), and a dense multiply costs the same for any values. Ignore-EOS fixes every output at 16 tokens and prefix caching is off, so weights cannot change what is generated or what is cached."
+      "a": "The work is set by shape (rank at the buffer rank, the seven projections), and a dense multiply costs the same for any values. Ignore-EOS fixes every output at 16 tokens, so weights cannot change how much is generated, and prefix caching is off, so no adapter's prompt is served from a cache another missed."
     },
     {
       "q": "Had the knee rule required the interval to clear 10%, where would the knee be, and why was that rule rejected?",
@@ -1611,27 +1611,35 @@
   "derived_numbers": [
     {
       "value": "0.81",
-      "how": "5.81 - 5.00: how far the 88-start TTFT resolution check's upper end (+5.81%, docs/experiment-a5.md Amendment 3) sat outside the +5% margin, in percentage points."
+      "how": "5.81 - 5.00: how far the 88-start TTFT resolution upper end (+5.81%, docs/experiment-a5.md Amendment 3) sat outside the +5% margin, in points."
     },
     {
       "value": "12.6",
-      "how": "1 - 3,127 / 3,577 = 0.1258: concentrated throughput at 64 slots against 1 slot, both medians in docs/post-a5.md 'The main chart'."
+      "how": "1 - 3,127 / 3,577 = 0.1258: concentrated throughput at 64 slots against 1 slot, medians in docs/post-a5.md 'The main chart'."
     },
     {
       "value": "2.87",
-      "how": "1,290 / 450 = 2.87: heterogeneity cost over registered-slot cost at 64 slots, from docs/post-a5.md 'Headline' (the post rounds it to 2.9)."
+      "how": "1,290 / 450 = 2.87: heterogeneity over registered-slot cost at 64 slots, docs/post-a5.md 'Headline' (which rounds to 2.9)."
     },
     {
-      "value": "250.9",
-      "how": "1,784 x 9 / 64 = 250.875: the memory bound as multilora/economics.py computes it (by_throughput x K / C), with 1,784 and 9 from docs/post-a5.md; floored to 250."
+      "value": "1784.6",
+      "how": "median per-start spread request rate at 8 slots, 203.72 requests/s (data/a5/campaign.jsonl, as multilora/analysis.py takes it), / one tenant's peak rate 0.11416 = 1,784.58; economics.py floors it to the throughput bound 1,784."
+    },
+    {
+      "value": "250.96",
+      "how": "multilora/economics.py by_memory = 9 x 203.72 / (64 x 0.11416) = 250.957 (= 1,784.58 x 9 / 64), floored to the memory bound 250. With the floored 1,784 it would be 250.875."
+    },
+    {
+      "value": "1478",
+      "how": "data/a5/analysis.json sweep.points[n_slots=64].memory.max_concurrency_request_shape = 42,864 // 29; the post (commit 820e1808ba) counts 16-token blocks instead: 42,864 / 32 = 1,339."
     },
     {
       "value": "0.03",
-      "how": "data/a5/analysis.json knee.doublings[n=2].lo = 0.000257, as a percent (0.03%), which rounds to 0.0 at one decimal on the chart."
+      "how": "data/a5/analysis.json knee.doublings[n=2].lo = 0.000257, as a percent (0.03%); 0.0 at one decimal on the chart."
     },
     {
       "value": "3260",
-      "how": "data/a5/analysis.json sweep.points[n_slots=8].median.spread.throughput_tps = 3259.51, rounded; used in the knee arithmetic 1 - 2,911/3,260."
+      "how": "data/a5/analysis.json sweep.points[n_slots=8].median.spread.throughput_tps = 3259.51, rounded."
     },
     {
       "value": "2911",
@@ -1639,143 +1647,143 @@
     },
     {
       "value": "3573",
-      "how": "data/a5/analysis.json sweep.points[n_slots=2].interval.concentrated.throughput_tps.point = 3572.92, rounded: the concentrated regime's median at 2 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=2].interval.concentrated.throughput_tps.point = 3572.92, rounded."
     },
     {
       "value": "3559",
-      "how": "data/a5/analysis.json sweep.points[n_slots=2].interval.concentrated.throughput_tps.lo = 3558.99, rounded: the concentrated regime's 95% interval low end at 2 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=2].interval.concentrated.throughput_tps.lo = 3558.99, rounded."
     },
     {
       "value": "3590",
-      "how": "data/a5/analysis.json sweep.points[n_slots=2].interval.concentrated.throughput_tps.hi = 3589.83, rounded: the concentrated regime's 95% interval high end at 2 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=2].interval.concentrated.throughput_tps.hi = 3589.83, rounded."
     },
     {
       "value": "3529",
-      "how": "data/a5/analysis.json sweep.points[n_slots=2].interval.spread.throughput_tps.point = 3529.39, rounded: the spread regime's median at 2 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=2].interval.spread.throughput_tps.point = 3529.39, rounded."
     },
     {
       "value": "3509",
-      "how": "data/a5/analysis.json sweep.points[n_slots=2].interval.spread.throughput_tps.lo = 3508.87, rounded: the spread regime's 95% interval low end at 2 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=2].interval.spread.throughput_tps.lo = 3508.87, rounded."
     },
     {
       "value": "3556",
-      "how": "data/a5/analysis.json sweep.points[n_slots=2].interval.spread.throughput_tps.hi = 3556.02, rounded: the spread regime's 95% interval high end at 2 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=2].interval.spread.throughput_tps.hi = 3556.02, rounded."
     },
     {
       "value": "3543",
-      "how": "data/a5/analysis.json sweep.points[n_slots=4].interval.concentrated.throughput_tps.point = 3542.82, rounded: the concentrated regime's median at 4 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=4].interval.concentrated.throughput_tps.point = 3542.82, rounded."
     },
     {
       "value": "3518",
-      "how": "data/a5/analysis.json sweep.points[n_slots=4].interval.concentrated.throughput_tps.lo = 3518.19, rounded: the concentrated regime's 95% interval low end at 4 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=4].interval.concentrated.throughput_tps.lo = 3518.19, rounded."
     },
     {
       "value": "3583",
-      "how": "data/a5/analysis.json sweep.points[n_slots=4].interval.concentrated.throughput_tps.hi = 3583.34, rounded: the concentrated regime's 95% interval high end at 4 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=4].interval.concentrated.throughput_tps.hi = 3583.34, rounded."
     },
     {
       "value": "3443",
-      "how": "data/a5/analysis.json sweep.points[n_slots=4].interval.spread.throughput_tps.point = 3443.37, rounded: the spread regime's median at 4 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=4].interval.spread.throughput_tps.point = 3443.37, rounded."
     },
     {
       "value": "3413",
-      "how": "data/a5/analysis.json sweep.points[n_slots=4].interval.spread.throughput_tps.lo = 3412.66, rounded: the spread regime's 95% interval low end at 4 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=4].interval.spread.throughput_tps.lo = 3412.66, rounded."
     },
     {
       "value": "3480",
-      "how": "data/a5/analysis.json sweep.points[n_slots=4].interval.spread.throughput_tps.hi = 3479.84, rounded: the spread regime's 95% interval high end at 4 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=4].interval.spread.throughput_tps.hi = 3479.84, rounded."
     },
     {
       "value": "3535",
-      "how": "data/a5/analysis.json sweep.points[n_slots=8].interval.concentrated.throughput_tps.point = 3535.21, rounded: the concentrated regime's median at 8 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=8].interval.concentrated.throughput_tps.point = 3535.21, rounded."
     },
     {
       "value": "3510",
-      "how": "data/a5/analysis.json sweep.points[n_slots=8].interval.concentrated.throughput_tps.lo = 3509.73, rounded: the concentrated regime's 95% interval low end at 8 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=8].interval.concentrated.throughput_tps.lo = 3509.73, rounded."
     },
     {
       "value": "3548",
-      "how": "data/a5/analysis.json sweep.points[n_slots=8].interval.concentrated.throughput_tps.hi = 3548.24, rounded: the concentrated regime's 95% interval high end at 8 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=8].interval.concentrated.throughput_tps.hi = 3548.24, rounded."
     },
     {
       "value": "3233",
-      "how": "data/a5/analysis.json sweep.points[n_slots=8].interval.spread.throughput_tps.lo = 3233.02, rounded: the spread regime's 95% interval low end at 8 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=8].interval.spread.throughput_tps.lo = 3233.02, rounded."
     },
     {
       "value": "3282",
-      "how": "data/a5/analysis.json sweep.points[n_slots=8].interval.spread.throughput_tps.hi = 3281.78, rounded: the spread regime's 95% interval high end at 8 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=8].interval.spread.throughput_tps.hi = 3281.78, rounded."
     },
     {
       "value": "3469",
-      "how": "data/a5/analysis.json sweep.points[n_slots=16].interval.concentrated.throughput_tps.point = 3469.50, rounded: the concentrated regime's median at 16 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=16].interval.concentrated.throughput_tps.point = 3469.50, rounded."
     },
     {
       "value": "3453",
-      "how": "data/a5/analysis.json sweep.points[n_slots=16].interval.concentrated.throughput_tps.lo = 3453.40, rounded: the concentrated regime's 95% interval low end at 16 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=16].interval.concentrated.throughput_tps.lo = 3453.40, rounded."
     },
     {
       "value": "3492",
-      "how": "data/a5/analysis.json sweep.points[n_slots=16].interval.concentrated.throughput_tps.hi = 3492.43, rounded: the concentrated regime's 95% interval high end at 16 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=16].interval.concentrated.throughput_tps.hi = 3492.43, rounded."
     },
     {
       "value": "2889",
-      "how": "data/a5/analysis.json sweep.points[n_slots=16].interval.spread.throughput_tps.lo = 2889.08, rounded: the spread regime's 95% interval low end at 16 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=16].interval.spread.throughput_tps.lo = 2889.08, rounded."
     },
     {
       "value": "2948",
-      "how": "data/a5/analysis.json sweep.points[n_slots=16].interval.spread.throughput_tps.hi = 2947.51, rounded: the spread regime's 95% interval high end at 16 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=16].interval.spread.throughput_tps.hi = 2947.51, rounded."
     },
     {
       "value": "3320",
-      "how": "data/a5/analysis.json sweep.points[n_slots=32].interval.concentrated.throughput_tps.point = 3319.91, rounded: the concentrated regime's median at 32 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=32].interval.concentrated.throughput_tps.point = 3319.91, rounded."
     },
     {
       "value": "3308",
-      "how": "data/a5/analysis.json sweep.points[n_slots=32].interval.concentrated.throughput_tps.lo = 3307.57, rounded: the concentrated regime's 95% interval low end at 32 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=32].interval.concentrated.throughput_tps.lo = 3307.57, rounded."
     },
     {
       "value": "3353",
-      "how": "data/a5/analysis.json sweep.points[n_slots=32].interval.concentrated.throughput_tps.hi = 3353.38, rounded: the concentrated regime's 95% interval high end at 32 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=32].interval.concentrated.throughput_tps.hi = 3353.38, rounded."
     },
     {
       "value": "2422",
-      "how": "data/a5/analysis.json sweep.points[n_slots=32].interval.spread.throughput_tps.point = 2421.83, rounded: the spread regime's median at 32 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=32].interval.spread.throughput_tps.point = 2421.83, rounded."
     },
     {
       "value": "2411",
-      "how": "data/a5/analysis.json sweep.points[n_slots=32].interval.spread.throughput_tps.lo = 2410.91, rounded: the spread regime's 95% interval low end at 32 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=32].interval.spread.throughput_tps.lo = 2410.91, rounded."
     },
     {
       "value": "2431",
-      "how": "data/a5/analysis.json sweep.points[n_slots=32].interval.spread.throughput_tps.hi = 2430.54, rounded: the spread regime's 95% interval high end at 32 slots."
+      "how": "data/a5/analysis.json sweep.points[n_slots=32].interval.spread.throughput_tps.hi = 2430.54, rounded."
     },
     {
       "value": "1.1",
-      "how": "data/a5/analysis.json knee.doublings[n=2].point = 0.01094, as a percent to one decimal: the loss per doubling's point estimate at 2 slots."
+      "how": "data/a5/analysis.json knee.doublings[n=2].point = 0.01094, as a percent to one decimal."
     },
     {
       "value": "2.4",
-      "how": "data/a5/analysis.json knee.doublings[n=4].point = 0.02437, as a percent to one decimal: the loss per doubling's point estimate at 4 slots."
+      "how": "data/a5/analysis.json knee.doublings[n=4].point = 0.02437, as a percent to one decimal."
     },
     {
       "value": "1.2",
-      "how": "data/a5/analysis.json knee.doublings[n=4].lo = 0.01188, as a percent to one decimal: the loss per doubling's 95% interval low end at 4 slots."
+      "how": "data/a5/analysis.json knee.doublings[n=4].lo = 0.01188, as a percent to one decimal."
     },
     {
       "value": "3.8",
-      "how": "data/a5/analysis.json knee.doublings[n=4].hi = 0.03756, as a percent to one decimal: the loss per doubling's 95% interval high end at 4 slots."
+      "how": "data/a5/analysis.json knee.doublings[n=4].hi = 0.03756, as a percent to one decimal."
     },
     {
       "value": "5.3",
-      "how": "data/a5/analysis.json knee.doublings[n=8].point = 0.05340, as a percent to one decimal: the loss per doubling's point estimate at 8 slots."
+      "how": "data/a5/analysis.json knee.doublings[n=8].point = 0.05340, as a percent to one decimal."
     },
     {
       "value": "4.3",
-      "how": "data/a5/analysis.json knee.doublings[n=8].lo = 0.04262, as a percent to one decimal: the loss per doubling's 95% interval low end at 8 slots."
+      "how": "data/a5/analysis.json knee.doublings[n=8].lo = 0.04262, as a percent to one decimal."
     },
     {
       "value": "6.6",
-      "how": "data/a5/analysis.json knee.doublings[n=8].hi = 0.06638, as a percent to one decimal: the loss per doubling's 95% interval high end at 8 slots."
+      "how": "data/a5/analysis.json knee.doublings[n=8].hi = 0.06638, as a percent to one decimal."
     }
   ],
   "links": {
