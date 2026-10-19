@@ -54,8 +54,8 @@ padding:14px 16px;margin:10px 0}
 .grid2>.card{margin:0}
 .grid>.card{margin:0}
 .why{color:var(--muted);font-size:14px}
-.row{margin:6px 0}.row b{display:inline-block;min-width:96px;margin-right:6px;color:var(--muted);
-font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+.row{display:grid;grid-template-columns:104px 1fr;gap:10px;margin:6px 0;align-items:baseline}
+.row b{color:var(--muted);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
 .opt{display:inline-block;margin:2px 6px 2px 0;padding:2px 10px;border:1px solid var(--line);
 border-radius:99px;font-size:14px}.opt.chosen{background:var(--soft);border-color:var(--accent);
 font-weight:600}
@@ -123,9 +123,12 @@ font-size:14px;text-decoration:none;color:var(--fg)}
 .achip:hover{background:var(--soft)}
 .rcode{color:var(--accent);font-weight:700;margin-right:8px;font-variant-numeric:tabular-nums}
 @media (min-width:1100px){body{font-size:18px}h1{font-size:36px}h2{font-size:26px}h3{font-size:18px}
-.lead{font-size:21px}.why{font-size:16px}.row b{min-width:104px}}
+.lead{font-size:21px}.why{font-size:16px}}
 @media (max-width:600px){.diagram{display:none}.diagram-text{display:block}
 h1{font-size:24px}.lead{font-size:16px}
+.row{display:block}.row b{display:block;margin-bottom:1px}
+nav.pills{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+nav.pills::-webkit-scrollbar{display:none}nav.pills a{flex:none}
 .blabel,.btotal,.inum{font-size:15px}.segtext,.axlabel{font-size:14px}}
 """
 
@@ -148,9 +151,9 @@ def _concepts(c):
     for t in c["concepts"]:
         extra = ""
         if t.get("analogy"):
-            extra += f'<div class="row"><b>Like</b>{inline(t["analogy"])}</div>'
+            extra += f'<div class="row"><b>Like</b><div>{inline(t["analogy"])}</div></div>'
         if t.get("why"):
-            extra += f'<div class="row"><b>Matters</b>{inline(t["why"])}</div>'
+            extra += f'<div class="row"><b>Matters</b><div>{inline(t["why"])}</div></div>'
         cards.append(f'<div class="card"><h3>{esc(t["term"])}</h3>'
                      f'<div>{inline(t["plain"])}</div>{extra}</div>')
     title = "Need to know first" if c["kind"] == "artifact" else "The ideas"
@@ -179,14 +182,13 @@ def _decisions(c):
             for o in d["options"])
         cards.append(
             f'<div class="card" id="d-{esc(d["id"])}"><h3>{esc(d["title"])}</h3>'
-            f'<div class="row"><b>Problem</b>{inline(d["problem"])}</div>'
-            f'<div class="row"><b>Options</b>{opts}</div>'
-            f'<div class="row"><b>Chose</b>{inline(d["chosen"])}</div>'
-            f'<div class="row"><b>Because</b>{inline(d["why_short"])}</div>'
-            f'<div class="row cost"><b>Cost</b>{inline(d["cost_short"])}</div>'
+            f'<div class="row"><b>Problem</b><div>{inline(d["problem"])}</div></div>'
+            f'<div class="row"><b>Options</b><div>{opts}</div></div>'
+            f'<div class="row"><b>Because</b><div>{inline(d["why_short"])}</div></div>'
+            f'<div class="row cost"><b>Cost</b><div>{inline(d["cost_short"])}</div></div>'
             '<details class="more"><summary>Full reasoning and cost</summary>'
-            f'<div class="row"><b>Because</b>{inline(d["why"])}</div>'
-            f'<div class="row cost"><b>Cost</b>{inline(d["cost"])}</div></details></div>')
+            f'<div class="row"><b>Because</b><div>{inline(d["why"])}</div></div>'
+            f'<div class="row cost"><b>Cost</b><div>{inline(d["cost"])}</div></div></details></div>')
     return (f'<section id="decisions"><h2>Core decisions</h2>'
             f'<div class="grid2">{"".join(cards)}</div></section>')
 
@@ -202,8 +204,8 @@ def _results(c):
         cards.append(
             f'<div class="card" id="r-{i}"><h3>{esc(r["title"])}</h3>'
             f'{chart_html(r["chart"], f"r{i}")}'
-            f'<div class="row"><b>Axis</b>{inline(r["axis"])}</div>'
-            f'<div class="row"><b>Read it as</b>{inline(r["read_as"])}</div>{so}</div>')
+            f'<div class="row"><b>Axis</b><div>{inline(r["axis"])}</div></div>'
+            f'<div class="row"><b>Read it as</b><div>{inline(r["read_as"])}</div></div>{so}</div>')
     return (f'<section id="results"><h2>Results, as meaning</h2>'
             f'<div class="grid2">{"".join(cards)}</div></section>')
 

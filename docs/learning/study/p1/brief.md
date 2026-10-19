@@ -74,24 +74,7 @@ The main phases of a vLLM replica's cold start, in order (device setup and KV al
 - Q: Why is a compile cache more fragile than a weight cache?
   A: Its key includes the engine version, model, GPU and flags, all of which change routinely, so an upgrade silently makes it cold. Weights never change, so their cache stays valid until you switch models.
 
-## Sources
-
-- `docs/post.md`: ## What was measured
-- `docs/post.md`: ## The decomposition
-- `docs/post.md`: ## KV capacity — the second dividend
-- `docs/post.md`: ### The number that dwarfs all of them
-- `docs/post.md`: ## The four mechanisms
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### Module 1 — What lives in GPU memory
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### Module 2 — The KV cache, and why it *is* your concurrency limit
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### Module 3 — Why the engine runs the model before serving anyone
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### Module 4 — CUDA graphs: paying at startup to be faster later
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### Module 5 — Compilation, and the cache you did not know you had
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### Module 6 — What happens before your code exists
-- `docs/post-a2.md`: ## The question
-- `docs/post-a2.md`: ## What was measured and what was simulated
-- `docs/post-a2.md`: ## The service curve
-- `explainer/terms.json`: "continuous batching"
-- `docs/learning/progress.md`: Q is not cached, only K and V
+Sources: see the page
 
 ## Interview mode (paste this to an AI chat)
 

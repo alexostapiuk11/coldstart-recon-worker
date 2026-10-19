@@ -108,7 +108,6 @@ def test_brief_has_every_section_in_order():
         "## Results as meaning",
         "## Interview card",
         "## Recall questions",
-        "## Sources",
         "## Interview mode (paste this to an AI chat)",
     ]
 
@@ -558,3 +557,59 @@ def test_requirements_section_is_titled_and_shows_ids():
     assert why.startswith("<h2>Requirements that drove everything</h2>")
     assert '<span class="rcode">R1</span>' in why
     assert "Does the example hold?" not in why
+
+
+# ---- review fixes ----
+
+def _media(css, query):
+    return css.split(f"@media ({query})")[1].split("}}")[0]
+
+
+def test_rows_are_a_two_column_grid_that_stacks_on_phones():
+    from study.page import CSS
+    assert ".row{display:grid;grid-template-columns:104px 1fr;" in CSS
+    assert ".row{display:block}" in _media(CSS, "max-width:600px")
+
+
+def test_phone_nav_is_one_scrolling_row():
+    from study.page import CSS
+    phone = _media(CSS, "max-width:600px")
+    assert "nav.pills{flex-wrap:nowrap;overflow-x:auto" in phone
+    assert "nav.pills a{flex:none" in phone
+
+
+def test_decision_card_drops_the_chose_row_but_the_brief_keeps_it():
+    u = artifact_unit()
+    assert "<b>Chose</b>" not in render_page(u)
+    assert 'class="opt chosen"' in render_page(u)
+    assert "**Chosen:** Option one" in render_brief(u)
+
+
+def test_brief_requirement_lines_have_no_double_period():
+    u = artifact_unit()
+    u["requirements"][0]["text"] = "Change exactly one thing."
+    brief = render_brief(u)
+    assert "- Change exactly one thing. *Why:* Because 0." in brief
+    assert "- Requirement 1. *Why:* Because 1." in brief
+    assert ".." not in brief
+
+
+def test_brief_points_to_the_page_for_sources():
+    u = artifact_unit()
+    brief = render_brief(u)
+    assert "## Sources" not in brief and "docs/post.md" not in brief
+    assert "\nSources: see the page\n" in brief
+
+
+def test_brief_relationships_only_with_links():
+    assert "## Relationships" not in render_brief(artifact_unit())
+    brief = render_brief(artifact_unit_with_links())
+    heads = [ln for ln in brief.splitlines() if ln.startswith("## ")]
+    assert heads.index("## Relationships") == heads.index("## Core decisions") + 1
+    rel = brief.split("## Relationships")[1].split("\n## ")[0]
+    assert "- R1: Split one cold start into named phases." in rel
+    assert "  - `d1` Decision 1: d1 meets R1." in rel
+    assert "  - No decision: Served by the process: the flow's last step, not a decision." in rel
+    assert "- `d0` Decision 0 uses Arm: d0 is built on arms." in rel
+    assert "- A result → `d0` Decision 0, `d1` Decision 1" in rel
+    assert "- A side result → no decision: Reported for completeness; no decision rests on it." in rel

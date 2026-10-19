@@ -33,6 +33,40 @@ Rules:
 """
 
 
+def _sentence(text):
+    """The text ending in exactly one full stop (it may already end in one)."""
+    return text.rstrip().rstrip(".") + "."
+
+
+def _relationships(c):
+    """Who serves whom, as text: requirement -> decisions, decision -> concepts,
+    result -> decisions, each link with its stated reason."""
+    if not any("id" in r for r in c.get("requirements", [])):
+        return []
+    decisions = c["decisions"]
+    out = ["## Relationships", "", "**Requirements and the decisions that meet them:**", ""]
+    for r in c["requirements"]:
+        out.append(f"- {r['id']}: {r['text']}")
+        links = [(d, s) for d in decisions for s in d.get("serves", []) if s["req"] == r["id"]]
+        out += [f"  - `{d['id']}` {d['title']}: {s['because']}" for d, s in links]
+        if not links and r.get("unlinked_reason"):
+            out.append(f"  - No decision: {r['unlinked_reason']}")
+    terms = {k["id"]: k["term"] for k in c.get("concepts", []) if "id" in k}
+    uses = [f"- `{d['id']}` {d['title']} uses {terms[u['concept']]}: {u['because']}"
+            for d in decisions for u in d.get("uses", [])]
+    if uses:
+        out += ["", "**Decisions and the concepts they use:**", ""] + uses
+    titles = {d["id"]: d["title"] for d in decisions}
+    out += ["", "**Results and the decisions they support:**", ""]
+    for r in c.get("results", []):
+        ids = so_ids(r)
+        if ids:
+            out.append(f"- {r['title']} → " + ", ".join(f"`{i}` {titles[i]}" for i in ids))
+        elif r.get("so_none_reason"):
+            out.append(f"- {r['title']} → no decision: {r['so_none_reason']}")
+    return out + [""]
+
+
 def _bullets(items):
     return "\n".join(f"- {i}" for i in items)
 
@@ -46,7 +80,7 @@ def render_brief(c: dict) -> str:
     if c["kind"] == "artifact":
         out += ["## Why it exists", "", f"**Question:** {c['question']}", "",
                 "**Requirements that drove everything:**", ""]
-        out += [f"- {r['text']}. *Why:* {r['why']}" for r in c["requirements"]] + [""]
+        out += [f"- {_sentence(r['text'])} *Why:* {r['why']}" for r in c["requirements"]] + [""]
     else:
         out += ["## Concepts", "", f"Used by: {', '.join(c['used_by'])}", ""]
     if c.get("concepts"):
@@ -78,6 +112,7 @@ def render_brief(c: dict) -> str:
                     "**Options considered:**", "", _bullets(d["options"]), "",
                     f"**Chosen:** {d['chosen']}", "", f"**Why:** {d['why']}", "",
                     f"**Cost:** {d['cost']}", ""]
+    out += _relationships(c)
     if c.get("flow"):
         out += ["## Implementation flow", ""]
         out += [f"{i}. **{s['label']}**: {s['detail']}" for i, s in enumerate(c["flow"], 1)]
@@ -116,7 +151,6 @@ def render_brief(c: dict) -> str:
     out += ["## Recall questions", ""]
     for r in c["recall"]:
         out += [f"- Q: {r['q']}", f"  A: {r['a']}"]
-    out += ["", "## Sources", ""]
-    out += [f"- `{s['file']}`: {s['section']}" for s in c["sources"]]
-    out += ["", "## Interview mode (paste this to an AI chat)", "", INTERVIEW_PROMPT]
+    out += ["", "Sources: see the page", ""]
+    out += ["## Interview mode (paste this to an AI chat)", "", INTERVIEW_PROMPT]
     return "\n".join(out)

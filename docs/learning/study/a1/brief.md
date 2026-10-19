@@ -10,11 +10,11 @@ Paste this whole file into an AI chat, then paste the prompt at the end (it is a
 
 **Requirements that drove everything:**
 
-- Split one cold start into named phases, and label what cannot be attributed instead of hiding it.. *Why:* The two caches act on different phases: weights on loading, compile on engine start. One "startup" bar would hide half the experiment. And many published cold-start numbers quietly give all the time to stages the author could see; a named bucket for "time I cannot attribute, and why" is more credible.
-- Change exactly one thing between the set-ups being compared.. *Why:* Otherwise a difference cannot be pinned on a cache. Same image, entrypoint and engine flags for every arm; only the cache configuration differs.
-- Report the distribution and its uncertainty, not an average.. *Why:* Cold starts are skewed with a heavy tail, so a mean describes no real run. A claim like "cache X matters more" needs its own interval, not two point estimates side by side.
-- Fix the hypotheses, exclusion rules, stopping rule and headline rule before the first paid measurement run.. *Why:* The git timestamps then show the rules came before the data, later amendments are dated and labelled, and the headline cannot be picked by which result cost the most effort.
-- Run only proven code on paid GPUs, and let anyone re-derive every number on a laptop.. *Why:* The whole budget was $200, and debugging on live GPUs is what eats it. A number a reader cannot re-derive from the committed data is one they have to take on trust.
+- Split one cold start into named phases, and label what cannot be attributed instead of hiding it. *Why:* The two caches act on different phases: weights on loading, compile on engine start. One "startup" bar would hide half the experiment. And many published cold-start numbers quietly give all the time to stages the author could see; a named bucket for "time I cannot attribute, and why" is more credible.
+- Change exactly one thing between the set-ups being compared. *Why:* Otherwise a difference cannot be pinned on a cache. Same image, entrypoint and engine flags for every arm; only the cache configuration differs.
+- Report the distribution and its uncertainty, not an average. *Why:* Cold starts are skewed with a heavy tail, so a mean describes no real run. A claim like "cache X matters more" needs its own interval, not two point estimates side by side.
+- Fix the hypotheses, exclusion rules, stopping rule and headline rule before the first paid measurement run. *Why:* The git timestamps then show the rules came before the data, later amendments are dated and labelled, and the headline cannot be picked by which result cost the most effort.
+- Run only proven code on paid GPUs, and let anyone re-derive every number on a laptop. *Why:* The whole budget was $200, and debugging on live GPUs is what eats it. A number a reader cannot re-derive from the committed data is one they have to take on trust.
 
 ## Need to know first
 
@@ -281,54 +281,7 @@ Follow the step numbers. Clock A (laptop) brackets the whole job; clock B (worke
 - Q: Why does the warm compile cache leave more KV cache?
   A: vLLM sizes the KV cache from free memory measured during a profiling pass. On a cold arm the compiler's working set is resident during that pass, so less memory looks free, and the smaller cache stays for the replica's life.
 
-## Sources
-
-- `docs/post.md`: ## Headline ranking, by the pre-registered rule
-- `docs/post.md`: ## The decomposition
-- `docs/post.md`: ## The distribution, not the mean
-- `docs/post.md`: ## The two contrasts, and the interval on their difference
-- `docs/post.md`: ### The part the compile cache saves that isn't compilation
-- `docs/post.md`: ## KV capacity — the second dividend
-- `docs/post.md`: ## Ready is already fast
-- `docs/post.md`: ### Break-even, and why the two caches are not the same shape
-- `docs/post.md`: ## Host heterogeneity: not answerable
-- `docs/post.md`: ## Scope
-- `docs/post.md`: ## Reproducing this
-- `docs/experiment.md`: ## Configuration held fixed
-- `docs/experiment.md`: ## Arms
-- `docs/experiment.md`: ## Hypotheses
-- `docs/experiment.md`: ## Analysis plan
-- `docs/experiment.md`: ## Exclusion rules, fixed in advance
-- `docs/experiment.md`: ## Stopping decision, recorded
-- `docs/experiment.md`: ## Headline selection rule
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ## 1. Context and goal
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### Resource envelope
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### Variables
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### Deliberate exclusion — the baked-image arm
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### Sample plan
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### 6.1 Approach
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### 6.3 Two decisions worth calling out
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### 6.5 Clock discipline
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### 6.6 Failure handling
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### 6.8 Reconnaissance run — discovery before measurement
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### Statistical treatment
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ### Known limitation, stated not solved — cold-start contention
-- `docs/superpowers/specs/2026-08-17-cold-start-decomposition-design.md`: ## 9b. Learning guide
-- `harness/README.md`: ## What is here
-- `coldstart/cache_config.py`: class CacheConfig
-- `coldstart/driver.py`: def _record_from
-- `coldstart/schema.py`: class RunRecord
-- `worker/handler.py`: Snapshot the cache state BEFORE run_probe(), not after.
-- `worker/handler.py`: def _purge_cold_roots
-- `worker/probe.py`: def run_probe
-- `harness/campaign.py`: def check_resume
-- `harness/scheduler.py`: def build_schedule
-- `harness/recorder.py`: class StageRecorder
-- `harness/vllm_logs.py`: MERGED: list[str] = ["S4a", "S4d"]
-- `harness/stats.py`: def bootstrap_contrast_difference
-- `coldstart/checks.py`: def check_consistency
-- `coldstart/analysis/metrics.py`: t_total = t_total_job - warmup_tail
-- `harness/runpod/submitter.py`: poll_interval: float = 5.0
+Sources: see the page
 
 ## Interview mode (paste this to an AI chat)
 
