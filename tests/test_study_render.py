@@ -33,10 +33,20 @@ def test_diagram_gives_phone_a_text_alternative():
 
 def test_diagram_edges_stop_at_box_borders():
     # Two boxes in one row: the first edge must start right of box 0 and end left of box 1.
+    # The column gap widens to fit edge labels, so read the box positions from the SVG.
     out = diagram_html(artifact_unit()["views"][0], "u")
     line = re.search(r'<line class="edge" x1="([\d.]+)" y1="[\d.]+" x2="([\d.]+)"', out)
     x1, x2 = float(line.group(1)), float(line.group(2))
-    assert 24 + 170 <= x1 < x2 <= 24 + 170 + 50 + 2
+    rects = [float(x) for x in re.findall(r'<rect x="([\d.]+)"', out)]
+    assert rects[0] + 170 <= x1 < x2 <= rects[1]
+
+
+def test_diagram_column_gap_fits_the_widest_same_row_edge_label():
+    # "submits 3 jobs" is wider than the default 50 px gap; the label must sit between boxes.
+    out = diagram_html(artifact_unit()["views"][0], "u")
+    rects = [float(x) for x in re.findall(r'<rect x="([\d.]+)"', out)]
+    gap = rects[2] - (rects[1] + 170)
+    assert gap >= len("submits 3 jobs") * 6.2 + 8
 
 
 def test_stacked_chart_scales_segments_and_lists_a_legend():
@@ -96,3 +106,51 @@ def test_prereq_brief_skips_artifact_only_sections():
     brief = render_brief(prereq_unit())
     assert "## Core decisions" not in brief and "## Interview card" not in brief
     assert "## Concepts" in brief and "Used by: a1" in brief
+
+
+from study.page import render_page
+
+
+def test_page_is_self_contained_and_themed():
+    page = render_page(artifact_unit())
+    assert page.startswith("<!doctype html>")
+    assert "<title>Example Artifact</title>" in page
+    assert "<script src" not in page and "<link " not in page
+    assert "prefers-color-scheme: dark" in page and 'data-theme="dark"' in page
+    assert 'name="viewport"' in page
+
+
+def test_page_sections_in_the_specified_order():
+    page = render_page(artifact_unit())
+    ids = re.findall(r'<section id="([\w-]+)"', page)
+    assert ids == ["why", "concepts", "views", "decisions", "flow", "results", "interview",
+                   "recall", "sources"]
+
+
+def test_page_has_a_card_per_decision_and_results_link_back():
+    page = render_page(artifact_unit())
+    for i in range(4):
+        assert f'id="d-d{i}"' in page
+    assert 'href="#d-d0"' in page
+
+
+def test_recall_answers_are_hidden_until_revealed():
+    page = render_page(artifact_unit())
+    assert "<details" in page and "<summary>Why?</summary>" in page
+
+
+def test_all_four_views_render_as_tabs():
+    page = render_page(artifact_unit())
+    assert page.count('role="tab"') == 4 and page.count('role="tabpanel"') == 4
+
+
+def test_content_is_escaped():
+    u = artifact_unit()
+    u["question"] = "<script>alert(1)</script>"
+    assert "<script>alert(1)" not in render_page(u)
+
+
+def test_prereq_page_skips_artifact_sections():
+    from tests.study_examples import prereq_unit
+    ids = re.findall(r'<section id="([\w-]+)"', render_page(prereq_unit()))
+    assert ids == ["concepts", "views", "recall", "sources"]

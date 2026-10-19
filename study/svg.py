@@ -11,6 +11,10 @@ from __future__ import annotations
 from study.text import esc
 
 W, H, GX, GY, PAD = 170, 72, 50, 44, 24
+GAP = 2  # surface gap between stacked segments (dataviz mark spec)
+CHAR = 6.2  # estimated width of one 11 px edge-label character
+LABEL_CHARS = 18  # edge labels wrap at this many characters
+CHART_CHAR = 8.5  # width allowance per chart-text character (phone CSS sets up to 15 px)
 
 
 def _clip(cx, cy, tx, ty, hw, hh):
@@ -39,11 +43,16 @@ def diagram_html(view: dict, uid: str) -> str:
     nodes = {n["id"]: n for n in view["nodes"]}
     cols = max(n["col"] for n in nodes.values()) + 1
     rows = max(n["row"] for n in nodes.values()) + 1
-    width = PAD * 2 + cols * W + (cols - 1) * GX
+    edges = view.get("edges", [])
+    # Widen the column gap so a label on a same-row edge fits between the two boxes.
+    gx = max([GX] + [round(len(line) * CHAR) + 16 for e in edges
+                     if nodes[e["from"]]["row"] == nodes[e["to"]]["row"]
+                     for line in _wrap(e.get("label", ""), LABEL_CHARS)])
+    width = PAD * 2 + cols * W + (cols - 1) * gx
     height = PAD * 2 + rows * H + (rows - 1) * GY
 
     def center(n):
-        return PAD + n["col"] * (W + GX) + W / 2, PAD + n["row"] * (H + GY) + H / 2
+        return PAD + n["col"] * (W + gx) + W / 2, PAD + n["row"] * (H + GY) + H / 2
 
     head = (f'<svg class="diagram" viewBox="0 0 {width} {height}" role="img" '
             f'aria-label="{esc(view["title"])}" xmlns="http://www.w3.org/2000/svg">')
@@ -51,15 +60,17 @@ def diagram_html(view: dict, uid: str) -> str:
               'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
               '<path d="M0,0 L10,5 L0,10 z" class="arrow"/></marker></defs>')
     p = [head, marker]
-    for e in view.get("edges", []):
+    for e in edges:
         (ax, ay), (bx, by) = center(nodes[e["from"]]), center(nodes[e["to"]])
         x1, y1 = _clip(ax, ay, bx, by, W / 2 + 2, H / 2 + 2)
         x2, y2 = _clip(bx, by, ax, ay, W / 2 + 6, H / 2 + 6)
         p.append(f'<line class="edge" x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" '
                  f'y2="{y2:.1f}" marker-end="url(#arr-{esc(uid)})"/>')
-        if e.get("label"):
+        lines = _wrap(e.get("label", ""), LABEL_CHARS)
+        for i, line in enumerate(lines):
+            y = (y1 + y2) / 2 - 5 - (len(lines) - 1 - i) * 13
             p.append(f'<text class="elabel" x="{(x1 + x2) / 2:.1f}" '
-                     f'y="{(y1 + y2) / 2 - 5:.1f}" text-anchor="middle">{esc(e["label"])}</text>')
+                     f'y="{y:.1f}" text-anchor="middle">{esc(line)}</text>')
     for n in nodes.values():
         cx, cy = center(n)
         kind = n.get("kind", "system")
@@ -80,7 +91,7 @@ def diagram_html(view: dict, uid: str) -> str:
         sub = f" — {esc(n['sub'])}" if n.get("sub") else ""
         text.append(f'<li><strong>{esc(n["label"])}</strong>{sub}</li>')
     text.append("</ul><ol>")
-    for e in view.get("edges", []):
+    for e in edges:
         lab = f": {esc(e['label'])}" if e.get("label") else ""
         text.append(f'<li>{esc(nodes[e["from"]]["label"])} → '
                     f'{esc(nodes[e["to"]]["label"])}{lab}</li>')
@@ -95,7 +106,8 @@ def _num(v: float) -> str:
 def chart_html(chart: dict, uid: str) -> str:
     """Horizontal bars. `stacked_bars` stacks named segments; `bars` is one bar per item."""
     unit = esc(chart["unit"])
-    if chart["type"] == "stacked_bars":
+    stacked = chart["type"] == "stacked_bars"
+    if stacked:
         bars = [(b["label"], [(s["name"], s["value"]) for s in b["segments"]])
                 for b in chart["bars"]]
     else:
@@ -105,7 +117,10 @@ def chart_html(chart: dict, uid: str) -> str:
     full, pitch = 340.0, 58
     scale = full / max(totals)
     height = len(bars) * pitch + 4
-    p = [(f'<svg class="chart" viewBox="0 0 420 {height}" role="img" '
+    # Leave room after the longest bar for the longest total label, so none is clipped.
+    tail = max(len(f"{_num(t)} {chart['unit']}") for t in totals) * CHART_CHAR + 6
+    width = round(full + 6 + tail)
+    p = [(f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
           f'aria-label="{unit} by bar" xmlns="http://www.w3.org/2000/svg">')]
     for r, ((label, segs), total) in enumerate(zip(bars, totals)):
         y = r * pitch
@@ -113,17 +128,20 @@ def chart_html(chart: dict, uid: str) -> str:
         x = 0.0
         for name, v in segs:
             w = v * scale
-            cls = names.index(name) % 8 if chart["type"] == "stacked_bars" else 0
-            p.append(f'<rect class="seg s{cls}" x="{x:.1f}" y="{y + 20}" width="{w:.1f}" '
-                     f'height="26" rx="2"><title>{esc(name)}: {_num(v)} {unit}</title></rect>')
-            if w >= 34:
-                p.append(f'<text class="segtext" x="{x + w / 2:.1f}" y="{y + 37}" '
+            cls = names.index(name) % 8 if stacked else 0
+            # A 2 px surface gap separates touching segments; a sliver keeps its width.
+            drawn = w - GAP if w > 2 * GAP else w
+            p.append(f'<rect class="seg s{cls}" x="{x:.1f}" y="{y + 20}" width="{drawn:.1f}" '
+                     f'height="24" rx="2"><title>{esc(name)}: {_num(v)} {unit}</title></rect>')
+            # A plain bar's value is its total, shown at the tip; label stacked segments only.
+            if stacked and drawn >= len(_num(v)) * CHART_CHAR + 8:
+                p.append(f'<text class="segtext s{cls}" x="{x + drawn / 2:.1f}" y="{y + 36}" '
                          f'text-anchor="middle">{_num(v)}</text>')
             x += w
-        p.append(f'<text class="btotal" x="{x + 6:.1f}" y="{y + 38}">{_num(total)} {unit}</text>')
+        p.append(f'<text class="btotal" x="{x + 6:.1f}" y="{y + 36}">{_num(total)} {unit}</text>')
     p.append("</svg>")
     legend = ""
-    if chart["type"] == "stacked_bars":
+    if stacked:
         chips = "".join(f'<li><span class="chip s{i % 8}"></span>{esc(n)}</li>'
                         for i, n in enumerate(names))
         legend = f'<ul class="legend">{chips}</ul>'
