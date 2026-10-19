@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from study.schema import merged_segments, so_ids
-from study.text import resolve_links
+from study.schema import flow_phases, merged_segments, phased, so_ids
+from study.text import plural, resolve_links
 
 INTERVIEW_PROMPT = """\
 You are my interview coach. The brief above is the only ground truth about my project;
@@ -73,6 +73,41 @@ def _relationships(c):
     return out + [""]
 
 
+def _phased_flow(c):
+    """The flow grouped by phase, numbered on across phases; each step with its output,
+    date, decision and evidence commits, and milestones marked [MILESTONE]."""
+    flow = c["flow"]
+    titles = {d["id"]: d["title"] for d in c.get("decisions", [])}
+    phases = flow_phases(flow)
+    marks = [(n, s) for n, s in enumerate(flow, 1) if s.get("milestone")]
+    summary = (f"{plural(len(flow), 'step')} in {plural(len(phases), 'phase')}, "
+               f"{plural(len(marks), 'milestone')}.")
+    milestones = "; ".join(f"{n}. {s['label']} ({s['when']})" for n, s in marks)
+    out = [summary, "", f"Milestones: {milestones}."]
+    for i, (name, steps) in enumerate(phases, 1):
+        out += ["", f"### Phase {i} of {len(phases)}: {name} ({plural(len(steps), 'step')})",
+                ""]
+        for n, s in steps:
+            mark = " [MILESTONE]" if s.get("milestone") else ""
+            out.append(f"{n}. **{s['label']}**{mark}: {s['detail']}")
+            if s.get("output"):
+                out.append(f"   - Output: {s['output']}")
+            if s.get("when"):
+                out.append(f"   - When: {s['when']}")
+            if s.get("decision"):
+                out.append(f"   - Decision: `{s['decision']}` {titles[s['decision']]}")
+            if s.get("evidence"):
+                out.append("   - Evidence: " + "; ".join(_commit(e) for e in s["evidence"]))
+    return out
+
+
+def _commit(e):
+    """'abc1234 in ~/projects/x (note)': the repo only when it is not this one."""
+    repo = f" in {e['repo']}" if e.get("repo") else ""
+    note = f" ({e['note']})" if e.get("note") else ""
+    return f"{e['commit']}{repo}{note}"
+
+
 def _bullets(items):
     return "\n".join(f"- {i}" for i in items)
 
@@ -125,7 +160,10 @@ def render_brief(c: dict) -> str:
     out += _relationships(c)
     if c.get("flow"):
         out += ["## Implementation flow", ""]
-        out += [f"{i}. **{s['label']}**: {s['detail']}" for i, s in enumerate(c["flow"], 1)]
+        if phased(c):
+            out += _phased_flow(c)
+        else:
+            out += [f"{i}. **{s['label']}**: {s['detail']}" for i, s in enumerate(c["flow"], 1)]
         out.append("")
     if c.get("results"):
         out += ["## Results as meaning", ""]

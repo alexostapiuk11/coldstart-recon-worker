@@ -13,9 +13,9 @@ from __future__ import annotations
 
 from study.links import link_index, req_label, traced
 from study.map import MAP_CSS, MAP_JS, has_map, map_section
-from study.schema import phased, so_ids
+from study.schema import flow_phases, phased, so_ids
 from study.svg import chart_html, diagram_html, segment_slots
-from study.text import esc, inline, resolve_links, unit_url
+from study.text import esc, inline, plural, resolve_links, unit_url
 
 CSS = """
 :root{--bg:#fafaf7;--fg:#1d2330;--muted:#5b6475;--card:#fff;--line:#d9dce3;
@@ -401,21 +401,6 @@ def _plain_flow(c):
             f'<div class="flow">{steps}</div></section>')
 
 
-def _phases(flow):
-    """[(phase, [(step number, step), ...]), ...] in the order written; numbers run on
-    across phases from 1."""
-    out = []
-    for n, s in enumerate(flow, 1):
-        if not out or out[-1][0] != s.get("phase"):
-            out.append((s.get("phase"), []))
-        out[-1][1].append((n, s))
-    return out
-
-
-def _plural(n, word):
-    return f"{n} {word}" if n == 1 else f"{n} {word}s"
-
-
 def _evidence(ev):
     """Commits as plain monospace text: sha, then the repo when it is not this one, then
     the note."""
@@ -456,7 +441,7 @@ def _flow(c):
     flow = c["flow"]
     codes = link_index(c)["dec_code"]
     titles = {d["id"]: d["title"] for d in c.get("decisions", [])}
-    phases = _phases(flow)
+    phases = flow_phases(flow)
     marks = [(n, s) for n, s in enumerate(flow, 1) if s.get("milestone")]
     strip = "".join(f'<li><a href="#flow-s{n}"><span class="fl-sdate">{esc(s["when"])}</span>'
                     f'<span class="fl-slabel">{esc(s["label"])}</span></a></li>'
@@ -464,13 +449,13 @@ def _flow(c):
     body = []
     for i, (name, steps) in enumerate(phases, 1):
         head = (f'<div class="fl-band"><span class="fl-pn">Phase {i} of {len(phases)}</span>'
-                f'<h3>{esc(name)}</h3><span class="fl-pc">{_plural(len(steps), "step")}'
+                f'<h3>{esc(name)}</h3><span class="fl-pc">{plural(len(steps), "step")}'
                 "</span></div>")
         items = "".join(_flow_step(n, s, codes, titles) for n, s in steps)
         body.append(f'<div class="fl-phase">{head}<ol class="fl-steps" start="{steps[0][0]}">'
                     f"{items}</ol></div>")
-    summary = (f'{_plural(len(flow), "step")} in {_plural(len(phases), "phase")}, '
-               f'{_plural(len(marks), "milestone")}')
+    summary = (f'{plural(len(flow), "step")} in {plural(len(phases), "phase")}, '
+               f'{plural(len(marks), "milestone")}')
     return (f'<section id="flow"><h2>Implementation flow</h2>'
             f'<p class="why fl-sum">{summary}. Milestones are the points where something '
             'durable existed; jump to one:</p>'

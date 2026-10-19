@@ -187,6 +187,17 @@ def phased(c: dict) -> bool:
                for s in c.get("flow", []))
 
 
+def flow_phases(flow: list) -> list[tuple[str, list[tuple[int, dict]]]]:
+    """[(phase, [(step number, step), ...]), ...] in the order written; step numbers run
+    on across phases from 1."""
+    out = []
+    for n, s in enumerate(flow, 1):
+        if not out or out[-1][0] != s.get("phase"):
+            out.append((s.get("phase"), []))
+        out[-1][1].append((n, s))
+    return out
+
+
 def _flow_step(s, w):
     """One step's optional fields: phase, output, when, milestone, evidence. A milestone
     needs an output, a when and at least one evidence commit."""

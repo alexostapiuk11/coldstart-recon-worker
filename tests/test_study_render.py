@@ -1432,3 +1432,43 @@ def test_timeline_css_is_two_columns_wide_and_one_column_on_phones():
     assert ".fl-card{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr)" in wide
     assert ".fl-card{display:grid" not in CSS.split("@media")[0]
     assert "overflow-wrap:anywhere" in CSS.split(".fl-ev{")[1].split("}")[0]
+
+
+def _brief_flow(brief):
+    return brief.split("## Implementation flow\n")[1].split("\n## ")[0]
+
+
+def test_brief_plain_flow_is_unchanged():
+    assert _brief_flow(render_brief(artifact_unit())) == (
+        "\n1. **Step 0**: Detail 0.\n2. **Step 1**: Detail 1.\n3. **Step 2**: Detail 2.\n")
+
+
+def test_brief_phased_flow_is_numbered_and_grouped_by_phase():
+    flow = _brief_flow(render_brief(artifact_unit_with_flow()))
+    lines = flow.splitlines()
+    assert "8 steps in 3 phases, 3 milestones." in lines
+    assert ("Milestones: 2. Pre-register the hypotheses and rules (2026-08-28); "
+            "4. Run interleaved triples (2026-09-02 to 09-04); "
+            "8. Publish what re-derives (2026-09-12).") in lines
+    heads = [ln for ln in lines if ln.startswith("### ")]
+    assert heads == ["### Phase 1 of 3: Design (2 steps)", "### Phase 2 of 3: Measure (3 steps)",
+                     "### Phase 3 of 3: Analyse and publish (3 steps)"]
+    numbered = [ln.split(".")[0] for ln in lines if re.match(r"\d+\. ", ln)]
+    assert numbered == [str(i) for i in range(1, 9)]
+    i = lines.index("2. **Pre-register the hypotheses and rules** [MILESTONE]: Hypotheses, "
+                    "contrasts, stopping rules and the gate are committed before the first "
+                    "paid run.")
+    assert lines[i + 1:i + 5] == [
+        "   - Output: a frozen pre-registration in docs/experiment.md",
+        "   - When: 2026-08-28",
+        "   - Decision: `d1` Decision 1",
+        "   - Evidence: 5d6e7f8a9b",
+    ]
+    assert ("   - Evidence: abcdef0 (store committed); 0fedcba987 in ~/projects/other-repo "
+            "(worker image pinned)") in lines
+    assert sum("[MILESTONE]" in ln for ln in lines) == 3
+    j = lines.index("5. **Store, never retry**: A failure is its own row: a retry would swap "
+                    "unlucky runs for faster ones.")
+    assert lines[j + 1:j + 3] == ["   - Output: failure rows kept next to the successes",
+                                  "   - When: 2026-09-04"]
+    assert not lines[j + 3].startswith("   - ")

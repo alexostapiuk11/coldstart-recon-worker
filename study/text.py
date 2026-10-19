@@ -33,6 +33,11 @@ def inline(s: str) -> str:
     return re.sub(r"`(.+?)`", r"<code>\1</code>", out)
 
 
+def plural(n: int, word: str) -> str:
+    """'1 step', '3 steps'."""
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
 def wrap(text: str, width: int) -> list[str]:
     """Greedy word wrap into lines of at most `width` characters (longer words stay whole)."""
     lines, cur = [], ""
