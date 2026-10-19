@@ -31,7 +31,7 @@ CSS = """
 --c5:#008300;--c6:#9085e9;--c7:#e66767;--t6:#000;color-scheme:dark}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans-serif}
-main{max-width:860px;margin:0 auto;padding:0 16px 64px}
+main{max-width:1560px;margin:0 auto;padding:0 clamp(16px,4vw,56px) 64px}
 header.hero{padding:32px 0 8px}
 .kicker{color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.06em}
 h1{font-size:28px;line-height:1.2;margin:6px 0 10px}
@@ -47,7 +47,9 @@ section,.card[id]{scroll-margin-top:64px}
 a{color:var(--accent)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
 padding:14px 16px;margin:10px 0}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr));gap:12px;align-items:start}
+.grid2>.card{margin:0}
 .grid>.card{margin:0}
 .why{color:var(--muted);font-size:14px}
 .row{margin:6px 0}.row b{display:inline-block;min-width:96px;margin-right:6px;color:var(--muted);
@@ -70,7 +72,7 @@ font-weight:600}
 stroke-dasharray:4 3}.node.k-store rect{fill:var(--warnsoft);stroke:var(--warn)}
 .node.k-focus rect{fill:var(--soft);stroke-width:2.5}
 .nlabel{font-size:13px;font-weight:600;fill:var(--fg)}.nsub{font-size:11px;fill:var(--muted)}
-.chart{width:100%;max-width:520px;height:auto;display:block}
+.chart{width:100%;max-width:760px;height:auto;display:block}
 .blabel{font-size:12px;fill:var(--fg);font-weight:600}.segtext{font-size:11px}
 .btotal{font-size:12px;fill:var(--fg)}
 .seg.s0,.chip.s0{fill:var(--c0);background:var(--c0)}
@@ -98,6 +100,8 @@ details{background:var(--card);border:1px solid var(--line);border-radius:8px;
 padding:8px 12px;margin:6px 0}summary{cursor:pointer;font-weight:600}
 code{font-size:.92em;background:var(--soft);padding:1px 5px;border-radius:4px}
 footer.src{font-size:13px;color:var(--muted)}
+@media (min-width:1100px){body{font-size:18px}h1{font-size:36px}h2{font-size:26px}h3{font-size:18px}
+.lead{font-size:21px}.why{font-size:16px}.row b{min-width:104px}}
 @media (max-width:600px){.diagram{display:none}.diagram-text{display:block}
 h1{font-size:24px}.lead{font-size:16px}
 .blabel,.btotal{font-size:15px}.segtext{font-size:14px}}
@@ -158,7 +162,8 @@ def _decisions(c):
             f'<div class="row"><b>Chose</b>{inline(d["chosen"])}</div>'
             f'<div class="row"><b>Because</b>{inline(d["why"])}</div>'
             f'<div class="row cost"><b>Cost</b>{inline(d["cost"])}</div></div>')
-    return f'<section id="decisions"><h2>Core decisions</h2>{"".join(cards)}</section>'
+    return (f'<section id="decisions"><h2>Core decisions</h2>'
+            f'<div class="grid2">{"".join(cards)}</div></section>')
 
 
 def _results(c):
@@ -173,7 +178,8 @@ def _results(c):
             f'<div class="card"><h3>{esc(r["title"])}</h3>{chart_html(r["chart"], f"r{i}")}'
             f'<div class="row"><b>Axis</b>{inline(r["axis"])}</div>'
             f'<div class="row"><b>Read it as</b>{inline(r["read_as"])}</div>{so}</div>')
-    return f'<section id="results"><h2>Results, as meaning</h2>{"".join(cards)}</section>'
+    return (f'<section id="results"><h2>Results, as meaning</h2>'
+            f'<div class="grid2">{"".join(cards)}</div></section>')
 
 
 def _interview(c):
