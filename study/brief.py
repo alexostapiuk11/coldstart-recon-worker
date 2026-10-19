@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from study.schema import flow_phases, merged_segments, phased, so_ids
+from study.seq import numbered, step_line
 from study.text import plural, resolve_links
 
 INTERVIEW_PROMPT = """\
@@ -176,6 +177,17 @@ def _scatter_lines(ch):
     return out
 
 
+def _sequence_lines(v):
+    """The participants, then the steps as a numbered list; a gap is an indented line."""
+    out = [f"- **{p['label']}**" + (f": {p['sub']}" if p.get("sub") else "")
+           for p in v["participants"]]
+    names = {p["id"]: p["label"] for p in v["participants"]}
+    out.append("")
+    for s, n in zip(v["steps"], numbered(v["steps"])):
+        out.append(f"{n}. {step_line(s, names)}" if n else f"   {step_line(s, names)}")
+    return out + [""]
+
+
 def _bullets(items):
     return "\n".join(f"- {i}" for i in items)
 
@@ -211,6 +223,9 @@ def render_brief(c: dict) -> str:
         out += ["## System views (C4)" if c["kind"] == "artifact" else "## Views", ""]
         for v in c["views"]:
             out += [f"### {v['title']} ({v['level']})", "", v["caption"], ""]
+            if v.get("style") == "sequence":
+                out += _sequence_lines(v)
+                continue
             labels = {n["id"]: n["label"] for n in v["nodes"]}
             for n in v["nodes"]:
                 out.append(f"- **{n['label']}**" + (f": {n['sub']}" if n.get("sub") else ""))

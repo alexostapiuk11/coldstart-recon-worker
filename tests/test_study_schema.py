@@ -772,3 +772,102 @@ def test_scatter_frontier_runs_down_and_to_the_right():
     c = scatter_chart()
     c["frontier"]["name"] = "in-flight"
     _fails(_with(c), r"frontier\.name 'in-flight' is also a group name")
+
+
+from tests.study_examples import sequence_view
+
+
+def _with_sequence(view):
+    u = artifact_unit()
+    u["views"][3] = view
+    return u
+
+
+def test_a_sequence_view_can_be_the_dynamic_view_and_a_prereq_concept_view():
+    validate(_with_sequence(sequence_view()))
+    p = prereq_unit()
+    p["views"] = [sequence_view("concept")]
+    validate(p)
+    _fails(_with_sequence(sequence_view("timeline")), r"views\[3\]\.level 'timeline' not in")
+
+
+def test_a_sequence_view_needs_participants_and_steps_not_nodes():
+    v = sequence_view()
+    v["style"] = "swimlane"
+    _fails(_with_sequence(v), r"views\[3\]\.style 'swimlane' not in \('grid', 'sequence'\)")
+    v = sequence_view()
+    v["nodes"] = []
+    _fails(_with_sequence(v), r"views\[3\]: a sequence view takes participants and steps, "
+                              r"not nodes or edges")
+    v = sequence_view()
+    del v["participants"]
+    _fails(_with_sequence(v), r"views\[3\]: missing 'participants'")
+    v = sequence_view()
+    v["participants"] = v["participants"][:1]
+    _fails(_with_sequence(v), r"views\[3\]\.participants: needs 2 to 6 items, has 1")
+    v = sequence_view()
+    v["participants"] += [dict(v["participants"][0], id=f"x{i}") for i in range(2)]
+    _fails(_with_sequence(v), r"views\[3\]\.participants: needs 2 to 6 items, has 7")
+    v = sequence_view()
+    v["steps"] = v["steps"][:1]
+    _fails(_with_sequence(v), r"views\[3\]\.steps: needs 2 to 24 items, has 1")
+
+
+def test_sequence_participants_are_unique_bounded_and_of_a_known_kind():
+    v = sequence_view()
+    v["participants"][1]["id"] = "kafka"
+    _fails(_with_sequence(v), r"participants\[1\]: duplicate participant id 'kafka'")
+    v = sequence_view()
+    v["participants"][0]["label"] = "x" * 23
+    _fails(_with_sequence(v), r"participants\[0\]\.label longer than 22 characters")
+    v = sequence_view()
+    v["participants"][0]["sub"] = "x" * 31
+    _fails(_with_sequence(v), r"participants\[0\]\.sub longer than 30 characters")
+    v = sequence_view()
+    v["participants"][0]["kind"] = "robot"
+    _fails(_with_sequence(v), r"participants\[0\]\.kind 'robot' not in")
+
+
+def test_sequence_steps_name_real_participants_and_known_kinds():
+    v = sequence_view()
+    v["steps"][0]["to"] = "nobody"
+    _fails(_with_sequence(v), r"steps\[0\]\.to 'nobody' is not a participant id")
+    v = sequence_view()
+    del v["steps"][0]["to"]
+    _fails(_with_sequence(v), r"steps\[0\]: missing 'to'")
+    v = sequence_view()
+    v["steps"][5]["from"] = "ghost"
+    _fails(_with_sequence(v), r"steps\[5\]\.from 'ghost' is not a participant id")
+    v = sequence_view()
+    v["steps"][0]["kind"] = "teleport"
+    _fails(_with_sequence(v), r"steps\[0\]\.kind 'teleport' not in")
+    v = sequence_view()
+    v["steps"][5]["to"] = "ldb"
+    _fails(_with_sequence(v), r"steps\[5\]: a crash happens on one participant; drop 'to'")
+    v = sequence_view()
+    v["steps"][7]["from"] = "cons"
+    _fails(_with_sequence(v), r"steps\[7\]: a gap spans every lifeline; drop 'from'")
+
+
+def test_sequence_step_text_is_bounded_and_marks_are_known():
+    v = sequence_view()
+    v["steps"][0]["label"] = "x" * 49
+    _fails(_with_sequence(v), r"steps\[0\]\.label longer than 48 characters")
+    v = sequence_view()
+    v["steps"][0]["label"] = " "
+    _fails(_with_sequence(v), r"steps\[0\]\.label is empty")
+    v = sequence_view()
+    v["steps"][0]["text"] = "x" * 61
+    _fails(_with_sequence(v), r"steps\[0\]\.text longer than 60 characters")
+    v = sequence_view()
+    v["steps"][0]["mark"] = "triplicate"
+    _fails(_with_sequence(v), r"steps\[0\]\.mark 'triplicate' not in")
+    v = sequence_view()
+    v["steps"][3]["mark"] = "duplicate"
+    _fails(_with_sequence(v), r"steps\[3\]\.mark: only a message, reply or fault takes a mark")
+    v = sequence_view()
+    v["steps"][0]["badge"] = "twice"
+    _fails(_with_sequence(v), r"steps\[0\]\.badge needs a mark")
+    v = sequence_view()
+    v["steps"][11]["badge"] = "x" * 17
+    _fails(_with_sequence(v), r"steps\[11\]\.badge longer than 16 characters")

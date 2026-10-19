@@ -14,6 +14,7 @@ from __future__ import annotations
 from study.links import link_index, req_label, traced
 from study.map import MAP_CSS, MAP_JS, has_map, map_section
 from study.schema import flow_phases, phased, so_ids
+from study.seq import list_below, sequence_html
 from study.svg import chart_html, diagram_html, segment_slots
 from study.text import esc, inline, plural, resolve_links, unit_url
 
@@ -265,6 +266,57 @@ for (const g of document.querySelectorAll('[data-tabs]')) {
 }
 """
 
+# Sequence views (study.seq); shipped only on a page that has one.
+SEQ_CSS = """
+.sq{container-type:inline-size}.sqd{width:100%;height:auto;display:block}
+.sq-text{display:none;font-size:15px}.sq-text small{color:var(--muted);font-size:13px}
+.sq-text ul{margin:4px 0 8px;padding-left:20px}.sq-steps{margin:0;padding-left:28px}
+.sq-steps li{margin:4px 0}.sq-gapi{list-style:none;color:var(--muted);margin-left:-8px}
+.sqw{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+color:var(--muted)}.sqw-bad{color:var(--warn)}
+.sqbox{fill:var(--card);stroke:var(--accent);stroke-width:1.5}
+.k-person .sqbox{fill:var(--soft)}.k-external .sqbox{stroke:var(--muted);stroke-dasharray:4 3}
+.k-store .sqbox{fill:var(--warnsoft);stroke:var(--warn)}.k-focus .sqbox{fill:var(--soft);stroke-width:2.5}
+.sqh{font-size:14px;font-weight:600;fill:var(--fg)}.sqsub{font-size:12px;fill:var(--muted)}
+.sqlife{stroke:var(--muted);stroke-width:1.2;stroke-dasharray:5 5}
+.sqdown{stroke:var(--warn);stroke-width:2;stroke-dasharray:1.5 4;stroke-linecap:round}
+.sqa{fill:none;stroke:var(--fg);stroke-width:1.6}
+.sqreply{stroke:var(--muted);stroke-dasharray:6 4}
+.sqfault{stroke:var(--warn);stroke-width:2.2}
+.sqdup{stroke:var(--c7);stroke-width:2.6}
+.sqns{stroke-dasharray:6 4}.sqnsx{stroke:var(--warn);stroke-width:2.5;stroke-linecap:round}
+.sqah-solid{fill:var(--fg)}.sqah-open{fill:none;stroke:var(--muted);stroke-width:1.5}
+.sqah-fault{fill:var(--warn)}.sqah-dup{fill:var(--c7)}.sqbolt{fill:var(--warn)}
+.sqx{stroke:var(--warn);stroke-width:3.5;stroke-linecap:round}
+.sqnote{fill:var(--soft);stroke:var(--line)}.sqbreak{stroke:var(--muted);stroke-width:1.5}
+.sqnum{fill:var(--card);stroke:var(--muted);stroke-width:1.2}
+.sqn{font-size:12px;font-weight:700;fill:var(--fg)}
+.sqlabel{font-size:13px;fill:var(--fg)}.sqtext{font-size:12px;fill:var(--muted);font-style:italic}
+.sqcrash{font-size:13px;font-weight:700;fill:var(--warn)}
+.sqgap{font-size:13px;font-weight:600;font-style:italic;fill:var(--muted)}
+.sqbadge{fill:color-mix(in srgb,var(--warn) 16%,var(--card));stroke:var(--warn)}
+.sqbadge-dup{fill:color-mix(in srgb,var(--c7) 16%,var(--card));stroke:var(--c7)}
+.sqbt{font-size:12px;font-weight:700;fill:var(--fg)}
+.sqlabel,.sqtext,.sqcrash,.sqgap{paint-order:stroke;stroke:var(--card);stroke-width:4px;
+stroke-linejoin:round}.sqnotet{stroke:none}
+"""
+
+
+def seq_css(diagrams: list[tuple[str, float]]) -> str:
+    """SEQ_CSS, then for each (uid, width) a container query that swaps the diagram for
+    its text list below that width (study.seq.list_below)."""
+    rules = "".join(f"@container (max-width:{w:.0f}px){{#sq-{uid} .sqd{{display:none}}"
+                    f"#sq-{uid} .sqleg{{display:none}}#sq-{uid} .sq-text{{display:block}}}}\n"
+                    for uid, w in diagrams)
+    return SEQ_CSS + rules
+
+
+def _sequences(c):
+    """(uid, list width) for each sequence view on the page."""
+    return [(f"{c['id']}-{i}", list_below(v)) for i, v in enumerate(c.get("views", []))
+            if v.get("style") == "sequence"]
+
+
 LEVEL_NAMES = {"context": "1 Context", "container": "2 Containers",
                "component": "3 Components", "dynamic": "4 One run"}
 
@@ -343,9 +395,11 @@ def _views(c):
     for i, v in enumerate(c["views"]):
         name = LEVEL_NAMES.get(v["level"], v["title"])
         tabs.append(f'<button role="tab" aria-selected="false">{esc(name)}</button>')
+        uid = f"{c['id']}-{i}"
+        drawn = (sequence_html(v, uid) if v.get("style") == "sequence"
+                 else diagram_html(v, uid) + legend)
         panels.append(f'<div role="tabpanel"><h3>{esc(v["title"])}</h3>'
-                      f'<p class="why">{inline(v["caption"])}</p>'
-                      f'{diagram_html(v, f"{c["id"]}-{i}")}{legend}</div>')
+                      f'<p class="why">{inline(v["caption"])}</p>{drawn}</div>')
     head = "System views" + (" (C4)" if c["kind"] == "artifact" else "")
     return (f'<section id="views"><h2>{head}</h2><div class="card" data-tabs>'
             f'<div class="tabs" role="tablist">{"".join(tabs)}</div>{"".join(panels)}</div>'
@@ -557,6 +611,8 @@ def render_page(c: dict) -> str:
         f'{count}</summary><ul>{src}</ul></details></section>')
 
     css, js = (CSS + MAP_CSS, JS + MAP_JS) if has_map(c) else (CSS, JS)
+    if _sequences(c):
+        css += seq_css(_sequences(c))
     if art:
         lead = f'<p class="lead">{inline(c["question"])}</p>{_answer_first(c)}'
     else:

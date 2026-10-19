@@ -2166,3 +2166,231 @@ def test_end_labels_stay_off_the_series_lines():
         for seg in _segments(out):
             assert not _crosses(seg, (left, y - 12, left + w, y + 3)), (txt, seg)
     _xy_texts_inside(out)
+
+
+from study.seq import sequence_html
+from tests.study_examples import sequence_view
+
+
+def _sq_lifelines(out):
+    """{participant id: x} from the header boxes, and every lifeline piece as (id, class,
+    x, y1, y2)."""
+    heads = {m.group(1): float(m.group(2)) for m in re.finditer(
+        r'<g class="sqp[^"]*" data-id="([^"]+)" data-x="([\d.]+)"', out)}
+    lines = [(m.group(2), m.group(1), float(m.group(3)), float(m.group(4)), float(m.group(5)))
+             for m in re.finditer(r'<line class="(sqlife[^"]*)" data-p="([^"]+)" x1="([\d.]+)" '
+                                  r'y1="([\d.]+)" x2="\3" y2="([\d.]+)"', out)]
+    return heads, lines
+
+
+def _sq_steps(out):
+    """(kind and mark classes, number or '', y) for every step, in document order."""
+    return [(m.group(1), m.group(2), float(m.group(3))) for m in re.finditer(
+        r'<g class="sqs ([^"]*)" data-n="(\d*)" data-y="([\d.]+)"', out)]
+
+
+def _sq_arrows(out):
+    return [(m.group(1), float(m.group(2)), float(m.group(3)), float(m.group(4)),
+             float(m.group(5))) for m in re.finditer(
+        r'<(?:line|path) class="(sqa[^"]*)" x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" '
+        r'y2="([\d.]+)"', out)]
+
+
+def test_sequence_lifelines_run_left_to_right_in_participant_order_under_their_boxes():
+    v = sequence_view()
+    out = sequence_html(v, "s0")
+    heads, lines = _sq_lifelines(out)
+    ids = [p["id"] for p in v["participants"]]
+    assert list(heads) == ids
+    xs = [heads[i] for i in ids]
+    assert xs == sorted(xs) and len(set(xs)) == len(xs)
+    for pid, _, x, y1, y2 in lines:
+        assert abs(x - heads[pid]) < 0.05 and y2 > y1
+    # every box sits above every step; no label is drawn up in the header band
+    box_bottom = max(float(y) + float(h) for y, h in re.findall(
+        r'<rect class="sqbox" x="[\d.]+" y="([\d.]+)" width="[\d.]+" height="([\d.]+)"', out))
+    assert all(y > box_bottom for _, _, y in _sq_steps(out))
+    for cls, x, y, anchor, txt in _texts(out):
+        if cls not in ("sqh", "sqsub"):
+            assert y - 12 > box_bottom, txt
+
+
+def test_sequence_steps_stack_top_to_bottom_with_numbers_at_the_left():
+    v = sequence_view()
+    out = sequence_html(v, "s1")
+    steps = _sq_steps(out)
+    assert len(steps) == len(v["steps"])
+    ys = [y for _, _, y in steps]
+    assert ys == sorted(ys) and len(set(ys)) == len(ys)
+    # the gap is not numbered; the steps after it go on counting
+    assert [n for _, n, _ in steps] == [str(i) for i in range(1, 8)] + [""] + [
+        str(i) for i in range(8, 13)]
+    heads, _ = _sq_lifelines(out)
+    nums = [(t[1], t[4]) for t in _texts(out) if t[0] == "sqn"]
+    assert [t for _, t in nums] == [str(i) for i in range(1, 13)]
+    assert all(x < min(heads.values()) - 40 for x, _ in nums)
+
+
+def test_sequence_message_arrows_join_their_lifelines_and_labels_sit_above_them():
+    v = sequence_view()
+    out = sequence_html(v, "s2")
+    heads, _ = _sq_lifelines(out)
+    arrows = _sq_arrows(out)
+    first = arrows[0]
+    assert first[0].startswith("sqa")
+    # kafka -> cons: from the kafka lifeline towards the consumer's, horizontal
+    assert abs(first[1] - heads["kafka"]) < 0.05 and first[2] == first[4]
+    assert abs(first[3] - heads["cons"]) < 12 and first[3] < heads["cons"]
+    label = next(t for t in _texts(out) if t[4] == "poll returns (1, 646)")
+    assert label[3] == "middle" and abs(label[1] - (heads["kafka"] + heads["cons"]) / 2) < 0.05
+    assert first[2] - 20 < label[2] < first[2]
+    # a reply is dashed, a fault is in the warning colour, a self message loops back
+    assert re.search(r'class="sqa sqreply"', out)
+    assert re.search(r'class="sqa sqfault"', out)
+    assert re.search(r'<path class="sqa sqself" d="M[\d.]+ [\d.]+h[\d.]+v[\d.]+h-', out)
+    from study.page import seq_css
+    css = seq_css([])
+    assert "stroke-dasharray" in css.split(".sqreply{")[1].split("}")[0]
+    assert "var(--warn)" in css.split(".sqfault{")[1].split("}")[0]
+
+
+def test_sequence_crash_draws_an_x_on_its_lifeline_and_the_lifeline_goes_down():
+    v = sequence_view()
+    out = sequence_html(v, "s3")
+    heads, lines = _sq_lifelines(out)
+    crash = next(s for s in _sq_steps(out) if "sq-crash" in s[0])
+    x = re.search(r'<path class="sqx" data-x="([\d.]+)" data-y="([\d.]+)"', out)
+    assert abs(float(x.group(1)) - heads["cons"]) < 0.05
+    assert abs(float(x.group(2)) - crash[2]) < 0.05
+    assert ">killed before commitSync<" in out
+    # the consumer's lifeline is drawn as down from the crash until it is restarted
+    down = [ln for ln in lines if ln[0] == "cons" and "sqdown" in ln[1]]
+    assert down and abs(down[0][3] - crash[2]) < 0.05
+    restart = next(s for s in _sq_steps(out) if s[1] == "8")
+    assert abs(down[-1][4] - restart[2]) < 12
+    from study.page import seq_css
+    assert "var(--warn)" in seq_css([]).split(".sqx{")[1].split("}")[0]
+
+
+def test_sequence_gap_breaks_every_lifeline_and_is_labelled():
+    v = sequence_view()
+    out = sequence_html(v, "s4")
+    heads, lines = _sq_lifelines(out)
+    gap = next(s for s in _sq_steps(out) if "sq-gap" in s[0])
+    for pid in heads:
+        # no lifeline piece of any participant runs through the gap's band
+        assert not any(y1 < gap[2] < y2 for p, _, _, y1, y2 in lines if p == pid), pid
+    assert len(re.findall(r'class="sqbreak"', out)) == len(heads)
+    label = next(t for t in _texts(out) if t[4] == "4.4 s later")
+    assert "sqgap" in label[0] and abs(label[2] - gap[2]) < 12
+
+
+def test_sequence_note_covers_its_participants():
+    v = sequence_view()
+    out = sequence_html(v, "s5")
+    heads, _ = _sq_lifelines(out)
+    notes = [tuple(map(float, m)) for m in re.findall(
+        r'<rect class="sqnote" x="([\d.]+)" y="[\d.]+" width="([\d.]+)"', out)]
+    one, wide = notes
+    assert one[0] < heads["cons"] < one[0] + one[1]
+    assert wide[0] < heads["kafka"] and wide[0] + wide[1] > heads["ldb"]
+    assert ">ledger committed, Kafka progress not<" in out
+
+
+def test_sequence_duplicate_and_never_sent_are_drawn_apart_and_badged():
+    v = sequence_view()
+    out = sequence_html(v, "s6")
+    dups = [a for a in _sq_arrows(out) if "sqdup" in a[0]]
+    assert len(dups) == 2
+    assert re.search(r'class="sqa sqns"', out)
+    assert ">applied twice<" in out and ">duplicate<" in out and ">never sent<" in out
+    from study.page import seq_css
+    css = seq_css([])
+    assert "var(--c7)" in css.split(".sqdup{")[1].split("}")[0]
+    assert "stroke-dasharray" in css.split(".sqns{")[1].split("}")[0]
+    assert not re.search(r'(fill|stroke)="#', out)
+
+
+def test_sequence_viewbox_fits_every_text_and_grows_with_the_sq_steps():
+    v = sequence_view()
+    out = sequence_html(v, "s7")
+    w, h = _box(out)
+    for cls, x, y, anchor, txt in _texts(out):
+        cw = {"sqh": 8.6, "sqtext": 6.8, "sqsub": 6.8, "sqbt": 7.3}.get(cls.split()[0], 7.4)
+        tw = len(html.unescape(txt)) * cw
+        left = {"end": x - tw, "middle": x - tw / 2}.get(anchor, x)
+        assert left >= -0.5 and left + tw <= w + 0.5, txt
+        assert y - 12 >= 0 and y + 4 <= h, txt
+    v2 = sequence_view()
+    v2["steps"] += v2["steps"][:2]
+    assert _box(sequence_html(v2, "s7"))[1] > h
+
+
+def test_sequence_has_a_phone_list_that_says_crash_gap_and_duplicate_in_words():
+    v = sequence_view()
+    out = sequence_html(v, "s8")
+    text = out.split('<div class="sq-text">', 1)[1]
+    items = re.findall(r"<li[^>]*>(.*?)</li>", text.split("<ol", 1)[1])
+    assert len(items) == len(v["steps"])
+    plain = [re.sub(r"<[^>]+>", "", i) for i in items]
+    assert plain[0] == "Kafka partition 1 → consumer-A: poll returns (1, 646) (payment p00004001)"
+    assert plain[5] == "crash consumer-A: killed before commitSync"
+    assert plain[6].endswith("never sent") and plain[7] == "gap: 4.4 s later"
+    assert plain[11].endswith("applied twice") and plain[10].endswith("duplicate")
+    assert "fault" in plain[4] and "reply" in plain[2] and plain[3].startswith("note")
+    assert re.search(r'<li value="8">', text)  # numbering skips the gap
+    from study.page import seq_css
+    css = seq_css([("s8", 900.0)])
+    assert "@container (max-width:900px)" in css and "#sq-s8 .sqd{display:none}" in css
+    assert "#sq-s8 .sq-text{display:block}" in css
+
+
+def test_sequence_aria_label_names_the_title_and_each_step():
+    out = sequence_html(sequence_view(), "s9")
+    aria = re.search(r'<svg class="sqd"[^>]* aria-label="([^"]+)"', out).group(1)
+    assert aria.startswith("Sequence: A crash between the two commits. 1. Kafka partition 1")
+    assert "[crash]" in aria and "[duplicate]" in aria
+
+
+def test_page_draws_a_sequence_view_in_its_tab_and_ships_its_css_only_then():
+    u = artifact_unit()
+    plain_page = render_page(u)
+    assert ".sqd{" not in plain_page
+    u["views"][3] = sequence_view()
+    page = render_page(u)
+    assert '<button role="tab" aria-selected="false">4 One run</button>' in page
+    assert 'class="sqd"' in page and ".sqd{" in page and "#sq-x1-3 .sqd" in page
+    # the grid legend belongs to grid views only
+    panel = page.split('<div role="tabpanel">')[4]
+    assert "solid box: part of this system" not in panel
+    assert "dashed arrow: a reply" in panel
+
+
+def test_brief_lists_a_sequence_as_numbered_sq_steps():
+    u = artifact_unit()
+    u["views"][3] = sequence_view()
+    brief = render_brief(u)
+    sec = brief.split("### A crash between the two commits (dynamic)")[1].split("##")[0]
+    assert "- **consumer-A**: stack N" in sec
+    lines = [ln for ln in sec.splitlines() if re.match(r"\s*(\d+\.|\()", ln)]
+    assert lines[0] == "1. Kafka partition 1 -> consumer-A: poll returns (1, 646) (payment p00004001)"
+    assert lines[2] == "3. ledger-db -> consumer-A: committed [reply]"
+    assert lines[3] == "4. Note over consumer-A: ledger committed, Kafka progress not"
+    assert lines[4] == "5. Orchestrator -> consumer-A: SIGKILL [fault]"
+    assert lines[5] == "6. consumer-A: killed before commitSync [crash]"
+    assert lines[6] == "7. consumer-A -> Group coordinator: commitSync({1: 647}) [never sent]"
+    assert lines[7] == "   (gap: 4.4 s later)"
+    assert lines[10] == "10. Kafka partition 1 -> consumer-A: poll redelivers (1, 646) [duplicate]"
+    assert lines[11] == ("11. consumer-A -> ledger-db: COMMIT again (db_txid 1899467) "
+                         "[applied twice]")
+    assert lines[12] == ("12. Note over Kafka partition 1 to ledger-db: same (partition, "
+                         "offset) twice: consumer side")
+
+
+def test_sequence_labels_are_traced_like_other_text(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\noffset 646, txid 1898860\n")
+    u = artifact_unit()
+    u["results"] = []
+    u["sources"] = [{"file": src, "section": "Title"}]
+    u["views"][3] = sequence_view()
+    assert sorted(untraced_numbers(u)) == sorted(["00004001", "647", "4.4", "1899467"])

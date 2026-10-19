@@ -228,3 +228,44 @@ def scatter_chart(**extra) -> dict:
         "frontier": {"name": "best p99 at each cost",
                      "points": [{"x": 880, "y": 14.44}, {"x": 2535, "y": 14.4}]},
     }, **extra))
+
+
+def sequence_view(level: str = "dynamic") -> dict:
+    """A `sequence` view: one consumer applies a payment, is killed before it records its
+    Kafka progress, and applies the redelivered payment again 4.4 s later. Every step
+    kind (message, reply, note, crash, fault, gap) and mark (duplicate, never_sent)."""
+    return copy.deepcopy({
+        "level": level, "style": "sequence",
+        "title": "A crash between the two commits",
+        "caption": "The ledger commit lands, the Kafka commit never does, so the batch "
+                   "comes back.",
+        "participants": [
+            {"id": "kafka", "label": "Kafka partition 1", "kind": "system"},
+            {"id": "grp", "label": "Group coordinator", "kind": "system"},
+            {"id": "cons", "label": "consumer-A", "sub": "stack N", "kind": "focus"},
+            {"id": "ldb", "label": "ledger-db", "kind": "store"},
+            {"id": "orch", "label": "Orchestrator", "sub": "injects faults",
+             "kind": "external"},
+        ],
+        "steps": [
+            {"from": "kafka", "to": "cons", "label": "poll returns (1, 646)",
+             "text": "payment p00004001"},
+            {"from": "cons", "to": "ldb", "label": "BEGIN, apply, COMMIT",
+             "text": "db_txid 1898860"},
+            {"from": "ldb", "to": "cons", "kind": "reply", "label": "committed"},
+            {"from": "cons", "kind": "note", "label": "ledger committed, Kafka progress not"},
+            {"from": "orch", "to": "cons", "kind": "fault", "label": "SIGKILL"},
+            {"from": "cons", "kind": "crash", "label": "killed before commitSync"},
+            {"from": "cons", "to": "grp", "label": "commitSync({1: 647})",
+             "mark": "never_sent"},
+            {"kind": "gap", "label": "4.4 s later"},
+            {"from": "orch", "to": "cons", "label": "docker start"},
+            {"from": "cons", "to": "cons", "label": "rejoin as generation 2"},
+            {"from": "kafka", "to": "cons", "label": "poll redelivers (1, 646)",
+             "mark": "duplicate"},
+            {"from": "cons", "to": "ldb", "label": "COMMIT again", "text": "db_txid 1899467",
+             "mark": "duplicate", "badge": "applied twice"},
+            {"from": "kafka", "to": "ldb", "kind": "note",
+             "label": "same (partition, offset) twice: consumer side"},
+        ],
+    })

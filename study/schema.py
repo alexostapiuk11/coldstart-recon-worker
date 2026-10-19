@@ -41,6 +41,16 @@ MAX_EVIDENCE_NOTE = 80
 PHASED_STEPS = (5, 12)
 MILESTONES = (2, 6)
 SHA = re.compile(r"[0-9a-f]{7,40}")
+# Views: a grid of nodes and edges (the default), or a sequence of steps (see _sequence).
+VIEW_STYLES = ("grid", "sequence")
+SEQ_KINDS = ("message", "reply", "note", "crash", "fault", "gap")
+# A step's mark, and the word its badge shows unless the step gives a `badge`.
+SEQ_MARKS = {"duplicate": "duplicate", "never_sent": "never sent", "lost": "lost"}
+MAX_SEQ_STEPS = 24
+MAX_SEQ_LABEL = 48
+MAX_SEQ_SUB = 30  # one line under a participant's name
+MAX_SEQ_TEXT = 60
+MAX_BADGE = 16
 
 
 class ContentError(ValueError):
@@ -581,11 +591,73 @@ def _scatter(ch, where):
             last = (x, y)
 
 
+def _sequence(v, where):
+    """A sequence view: participants (2 to 6 lifelines, left to right) and steps (2 to 24,
+    top to bottom). A step is {from, to, label, optional kind, mark, badge, text}:
+
+    - message (the default), reply, fault: an arrow from one participant to another (or to
+      itself); only these take a `mark` (MARKS), and `badge` replaces the mark's word;
+    - crash: an X on `from`'s lifeline; no `to`;
+    - note: a box over `from` (to `to`, when given);
+    - gap: time passing across every lifeline; no `from` or `to`.
+    """
+    if "nodes" in v or "edges" in v:
+        raise ContentError(f"{where}: a sequence view takes participants and steps, not "
+                           "nodes or edges")
+    ids = set()
+    for i, p in enumerate(_items(v, "participants", where, at_least=2, at_most=6,
+                                 fields=("id", "label"))):
+        w = f"{where}.participants[{i}]"
+        if p["id"] in ids:
+            raise ContentError(f"{w}: duplicate participant id '{p['id']}'")
+        ids.add(p["id"])
+        _label(p, "label", w)
+        if len(p["label"]) > MAX_LABEL:
+            raise ContentError(f"{w}.label longer than {MAX_LABEL} characters")
+        _opt_str(p, "sub", w, MAX_SEQ_SUB)
+        if p.get("kind", "system") not in NODE_KINDS:
+            raise ContentError(f"{w}.kind '{p['kind']}' not in {NODE_KINDS}")
+    for i, s in enumerate(_items(v, "steps", where, at_least=2, at_most=MAX_SEQ_STEPS)):
+        w = f"{where}.steps[{i}]"
+        kind = s.get("kind", "message") if isinstance(s, dict) else None
+        if kind not in SEQ_KINDS:
+            raise ContentError(f"{w}.kind '{kind}' not in {SEQ_KINDS}")
+        _label(s, "label", w)
+        if len(s["label"]) > MAX_SEQ_LABEL:
+            raise ContentError(f"{w}.label longer than {MAX_SEQ_LABEL} characters")
+        _opt_str(s, "text", w, MAX_SEQ_TEXT)
+        ends = {"gap": (), "crash": ("from",), "note": ("from",)}.get(kind, ("from", "to"))
+        for end in ends:
+            if _get(s, end, str, w) not in ids:
+                raise ContentError(f"{w}.{end} '{s[end]}' is not a participant id")
+        if kind == "note" and "to" in s and _get(s, "to", str, w) not in ids:
+            raise ContentError(f"{w}.to '{s['to']}' is not a participant id")
+        if kind == "crash" and "to" in s:
+            raise ContentError(f"{w}: a crash happens on one participant; drop 'to'")
+        if kind == "gap" and ("from" in s or "to" in s):
+            raise ContentError(f"{w}: a gap spans every lifeline; drop 'from' and 'to'")
+        if "mark" in s:
+            if _get(s, "mark", str, w) not in SEQ_MARKS:
+                raise ContentError(f"{w}.mark '{s['mark']}' not in {tuple(SEQ_MARKS)}")
+            if kind not in ("message", "reply", "fault"):
+                raise ContentError(f"{w}.mark: only a message, reply or fault takes a mark")
+        if "badge" in s:
+            if "mark" not in s:
+                raise ContentError(f"{w}.badge needs a mark")
+            _opt_str(s, "badge", w, MAX_BADGE)
+
+
 def _view(v, where, allowed):
     for f in ("level", "title", "caption"):
         _get(v, f, str, where)
     if v["level"] not in allowed:
         raise ContentError(f"{where}.level '{v['level']}' not in {allowed}")
+    style = v.get("style", "grid")
+    if style not in VIEW_STYLES:
+        raise ContentError(f"{where}.style '{style}' not in {VIEW_STYLES}")
+    if style == "sequence":
+        _sequence(v, where)
+        return
     nodes = _items(v, "nodes", where, at_least=2, fields=("id", "label"))
     ids, cells = set(), set()
     for i, n in enumerate(nodes):
