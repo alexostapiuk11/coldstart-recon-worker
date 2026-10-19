@@ -1,0 +1,2141 @@
+{
+  "id": "a6",
+  "kind": "artifact",
+  "title": "Which duplicate-payment defense holds",
+  "short_title": "Duplicate Payment Defenses",
+  "minutes": 45,
+  "question": "**Campaign running; results pending: this page shows requirements, design, predictions and controls only.** A payment service records each payment in its own database and publishes it to Kafka; a ledger consumer applies it to balances in a second Postgres. Under real broker, process and network faults, which defense keeps every recorded payment applied exactly once: none (N), [Kafka transactions](p3:idempotence) (K), an [idempotency key at the sink](p3:key) (I), or an [outbox](p3:dualwrite) plus that key (O+I)? And at which boundary does each one stop? One laptop, public software, 760 pre-registered trials.",
+  "requirements": [
+    {
+      "id": "R1",
+      "short": "Reconcile against the source",
+      "text": "Every payment committed in the source database is applied exactly once, and every balance equals opening + credits − debits over the source's payments, computed without reading anything the consumer wrote.",
+      "why": "The source row is the business record of the payment. Conservation alone is useless here: double-entry keeps the total constant, so a duplicate or a loss never trips it. The review upgraded the invariant to per-account reconciliation."
+    },
+    {
+      "id": "R2",
+      "short": "Say where each anomaly was born",
+      "text": "Attribute every loss and every extra apply to the producer side (source ↔ Kafka), the consumer side (Kafka ↔ ledger), or unattributable.",
+      "why": "The defenses guard different boundaries, so a count without a birthplace cannot say which one failed. Unattributable applies are reported, never split by guesswork."
+    },
+    {
+      "id": "R3",
+      "short": "One change per contrast",
+      "text": "Compare whole pipelines in which each contrast, N→K, N→I and I→O+I, adds exactly one defense.",
+      "why": "The four defenses do not sit on one axis: ranked head to head, they would compare things at different layers."
+    },
+    {
+      "id": "R4",
+      "short": "Real faults: whether, and how often",
+      "text": "Inject real kills, pauses and network blackholes, at code hooks in the weakest window (can it break?) and at random times (how often?), and confirm each fault took effect.",
+      "why": "The closest prior work simulated its faults inside the application. Random faults rarely land in narrow windows, so without targeted cells a zero would mean little."
+    },
+    {
+      "id": "R5",
+      "short": "A zero must be able to fail",
+      "text": "Before the campaign, show in real trials that the checker catches a duplicate and a loss when they happen, and stays silent when no fault runs.",
+      "why": "A zero only means something if the harness can see a nonzero ([controls](p3:controls))."
+    },
+    {
+      "id": "R6",
+      "short": "Rules fixed before measured trials",
+      "text": "Commit the hypotheses, fault matrix, void rules, gate and analysis before the first measured trial; no early stopping, no extension, and no anomaly output read until the campaign ends.",
+      "why": "With 4 stacks × 9 cells, a result can be argued into shape afterwards. A [pre-registration](p2:prereg) tag and dated [amendments](p2:amendment) show which rules came first; reconnaissance ran before the tag and is not a result."
+    }
+  ],
+  "concepts": [
+    {
+      "id": "stacks",
+      "short": "Four stacks, three contrasts",
+      "term": "The four stacks and their contrasts",
+      "plain": "Same client, topic, two consumers, schema and failure policy; only the defense differs. **N**: dual write, [at-least-once](p3:atleast) consumer. **K**: dual write, consumer offsets inside a Kafka transaction. **I**: dual write, key checked in the ledger transaction. **O+I**: outbox relayed by Debezium, plus the key. **N→K**, **N→I** and **I→O+I** each add one defense. Every producer is idempotent; O+I's needs a config override."
+    },
+    {
+      "id": "cells",
+      "short": "Nine cells, two timings",
+      "term": "The fault matrix: nine cells, two timings",
+      "plain": "Six faults plus a no-fault control (F0). Broker kill (F1) and pause (F2) can stress both sides; a producer blackhole (F3) and a service kill right after its source commit (F4-svc) the producer side; a random consumer kill (F4-con-r), a kill in the commit window (F4-con-t), a [zombie](p3:groups) (F5) and a lost `COMMIT` reply (F6) the consumer side. **Random-time** cells (F1–F3, F4-con-r; 30 trials per stack, as for F0) ask how often; **targeted** cells (a code hook; 10 trials) ask whether."
+    },
+    {
+      "id": "window",
+      "short": "Commit-window duty cycle",
+      "term": "The commit-window duty cycle",
+      "plain": "The share of a consumer's running time between its ledger `COMMIT` returning and its Kafka progress committing (`commitSync` for N and I, `commitTransaction` for K), measured in F0 trials over 20–50 s, the window random kills draw from. A random kill duplicates only if it lands inside the window, so the duty cycle should predict the F4-con-r duplicate rate (H5)."
+    },
+    {
+      "id": "blocks",
+      "short": "Paired blocks, McNemar",
+      "term": "Paired blocks, Newcombe and McNemar",
+      "plain": "A **block** is one cell and one seed run on all four stacks in random order: the same fault schedule and payment stream. A void trial voids its whole block, re-run with a new seed, so analysed blocks stay [paired](p2:pairing). For N vs K, only blocks where exactly one of the two had a duplicate (**discordant**) carry information: the exact McNemar test uses them, and Newcombe's paired interval (method 10) bounds the difference. Two contrasts are confirmatory: N vs K in F4-con-r (H5) and in F1+F2 (H4b)."
+    },
+    {
+      "id": "zerobound",
+      "short": "What zero in N trials claims",
+      "term": "The zero bound and the rule of three",
+      "plain": "The trial is the unit: payments in one trial share a fault and are never pooled. If 0 of N trials show an anomaly, the per-trial probability is below 1 − 0.05^(1/N), one-sided 95%: 0.095 at N = 30, 0.259 at N = 10. The **rule of three**, about 3/N, approximates it."
+    },
+    {
+      "id": "detgate",
+      "short": "The detection gate",
+      "term": "The detection gate, as run here",
+      "plain": "Run after the pre-registration tag, before the campaign, and not counted in it: the checker on synthetic histories with every anomaly class planted; two [positive controls](p3:controls) on **N only** (a commit-window kill must give a duplicate, a kill after the source commit a loss, each in at least 8 of 10 trials); a negative control of five no-fault trials per stack, all clean. All four must pass."
+    }
+  ],
+  "views": [
+    {
+      "level": "context",
+      "title": "Who and what the experiment touches",
+      "caption": "Public software on one laptop; no employer system appears. The rules are tagged in git before the trials they govern. Bundles stay in runs/, and no anomaly output is read while the campaign runs.",
+      "nodes": [
+        {
+          "id": "author",
+          "label": "Author",
+          "sub": "designs, pre-registers, runs",
+          "kind": "person",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "id": "prior",
+          "label": "Prior art",
+          "sub": "Jepsen, Stripe keys, Debezium outbox",
+          "kind": "store",
+          "col": 1,
+          "row": 0
+        },
+        {
+          "id": "prereg",
+          "label": "Pre-registration",
+          "sub": "tags prereg-v1, campaign-v1",
+          "kind": "store",
+          "col": 2,
+          "row": 0
+        },
+        {
+          "id": "harness",
+          "label": "ledger-faults",
+          "sub": "4 stacks × 9 cells; a checker",
+          "kind": "focus",
+          "col": 1,
+          "row": 1
+        },
+        {
+          "id": "reader",
+          "label": "Reader",
+          "sub": "payments, distributed-systems hiring managers",
+          "kind": "person",
+          "col": 2,
+          "row": 1
+        },
+        {
+          "id": "sw",
+          "label": "Public software",
+          "sub": "Kafka 4.3.1, Postgres 17, Debezium 3.7",
+          "kind": "external",
+          "col": 0,
+          "row": 2
+        },
+        {
+          "id": "laptop",
+          "label": "One laptop",
+          "sub": "16 GB Apple M4; 8 GB Docker VM",
+          "kind": "external",
+          "col": 1,
+          "row": 2
+        },
+        {
+          "id": "bundles",
+          "label": "Trial bundles",
+          "sub": "one per trial in runs/; sealed",
+          "kind": "store",
+          "col": 2,
+          "row": 2
+        }
+      ],
+      "edges": [
+        {
+          "from": "author",
+          "to": "harness",
+          "label": "designs, runs"
+        },
+        {
+          "from": "prior",
+          "to": "harness",
+          "label": "gap it fills"
+        },
+        {
+          "from": "prereg",
+          "to": "harness",
+          "label": "fixes the rules"
+        },
+        {
+          "from": "harness",
+          "to": "reader",
+          "label": "boundary map (pending)"
+        },
+        {
+          "from": "harness",
+          "to": "sw",
+          "label": "pinned images"
+        },
+        {
+          "from": "harness",
+          "to": "laptop",
+          "label": "one host"
+        },
+        {
+          "from": "harness",
+          "to": "bundles",
+          "label": "writes"
+        }
+      ]
+    },
+    {
+      "level": "container",
+      "title": "The pipeline and the harness around it",
+      "caption": "O+I runs consumer mode I; its service writes the outbox row in the payment's own transaction and never talks to Kafka. Every Kafka client goes through its own role's proxies: one proxy at the bootstrap address would fault nothing after the first metadata response. Admin and readback traffic stays off the proxies.",
+      "nodes": [
+        {
+          "id": "client",
+          "label": "Client",
+          "sub": "200/s open loop; assigns payment_id",
+          "kind": "person",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "id": "svc",
+          "label": "payment-service",
+          "sub": "dual write (N, K, I) or outbox (O+I)",
+          "kind": "system",
+          "col": 1,
+          "row": 0
+        },
+        {
+          "id": "tp",
+          "label": "Toxiproxy",
+          "sub": "per-role broker proxies; one per consumer",
+          "kind": "external",
+          "col": 2,
+          "row": 0
+        },
+        {
+          "id": "kafka",
+          "label": "Kafka ×3, KRaft",
+          "sub": "payments: 6 partitions, RF 3",
+          "kind": "system",
+          "col": 3,
+          "row": 0
+        },
+        {
+          "id": "srcdb",
+          "label": "source-db",
+          "sub": "payments, outbox: the authority",
+          "kind": "store",
+          "col": 1,
+          "row": 1
+        },
+        {
+          "id": "dbz",
+          "label": "Debezium on Connect",
+          "sub": "WAL slot to topic; O+I only",
+          "kind": "system",
+          "col": 2,
+          "row": 1
+        },
+        {
+          "id": "cons",
+          "label": "ledger-consumer A, B",
+          "sub": "one group; mode N, K or I",
+          "kind": "focus",
+          "col": 3,
+          "row": 1
+        },
+        {
+          "id": "orch",
+          "label": "Orchestrator",
+          "sub": "seeded schedule; kills, pauses, toxics, hooks",
+          "kind": "system",
+          "col": 2,
+          "row": 2
+        },
+        {
+          "id": "chk",
+          "label": "Checker + analysis",
+          "sub": "Python over each trial's bundle",
+          "kind": "system",
+          "col": 1,
+          "row": 2
+        },
+        {
+          "id": "ldb",
+          "label": "ledger-db",
+          "sub": "accounts, apply_log, processed",
+          "kind": "store",
+          "col": 3,
+          "row": 2
+        }
+      ],
+      "edges": [
+        {
+          "from": "client",
+          "to": "svc",
+          "label": "HTTP"
+        },
+        {
+          "from": "svc",
+          "to": "srcdb",
+          "label": "INSERT, COMMIT"
+        },
+        {
+          "from": "svc",
+          "to": "tp",
+          "label": "send (N, K, I)"
+        },
+        {
+          "from": "srcdb",
+          "to": "dbz",
+          "label": "WAL (O+I)"
+        },
+        {
+          "from": "dbz",
+          "to": "tp",
+          "label": "relay (O+I)"
+        },
+        {
+          "from": "tp",
+          "to": "kafka",
+          "label": "role listeners"
+        },
+        {
+          "from": "kafka",
+          "to": "cons",
+          "label": "poll, via proxy"
+        },
+        {
+          "from": "cons",
+          "to": "ldb",
+          "label": "batch txn, own proxy"
+        },
+        {
+          "from": "orch",
+          "to": "cons",
+          "label": "kill, pause, hooks"
+        },
+        {
+          "from": "orch",
+          "to": "chk",
+          "label": "bundle"
+        }
+      ]
+    },
+    {
+      "level": "component",
+      "title": "Inside one ledger consumer: where the defenses sit",
+      "caption": "Every mode runs this loop; only the key check and the Kafka step differ. K begins its transaction client-locally, commits Postgres, then sends one payments-applied record per payment and adds its offsets to the transaction before `before_kafka_commit`, so a kill there leaves a real open transaction. Hooks are named code points: disarmed, one volatile read; armed, they block until released or killed.",
+      "nodes": [
+        {
+          "id": "poll",
+          "label": "Poll a batch",
+          "sub": "100 ms poll, up to 500 records",
+          "kind": "system",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "id": "hpoll",
+          "label": "after_poll hook",
+          "sub": "batch in hand, no DB work (F5)",
+          "kind": "external",
+          "col": 1,
+          "row": 0
+        },
+        {
+          "id": "apply",
+          "label": "Apply in Postgres",
+          "sub": "apply_log rows, sorted increments",
+          "kind": "system",
+          "col": 2,
+          "row": 0
+        },
+        {
+          "id": "key",
+          "label": "Key check (I, O+I)",
+          "sub": "processed ON CONFLICT, same txn",
+          "kind": "focus",
+          "col": 3,
+          "row": 0
+        },
+        {
+          "id": "hled",
+          "label": "before_ledger_commit",
+          "sub": "statements done, COMMIT not sent (F6)",
+          "kind": "external",
+          "col": 3,
+          "row": 1
+        },
+        {
+          "id": "pgc",
+          "label": "Postgres COMMIT",
+          "sub": "db_commit logged after it returns",
+          "kind": "store",
+          "col": 2,
+          "row": 1
+        },
+        {
+          "id": "hk",
+          "label": "before_kafka_commit",
+          "sub": "ledger committed, Kafka not (F4-con-t)",
+          "kind": "external",
+          "col": 1,
+          "row": 1
+        },
+        {
+          "id": "kprog",
+          "label": "Kafka progress",
+          "sub": "N, I: commitSync; K: commitTransaction",
+          "kind": "focus",
+          "col": 0,
+          "row": 1
+        },
+        {
+          "id": "crash",
+          "label": "Crash-only exit",
+          "sub": "roll back, log, Runtime.halt(1)",
+          "kind": "system",
+          "col": 0,
+          "row": 2
+        },
+        {
+          "id": "ev",
+          "label": "Event log",
+          "sub": "JSONL: polls, commits, rebalances",
+          "kind": "store",
+          "col": 2,
+          "row": 2
+        }
+      ],
+      "edges": [
+        {
+          "from": "poll",
+          "to": "hpoll"
+        },
+        {
+          "from": "hpoll",
+          "to": "apply"
+        },
+        {
+          "from": "apply",
+          "to": "key",
+          "label": "I, O+I"
+        },
+        {
+          "from": "key",
+          "to": "hled"
+        },
+        {
+          "from": "hled",
+          "to": "pgc",
+          "label": "COMMIT"
+        },
+        {
+          "from": "pgc",
+          "to": "hk"
+        },
+        {
+          "from": "hk",
+          "to": "kprog"
+        },
+        {
+          "from": "kprog",
+          "to": "poll",
+          "label": "next batch"
+        },
+        {
+          "from": "kprog",
+          "to": "crash",
+          "label": "on any error"
+        },
+        {
+          "from": "pgc",
+          "to": "ev",
+          "label": "db_commit"
+        }
+      ]
+    },
+    {
+      "level": "dynamic",
+      "style": "sequence",
+      "title": "Observed in the detection gate (stack N), not a campaign result",
+      "caption": "Trial `gate_cons_1`, a positive control on N in cell F4-con-t, as `docs/gate.md` reads it from the timelines. The ledger commit lands, the offset commit never does, so the batch comes back. The same order of events is what H1 predicts for K; nothing has shown K doing it yet.",
+      "participants": [
+        {
+          "id": "kafka",
+          "label": "Kafka partition 1",
+          "kind": "system"
+        },
+        {
+          "id": "grp",
+          "label": "Group coordinator",
+          "kind": "system"
+        },
+        {
+          "id": "cons",
+          "label": "consumer-A",
+          "sub": "stack N",
+          "kind": "focus"
+        },
+        {
+          "id": "ldb",
+          "label": "ledger-db",
+          "kind": "store"
+        },
+        {
+          "id": "orch",
+          "label": "Orchestrator",
+          "sub": "injects the fault",
+          "kind": "external"
+        }
+      ],
+      "steps": [
+        {
+          "from": "kafka",
+          "to": "cons",
+          "label": "poll returns (1, 646)",
+          "text": "payment p00004001"
+        },
+        {
+          "from": "cons",
+          "to": "ldb",
+          "label": "apply, COMMIT",
+          "text": "db_txid 1898860"
+        },
+        {
+          "from": "ldb",
+          "to": "cons",
+          "kind": "reply",
+          "label": "committed"
+        },
+        {
+          "from": "cons",
+          "kind": "note",
+          "label": "hook holds at before_kafka_commit",
+          "text": "pending offsets {1: 647}"
+        },
+        {
+          "from": "orch",
+          "to": "cons",
+          "kind": "fault",
+          "label": "SIGKILL"
+        },
+        {
+          "from": "cons",
+          "kind": "crash",
+          "label": "killed in the commit window"
+        },
+        {
+          "from": "cons",
+          "to": "grp",
+          "label": "commitSync({1: 647})",
+          "mark": "never_sent"
+        },
+        {
+          "kind": "gap",
+          "label": "4.4 s later"
+        },
+        {
+          "from": "orch",
+          "to": "cons",
+          "label": "docker start"
+        },
+        {
+          "from": "grp",
+          "to": "cons",
+          "kind": "reply",
+          "label": "generation 2: partition 1 back",
+          "text": "from the last committed offset"
+        },
+        {
+          "from": "kafka",
+          "to": "cons",
+          "label": "poll redelivers (1, 646)",
+          "mark": "duplicate",
+          "badge": "redelivered"
+        },
+        {
+          "from": "cons",
+          "to": "ldb",
+          "label": "apply, COMMIT again",
+          "text": "db_txid 1899467, 10.1 s after the first",
+          "mark": "duplicate",
+          "badge": "applied twice"
+        },
+        {
+          "from": "kafka",
+          "to": "ldb",
+          "kind": "note",
+          "label": "same (partition, offset) twice: consumer side"
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "stacks",
+      "title": "Whole pipelines, each defense at the boundary it guards",
+      "problem": "The brief listed four defenses as alternatives, but the outbox guards the producer side, Kafka transactions cover only Kafka-to-Kafka work, and the key works at the sink.",
+      "options": [
+        "Rank the four defenses head to head",
+        "Add offsets stored in Postgres as a fifth arm",
+        "Leave Connect's default, the relay producer's idempotence off",
+        "Four whole pipelines, N, K, I and O+I, each contrast adding one defense, every producer idempotent"
+      ],
+      "chosen": "Four whole pipelines, N, K, I and O+I, each contrast adding one defense, every producer idempotent",
+      "why": "Ranked head to head the defenses would compare things at different layers. Offsets in Postgres is correct and Kafka's docs recommend it, but it guards the consumer side as I does and breaks the three-contrast structure. With Connect's default, I→O+I would change two things at once. The client assigns `payment_id` at the origin, and every defense depends on that.",
+      "cost": "A reader running Debezium as shipped has a non-idempotent relay (`max.in.flight=1`) whose retries can duplicate: stated, not measured. Offsets in Postgres and KIP-618's exactly-once source are explained or named, not measured.",
+      "why_short": "Ranked head to head the defenses would compare different layers; whole pipelines let each contrast add exactly one.",
+      "cost_short": "Debezium's shipped default (a non-idempotent relay) and offsets in Postgres are explained, not measured.",
+      "short": "Whole pipelines, one change each",
+      "serves": [
+        {
+          "req": "R3",
+          "because": "N→K, N→I and I→O+I each add one defense; forcing the relay idempotent keeps I→O+I to one change."
+        },
+        {
+          "req": "R2",
+          "because": "Each defense sits at the boundary it guards, so an anomaly's birthplace names the defense that missed it."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "stacks",
+          "because": "The stacks are this decision."
+        }
+      ]
+    },
+    {
+      "id": "order",
+      "title": "Postgres commits first; the targeted kill hits every stack in one state",
+      "problem": "A crash between the ledger commit and Kafka's progress commit is where consumer-side duplicates are born, so the order of the two commits, and where the targeted kill lands, decide what is measured.",
+      "options": [
+        "Commit Kafka first, then Postgres",
+        "Kill K before any Kafka work (the first draft's hook)",
+        "Postgres first in every mode; `before_kafka_commit` placed per mode, for K after `sendOffsetsToTransaction`"
+      ],
+      "chosen": "Postgres first in every mode; `before_kafka_commit` placed per mode, for K after `sendOffsetsToTransaction`",
+      "why": "Postgres first is the common order; the reverse trades duplicates for losses, which the post states by reasoning and does not measure. At the first draft's hook K had no broker-side transaction (`beginTransaction()` is client-local), so K and N ran the same code path; the review moved it. Now every stack is hit with the ledger committed and Kafka's progress not, and for K that includes a real open transaction with pending offsets.",
+      "cost": "Results hold for this commit order only: a reader whose Postgres commits after Kafka is outside what is measured. K's commit step also carries Kafka's default ~100 ms `CONCURRENT_TRANSACTIONS` retry in about two-thirds of transactions (reconnaissance); it is left as is, named, and lengthens the window H5 measures.",
+      "why_short": "The common order, and one state for every stack at the hook: ledger committed, Kafka progress not; for K, a real open transaction.",
+      "cost_short": "Kafka-first consumers are outside what is measured; K keeps Kafka's default ~100 ms commit retry.",
+      "short": "Postgres first, one state at the hook",
+      "serves": [
+        {
+          "req": "R4",
+          "because": "The targeted cell F4-con-t can only ask whether a stack breaks if the kill lands in the same window for each."
+        },
+        {
+          "req": "R3",
+          "because": "The same commit order in every mode keeps N→K about the transaction, not about ordering."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "window",
+          "because": "The hook sits inside the commit window; H5 measures how much time each stack spends there."
+        },
+        {
+          "concept": "cells",
+          "because": "F4-con-t is the cell that fires this hook."
+        }
+      ]
+    },
+    {
+      "id": "crash",
+      "title": "One failure policy for every mode: crash-only",
+      "problem": "Outcomes in F1, F2, F5 and F6 depend on what a consumer does on an error; error handling must not become a second variable between stacks.",
+      "options": [
+        "Textbook in-process recovery: abort, seek, continue",
+        "Crash-only: any exception in apply or commit rolls back if it can, logs, and halts; a supervisor restarts the process after 2 s"
+      ],
+      "chosen": "Crash-only: any exception in apply or commit rolls back if it can, logs, and halts; a supervisor restarts the process after 2 s",
+      "why": "For these exceptions crash-only reaches the textbook outcome, resuming from the last committed offsets, and it is what an orchestrated deployment does by default. It removes the abort, seek and continue path, where a missed `seek` silently skips a batch and where KAFKA-17582 would act. The exit is `Runtime.halt(1)` with no client closed, so every crash looks the same to the group and the coordinator.",
+      "cost": "In-process recovery is unmeasured and named out of scope. A loss hypothesis about KAFKA-17582 was dropped before pre-registration: this design gives the bug no route to the ledger, so a zero would have read as evidence it never had.",
+      "why_short": "It reaches the textbook outcome, is what orchestrators do by default, and removes the skip-prone in-process path.",
+      "cost_short": "In-process recovery is unmeasured; the KAFKA-17582 loss hypothesis was dropped, not tested.",
+      "short": "Crash-only, every mode",
+      "serves": [
+        {
+          "req": "R3",
+          "because": "One policy for N, K and I keeps error handling out of every contrast."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "stacks",
+          "because": "The policy is shared by every stack, like the client and schema."
+        }
+      ]
+    },
+    {
+      "id": "faults",
+      "title": "Real faults, two timings, and a check that each one landed",
+      "problem": "A defense can only be judged against faults that really happen to processes and the network, and a fault that silently did nothing would produce a false zero.",
+      "options": [
+        "Simulate faults inside the application, as the closest prior work does",
+        "One Toxiproxy in front of the bootstrap address",
+        "Random-time faults only",
+        "Real kills, pauses and blackholes via per-role proxies; random (30) and targeted (10) cells; a check per cell"
+      ],
+      "chosen": "Real kills, pauses and blackholes via per-role proxies; random (30) and targeted (10) cells; a check per cell",
+      "why": "A simulated fault would be the one thing this artifact criticises in the closest prior work. Clients connect to what brokers advertise, so one bootstrap proxy would fault nothing after the first metadata response. Targeted cells ask whether, random cells how often. The [manipulation check](p3:injector) reads only orchestrator, broker and process state; a failed check voids the trial and its block, and no trial is voided for what the checker found.",
+      "cost": "One laptop: combined KRaft, no database failover, no disk faults, no inter-broker partitions. Host contention needed two added void reasons (`host_swap_out`, then `host_degraded` in amendment A1); contention that starts after 20 s is not caught.",
+      "why_short": "Simulated faults are what the closest prior work did; targeted cells ask whether, random cells how often, and each fault is checked.",
+      "cost_short": "One laptop and its limits; host contention needed two extra void reasons, and late contention is not caught.",
+      "short": "Real faults, checked",
+      "serves": [
+        {
+          "req": "R4",
+          "because": "Nine cells with two timings, each fault confirmed by a check that never reads the ledger."
+        },
+        {
+          "req": "R5",
+          "because": "A fault that did nothing voids its block instead of passing as a clean zero."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "cells",
+          "because": "The matrix is this decision in table form."
+        }
+      ]
+    },
+    {
+      "id": "checker",
+      "title": "The source is the authority; an append-only apply log shows every apply",
+      "problem": "To say 'applied exactly once' and 'born here', the checker needs a truth independent of the consumer and a record of each apply's `(partition, offset)`.",
+      "options": [
+        "A unique applied table",
+        "An 'unknown' bucket for timed-out requests",
+        "A linearizability checker",
+        "Count each payment in the source, topic and append-only `apply_log`; the source resolves `info`; attribute by offset"
+      ],
+      "chosen": "Count each payment in the source, topic and append-only `apply_log`; the source resolves `info`; attribute by offset",
+      "why": "A unique applied table would hide the very duplicates N and K are expected to produce. The review dropped 'unknown' because it contradicted the source-as-authority rule. With unique IDs and commuting increments, [counting each ID](p3:history) is a complete check, and order is not part of the invariant, so no linearizability checker is needed. The offset splits a duplicate into a redelivery or a re-send.",
+      "cost": "Order is not checked: a defense that holds here may not hold for a ledger with overdraft rules. The experiment can resolve `info`; a real client cannot. An apply whose offset is absent from the readback stays unattributable.",
+      "why_short": "A unique table would hide the duplicates; the source as oracle and each apply's offset make the check complete and attributable.",
+      "cost_short": "No ordering check, so overdraft-style ledgers are out; `info` is resolvable only because this is an experiment.",
+      "short": "Source as oracle, apply log",
+      "serves": [
+        {
+          "req": "R1",
+          "because": "Expected balances come from the source alone, never from what the consumer wrote."
+        },
+        {
+          "req": "R2",
+          "because": "Same offset: consumer side; different offset: producer side; offset missing: unattributable."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "detgate",
+          "because": "The gate tested this checker on synthetic histories and on real controls."
+        }
+      ]
+    },
+    {
+      "id": "trust",
+      "title": "Pre-register, gate the detector, pair the stacks, never peek",
+      "problem": "With 4 stacks × 9 cells on a noisy laptop, a result could be argued into shape afterwards, and a blind checker would give false zeros.",
+      "options": [
+        "Pool payments into a per-payment rate",
+        "Look at results mid-campaign; stop early or extend",
+        "Newcombe's method 8, as the plan's code first had it",
+        "Against host contention: an operating condition, or a mechanical guard",
+        "Rules tagged first; a detection gate; paired blocks with method 10 and McNemar; both contention fixes; a sealed campaign"
+      ],
+      "chosen": "Rules tagged first; a detection gate; paired blocks with method 10 and McNemar; both contention fixes; a sealed campaign",
+      "why": "Payments in one trial share a fault, so the trial is the unit. Not reading results rules out any decision that depends on them. The implementer found the plan's φ lacked method 10's continuity correction (that is method 8); plan and code were fixed and checked against Newcombe's Table III before the campaign-v1 tag. The gate showed contention degrading 5 of 42 trials, so amendment A1 chose both the condition and a guard.",
+      "cost": "About 50–55 h of unattended runtime, and 30 trials per stack resolve only large differences, so H5 may end inconclusive. Reconnaissance ran before the tag; one of its rules (cap refusals as `fail`) was set after seeing its data, and is disclosed. The gate's positive controls ran on N only.",
+      "why_short": "Timestamped rules, a gate that can see a nonzero, paired blocks and an unread campaign keep the rules ahead of the data.",
+      "cost_short": "50–55 h of runtime; H5 may be inconclusive; positive controls on N only; one recon rule set after its data.",
+      "short": "Pre-register, gate, pair, seal",
+      "serves": [
+        {
+          "req": "R5",
+          "because": "The gate's controls run before the campaign and must pass before it may start."
+        },
+        {
+          "req": "R6",
+          "because": "prereg-v1 precedes every gate and campaign trial; campaign-v1 precedes the first campaign trial."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "blocks",
+          "because": "Paired blocks make N vs K a paired contrast with McNemar and Newcombe."
+        },
+        {
+          "concept": "zerobound",
+          "because": "A clean cell is reported as a bound, not as safety."
+        },
+        {
+          "concept": "detgate",
+          "because": "The gate is the control that makes a zero meaningful."
+        }
+      ]
+    }
+  ],
+  "flow": [
+    {
+      "phase": "Design",
+      "label": "Reframe the brief into a two-boundary experiment",
+      "detail": "First draft; an independent review moved K's hook, added the crash-only policy, H5, the producer and negative controls and per-account reconciliation; approved the same day.",
+      "output": "the approved spec: 4 stacks, 9 cells, H1–H6 with falsifiers, the detection gate, a learning guide",
+      "when": "2026-10-08 (−07:00)",
+      "evidence": [
+        {
+          "commit": "27309f692b",
+          "repo": "~/projects/ledger-faults",
+          "note": "first draft"
+        },
+        {
+          "commit": "d5e891140f",
+          "repo": "~/projects/ledger-faults",
+          "note": "review applied"
+        },
+        {
+          "commit": "a462af2c19",
+          "repo": "~/projects/ledger-faults",
+          "note": "approved"
+        }
+      ],
+      "decision": "stacks"
+    },
+    {
+      "phase": "Build",
+      "label": "Cluster, per-role listeners, service and consumers",
+      "detail": "Three combined KRaft nodes; nine role proxies, verified by blackholing one role (F3 kept); the service in dual-write and outbox modes; consumers N and I, then K with Postgres first, all crash-only.",
+      "output": "a runnable pipeline in every stack mode; no fault injection yet",
+      "when": "2026-10-08 to 10-09 (−07:00)",
+      "evidence": [
+        {
+          "commit": "15a39cf386",
+          "repo": "~/projects/ledger-faults",
+          "note": "three KRaft nodes"
+        },
+        {
+          "commit": "f7bb16dd5b",
+          "repo": "~/projects/ledger-faults",
+          "note": "per-role listeners"
+        },
+        {
+          "commit": "b53a622819",
+          "repo": "~/projects/ledger-faults",
+          "note": "service modes"
+        },
+        {
+          "commit": "fb274427d4",
+          "repo": "~/projects/ledger-faults",
+          "note": "K, Postgres first"
+        }
+      ],
+      "decision": "order"
+    },
+    {
+      "phase": "Build",
+      "label": "Checker on synthetic histories",
+      "detail": "Counting over source, topic readback and apply_log; every anomaly class and attribution row tested on synthetic fixtures.",
+      "output": "checker/: classification and attribution per spec §6",
+      "when": "2026-10-09 (−07:00)",
+      "evidence": [
+        {
+          "commit": "bf1c9f34da",
+          "repo": "~/projects/ledger-faults",
+          "note": "classification, attribution"
+        }
+      ],
+      "decision": "checker"
+    },
+    {
+      "phase": "Reconnoitre",
+      "label": "Reconnaissance A: rate, VM, K's commit step",
+      "detail": "The rate rule failed first; cap refusals were redefined as `fail` after seeing that data (disclosed). VM stalls traced to the host swapping the Docker VM. `diag_k1` explained K's flat ~148 ms commit step. Values frozen, then re-verified on an 8 GB VM.",
+      "output": "docs/recon-part-a.md: 200/s, 8 GB VM, 512m heaps, swappiness 1; \"Nothing here is a result.\"",
+      "milestone": true,
+      "when": "2026-10-08 to 10-10 (−07:00)",
+      "evidence": [
+        {
+          "commit": "e3413ea877",
+          "repo": "~/projects/ledger-faults",
+          "note": "diag_k1"
+        },
+        {
+          "commit": "181ce23666",
+          "repo": "~/projects/ledger-faults",
+          "note": "host swap in the VM rule"
+        },
+        {
+          "commit": "2cdf2f3db6",
+          "repo": "~/projects/ledger-faults",
+          "note": "re-verified, frozen"
+        }
+      ],
+      "decision": "faults"
+    },
+    {
+      "phase": "Reconnoitre",
+      "label": "Hooks, orchestrator and manipulation checks",
+      "detail": "Hooks with a control channel; a seeded schedule per cell; injectors and a supervisor; per-cell manipulation checks and the void order.",
+      "output": "orchestrator/ and manip/: every cell injectable, every trial gets a verdict",
+      "when": "2026-10-10 (−07:00)",
+      "evidence": [
+        {
+          "commit": "e5107452a1",
+          "repo": "~/projects/ledger-faults",
+          "note": "hooks"
+        },
+        {
+          "commit": "1c370360b4",
+          "repo": "~/projects/ledger-faults",
+          "note": "seeded schedule"
+        },
+        {
+          "commit": "95fcd961b2",
+          "repo": "~/projects/ledger-faults",
+          "note": "manipulation checks"
+        }
+      ],
+      "decision": "faults"
+    },
+    {
+      "phase": "Reconnoitre",
+      "label": "Reconnaissance B: F2, F5, F6 and the checks",
+      "detail": "F2's first set stopped on an observer bug, a harness error, fixed; F5's count restarted after host-swap voids. In all 17 F5 trials, on N, the zombie wrote its held batch, then failed its offset commit. F6 kept at 10 of 10.",
+      "output": "docs/recon-part-b.md: session.timeout.ms 10 s, F2 20–60 s, F6 kept; part B frozen",
+      "milestone": true,
+      "when": "2026-10-10 to 10-12 (−07:00)",
+      "evidence": [
+        {
+          "commit": "3aded02ae7",
+          "repo": "~/projects/ledger-faults",
+          "note": "F5 frozen"
+        },
+        {
+          "commit": "531735691f",
+          "repo": "~/projects/ledger-faults",
+          "note": "F6 kept"
+        },
+        {
+          "commit": "38ebe49113",
+          "repo": "~/projects/ledger-faults",
+          "note": "part B frozen"
+        }
+      ],
+      "decision": "faults"
+    },
+    {
+      "phase": "Pre-register and gate",
+      "label": "Pre-register, tag prereg-v1",
+      "detail": "docs/experiment.md copies the spec's hypotheses, matrix, checks, gate and analysis verbatim by line range, with reconnaissance's frozen values and dated amendments. Tagged after reconnaissance, before any gate or campaign trial.",
+      "output": "docs/experiment.md at tag prereg-v1",
+      "milestone": true,
+      "when": "2026-10-12 11:23 (−07:00)",
+      "evidence": [
+        {
+          "commit": "ba5ce52669",
+          "repo": "~/projects/ledger-faults",
+          "note": "checker gate-set audit"
+        },
+        {
+          "commit": "c7ba566e78",
+          "repo": "~/projects/ledger-faults",
+          "note": "tag prereg-v1"
+        }
+      ],
+      "decision": "trust"
+    },
+    {
+      "phase": "Pre-register and gate",
+      "label": "Run the detection gate",
+      "detail": "The evaluator was committed minutes after the tag, before the first gate trial. 42 trials, two voids replaced. Five showed host contention; that became amendment A1.",
+      "output": "docs/gate.md: GATE PASS; positive controls on N only",
+      "milestone": true,
+      "when": "2026-10-12 (−07:00)",
+      "evidence": [
+        {
+          "commit": "9fb3bd3cb2",
+          "repo": "~/projects/ledger-faults",
+          "note": "evaluator first"
+        },
+        {
+          "commit": "9e42d3700a",
+          "repo": "~/projects/ledger-faults",
+          "note": "gate trials run"
+        },
+        {
+          "commit": "ddf2e522fa",
+          "repo": "~/projects/ledger-faults",
+          "note": "verdict recorded"
+        }
+      ],
+      "decision": "trust"
+    },
+    {
+      "phase": "Prepare the campaign",
+      "label": "Contention guard, block plan and runner",
+      "detail": "`host_degraded` voids a campaign trial with over 100 cap refusals in its 5–20 s window; the 190-block plan is derived by code and committed; the runner resumes, replaces void blocks and reads only harness integrity.",
+      "output": "manip host_degraded; docs/campaign/campaign-plan.tsv; python -m campaign",
+      "when": "2026-10-12 (−07:00)",
+      "evidence": [
+        {
+          "commit": "d38175470c",
+          "repo": "~/projects/ledger-faults",
+          "note": "host_degraded (A1)"
+        },
+        {
+          "commit": "9ac7ceb7d4",
+          "repo": "~/projects/ledger-faults",
+          "note": "block plan (A2)"
+        },
+        {
+          "commit": "06f5c70723",
+          "repo": "~/projects/ledger-faults",
+          "note": "runner (A2)"
+        }
+      ],
+      "decision": "trust"
+    },
+    {
+      "phase": "Prepare the campaign",
+      "label": "Analysis code, with the Newcombe method fix",
+      "detail": "Writing the statistics, the implementer noted the plan's φ had no continuity correction: Newcombe's method 8, not the pre-registered method 10. Plan and code were fixed within a minute and checked on Table III: 18, 12, 2, 18 gives 0.0562 to 0.3290.",
+      "output": "analysis/: Wilson, zero bound, Newcombe method 10, exact McNemar, H1–H6 evaluators",
+      "when": "2026-10-12 (−07:00)",
+      "evidence": [
+        {
+          "commit": "125767c80f",
+          "repo": "~/projects/ledger-faults",
+          "note": "method 8 flagged"
+        },
+        {
+          "commit": "16d7a7784e",
+          "repo": "~/projects/ledger-faults",
+          "note": "plan fixed"
+        },
+        {
+          "commit": "51e29fa724",
+          "repo": "~/projects/ledger-faults",
+          "note": "code fixed"
+        },
+        {
+          "commit": "78f4545345",
+          "repo": "~/projects/ledger-faults",
+          "note": "evaluators"
+        }
+      ],
+      "decision": "trust"
+    },
+    {
+      "phase": "Prepare the campaign",
+      "label": "Amendments A1–A4, tag campaign-v1, start",
+      "detail": "A1 contention, A2 the runner, A3 analysis definitions, A4 cost runs, appended in one dated commit and tagged (06:54 UTC on 10-13). The runner refuses campaign runs unless HEAD contains the tag; the campaign runs after it.",
+      "output": "tag campaign-v1; the campaign running, its anomaly output unread until it ends",
+      "milestone": true,
+      "when": "2026-10-12 23:54 (−07:00)",
+      "evidence": [
+        {
+          "commit": "b613be0d48",
+          "repo": "~/projects/ledger-faults",
+          "note": "A1–A4; tag campaign-v1"
+        }
+      ],
+      "decision": "trust"
+    }
+  ],
+  "results": [
+    {
+      "title": "The detection gate's controls, on stack N (control, not a campaign result)",
+      "short": "Gate: controls passed, N only",
+      "chart": {
+        "type": "matrix",
+        "unit": "trials",
+        "rows": [
+          {
+            "label": "Consumer positive",
+            "sub": "N, F4-con-t"
+          },
+          {
+            "label": "Producer positive",
+            "sub": "N, F4-svc"
+          },
+          {
+            "label": "Negative",
+            "sub": "F0, five per stack"
+          },
+          {
+            "label": "Synthetic checker",
+            "sub": "every class planted"
+          }
+        ],
+        "cols": [
+          {
+            "label": "Pass rule"
+          },
+          {
+            "label": "Observed"
+          },
+          {
+            "label": "Void, replaced"
+          },
+          {
+            "label": "Without contended",
+            "sub": "5 trials left out"
+          }
+        ],
+        "cells": [
+          [
+            {
+              "text": "duplicate in ≥ 8 of 10",
+              "status": "none"
+            },
+            {
+              "text": "10 of 10 duplicated",
+              "status": "observed",
+              "tone": "ok",
+              "note": "1–9 duplicates per trial, all consumer side"
+            },
+            {
+              "text": "1, host swap-out",
+              "status": "observed",
+              "tone": "warn"
+            },
+            {
+              "text": "8 positive",
+              "status": "observed",
+              "tone": "ok"
+            }
+          ],
+          [
+            {
+              "text": "loss in ≥ 8 of 10",
+              "status": "none"
+            },
+            {
+              "text": "10 of 10 lost, topic gap",
+              "status": "observed",
+              "tone": "ok",
+              "note": "1–15 losses per trial, all producer side, none acked"
+            },
+            {
+              "text": "none",
+              "status": "observed",
+              "tone": "ok"
+            },
+            {
+              "text": "9 positive",
+              "status": "observed",
+              "tone": "ok"
+            }
+          ],
+          [
+            {
+              "text": "20 of 20 clean",
+              "status": "none"
+            },
+            {
+              "text": "20 of 20 clean",
+              "status": "observed",
+              "tone": "ok",
+              "note": "no class flagged in any trial, all four stacks"
+            },
+            {
+              "text": "1, host swap-out",
+              "status": "observed",
+              "tone": "warn"
+            },
+            {
+              "text": "19 clean",
+              "status": "observed",
+              "tone": "ok"
+            }
+          ],
+          [
+            {
+              "text": "classify every class",
+              "status": "none"
+            },
+            {
+              "text": "44 passed, 26 rows",
+              "status": "observed",
+              "tone": "ok",
+              "note": "one row per anomaly class and attribution row"
+            },
+            {
+              "text": "",
+              "status": "n/a"
+            },
+            {
+              "text": "",
+              "status": "n/a"
+            }
+          ]
+        ],
+        "legend": [
+          {
+            "status": "none",
+            "label": "rule fixed in advance"
+          },
+          {
+            "status": "observed",
+            "label": "observed in the gate"
+          },
+          {
+            "tone": "ok",
+            "label": "control passed"
+          },
+          {
+            "tone": "warn",
+            "label": "void"
+          }
+        ],
+        "note": "Gate passed 2026-10-12, after the prereg-v1 tag, before any campaign trial; not counted in the campaign. Both positive controls ran on N only."
+      },
+      "axis": "One row per control of the pre-registered gate; counts are valid trials. A positive control passes when the anomaly appears, so green here means the checker saw what it had to.",
+      "read_as": "Each control cleared its rule. Five trials had host CPU contention (thousands of cap refusals); per `docs/gate.md`, leaving them out, the controls still clear the pass rule: 8, 9 and 19.",
+      "so": [
+        "trust",
+        "checker"
+      ],
+      "takeaway": "On N, the harness sees a duplicate and a loss when they happen, so a campaign zero can mean something. Nothing here shows K, I or O+I under faults.",
+      "arithmetic": "docs/gate.md: CONSUMER 10/10, PRODUCER 10/10, NEGATIVE 20/20, SYNTHETIC pass. 42 trials, 2 void and replaced. Contended: 2 consumer, 1 producer, 2 negative (one of them void)."
+    },
+    {
+      "title": "The design: what each stack's defense faces in each cell",
+      "short": "4 stacks × 9 cells, 760 trials",
+      "chart": {
+        "type": "matrix",
+        "unit": "design",
+        "rows": [
+          {
+            "label": "F0",
+            "sub": "no fault · 30"
+          },
+          {
+            "label": "F1",
+            "sub": "broker kill · both · 30"
+          },
+          {
+            "label": "F2",
+            "sub": "broker pause · both · 30"
+          },
+          {
+            "label": "F3",
+            "sub": "producer blackhole · 30"
+          },
+          {
+            "label": "F4-svc",
+            "sub": "kill after source commit · 10"
+          },
+          {
+            "label": "F4-con-r",
+            "sub": "random consumer kill · 30"
+          },
+          {
+            "label": "F4-con-t",
+            "sub": "commit-window kill · 10"
+          },
+          {
+            "label": "F5",
+            "sub": "zombie consumer · 10"
+          },
+          {
+            "label": "F6",
+            "sub": "COMMIT reply lost · 10"
+          }
+        ],
+        "cols": [
+          {
+            "label": "N",
+            "sub": "naive baseline"
+          },
+          {
+            "label": "K",
+            "sub": "Kafka transactions"
+          },
+          {
+            "label": "I",
+            "sub": "key at the sink"
+          },
+          {
+            "label": "O+I",
+            "sub": "outbox plus the key"
+          }
+        ],
+        "cells": [
+          [
+            {
+              "text": "control",
+              "status": "none"
+            },
+            {
+              "text": "control",
+              "status": "none"
+            },
+            {
+              "text": "control",
+              "status": "none"
+            },
+            {
+              "text": "control",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "dual write; offsets",
+              "status": "none"
+            },
+            {
+              "text": "dual write; Kafka txn",
+              "status": "none"
+            },
+            {
+              "text": "dual write; key",
+              "status": "none"
+            },
+            {
+              "text": "outbox; key",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "dual write; offsets",
+              "status": "none"
+            },
+            {
+              "text": "dual write; Kafka txn",
+              "status": "none"
+            },
+            {
+              "text": "dual write; key",
+              "status": "none"
+            },
+            {
+              "text": "outbox; key",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "dual write",
+              "status": "none"
+            },
+            {
+              "text": "dual write",
+              "status": "none"
+            },
+            {
+              "text": "dual write",
+              "status": "none"
+            },
+            {
+              "text": "outbox relay (Connect)",
+              "status": "none",
+              "note": "F3's producer role is Connect for O+I; its delivery timeout is unlimited"
+            }
+          ],
+          [
+            {
+              "text": "dual write",
+              "status": "none"
+            },
+            {
+              "text": "dual write",
+              "status": "none"
+            },
+            {
+              "text": "dual write",
+              "status": "none"
+            },
+            {
+              "text": "outbox row, same commit",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "offsets after commit",
+              "status": "none"
+            },
+            {
+              "text": "Kafka txn, Postgres outside",
+              "status": "none"
+            },
+            {
+              "text": "key in ledger txn",
+              "status": "none"
+            },
+            {
+              "text": "key in ledger txn",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "offsets after commit",
+              "status": "none"
+            },
+            {
+              "text": "Kafka txn, Postgres outside",
+              "status": "none"
+            },
+            {
+              "text": "key in ledger txn",
+              "status": "none"
+            },
+            {
+              "text": "key in ledger txn",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "offsets after commit",
+              "status": "none"
+            },
+            {
+              "text": "Kafka txn, Postgres outside",
+              "status": "none"
+            },
+            {
+              "text": "key in ledger txn",
+              "status": "none"
+            },
+            {
+              "text": "key in ledger txn",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "offsets after commit",
+              "status": "none"
+            },
+            {
+              "text": "Kafka txn, Postgres outside",
+              "status": "none"
+            },
+            {
+              "text": "key in ledger txn",
+              "status": "none"
+            },
+            {
+              "text": "key in ledger txn",
+              "status": "none"
+            }
+          ]
+        ],
+        "legend": [
+          {
+            "status": "none",
+            "label": "design, not a result"
+          }
+        ],
+        "note": "Row sub: the fault, 'both' where it can stress both sides, and trials per stack. A block runs one cell and seed on all four stacks: 190 blocks."
+      },
+      "axis": "Rows: the nine cells. Columns: stacks. Each cell names the guard that fault meets in that stack. F3 and F4-svc stress the producer side; F4-con-r to F6 the consumer side; F1 and F2 may stress both.",
+      "read_as": "The producer-side cells pit the dual write against the outbox; the consumer-side cells pit committed offsets, the Kafka transaction and the key against one another. F0 is the in-campaign negative control.",
+      "so": [
+        "stacks",
+        "faults"
+      ],
+      "takeaway": "Each fault is aimed at one boundary, so a nonzero cell names the guard that missed, and the attribution rule cross-checks it.",
+      "arithmetic": "4 stacks × (5 cells × 30 + 4 cells × 10) = 760 trials; 760 ÷ 4 = 190 blocks (docs/experiment.md §4)."
+    },
+    {
+      "title": "Pre-registered predictions H1–H6 (results pending)",
+      "short": "Six predictions, results pending",
+      "chart": {
+        "type": "matrix",
+        "unit": "prediction",
+        "rows": [
+          {
+            "label": "H1 the boundary"
+          },
+          {
+            "label": "H2 key at the sink"
+          },
+          {
+            "label": "H3 the dual write"
+          },
+          {
+            "label": "H4 broker death",
+            "sub": "genuinely uncertain"
+          },
+          {
+            "label": "H5 commit window",
+            "sub": "the non-obvious one"
+          },
+          {
+            "label": "H6 cost"
+          }
+        ],
+        "cols": [
+          {
+            "label": "Stacks, cells"
+          },
+          {
+            "label": "Prediction"
+          },
+          {
+            "label": "Falsified if"
+          },
+          {
+            "label": "Result"
+          }
+        ],
+        "cells": [
+          [
+            {
+              "text": "K · F4-con-t and F5",
+              "status": "none"
+            },
+            {
+              "text": "K duplicates in ≥ 8 of 10, each cell",
+              "status": "predicted",
+              "tone": "bad",
+              "note": "each duplicate once in payments-applied: output once, ledger twice"
+            },
+            {
+              "text": "K below 8 of 10 in either cell",
+              "status": "none"
+            },
+            {
+              "text": "pending",
+              "status": "pending"
+            }
+          ],
+          [
+            {
+              "text": "I and O+I · all nine cells",
+              "status": "none"
+            },
+            {
+              "text": "zero duplicates, zero balance off",
+              "status": "predicted",
+              "tone": "ok",
+              "note": "A3 reads balance off as the residual after losses, so H2 and H3 agree"
+            },
+            {
+              "text": "a single duplicate or balance off",
+              "status": "none"
+            },
+            {
+              "text": "pending",
+              "status": "pending"
+            }
+          ],
+          [
+            {
+              "text": "N, K, I · F4-svc, F3; O+I all",
+              "status": "none"
+            },
+            {
+              "text": "N, K, I lose ≥ 8 of 10 F4-svc; O+I none",
+              "status": "predicted",
+              "tone": "bad",
+              "note": "also a loss in every F3 trial longer than delivery.timeout.ms (120 s)"
+            },
+            {
+              "text": "< 8 of 10, a clean long F3, or O+I loss",
+              "status": "none"
+            },
+            {
+              "text": "pending",
+              "status": "pending"
+            }
+          ],
+          [
+            {
+              "text": "all stacks · F1, F2",
+              "status": "none"
+            },
+            {
+              "text": "no loss; K dup in more trials than N",
+              "status": "predicted",
+              "tone": "warn",
+              "note": "and each K or N duplicate trial has its logged txn or commitSync error"
+            },
+            {
+              "text": "any loss; K ≤ N; a cause missing",
+              "status": "none"
+            },
+            {
+              "text": "pending",
+              "status": "pending"
+            }
+          ],
+          [
+            {
+              "text": "N vs K · F4-con-r; duty F0",
+              "status": "none"
+            },
+            {
+              "text": "K duty cycle > N's; K dup more often",
+              "status": "predicted",
+              "tone": "bad",
+              "note": "paired interval including 0: inconclusive, never 'no difference'"
+            },
+            {
+              "text": "K's duplicate share ≤ N's",
+              "status": "none"
+            },
+            {
+              "text": "pending",
+              "status": "pending"
+            }
+          ],
+          [
+            {
+              "text": "cost runs, no fault",
+              "status": "none"
+            },
+            {
+              "text": "I's rate within 10% of N; K, O+I add p50",
+              "status": "predicted",
+              "tone": "neutral",
+              "note": "max sustainable rate; p50 end-to-end latency; K vs O+I not predicted"
+            },
+            {
+              "text": "I > 10% slower; K or O+I p50 ≤ N's",
+              "status": "none",
+              "note": "with non-overlapping run ranges; overlap is inconclusive"
+            },
+            {
+              "text": "pending",
+              "status": "pending",
+              "note": "cost runs need new images, built after the campaign (amendment A5)"
+            }
+          ]
+        ],
+        "legend": [
+          {
+            "status": "none",
+            "label": "fixed in advance"
+          },
+          {
+            "status": "predicted",
+            "label": "pre-registered prediction"
+          },
+          {
+            "status": "pending",
+            "label": "results pending"
+          },
+          {
+            "tone": "bad",
+            "label": "anomaly or cost expected"
+          },
+          {
+            "tone": "ok",
+            "label": "no anomaly expected"
+          },
+          {
+            "tone": "warn",
+            "label": "mixed, uncertain"
+          }
+        ],
+        "note": "Pre-registered at tag prereg-v1 (2026-10-12); results pending. Cells condense docs/experiment.md §7; notes carry the rest."
+      },
+      "axis": "One row per hypothesis, condensed from the pre-registration (§7, copied verbatim from the spec). Tone is what the prediction expects, not what happened: nothing has happened yet.",
+      "read_as": "H1 and H5 bet against Kafka transactions at a Postgres sink; H2 bets on the key; H3 on the outbox; H4, the broker-death cells, is stated as uncertain, and all-zero there is publishable. H6 needs cost runs that come after the campaign.",
+      "so": [
+        "order",
+        "trust"
+      ],
+      "takeaway": "Every outcome is publishable, including all zeros, and each falsifier was written down before any gate or campaign trial. These are bets, not findings.",
+      "arithmetic": "Thresholds: 8 of 10 targeted trials (H1, H3); zero in every cell (H2); a paired interval on p_K − p_N that includes 0 makes H5 inconclusive; 10% on maximum rate (H6)."
+    },
+    {
+      "title": "What a zero can claim (a formula, not data)",
+      "short": "Zero in 30: under 9.5% per trial",
+      "chart": {
+        "type": "xy",
+        "unit": "per-trial probability",
+        "x_label": "trials per stack in a cell (N)",
+        "y_label": "95% upper bound when 0 of N show an anomaly",
+        "y_from_zero": true,
+        "series": [
+          {
+            "name": "exact: 1 − 0.05^(1/N)",
+            "style": "line",
+            "points": [
+              {
+                "x": 10,
+                "y": 0.259
+              },
+              {
+                "x": 20,
+                "y": 0.139
+              },
+              {
+                "x": 30,
+                "y": 0.095
+              }
+            ]
+          },
+          {
+            "name": "rule of three: 3/N",
+            "style": "points",
+            "points": [
+              {
+                "x": 10,
+                "y": 0.3
+              },
+              {
+                "x": 20,
+                "y": 0.15
+              },
+              {
+                "x": 30,
+                "y": 0.1
+              }
+            ]
+          }
+        ],
+        "refs": [
+          {
+            "x": 10,
+            "label": "targeted cells"
+          },
+          {
+            "x": 30,
+            "label": "random-time cells"
+          }
+        ],
+        "note": "Computed from the formula; no trial data."
+      },
+      "axis": "x: trials in one cell for one stack. y: the one-sided 95% upper bound on that stack's per-trial failure probability when every trial is clean.",
+      "read_as": "0 of 30 bounds it below 9.5%; 0 of 10 below 26%. Cutting random cells to 20, the last item on the cut list, would weaken 0.095 to 0.139. The rule of three sits just above the exact bound.",
+      "so": "trust",
+      "takeaway": "A clean cell bounds a failure rate for these faults on this setup; it never says a defense is safe in general.",
+      "arithmetic": "1 − 0.05^(1/N): 0.259 at 10 and 0.095 at 30 (docs/experiment.md §10); 0.139 at 20 (spec cut list); every 3/N computed here."
+    },
+    {
+      "title": "Why H5 was predicted: K's commit step in reconnaissance (not a result)",
+      "short": "Recon: K's ~100 ms commit retry",
+      "chart": {
+        "type": "stacked_bars",
+        "unit": "ms, median",
+        "show_totals": true,
+        "highlight": [
+          "offset commit"
+        ],
+        "bars": [
+          {
+            "label": "no retry (about a third)",
+            "segments": [
+              {
+                "name": "offset commit",
+                "value": 2
+              },
+              {
+                "name": "rest of the step",
+                "value": 46
+              }
+            ]
+          },
+          {
+            "label": "one retry (65–67%)",
+            "segments": [
+              {
+                "name": "offset commit",
+                "value": 104
+              },
+              {
+                "name": "rest of the step",
+                "value": 45
+              }
+            ]
+          }
+        ]
+      },
+      "axis": "Diagnostic `diag_k1`: stack K alone, 200/s for 120 s, no fault, unscored. Step: from `sendOffsetsToTransaction` to `commitTransaction` returning; both consumers had these medians.",
+      "read_as": "When a consumer sends the next transaction's offsets before the coordinator has finished the last one's markers, it is refused once with `CONCURRENT_TRANSACTIONS` and waits about 100 ms. Reconnaissance read each K consumer as near 100% busy in its commit step.",
+      "so": "order",
+      "takeaway": "This is the mechanism behind H5's bet that K's commit window is wider than N's, from one diagnostic in an earlier environment. The campaign's F0 duty cycles and F4-con-r trials test it.",
+      "arithmetic": "docs/recon-part-a.md: 2 vs 104 ms offset commit, 48 vs 149 ms whole step; 638 of 951 (67%) and 626 of 968 (65%) retried. Rest = step median − offset median."
+    }
+  ],
+  "interview": {
+    "pitch30": "I built a fault-injection harness that asks which duplicate-payment defense holds between Kafka and a Postgres ledger: none, Kafka transactions, an idempotency key at the sink, or an outbox plus that key. Each trial kills, pauses or blackholes a real broker, process or connection, and a checker that treats the source database as the authority says whether every payment was applied exactly once and at which boundary any anomaly was born. Before measuring, a detection gate on the naive stack showed the checker catching the duplicate a commit-window kill causes and the loss a kill after the source commit causes, 10 of 10 each. The predictions were tagged before any gate or campaign trial; the campaign's results are sealed until it ends.",
+    "pitch120": "Teams say \"exactly-once\", but the usual defenses guard different boundaries: the outbox the producer side, Kafka transactions only Kafka-to-Kafka work, an idempotency key the sink. So I built four whole pipelines, each contrast adding one defense, on one laptop with public software, and a harness that injects real faults: broker kills and pauses, a producer blackhole, consumer kills at random times and at a code hook in the commit window, a zombie consumer, a lost COMMIT reply. A checker treats the source database as the authority and uses each apply's (partition, offset) to tell a redelivery from a re-send. Everything was pre-registered after reconnaissance and before the first gate or campaign trial. H1 says Kafka transactions still double-post when killed after the Postgres commit. H5, the non-obvious one, says they make a random crash more likely to double-post, because the transaction commit widens the window between the ledger commit and Kafka's progress. A detection gate on the naive stack showed the checker sees a duplicate and a loss when they happen. The 760-trial campaign is running and I don't read its anomaly output until it ends, so today I can give you the design and the bets, not the answers.",
+    "followups": [
+      {
+        "q": "Do your consumers commit the database before or after Kafka, and what does that do to your duplicate rate under crashes?",
+        "a": "Postgres first, then Kafka's progress, in every stack. A crash between the two leaves the ledger committed and the offset not, so the batch is redelivered and applied again unless the sink checks a key; the gate showed it on N, payment (1, 646) applied again 10.1 s later. Kafka first trades duplicates for losses; that I state by reasoning, not measurement. How often a random crash lands in the window depends on the time spent there: H5 predicts K spends more, and reconnaissance saw about two-thirds of K's offset commits retried after ~100 ms. The campaign will measure the rates."
+      },
+      {
+        "q": "Kafka has exactly-once. Why doesn't K solve it?",
+        "a": "A Kafka transaction commits Kafka partitions and consumer offsets atomically; Postgres is not a participant, and KIP-939, two-phase commit with external participants, has not shipped. Kill K after its Postgres commit and before `commitTransaction`: on restart `initTransactions` aborts the transaction and the batch is redelivered, but the Postgres commit stands. H1 predicts duplicates in at least 8 of 10 such trials, and in the zombie cell; the campaign will say."
+      },
+      {
+        "q": "Why not store offsets in Postgres in the same transaction?",
+        "a": "It is correct, Kafka's docs recommend it, and it guards the consumer side as I does; as a fifth arm it would break the one-change contrasts. It deduplicates by (partition, offset), though, and an outbox relay's re-send lands at a new offset, so it would not catch O+I's relay duplicates. Only a key carried from the origin catches those."
+      },
+      {
+        "q": "How do you know a zero isn't a blind checker, or a fault that never happened?",
+        "a": "The detection gate, run after the tag: 44 synthetic tests covering 26 class and attribution rows; on N, commit-window kills gave a consumer-side duplicate in 10 of 10 trials and kills after the source commit a producer-side loss in 10 of 10; 20 of 20 no-fault trials across the four stacks were clean. Every campaign trial also passes a per-cell manipulation check that never reads the ledger; a failed one voids the block. The gap: the positive controls ran on N only."
+      },
+      {
+        "q": "Your zombie consumer: which fencing stops it, and does it stop the duplicate write?",
+        "a": "Generation fencing (KIP-447), at the offset commit. In reconnaissance on N, in all 17 F5 trials, the paused consumer's first act after unpause was a `db_commit` of the batch it held, then `CommitFailedException` about 0.1 s later. The Postgres write is another system's commit and has already happened, so fencing stops the Kafka commit, not the ledger write. Epoch fencing does not apply: each instance has its own `transactional.id`. For K the same is predicted at `TxnOffsetCommit` (H1)."
+      },
+      {
+        "q": "What came before your pre-registration tag?",
+        "a": "Reconnaissance A and B: the rate, the VM, Debezium's lifecycle, the F2, F5 and F6 decision rules, and the manipulation checks on real trials. Their values were frozen into the pre-registration and none is reported as a result. One recon rule, counting cap refusals as `fail`, was set after seeing data, and that is disclosed. The tag came before any gate or campaign trial, and the analysis code and amendments A1–A4 were tagged campaign-v1 before the first campaign trial."
+      }
+    ],
+    "limits": "No campaign result exists yet: the campaign is running and its anomaly output is unread, so nothing here says which defense held. The gate's positive controls ran on N only; nothing yet shows K duplicating. When results exist they will hold for one laptop (combined KRaft, one Docker VM, no real network or host boundary), this configuration (acks=all, Postgres before Kafka, crash-only recovery, the classic group protocol, these versions) and these faults; no overdraft rule, so ordering is untested; no database failover, disk faults or inter-broker partitions; client retries to the API are excluded; no production fault frequency is claimed. Reconnaissance numbers come from earlier environments and are not results."
+  },
+  "recall": [
+    {
+      "q": "Under F4-svc, how does a dual-write stack lose a payment, and why should O+I not?",
+      "a": "The service commits the source row, is killed before sending, and the payment never reaches the topic: a loss with a topic gap, born on the producer side. O+I writes the outbox row in the same commit, and the relay publishes it later."
+    },
+    {
+      "q": "Where does the commit-window hook sit for K, and why not before the Kafka work?",
+      "a": "After the Postgres commit, the payments-applied sends and `sendOffsetsToTransaction`, before `commitTransaction`. `beginTransaction()` is client-local, so earlier the broker has no transaction and K would run N's code path."
+    },
+    {
+      "q": "In `gate_cons_1`, what tells the checker the duplicate was born on the consumer side?",
+      "a": "The extra apply has the same (partition, offset), (1, 646), as the first: a redelivery. A different offset for the same payment would mean a re-send, born on the producer side."
+    },
+    {
+      "q": "Why pair random-time cells with targeted cells?",
+      "a": "Random faults rarely land in narrow windows, so a random zero alone would mean little. Targeted cells ask whether a defense can break at all; random cells how often it does under realistic timing."
+    },
+    {
+      "q": "I shows 0 anomalies in 30 trials of a cell. What can you claim?",
+      "a": "That its per-trial probability for that fault is below about 9.5% (one-sided 95%), on this setup. Not that the defense is safe in general."
+    },
+    {
+      "q": "Why does one void trial void its whole block?",
+      "a": "So every analysed block keeps all four stacks with the same fault schedule and payment stream: the pairing the N vs K contrasts rely on. The block is re-run with a new seed."
+    },
+    {
+      "q": "What is the commit-window duty cycle, and why should it predict F4-con-r duplicates?",
+      "a": "The share of running time between a ledger `COMMIT` returning and Kafka progress committing. A random kill duplicates only if it lands in that window, so a wider window should mean more duplicates (H5)."
+    },
+    {
+      "q": "Why is a trial voided by a failed manipulation check but never by the checker's output?",
+      "a": "The check asks whether the fault happened, from orchestrator, broker and process state. Voiding on the checker's output would let results decide which trials count."
+    },
+    {
+      "q": "Why crash-only rather than in-process recovery?",
+      "a": "It reaches the same outcome (resume from the last committed offsets), is what orchestrators do by default, keeps error handling out of the contrasts, and removes the abort-seek-continue path where skip bugs live."
+    },
+    {
+      "q": "What does the passed detection gate not tell you?",
+      "a": "Anything about K, I or O+I under faults: both positive controls ran on N. Nor any campaign rate: the gate's trials are not counted in the campaign."
+    }
+  ],
+  "sources": [
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "**Working post title:** *Which duplicate-payment defense holds when the broker dies.*"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "## 1. Context and goal"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### Question"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### The reframing the starting idea needed"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### Differentiation"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### In scope"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### Out of scope, named in the post"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### The four stacks"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "**Toxiproxy and per-role listeners.**"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "**ledger-consumer (Java).**"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### Failure handling: crash-only, uniformly"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### Instrumentation inside the system under test"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### What counts as a payment"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### Anomaly taxonomy"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "**Attribution rule: where an anomaly was born.**"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### Pre-registration mechanism"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### The cut list, fixed now"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### Explanations the post must give"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### Distribution"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### Module 4: the boundary"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### Module 9: checking histories"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### Module 10: statistics over trials"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### Known limitations, stated not solved"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "## 15. Review record"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "**Status:** pre-registration, committed and tagged `prereg-v1` before the first measured trial."
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "## 2. Frozen values"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "## 3. Stacks and contrasts"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "### The fault matrix"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "**Seeds and stack order: the blocking design.**"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "### Frozen for this matrix"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "**Carried from reconnaissance:**"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "## 7. Hypotheses H1–H6"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "### Detection gate: controls before the campaign"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "### Manipulation checks and void rules, fixed in advance"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "## 10. Analysis plan"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "### What counts as a result"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "**C-R: the rate rule's \"no errors\" (plan 1 D17), 2026-10-09; set after seeing data.**"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "**A1: contention, 2026-10-12.**"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "**A2: the campaign runner, 2026-10-12.**"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "**A3: analysis definitions, 2026-10-12.**"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "#### Analysis definitions (D42)"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "**Newcombe's method 10, exactly**"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "**A4: the cost runs, 2026-10-12.**"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/experiment.md",
+      "section": "**The tag.** These amendments and the analysis code are tagged `campaign-v1`"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/gate.md",
+      "section": "## Checker gate-set audit (Task 15)"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/gate.md",
+      "section": "Gate passed 2026-10-12"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/gate.md",
+      "section": "### Per control"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/gate.md",
+      "section": "### Mechanism, read from the timelines (spec §7)"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/gate.md",
+      "section": "### Observations for the campaign (not part of the verdict)"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/recon-part-a.md",
+      "section": "Spec §8 part A. Nothing here is a result."
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/recon-part-a.md",
+      "section": "**K's commit step takes a near-constant 148 ms at every rate.**"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/recon-part-a.md",
+      "section": "### Diagnostic `diag_k1` (author-approved, 2026-10-09; not scored, in no recon list)"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/recon-part-b.md",
+      "section": "## `session.timeout.ms` and the F5 pause (Task 12)"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/recon-part-b.md",
+      "section": "The zombie was seen in all 17 F5 trials of part B"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/plans/2026-10-08-plan-1-core-and-recon-a.md",
+      "section": "| D5 | **Crash-only exit is `Runtime.halt(1)`,**"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/plans/2026-10-10-plan-2-faults-gate-prereg.md",
+      "section": "No gate trial runs before the tag exists."
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/plans/2026-10-12-plan-3a-campaign-and-analysis.md",
+      "section": "| D45 | **The analysis code is committed before the first campaign trial,**"
+    },
+    {
+      "file": "~/projects/ledger-faults/consumer/src/main/java/lf/consumer/ConsumerLoop.java",
+      "section": "// ledger committed, Kafka progress not"
+    },
+    {
+      "file": "~/projects/ledger-faults/consumer/src/main/java/lf/consumer/ConsumerLoop.java",
+      "section": "// a real open transaction with pending offsets"
+    },
+    {
+      "file": "~/projects/ledger-faults/consumer/src/main/java/lf/consumer/ConsumerLoop.java",
+      "section": "// client-local: the coordinator hears nothing yet"
+    },
+    {
+      "file": "~/projects/ledger-faults/consumer/src/main/java/lf/consumer/Ledger.java",
+      "section": "ON CONFLICT DO NOTHING RETURNING payment_id"
+    },
+    {
+      "file": "~/projects/ledger-faults/consumer/src/main/java/lf/consumer/CrashOnly.java",
+      "section": "There is no in-process abort, seek or continue."
+    },
+    {
+      "file": "~/projects/ledger-faults/service/src/main/java/lf/service/PaymentHandler.java",
+      "section": "// row committed; nothing sent, no reply yet"
+    }
+  ],
+  "derived_numbers": [
+    {
+      "value": "0.15",
+      "how": "3/20, the rule-of-three approximation (spec §12 module 10, 'about 3/N') at N = 20."
+    },
+    {
+      "value": "0.1",
+      "how": "3/30, the rule-of-three approximation at N = 30."
+    },
+    {
+      "value": "0.3",
+      "how": "3/10, the rule-of-three approximation at N = 10."
+    },
+    {
+      "value": "951",
+      "how": "313 + 638, consumer A's transactions without and with one retry in docs/recon-part-a.md diag_k1; 638 / 951 = 67%."
+    },
+    {
+      "value": "968",
+      "how": "342 + 626, consumer B's transactions without and with one retry in diag_k1; 626 / 968 = 65%."
+    },
+    {
+      "value": "46",
+      "how": "48 − 2: diag_k1's whole-step median minus its offset-commit median, no-retry transactions; a difference of medians, drawn only to place the retry."
+    },
+    {
+      "value": "45",
+      "how": "149 − 104: the same difference for transactions with one retry."
+    }
+  ],
+  "links": {
+    "p2": "https://claude.ai/artifact/A4MJnGXGWMBmi5z5ntxZBz",
+    "p3": "https://claude.ai/artifact/HspzVnu9oRQMqUjfrWUqZL"
+  },
+  "prereqs": [
+    {
+      "unit": "p2",
+      "label": "How these experiments earn trust"
+    },
+    {
+      "unit": "p3",
+      "label": "Delivery guarantees and duplicate payments"
+    }
+  ]
+}
