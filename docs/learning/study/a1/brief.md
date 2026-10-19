@@ -329,7 +329,6 @@ Follow the step numbers. Clock A (laptop) brackets the whole job; clock B (worke
 - `coldstart/checks.py`: def check_consistency
 - `coldstart/analysis/metrics.py`: t_total = t_total_job - warmup_tail
 - `harness/runpod/submitter.py`: poll_interval: float = 5.0
-- `data/campaign.jsonl`: Model loading took
 
 ## Interview mode (paste this to an AI chat)
 
