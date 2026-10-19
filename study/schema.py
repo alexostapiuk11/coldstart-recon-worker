@@ -430,16 +430,26 @@ def _log_x(x, x_log, where):
         raise ContentError(f"{where}.x is {x:g}; a log x axis needs every x > 0")
 
 
+def _log_y(d, key, y_log, where):
+    """d[key] (finite, already checked) is above zero when the y axis is logarithmic."""
+    if y_log and d[key] <= 0:
+        raise ContentError(f"{where}.{key} is {d[key]:g}; a log y axis needs every y value > 0")
+
+
 def _numeric_frame(ch, where):
-    """Fields `xy` and `scatter` share: x_label, y_label, optional bools x_log and
+    """Fields `xy` and `scatter` share: x_label, y_label, optional bools x_log, y_log and
     y_from_zero, optional `note`, and optional `refs` [{x or y: number, label}] (dashed
-    reference lines). Returns x_log."""
+    reference lines). A log y axis has no zero: y_log rejects y_from_zero true and needs
+    every y value above zero. Returns (x_log, y_log)."""
     _label(ch, "x_label", where)
     _label(ch, "y_label", where)
-    for f in ("x_log", "y_from_zero"):
+    for f in ("x_log", "y_log", "y_from_zero"):
         if f in ch:
             _get(ch, f, bool, where)
-    x_log = ch.get("x_log", False)
+    x_log, y_log = ch.get("x_log", False), ch.get("y_log", False)
+    if y_log and ch.get("y_from_zero"):
+        raise ContentError(f"{where}.y_from_zero: a log y axis has no zero; drop "
+                           "y_from_zero or set it false")
     _opt_str(ch, "note", where)
     for i, r in enumerate(_get(ch, "refs", list, where) if "refs" in ch else []):
         w = f"{where}.refs[{i}]"
@@ -449,8 +459,10 @@ def _numeric_frame(ch, where):
         v = _finite(r, axes[0], w)
         if axes[0] == "x":
             _log_x(v, x_log, w)
+        else:
+            _log_y(r, "y", y_log, w)
         _label(r, "label", w)
-    return x_log
+    return x_log, y_log
 
 
 def _xy(ch, where):
@@ -458,11 +470,15 @@ def _xy(ch, where):
     ascending (equal x allowed) and lo <= y <= hi, optional style 'line' | 'points' |
     'step' (default line), optional axis 'left' | 'right'}; optional `bands`
     [{y_lo < y_hi, label}] (on the left axis); optional y_axes 'single' | 'dual' (dual
-    needs `y2_label`, optional `y2_unit`, and a series on each axis)."""
-    x_log = _numeric_frame(ch, where)
+    needs `y2_label`, optional `y2_unit`, and a series on each axis; it cannot take
+    y_log)."""
+    x_log, y_log = _numeric_frame(ch, where)
     axes = ch.get("y_axes", "single")
     if axes not in ("single", "dual"):
         raise ContentError(f"{where}.y_axes must be 'single' or 'dual'")
+    if y_log and axes == "dual":
+        raise ContentError(f"{where}.y_log: a log y axis cannot be used with y_axes 'dual'; "
+                           "draw two charts instead")
     names, sides = set(), set()
     for i, s in enumerate(_items(ch, "series", where, at_most=MAX_SERIES, fields=("name",))):
         w = f"{where}.series[{i}]"
@@ -485,6 +501,9 @@ def _xy(ch, where):
             _log_x(x, x_log, wp)
             lo = _finite(p, "lo", wp) if "lo" in p else y
             hi = _finite(p, "hi", wp) if "hi" in p else y
+            for k in ("y", "lo", "hi"):
+                if k in p:
+                    _log_y(p, k, y_log, wp)
             if not lo <= y <= hi:
                 raise ContentError(f"{wp}: needs lo <= y <= hi, got {lo:g}, {y:g}, {hi:g}")
             if last is not None and x < last:
@@ -503,6 +522,7 @@ def _xy(ch, where):
     for i, b in enumerate(_get(ch, "bands", list, where) if "bands" in ch else []):
         w = f"{where}.bands[{i}]"
         lo, hi = _finite(b, "y_lo", w), _finite(b, "y_hi", w)
+        _log_y(b, "y_lo", y_log, w)
         if not lo < hi:
             raise ContentError(f"{w}: needs y_lo < y_hi, got {lo:g}, {hi:g}")
         _label(b, "label", w)
@@ -521,7 +541,7 @@ def _scatter(ch, where):
     marker (a shape in SHAPES, one group's only)}; optional frontier {name, points: 2+
     [{x, y}]} running down and to the right (lower-left is better): x rising strictly, y
     never rising."""
-    x_log = _numeric_frame(ch, where)
+    x_log, y_log = _numeric_frame(ch, where)
     names, markers = set(), {}
     for i, g in enumerate(_items(ch, "groups", where, at_most=MAX_SERIES, fields=("name",))):
         w = f"{where}.groups[{i}]"
@@ -540,6 +560,7 @@ def _scatter(ch, where):
             wp = f"{w}.points[{j}]"
             _log_x(_finite(p, "x", wp), x_log, wp)
             _finite(p, "y", wp)
+            _log_y(p, "y", y_log, wp)
             _opt_str(p, "label", wp, MAX_POINT_LABEL)
     if "frontier" in ch:
         fr = _get(ch, "frontier", dict, where)
@@ -552,6 +573,7 @@ def _scatter(ch, where):
             wp = f"{w}.points[{j}]"
             x, y = _finite(p, "x", wp), _finite(p, "y", wp)
             _log_x(x, x_log, wp)
+            _log_y(p, "y", y_log, wp)
             if last and not (x > last[0] and y <= last[1]):
                 raise ContentError(f"{w}: x must rise strictly and y never rise (lower-left "
                                    f"is better); point {j} is ({x:g}, {y:g}) after "

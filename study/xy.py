@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import itertools
 import math
+import re
 
 from study.schema import SHAPES, group_shapes
 from study.svg import CHART_CHAR, _fit, _note, _num, _overlaps
@@ -78,8 +79,10 @@ def _with_unit(text: str, unit: str) -> str:
 
 
 class Axis:
-    def __init__(self, lo: float, hi: float, ticks: list[float], log: bool = False):
+    def __init__(self, lo: float, hi: float, ticks: list[float], log: bool = False,
+                 minor: list[float] | None = None):
         self.lo, self.hi, self.ticks, self.log = lo, hi, ticks, log
+        self.minor = minor or []  # unlabelled ticks (a log y axis' 2 to 9 per decade)
 
     def frac(self, v: float) -> float:
         if self.log:
@@ -155,6 +158,45 @@ def log_axis(values: list[float], data: list[float]) -> Axis:
     return Axis(lo, hi, ticks, log=True)
 
 
+def _snap125(v: float, up: bool) -> float:
+    """The nearest 1, 2 or 5 times a power of ten at or above v (up) or at or below it."""
+    e = math.floor(math.log10(v))
+    steps = [m * 10.0 ** k for k in (e - 1, e, e + 1) for m in (1, 2, 5)]
+    if up:
+        return min(t for t in steps if t >= v * (1 - 1e-9))
+    return max(t for t in steps if t <= v * (1 + 1e-9))
+
+
+def log_y_axis(values: list[float]) -> Axis:
+    """A log y axis that ends on ticks. Ticks at 1, 2 and 5 times each power of ten from
+    the step at or below the lowest value to the one at or above the highest, while that
+    is at most seven ticks; past that, from the decade below the values to the decade
+    above, labelled ticks at each power of ten and unlabelled minor ticks at 2 to 9 times
+    it."""
+    lo, hi = min(values), max(values)
+    a, b = _snap125(lo, False), _snap125(hi, True)
+    if b <= a * (1 + 1e-9):  # one value: widen to the steps either side
+        a, b = _snap125(a * 0.999, False), _snap125(b * 1.001, True)
+    ticks = [m * 10.0 ** e for e in range(math.floor(math.log10(a)) - 1,
+                                          math.ceil(math.log10(b)) + 1)
+             for m in (1, 2, 5) if a * (1 - 1e-9) <= m * 10.0 ** e <= b * (1 + 1e-9)]
+    if len(ticks) <= 7:
+        return Axis(a, b, ticks, log=True)
+    e0 = math.floor(math.log10(lo) + 1e-9)
+    e1 = max(math.ceil(math.log10(hi) - 1e-9), e0 + 1)
+    return Axis(10.0 ** e0, 10.0 ** e1, [10.0 ** e for e in range(e0, e1 + 1)], log=True,
+                minor=[m * 10.0 ** e for e in range(e0, e1) for m in range(2, 10)])
+
+
+def y_title(chart: dict) -> str:
+    """The y axis title: label (unit), with ', log scale' inside the brackets on a log y
+    axis unless the label already says log."""
+    label, unit = chart["y_label"], chart["unit"]
+    log = chart.get("y_log") and not re.search(r"\blog\b", label, re.IGNORECASE)
+    inner = ", ".join(p for p in (unit, "log scale" if log else "") if p)
+    return f"{label} ({inner})" if inner else label
+
+
 def text_box(x: float, y: float, text: str, anchor: str = "start"):
     """Estimated (left, top, right, bottom) of one line of chart text at baseline y."""
     w = len(text) * CHART_CHAR
@@ -181,7 +223,7 @@ class Frame:
         from_zero = chart.get("y_from_zero", True)
         self.xa = (log_axis(xs, data_xs or xs) if chart.get("x_log")
                    else linear_axis(xs, 4, False))
-        self.ya = linear_axis(ys, 5, from_zero)
+        self.ya = log_y_axis(ys) if chart.get("y_log") else linear_axis(ys, 5, from_zero)
         self.ya2 = aligned_axis(ys2, len(self.ya.ticks) - 1, from_zero) if ys2 else None
         left = max(len(plain(t)) for t in self.ya.ticks) * CHART_CHAR + 8
         right = (max(len(plain(t)) for t in self.ya2.ticks) * CHART_CHAR + 8
@@ -196,7 +238,7 @@ class Frame:
 
         # Axis titles over the plot: y on the left, the right axis' on the right.
         unit = chart["unit"]
-        t1 = f"{chart['y_label']} ({unit})" if unit else chart["y_label"]
+        t1 = y_title(chart)
         lines = [(s, 0.0, "start") for s in wrap(t1, TITLE_CHARS)]
         if self.ya2:
             u2 = chart.get("y2_unit", unit)
@@ -249,6 +291,9 @@ class Frame:
         for t in self.ya.ticks[1:]:
             self.back.append(f'<line class="xygrid" data-v="{t:g}" x1="{self.pl:.1f}" '
                              f'y1="{self.y(t):.1f}" x2="{self.pr:.1f}" y2="{self.y(t):.1f}"/>')
+        for t in self.ya.minor:  # outward, like the x ticks; clear of the labels
+            self.back.append(f'<line class="xytick xyminor" x1="{self.pl - 4:.1f}" '
+                             f'y1="{self.y(t):.1f}" x2="{self.pl:.1f}" y2="{self.y(t):.1f}"/>')
         self.back.append(f'<line class="xyaxis" x1="{self.pl:.1f}" y1="{self.pb:.1f}" '
                          f'x2="{self.pr:.1f}" y2="{self.pb:.1f}"/>')
         self.back.append(f'<line class="xyaxis" x1="{self.pl:.1f}" y1="{self.pt:.1f}" '
@@ -483,8 +528,7 @@ def xy_html(chart: dict) -> str:
         f"x {_range([p['x'] for p in s['points']], plain)}, "
         f"y {_with_unit(_range([p['y'] for p in s['points']], val), unit2 if on_right(s) else unit)}"
         for s in series)
-    t1 = f"{chart['y_label']} ({unit})" if unit else chart["y_label"]
-    aria = (f"Line chart: {t1} against {chart['x_label']}"
+    aria = (f"Line chart: {y_title(chart)} against {chart['x_label']}"
             + (" (log scale)" if chart.get("x_log") else "") + f". {summary}."
             + refs_summary(chart)
             + "".join(f" Band: {b['label']}, {val(b['y_lo'])} to {val(b['y_hi'])}."
@@ -580,8 +624,7 @@ def scatter_html(chart: dict) -> str:
                      f"x {_range([p['x'] for p in g['points']], bare)}, "
                      f"y {_with_unit(_range([p['y'] for p in g['points']], val), unit)}"
                      + "".join(f", {d}" for d in dups))
-    t1 = f"{chart['y_label']} ({unit})" if unit else chart["y_label"]
-    aria = (f"Scatter chart: {t1} against {chart['x_label']}"
+    aria = (f"Scatter chart: {y_title(chart)} against {chart['x_label']}"
             + (" (log scale)" if chart.get("x_log") else "") + f". {'; '.join(parts)}."
             + (f" Frontier {fr['name']}: "
                + ", ".join(f"({bare(p['x'])}, {val(p['y'])})" for p in fr_pts) + "."

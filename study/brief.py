@@ -109,12 +109,15 @@ def _commit(e):
 
 
 def _axes_line(ch):
-    """'- Axes: x is <x_label> (log scale); y is <y_label> (<unit>)[; right y is ...]'."""
+    """'- Axes: x is <x_label> (log scale); y is <y_label> (<unit>)[; right y is ...]
+    [; log y]'."""
     x = ch["x_label"] + (" (log scale)" if ch.get("x_log") else "")
     unit = f" ({ch['unit']})" if ch["unit"] else ""
     line = f"- Axes: x is {x}; y is {ch['y_label']}{unit}"
     if ch.get("y_axes") == "dual":
         line += f"; right y is {ch['y2_label']} ({ch.get('y2_unit', ch['unit'])})"
+    if ch.get("y_log"):
+        line += "; log y"
     return line
 
 

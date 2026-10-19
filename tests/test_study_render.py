@@ -1575,6 +1575,7 @@ def test_large_chart_values_are_traced_without_an_exponent(tmp_path):
 
 import html
 import itertools
+import math
 
 from tests.study_examples import xy_chart
 
@@ -1981,3 +1982,131 @@ def test_xy_prints_last_values_for_up_to_four_series_only():
                                 for k in range(n)])
     assert len([t for t in _texts(chart_html(chart(4), "e4")) if "xyv" in t[0]]) == 4
     assert [t for t in _texts(chart_html(chart(5), "e5")) if "xyv" in t[0]] == []
+
+
+# ---- y_log: a logarithmic y axis on xy and scatter charts ----
+
+def _log_xy(**extra):
+    """One series at y = 1, 10, 1000 on a log y axis."""
+    return xy_chart(y_log=True, series=[{"name": "a", "points": [
+        {"x": 0, "y": 1}, {"x": 50, "y": 10}, {"x": 100, "y": 1000}]}], **extra)
+
+
+def _y_ticks(out):
+    """{label: y} of the left axis' tick labels, and {value: y} of its gridlines."""
+    labels = {t[4]: t[2] - 4 for t in _texts(out) if "xyt" in t[0] and t[3] == "end"}
+    grid = {float(v): float(y) for v, y in re.findall(
+        r'<line class="xygrid" data-v="([\d.e+-]+)" x1="[\d.]+" y1="([\d.]+)"', out)}
+    return labels, grid
+
+
+def test_xy_log_y_places_a_decade_a_third_of_the_way_up_three_decades():
+    out = chart_html(_log_xy(), "y0")
+    ys = {title.split(" → ")[1]: py for _, _, py, title in _pts(out)}
+    y1, y10, y1000 = ys["1 s"], ys["10 s"], ys["1,000 s"]
+    assert abs((y1 - y10) / (y1 - y1000) - 1 / 3) < 0.002
+    labels, grid = _y_ticks(out)
+    assert list(labels) == ["1", "10", "100", "1,000"]  # decades, thousands separated
+    assert abs(labels["1"] - y1) < 0.15 and abs(labels["1,000"] - y1000) < 0.15
+    assert abs(grid[10] - y10) < 0.15 and abs(grid[100] - (2 * y10 - y1)) < 0.2
+    # the axis runs from the decade below the data to the decade above it
+    axis_y = float(re.search(r'<line class="xyaxis" x1="[\d.]+" y1="([\d.]+)" x2="[\d.]+" '
+                             r'y2="\1"', out).group(1))
+    assert abs(axis_y - y1) < 0.15
+
+
+def test_xy_log_y_of_three_decades_has_unlabelled_minor_ticks():
+    out = chart_html(_log_xy(), "y1")
+    _, grid = _y_ticks(out)
+    minor = [float(y) for y in re.findall(
+        r'<line class="xytick xyminor" x1="[\d.]+" y1="([\d.]+)"', out)]
+    assert len(minor) == 3 * 8  # 2 to 9 in each of three decades
+    pts = {title: py for _, _, py, title in _pts(out)}
+    y1, y10 = pts["a: 0 → 1 s"], pts["a: 50 → 10 s"]
+    two = y1 - (y1 - y10) * math.log10(2)
+    assert min(abs(m - two) for m in minor) < 0.15
+    assert all(m not in grid.values() for m in minor)
+
+
+def test_xy_log_y_within_two_decades_ticks_1_2_5():
+    c = xy_chart(y_log=True, series=[{"name": "a", "points": [{"x": 0, "y": 3},
+                                                              {"x": 1, "y": 40}]}])
+    out = chart_html(c, "y2")
+    labels, _ = _y_ticks(out)
+    assert list(labels) == ["2", "5", "10", "20", "50"]
+    gaps = [labels[a] - labels[b] for a, b in itertools.pairwise(labels)]
+    assert abs(gaps[0] - gaps[3]) < 0.15  # 2 to 5 is as far as 20 to 50
+    assert "xyminor" not in out
+
+
+def test_xy_log_y_whiskers_bands_refs_and_end_labels_use_the_log_scale():
+    c = _log_xy(bands=[{"y_lo": 10, "y_hi": 100, "label": "band"}],
+                refs=[{"y": 100, "label": "target"}])
+    c["series"][0]["points"][1].update(lo=1, hi=100)
+    out = chart_html(c, "y3")
+    pts = {title: py for _, _, py, title in _pts(out)}
+    y1, y10 = pts["a: 0 → 1 s"], pts["a: 50 → 10 s (1 to 100)"]
+    y100 = y10 - (y1 - y10)
+    w = re.search(r'<line class="xyw xk0" x1="[\d.]+" y1="([\d.]+)" x2="[\d.]+" y2="([\d.]+)"',
+                  out)
+    assert abs(float(w.group(1)) - y1) < 0.15 and abs(float(w.group(2)) - y100) < 0.15
+    _, y, _, h = map(float, re.search(r'<rect class="xyband" x="([\d.]+)" y="([\d.]+)" '
+                                      r'width="([\d.]+)" height="([\d.]+)"', out).groups())
+    assert abs(y - y100) < 0.15 and abs(y + h - y10) < 0.15
+    ry = [float(m) for m in re.findall(r'<line class="xyref" x1="[\d.]+" y1="([\d.]+)"', out)]
+    assert abs(ry[0] - y100) < 0.15
+    assert [t[4] for t in _texts(out) if "xyv" in t[0]] == ["1,000"]
+    _xy_texts_inside(out)
+
+
+def test_xy_log_y_axis_title_and_aria_say_log_scale_once():
+    out = chart_html(_log_xy(), "y4")
+    assert ">latency (s, log scale)<" in out
+    assert re.search(r'aria-label="Line chart: latency \(s, log scale\) against', out)
+    out = chart_html(_log_xy(y_label="latency, log scale"), "y5")
+    assert ">latency, log scale (s)<" in out and out.count("log scale") == 2  # title, aria
+    out = chart_html(_log_xy(y_label="log latency", unit=""), "y6")
+    assert ">log latency<" in out
+
+
+def test_xy_log_y_text_stays_inside_and_readable_on_a_phone():
+    c = xy_chart(y_log=True, x_log=True, series=[
+        {"name": f"arm {k}", "points": [{"x": 10000, "y": y0, "lo": y0 * 0.98, "hi": y0 * 1.05},
+                                        {"x": 500000, "y": y1}]}
+        for k, (y0, y1) in enumerate([(1.43, 1.53), (5.32, 5.56), (4.08, 2160), (6.13, 2020)])])
+    out = chart_html(c, "y7")
+    _xy_texts_inside(out)
+    width, _ = _box(out)
+    sizes = _phone_font_sizes()
+    for cls, *_ in _texts(out):
+        assert 309 / width * max(sizes.get(k, 0) for k in cls.split()) >= 12, cls
+    labels, _ = _y_ticks(out)
+    assert list(labels) == ["1", "10", "100", "1,000", "10,000"]
+    assert len([t for t in _texts(out) if "xyv" in t[0]]) == 4
+
+
+def test_y_log_false_draws_the_same_chart_as_no_y_log():
+    assert chart_html(xy_chart(y_log=False), "y8") == chart_html(xy_chart(), "y8")
+    assert chart_html(scatter_chart(y_log=False), "y8") == chart_html(scatter_chart(), "y8")
+
+
+def test_scatter_log_y_places_points_by_ratio():
+    c = scatter_chart(y_log=True, groups=[{"name": "g", "points": [
+        {"x": 1, "y": 1}, {"x": 2, "y": 10}, {"x": 3, "y": 1000}]}])
+    del c["frontier"]
+    out = chart_html(c, "y9")
+    ys = [py for _, _, py, _ in _pts(out)]
+    assert abs((ys[0] - ys[1]) / (ys[0] - ys[2]) - 1 / 3) < 0.002
+    assert ">p99 (s, log scale)<" in out
+    assert "Scatter chart: p99 (s, log scale) against" in out
+
+
+def test_brief_notes_a_log_y_axis():
+    u = artifact_unit()
+    u["results"][0]["chart"] = _log_xy(x_log=True)
+    u["results"][0]["chart"]["series"][0]["points"][0]["x"] = 1
+    brief = render_brief(u)
+    assert "- Axes: x is requests in flight (log scale); y is latency (s); log y\n" in brief
+    assert "- a: 1: 1, 50: 10, 100: 1000\n" in brief
+    u["results"][0]["chart"] = scatter_chart(y_log=True)
+    assert "- Axes: x is replica-seconds; y is p99 (s); log y\n" in render_brief(u)

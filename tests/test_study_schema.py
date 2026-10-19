@@ -660,6 +660,45 @@ def test_xy_dual_axes_need_y2_label_and_a_series_on_each_side():
     _fails(_with(xy_chart(y2_label="x")), r"y2_label needs y_axes 'dual'")
 
 
+def _log_y_chart(**extra):
+    """xy_chart() with y_log and every y value positive."""
+    c = xy_chart(y_log=True, **extra)
+    c["series"][0]["points"][0]["y"] = 0.5
+    return c
+
+
+def test_xy_log_y_validates_with_whiskers_bands_and_refs():
+    validate(_with(_log_y_chart()))
+    validate(_with(_log_y_chart(x_log=False, y_from_zero=False, note="A note.",
+                                bands=[{"y_lo": 2, "y_hi": 4, "label": "b"}],
+                                refs=[{"y": 3, "label": "r"}, {"x": 0, "label": "x"}])))
+    _fails(_with(dict(_log_y_chart(), y_log="yes")), r"y_log: expected bool")
+
+
+def test_xy_log_y_needs_every_y_value_above_zero():
+    c = xy_chart(y_log=True)
+    _fails(_with(c), r"series\[0\]\.points\[0\]\.y is 0; a log y axis needs every y value > 0")
+    c = _log_y_chart()
+    c["series"][1]["points"][0]["lo"] = -0.5
+    _fails(_with(c), r"series\[1\]\.points\[0\]\.lo is -0.5; a log y axis needs every y")
+    c = _log_y_chart()
+    c["series"][1]["points"][0].update(lo=0.5, hi=0)
+    _fails(_with(c), r"series\[1\]\.points\[0\]")
+    _fails(_with(_log_y_chart(bands=[{"y_lo": 0, "y_hi": 4, "label": "b"}])),
+           r"bands\[0\]\.y_lo is 0; a log y axis needs every y value > 0")
+    _fails(_with(_log_y_chart(refs=[{"y": 0, "label": "r"}])),
+           r"refs\[0\]\.y is 0; a log y axis needs every y value > 0")
+    validate(_with(xy_chart(refs=[{"y": 0, "label": "r"}])))  # a linear axis takes zero
+
+
+def test_xy_log_y_rejects_y_from_zero_and_dual_axes():
+    _fails(_with(_log_y_chart(y_from_zero=True)),
+           r"y_from_zero: a log y axis has no zero; drop y_from_zero or set it false")
+    c = _log_y_chart(y_axes="dual", y2_label="throughput")
+    c["series"][1]["axis"] = "right"
+    _fails(_with(c), r"y_log: a log y axis cannot be used with y_axes 'dual'")
+
+
 def test_xy_needs_axis_labels():
     c = xy_chart()
     del c["x_label"]
@@ -704,6 +743,19 @@ def test_scatter_points_are_finite_with_optional_labels():
     c = scatter_chart(x_log=True, groups=[{"name": "a", "points": [{"x": 0, "y": 1}]}])
     del c["frontier"]
     _fails(_with(c), r"x is 0; a log x axis needs every x > 0")
+
+
+def test_scatter_log_y_needs_every_y_above_zero():
+    validate(_with(scatter_chart(y_log=True, refs=[{"y": 14.5, "label": "r"}])))
+    c = scatter_chart(y_log=True)
+    c["groups"][1]["points"][0]["y"] = 0
+    _fails(_with(c), r"groups\[1\]\.points\[0\]\.y is 0; a log y axis needs every y value > 0")
+    c = scatter_chart(y_log=True)
+    c["frontier"]["points"][1]["y"] = -1
+    _fails(_with(c), r"frontier\.points\[1\]\.y is -1; a log y axis needs every y value > 0")
+    _fails(_with(scatter_chart(y_log=True, refs=[{"y": 0, "label": "r"}])),
+           r"refs\[0\]\.y is 0; a log y axis")
+    _fails(_with(scatter_chart(y_log=True, y_from_zero=True)), r"y_from_zero: a log y axis")
 
 
 def test_scatter_frontier_runs_down_and_to_the_right():
