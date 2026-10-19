@@ -15,14 +15,14 @@ Read first: LLM serving on a GPU (P1), How these experiments earn trust (P2).
 - Size every strategy by the same rule: hot models pinned the same way, then the smallest fleet that meets the SLO. *Why:* If only some strategies may give a hot model extra GPUs, the rule, not the measurement, decides the high-skew result (scope amendment §7).
 - Hold the latency target for every popularity decile of models, not only for all requests together. *Why:* Popular models send most requests, so an aggregate p99 (P2: percentiles) can pass while some tenants fail (design §8).
 - Sweep popularity skew at two arrival regimes that give each model the same long-run share. *Why:* Swapping with LRU follows whether a model's requests come together in time, not how often they come; skew alone misses that (design §7).
-- Measure on the GPU what a swap, a co-located neighbour and a memory split cost; simulate only traffic, fleet dynamics and queueing. *Why:* They are the design's only hardware contacts; interference "cannot be reasoned to" (design, module 2).
+- Measure on the GPU what a swap, a co-located neighbour and a memory split cost; simulate only traffic, fleet dynamics and queueing. *Why:* Only the hardware can answer them; interference "cannot be reasoned to" (design, module 2).
 - Fix every rule before the data it governs, with dated amendments (P2: amendment); trust the simulator only if it reproduces a real replay, and publish a miss. *Why:* Fleet numbers are a model's; only a test fixed in advance separates a finding from model error (a failed gate is a result (P2: failed)).
 - State the result as a decision rule in GPUs and monthly dollars, with every conversion assumption published. *Why:* The portfolio requires money too, and readers must be able to substitute their own rate.
 
 ## Need to know first
 
 - **Zipf skew, and hot models**: The k-th most popular of 20 models gets a share proportional to 1 / k to the power s. At **s = 2.0** the hottest model carries about 62.7% (a scope-amendment estimate). Total load: one GPU's measured throughput, 8.89 requests per second. A model above 0.7 of a GPU is **hot** and gets pinned GPUs in every strategy.
-- **Spread and bursty arrivals**: Same long-run share per model, different timing. **Spread**: random (Poisson) arrivals, each labelled independently. **Bursty**: each model is ON in bursts of about 120 s, a fifth of the time. In a burst its load is five times its average, so bursty sizing uses that ON-period load.
+- **Spread and bursty arrivals**: Same long-run share per model, different timing. **Spread**: random (Poisson) arrivals, each labelled independently. **Bursty**: each model is ON in bursts of about 120 s, a fifth of the time. In a burst its load is five times its average, so the bursty hot-model rule uses that ON-period load.
 - **A swap, and the LRU pool**: Stop one vLLM (P1: vllm) engine, wait for its memory to free, start the next model's engine until it answers health: median **37.8 s** over 16 warm swaps, compile cache (P1: compile) hit. The swap strategy's pool evicts the **least recently used** model. Sleep mode (5.0 s) was measured, never simulated.
 - **Co-location and the KV split**: Two engines on one card, 45% of its memory each. The KV cache (P1: kvcache) falls from **168,464** tokens alone to **55,104** (pinned): 82 requests of 2,048 tokens at once, against 26. It shrinks 3.1 times while the memory share shrinks 2.0 times, because the weights (P1: weights) and graph buffers come out of the smaller budget first.
 - **The SLO, per popularity decile**: **SLO: p99 at most 75.6 s**, twice the median swap. A **decile** is 2 of the 20 models by popularity. Its p99 is taken in each simulated run, then the median over 30 runs. A fleet size passes only if all ten deciles meet the SLO.
@@ -91,7 +91,7 @@ Every fleet size of every strategy runs the same 30 traces (common random number
 
 ### One swap inside the simulator, in order (dynamic)
 
-This path, on one GPU, is what the gate replayed. The swap is a fixed stall of the GPU; nothing models what a swap costs the requests around it, the term the diagnosis says is missing.
+The gate replayed this path on one GPU, where the victim is trivial: LRU choice across GPUs was only unit-tested. The swap is a fixed stall of the GPU; nothing models what a swap costs the requests around it, the term the diagnosis says is missing.
 
 - **1 Request for model x**: x is on no GPU; it waits in its queue
 - **2 Pick the LRU victim**: the pool GPU used longest ago
@@ -141,9 +141,9 @@ This path, on one GPU, is what the gate replayed. The swap is a fixed stall of t
 
 **Chosen:** One hot-model rule for all three; the smallest fleet whose every decile meets the SLO; bursty sizing on ON-period load
 
-**Why:** Hot models get pinned GPUs in every strategy, so strategies differ only in how the rest are placed. The aggregate p99 is mostly popular models' requests: an aggregate rule gives swap 9 GPUs at the reference point while the two hottest deciles sit at 87.7 and 77.2 s. On average load, a placeholder sweep left every bursty strategy dominated; the owner chose ON-period load.
+**Why:** Hot models get pinned GPUs in every strategy, so strategies differ only in how the rest are placed. The aggregate p99 is mostly popular models' requests: in the simulator an aggregate rule gives swap 9 GPUs at the reference point while the two hottest deciles sit at 87.7 and 77.2 s. On average load, a placeholder sweep left every bursty strategy dominated; the owner chose ON-period load.
 
-**Cost:** Swap needs one GPU more at the reference point. Swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie unless both others miss below it. Bursty s = 0.6 is not evaluable: a decile had too few requests for a p99.
+**Cost:** Swap needs one GPU more at the reference point. Swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie. Bursty s = 0.6 is not evaluable: a decile had too few requests for a p99.
 
 ### Two arrival regimes with the same per-model shares
 
@@ -190,7 +190,7 @@ This path, on one GPU, is what the gate replayed. The swap is a fixed stall of t
 
 **Why:** A count of distinct fleet sizes cannot favour a strategy. Ties went to the earlier candidate: one GPU of load and twice the swap median, 75.6 s with the measured swaps. The screen's data was committed before the values it set.
 
-**Cost:** Twice a swap absorbs a swap, which favours swapping: at the reference point swap delivers about 45 s p99, the others 4 to 5 s. The measured sweep ran at this one SLO, and the screen ran on placeholder engines.
+**Cost:** Twice a swap absorbs a swap, which favours swapping: at the reference point the simulated swap fleet delivers about 45 s p99, the others 4 to 5 s. The measured sweep ran at this one SLO, and the screen ran on placeholder engines.
 
 ### Hold the simulator to a one-GPU replay; publish the miss
 
@@ -289,7 +289,7 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
 
 5. **Reconnaissance: 4B fails, 1.7B passes**: Two 4B engines left 9,456 and 9,520 KV tokens of 16,384 needed; the 1.7B pair passed, a pre-registered branch. Eviction missed its threshold, so swaps are warm only.
    - Output: docs/recon-a4.md: Qwen3-1.7B, warm swaps, sleep mode works
-   - When: 2026-10-05
+   - When: 2026-10-04 to 10-05
    - Decision: `model` A small model, picked by a go/no-go, with KV that binds
    - Evidence: dcd528cb99 (jobs rebuilt for the fallback); c60602db50 (captures and record)
 6. **Screen load and SLO; fix step 2's values** [MILESTONE]: On placeholder engines and recon's swaps, the screen chose one GPU of load and twice the swap median. Values committed before the first measurement run.
@@ -305,8 +305,8 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
    - When: 2026-10-05
    - Decision: `model` A small model, picked by a go/no-go, with KV that binds
    - Evidence: 8e8b3ac7de (drafted); 4ccbbadc3c (signed after the probe)
-8. **Cells, swaps, sleep; two amendments, re-runs** [MILESTONE]: A saturated neighbour now counts and its ramp wait may lengthen: 44 re-runs, one batch lost to a zero balance.
-   - Output: 28 cells with 3+ valid repeats, 16 swaps, 8 sleep switches
+8. **Cells, swaps, sleep; two amendments, re-runs** [MILESTONE]: After the cell runs, before their analysis: a saturated neighbour counts and its ramp wait may lengthen. 44 re-runs; first tries of two designs lost to a zero balance.
+   - Output: every cell, held-out and solo included, with 3+ valid repeats; 16 swaps, 8 sleep switches
    - When: 2026-10-05 to 10-06
    - Decision: `newsim` A new fleet simulator, fed three measured primitives
    - Evidence: b8b74ac0b1 (validity and ramp amendments); 4778350b74 (cells, swaps, sleep stored); 2389defca2 (failed for want of credit); f5efb1c632 (every cell 3+ valid)
@@ -337,7 +337,7 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
 ### UNVALIDATED: GPUs each strategy needs, by skew and regime
 
 - Axis: Simulated by a model that failed its gate. Each point: the smallest fleet whose every popularity decile meets the 75.6 s p99 SLO, over 30 runs.
-- Read it as: In each regime one strategy is cheapest at every skew: co-locate when spread, swap when bursty. Dedicating is never cheapest, at about twice the cheapest. Spread swap's peak at s = 1.25 was not diagnosed.
+- Read it as: In each regime one strategy is cheapest at every evaluable skew: co-locate when spread, swap when bursty. Dedicating, which can at best tie by construction, needs about twice the cheapest. Spread swap's peak at s = 1.25 was not diagnosed.
 - How it is computed: Reference point, bursty s = 1.0: 21, 10, 12 GPUs. One GPU-month = $1.1095 × 730 h = $809.935; 21 × 809.935 / 20 tenants = $850.43; dedicate costs $8,909.28 a month more than swap.
 - Axes: x is Zipf skew s; y is GPUs to meet the SLO in every decile (GPUs)
 - spread: dedicate: 0.6: 20, 0.8: 20, 1.0: 20, 1.25: 20, 1.5: 20, 2.0: 20
@@ -420,26 +420,26 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
 
 ## Interview card
 
-**30-second pitch:** I asked how to place twenty small LLMs on rented GPUs: give each its own GPU, swap models in and out of a shared pool, or pair them on one card. I measured what the hardware charges for a swap and for a busy neighbour, and fed that into a fleet simulator. Its answer: how traffic arrives picks the winner, not how skewed it is. Pair models when requests are spread out, swap when they come in bursts; dedicating was never cheapest. But the simulator failed its own pre-registered test, 10 of 13 bins, so I publish the GPU counts as unvalidated.
+**30-second pitch:** I asked how to place twenty small LLMs on rented GPUs: give each its own GPU, swap models in and out of a shared pool, or pair them on one card. I measured what the hardware charges for a swap and for a busy neighbour, and fed that into a fleet simulator. Its answer: how traffic arrives picks the winner, not how skewed it is. Pair models when requests are spread out, swap when they come in bursts; dedicating, which by construction can at best tie, never won. But the simulator failed its own pre-registered test, 10 of 13 bins, so I publish the GPU counts as unvalidated.
 
-**2-minute version:** Serving many models means deciding placement. For 20 small models on RTX 4090s I compared dedicating a GPU each, swapping through a shared LRU pool, and co-locating two per GPU, across Zipf skew and two arrival patterns with the same per-model shares, spread and bursty. On the GPU I measured a swap (median 37.8 s, mostly process start), a busy neighbour (2.0 to 2.4 times slower) and the memory split (KV cache 168,464 down to 55,104 tokens). A new simulator sized each strategy to the smallest fleet where every popularity decile meets a 75.6 s p99, because aggregate sizing let the hottest tenants breach. Result: co-locate when spread, swap when bursty, dedicating about twice the cheapest. But my pre-registered gate, three real replays on one GPU, failed: 10 of 13 bins outside the band. Afterwards I found the simulator charged 37.8 s per swap where the replay pod took about 25 s, and even at that 12 of 13 still missed: it lacks a term for what a swap costs nearby requests. So the ordering is wide and the counts are unvalidated. The paid runs cost $25.23.
+**2-minute version:** For 20 small models on RTX 4090s I compared dedicating a GPU each, swapping through a shared LRU pool, and co-locating two per GPU, across Zipf skew and two arrival patterns with the same per-model shares, spread and bursty. On the GPU I measured a swap (median 37.8 s, mostly process start), a busy neighbour (2.0 to 2.4 times slower) and the memory split (KV cache 168,464 down to 55,104 tokens). A new simulator sized each strategy to the smallest fleet where every popularity decile meets a 75.6 s p99; aggregate sizing would have let the hottest tenants breach. Simulated result: co-locate when spread, swap when bursty, dedicating about twice the cheapest. But my pre-registered gate, three real replays on one GPU, failed: 10 of 13 bins outside the band. An exploratory diagnosis found the simulator charged 37.8 s per swap where the replay pod took about 25 s, and even at that 12 of 13 still missed; the likely gap is a term for what a swap costs nearby requests, unmeasured. So the ordering is wide and the counts are unvalidated. The paid runs cost $25.23.
 
 **Hard follow-ups:**
 
 - Q: Why trust a simulator that failed its gate?
   A: For GPU counts, I don't: the gate failed at its one point (one GPU, three tenants, swapping only), the fleets are 10 to 25 GPUs, and co-location had two held-out cells, one missed. The ordering is wide, about twice, but I did not test whether the model's error leaves it unchanged. The measured swap, slowdown and KV split stand.
 - Q: Why is dedicating never cheapest?
-  A: Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). The finding is the margin: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs.
+  A: Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). The simulated margin is the point: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs.
 - Q: What would change the winner?
-  A: Arrival timing (only two regimes built); the SLO (twice a swap favours swapping, and the sweep ran at one SLO); interference (exploratory: four times the penalty loses co-location the bursty regime, eight the spread one); model size (a 1.7B result).
+  A: Arrival timing (only two regimes built); the SLO (twice a swap favours swapping, and the sweep ran at one SLO); interference (exploratory: four times the busy-neighbour latency loses co-location the bursty regime, eight the spread one); model size (a 1.7B result).
 - Q: Why did the gate fail?
-  A: Exploratory, after the verdict. A host up to 30% faster does not close it. The gate charged 37.8 s per swap; replay swaps took about 25 s. Charged that, the simulator is too fast and 12 of 13 bins still miss: it has no term for what a swap costs nearby requests.
+  A: Exploratory, after the verdict. A host up to 30% faster does not close it. The gate charged 37.8 s per swap; replay swaps took about 25 s. Charged that, the simulator is too fast and 12 of 13 bins still miss: probably it lacks a term for what a swap costs nearby requests, which I did not measure.
 - Q: You switched models and changed rules mid-campaign. Isn't that moving the goalposts?
-  A: The 1.7B switch was a branch committed before reconnaissance. The KV pin came after the first co-located runs crashed, before any valid co-located data, confirmed by a probe and signed; the validity and ramp amendments came before the cells were analysed. All dated in git; the re-runs cost 7.45 unplanned GPU-hours.
+  A: The 1.7B switch was a branch committed before reconnaissance. The KV pin came after the first co-located runs crashed, before any valid co-located data, confirmed by a probe and signed; the validity and ramp amendments came after the cell runs, before their analysis. All dated in git; the re-runs cost 7.45 unplanned GPU-hours.
 - Q: What would you do next?
-  A: Measure what a swap costs the requests around it, on one pod with the replay's own requests: the missing term. A recalibrated re-run would not pass. Co-location needs its own replay.
+  A: Measure what a swap costs the requests around it, on one pod with the replay's own requests: the likely missing term. A recalibrated re-run would not pass. Co-location needs its own replay.
 
-**Limits (what I must not claim):** Every GPU count, dollar figure and the decision rule are from a simulator that failed its gate (10 of 13 bins), at one GPU, three tenants and swapping only, with a burst shape and load the sweep did not use; co-location had two held-out cells, one missed, and no replay. Whether the model's error leaves the ordering unchanged was not tested. Qwen3-1.7B, not the registered 4B; one size and request shape; LRU only; one GPU class and datacenter; warm swaps only; swap time varies about 50% by pod; one SLO, twice a swap, which favours swapping; two arrival regimes. Sleep mode measured, never simulated. The diagnosis and the interference sensitivity are exploratory. The post is an unpublished draft.
+**Limits (what I must not claim):** Every GPU count, dollar figure and the decision rule are from a simulator that failed its gate (10 of 13 bins), at one GPU, three tenants and swapping only, with a burst shape and load the sweep did not use; co-location had two held-out cells, one missed, and no replay; LRU victim choice across GPUs was only unit-tested. Whether the model's error leaves the ordering unchanged was not tested. Qwen3-1.7B, not the registered 4B; one size and request shape; LRU only; one GPU class and datacenter; warm swaps only; swap time varies about 50% by pod; one SLO, twice a swap, which favours swapping; two arrival regimes. Sleep mode measured, never simulated. The diagnosis and the interference sensitivity are exploratory. The post is an unpublished draft.
 
 ## Recall questions
 
@@ -448,19 +448,19 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
 - Q: Spread and bursty traffic give each model the same share. What differs, and what does it change?
   A: Timing. In a burst one swap-in serves many requests; scattered, a model is loaded, evicted and loaded again (design module 4). Simulated: swap cheapest when bursty, co-locate when spread.
 - Q: At the reference point, what does sizing on the aggregate p99 get wrong?
-  A: It picks 9 GPUs for swap, and the two hottest deciles breach (87.7 and 77.2 s against 75.6 s); per-decile sizing needs 10. R2.
+  A: In the simulator it picks 9 GPUs for swap, and the two hottest deciles breach (87.7 and 77.2 s against 75.6 s); per-decile sizing needs 10. R2.
 - Q: Which cold-start stages does a swap skip, and what does it still pay?
   A: It skips platform scheduling and compiling (a cache hit). It re-pays process start, imports and the health check, 27.8 of 37.8 s.
 - Q: Splitting memory halves each engine's share. Why does its KV cache shrink 3.1 times?
   A: Weights and graph buffers are fixed and come out of the smaller budget first: 168,464 to 55,104 tokens, 82 to 26 requests.
-- Q: A busy neighbour makes a model about twice as slow. Why does co-locating still halve the fleet?
+- Q: A busy neighbour makes a model about twice as slow. Why does co-locating still halve the simulated spread fleet?
   A: SLO headroom, not low load: 3 to 6 s against 75.6 s. In the exploratory run it held at the worst reading of the unmeasured range.
 - Q: Why can dedicating at best tie under this sizing rule?
-  A: Swap and co-locate search only up to dedicate's size, where their layouts become dedicate's; dedicating wins only if both miss below it. The margin is the finding.
+  A: Swap and co-locate search only up to dedicate's size, where their layouts become dedicate's and serve identically, so dedicating can tie but never win. The simulated margin is the point.
 - Q: The gate charged 37.8 s per swap; the replay pod's swaps took about 25 s. Why does charging 25 s not rescue the gate?
-  A: Then it predicts faster than real and 12 of 13 bins still miss: no fixed swap cost matches, because the model has no term for a swap's effect on nearby requests.
+  A: Then it predicts faster than real and 12 of 13 bins still miss: no fixed swap cost matches. The exploratory diagnosis blames a missing term for a swap's effect on nearby requests, unmeasured.
 - Q: What did the gate test, and what did it never test?
-  A: One GPU, three tenants, swapping, 180 s bursts at 0.3 of a GPU. Never co-location (two held-out cells), never a multi-GPU fleet, never the swept 120 s bursts.
+  A: One GPU, three tenants, swapping, 180 s bursts at 0.3 of a GPU. Never co-location (two held-out cells), never a multi-GPU fleet or LRU victim choice across GPUs, never the swept 120 s bursts.
 - Q: Which requirement breaks if the GPU counts are presented as findings, and what may be said instead?
   A: R5. The ordering may be called wide but unvalidated; the measured primitives stand.
 

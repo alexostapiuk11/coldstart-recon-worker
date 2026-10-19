@@ -28,7 +28,7 @@
       "id": "R4",
       "short": "Measure primitives, simulate fleets",
       "text": "Measure on the GPU what a swap, a co-located neighbour and a memory split cost; simulate only traffic, fleet dynamics and queueing.",
-      "why": "They are the design's only hardware contacts; interference \"cannot be reasoned to\" (design, module 2)."
+      "why": "Only the hardware can answer them; interference \"cannot be reasoned to\" (design, module 2)."
     },
     {
       "id": "R5",
@@ -54,7 +54,7 @@
       "id": "regimes",
       "short": "Spread vs bursty arrivals",
       "term": "Spread and bursty arrivals",
-      "plain": "Same long-run share per model, different timing. **Spread**: random (Poisson) arrivals, each labelled independently. **Bursty**: each model is ON in bursts of about 120 s, a fifth of the time. In a burst its load is five times its average, so bursty sizing uses that ON-period load."
+      "plain": "Same long-run share per model, different timing. **Spread**: random (Poisson) arrivals, each labelled independently. **Bursty**: each model is ON in bursts of about 120 s, a fifth of the time. In a burst its load is five times its average, so the bursty hot-model rule uses that ON-period load."
     },
     {
       "id": "swap",
@@ -401,7 +401,7 @@
     {
       "level": "dynamic",
       "title": "One swap inside the simulator, in order",
-      "caption": "This path, on one GPU, is what the gate replayed. The swap is a fixed stall of the GPU; nothing models what a swap costs the requests around it, the term the diagnosis says is missing.",
+      "caption": "The gate replayed this path on one GPU, where the victim is trivial: LRU choice across GPUs was only unit-tested. The swap is a fixed stall of the GPU; nothing models what a swap costs the requests around it, the term the diagnosis says is missing.",
       "nodes": [
         {
           "id": "s1",
@@ -552,9 +552,9 @@
         "One hot-model rule for all three; the smallest fleet whose every decile meets the SLO; bursty sizing on ON-period load"
       ],
       "chosen": "One hot-model rule for all three; the smallest fleet whose every decile meets the SLO; bursty sizing on ON-period load",
-      "why": "Hot models get pinned GPUs in every strategy, so strategies differ only in how the rest are placed. The aggregate p99 is mostly popular models' requests: an aggregate rule gives swap 9 GPUs at the reference point while the two hottest deciles sit at 87.7 and 77.2 s. On average load, a placeholder sweep left every bursty strategy dominated; the owner chose ON-period load.",
+      "why": "Hot models get pinned GPUs in every strategy, so strategies differ only in how the rest are placed. The aggregate p99 is mostly popular models' requests: in the simulator an aggregate rule gives swap 9 GPUs at the reference point while the two hottest deciles sit at 87.7 and 77.2 s. On average load, a placeholder sweep left every bursty strategy dominated; the owner chose ON-period load.",
       "why_short": "Hot models are pinned alike in all three, and a fleet passes only if every decile meets the SLO: the aggregate hides the hottest tenants.",
-      "cost": "Swap needs one GPU more at the reference point. Swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie unless both others miss below it. Bursty s = 0.6 is not evaluable: a decile had too few requests for a p99.",
+      "cost": "Swap needs one GPU more at the reference point. Swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie. Bursty s = 0.6 is not evaluable: a decile had too few requests for a p99.",
       "cost_short": "Swap needs a GPU more; dedicating can at best tie by construction; bursty s = 0.6 is not evaluable.",
       "short": "One rule, every decile",
       "serves": [
@@ -657,7 +657,7 @@
       "chosen": "A screen over 3 loads × 3 SLO multiples of the swap median that scores how many strategies each grid point tells apart, never which is cheaper",
       "why": "A count of distinct fleet sizes cannot favour a strategy. Ties went to the earlier candidate: one GPU of load and twice the swap median, 75.6 s with the measured swaps. The screen's data was committed before the values it set.",
       "why_short": "Counting how many strategies a point tells apart cannot favour one; the placeholder SLO was shorter than a swap.",
-      "cost": "Twice a swap absorbs a swap, which favours swapping: at the reference point swap delivers about 45 s p99, the others 4 to 5 s. The measured sweep ran at this one SLO, and the screen ran on placeholder engines.",
+      "cost": "Twice a swap absorbs a swap, which favours swapping: at the reference point the simulated swap fleet delivers about 45 s p99, the others 4 to 5 s. The measured sweep ran at this one SLO, and the screen ran on placeholder engines.",
       "cost_short": "Twice a swap favours swapping, and the measured sweep ran at that one SLO.",
       "short": "Ranking-blind load and SLO",
       "serves": [
@@ -802,7 +802,7 @@
       "label": "Reconnaissance: 4B fails, 1.7B passes",
       "detail": "Two 4B engines left 9,456 and 9,520 KV tokens of 16,384 needed; the 1.7B pair passed, a pre-registered branch. Eviction missed its threshold, so swaps are warm only.",
       "output": "docs/recon-a4.md: Qwen3-1.7B, warm swaps, sleep mode works",
-      "when": "2026-10-05",
+      "when": "2026-10-04 to 10-05",
       "evidence": [
         {
           "commit": "dcd528cb99",
@@ -855,8 +855,8 @@
     {
       "phase": "Measure",
       "label": "Cells, swaps, sleep; two amendments, re-runs",
-      "detail": "A saturated neighbour now counts and its ramp wait may lengthen: 44 re-runs, one batch lost to a zero balance.",
-      "output": "28 cells with 3+ valid repeats, 16 swaps, 8 sleep switches",
+      "detail": "After the cell runs, before their analysis: a saturated neighbour counts and its ramp wait may lengthen. 44 re-runs; first tries of two designs lost to a zero balance.",
+      "output": "every cell, held-out and solo included, with 3+ valid repeats; 16 swaps, 8 sleep switches",
       "milestone": true,
       "when": "2026-10-05 to 10-06",
       "evidence": [
@@ -1127,12 +1127,12 @@
         "note": "SIMULATED, FAILED VALIDATION. Bursty s = 0.6 is not evaluable: some decile had too few requests for a p99 in some run."
       },
       "axis": "Simulated by a model that failed its gate. Each point: the smallest fleet whose every popularity decile meets the 75.6 s p99 SLO, over 30 runs.",
-      "read_as": "In each regime one strategy is cheapest at every skew: co-locate when spread, swap when bursty. Dedicating is never cheapest, at about twice the cheapest. Spread swap's peak at s = 1.25 was not diagnosed.",
+      "read_as": "In each regime one strategy is cheapest at every evaluable skew: co-locate when spread, swap when bursty. Dedicating, which can at best tie by construction, needs about twice the cheapest. Spread swap's peak at s = 1.25 was not diagnosed.",
       "so": [
         "sizing",
         "regimes"
       ],
-      "takeaway": "How traffic arrives picks the winner, not skew. The ordering is wide; the counts are not validated.",
+      "takeaway": "In the simulator, how traffic arrives picks the winner, not skew. The ordering is wide; the counts are not validated.",
       "arithmetic": "Reference point, bursty s = 1.0: 21, 10, 12 GPUs. One GPU-month = $1.1095 × 730 h = $809.935; 21 × 809.935 / 20 tenants = $850.43; dedicate costs $8,909.28 a month more than swap."
     },
     {
@@ -1444,7 +1444,7 @@
         "newsim",
         "model"
       ],
-      "takeaway": "Sharing a card costs a busy model more than half the card, and under a third of the requests in flight.",
+      "takeaway": "Next to a busy neighbour a model does slightly worse than half a card, and holds under a third of the requests it could alone.",
       "arithmetic": "Own 1: 2.95 / 1.27 = 2.3. KV: 168,464 / 2,048 = 82 requests alone, 55,104 / 2,048 = 26 split; 168,464 / 55,104 = 3.1 while the memory share falls 2.0 times."
     },
     {
@@ -1861,8 +1861,8 @@
     }
   ],
   "interview": {
-    "pitch30": "I asked how to place twenty small LLMs on rented GPUs: give each its own GPU, swap models in and out of a shared pool, or pair them on one card. I measured what the hardware charges for a swap and for a busy neighbour, and fed that into a fleet simulator. Its answer: how traffic arrives picks the winner, not how skewed it is. Pair models when requests are spread out, swap when they come in bursts; dedicating was never cheapest. But the simulator failed its own pre-registered test, 10 of 13 bins, so I publish the GPU counts as unvalidated.",
-    "pitch120": "Serving many models means deciding placement. For 20 small models on RTX 4090s I compared dedicating a GPU each, swapping through a shared LRU pool, and co-locating two per GPU, across Zipf skew and two arrival patterns with the same per-model shares, spread and bursty. On the GPU I measured a swap (median 37.8 s, mostly process start), a busy neighbour (2.0 to 2.4 times slower) and the memory split (KV cache 168,464 down to 55,104 tokens). A new simulator sized each strategy to the smallest fleet where every popularity decile meets a 75.6 s p99, because aggregate sizing let the hottest tenants breach. Result: co-locate when spread, swap when bursty, dedicating about twice the cheapest. But my pre-registered gate, three real replays on one GPU, failed: 10 of 13 bins outside the band. Afterwards I found the simulator charged 37.8 s per swap where the replay pod took about 25 s, and even at that 12 of 13 still missed: it lacks a term for what a swap costs nearby requests. So the ordering is wide and the counts are unvalidated. The paid runs cost $25.23.",
+    "pitch30": "I asked how to place twenty small LLMs on rented GPUs: give each its own GPU, swap models in and out of a shared pool, or pair them on one card. I measured what the hardware charges for a swap and for a busy neighbour, and fed that into a fleet simulator. Its answer: how traffic arrives picks the winner, not how skewed it is. Pair models when requests are spread out, swap when they come in bursts; dedicating, which by construction can at best tie, never won. But the simulator failed its own pre-registered test, 10 of 13 bins, so I publish the GPU counts as unvalidated.",
+    "pitch120": "For 20 small models on RTX 4090s I compared dedicating a GPU each, swapping through a shared LRU pool, and co-locating two per GPU, across Zipf skew and two arrival patterns with the same per-model shares, spread and bursty. On the GPU I measured a swap (median 37.8 s, mostly process start), a busy neighbour (2.0 to 2.4 times slower) and the memory split (KV cache 168,464 down to 55,104 tokens). A new simulator sized each strategy to the smallest fleet where every popularity decile meets a 75.6 s p99; aggregate sizing would have let the hottest tenants breach. Simulated result: co-locate when spread, swap when bursty, dedicating about twice the cheapest. But my pre-registered gate, three real replays on one GPU, failed: 10 of 13 bins outside the band. An exploratory diagnosis found the simulator charged 37.8 s per swap where the replay pod took about 25 s, and even at that 12 of 13 still missed; the likely gap is a term for what a swap costs nearby requests, unmeasured. So the ordering is wide and the counts are unvalidated. The paid runs cost $25.23.",
     "followups": [
       {
         "q": "Why trust a simulator that failed its gate?",
@@ -1870,26 +1870,26 @@
       },
       {
         "q": "Why is dedicating never cheapest?",
-        "a": "Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). The finding is the margin: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs."
+        "a": "Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). The simulated margin is the point: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs."
       },
       {
         "q": "What would change the winner?",
-        "a": "Arrival timing (only two regimes built); the SLO (twice a swap favours swapping, and the sweep ran at one SLO); interference (exploratory: four times the penalty loses co-location the bursty regime, eight the spread one); model size (a 1.7B result)."
+        "a": "Arrival timing (only two regimes built); the SLO (twice a swap favours swapping, and the sweep ran at one SLO); interference (exploratory: four times the busy-neighbour latency loses co-location the bursty regime, eight the spread one); model size (a 1.7B result)."
       },
       {
         "q": "Why did the gate fail?",
-        "a": "Exploratory, after the verdict. A host up to 30% faster does not close it. The gate charged 37.8 s per swap; replay swaps took about 25 s. Charged that, the simulator is too fast and 12 of 13 bins still miss: it has no term for what a swap costs nearby requests."
+        "a": "Exploratory, after the verdict. A host up to 30% faster does not close it. The gate charged 37.8 s per swap; replay swaps took about 25 s. Charged that, the simulator is too fast and 12 of 13 bins still miss: probably it lacks a term for what a swap costs nearby requests, which I did not measure."
       },
       {
         "q": "You switched models and changed rules mid-campaign. Isn't that moving the goalposts?",
-        "a": "The 1.7B switch was a branch committed before reconnaissance. The KV pin came after the first co-located runs crashed, before any valid co-located data, confirmed by a probe and signed; the validity and ramp amendments came before the cells were analysed. All dated in git; the re-runs cost 7.45 unplanned GPU-hours."
+        "a": "The 1.7B switch was a branch committed before reconnaissance. The KV pin came after the first co-located runs crashed, before any valid co-located data, confirmed by a probe and signed; the validity and ramp amendments came after the cell runs, before their analysis. All dated in git; the re-runs cost 7.45 unplanned GPU-hours."
       },
       {
         "q": "What would you do next?",
-        "a": "Measure what a swap costs the requests around it, on one pod with the replay's own requests: the missing term. A recalibrated re-run would not pass. Co-location needs its own replay."
+        "a": "Measure what a swap costs the requests around it, on one pod with the replay's own requests: the likely missing term. A recalibrated re-run would not pass. Co-location needs its own replay."
       }
     ],
-    "limits": "Every GPU count, dollar figure and the decision rule are from a simulator that failed its gate (10 of 13 bins), at one GPU, three tenants and swapping only, with a burst shape and load the sweep did not use; co-location had two held-out cells, one missed, and no replay. Whether the model's error leaves the ordering unchanged was not tested. Qwen3-1.7B, not the registered 4B; one size and request shape; LRU only; one GPU class and datacenter; warm swaps only; swap time varies about 50% by pod; one SLO, twice a swap, which favours swapping; two arrival regimes. Sleep mode measured, never simulated. The diagnosis and the interference sensitivity are exploratory. The post is an unpublished draft."
+    "limits": "Every GPU count, dollar figure and the decision rule are from a simulator that failed its gate (10 of 13 bins), at one GPU, three tenants and swapping only, with a burst shape and load the sweep did not use; co-location had two held-out cells, one missed, and no replay; LRU victim choice across GPUs was only unit-tested. Whether the model's error leaves the ordering unchanged was not tested. Qwen3-1.7B, not the registered 4B; one size and request shape; LRU only; one GPU class and datacenter; warm swaps only; swap time varies about 50% by pod; one SLO, twice a swap, which favours swapping; two arrival regimes. Sleep mode measured, never simulated. The diagnosis and the interference sensitivity are exploratory. The post is an unpublished draft."
   },
   "recall": [
     {
@@ -1902,7 +1902,7 @@
     },
     {
       "q": "At the reference point, what does sizing on the aggregate p99 get wrong?",
-      "a": "It picks 9 GPUs for swap, and the two hottest deciles breach (87.7 and 77.2 s against 75.6 s); per-decile sizing needs 10. R2."
+      "a": "In the simulator it picks 9 GPUs for swap, and the two hottest deciles breach (87.7 and 77.2 s against 75.6 s); per-decile sizing needs 10. R2."
     },
     {
       "q": "Which cold-start stages does a swap skip, and what does it still pay?",
@@ -1913,20 +1913,20 @@
       "a": "Weights and graph buffers are fixed and come out of the smaller budget first: 168,464 to 55,104 tokens, 82 to 26 requests."
     },
     {
-      "q": "A busy neighbour makes a model about twice as slow. Why does co-locating still halve the fleet?",
+      "q": "A busy neighbour makes a model about twice as slow. Why does co-locating still halve the simulated spread fleet?",
       "a": "SLO headroom, not low load: 3 to 6 s against 75.6 s. In the exploratory run it held at the worst reading of the unmeasured range."
     },
     {
       "q": "Why can dedicating at best tie under this sizing rule?",
-      "a": "Swap and co-locate search only up to dedicate's size, where their layouts become dedicate's; dedicating wins only if both miss below it. The margin is the finding."
+      "a": "Swap and co-locate search only up to dedicate's size, where their layouts become dedicate's and serve identically, so dedicating can tie but never win. The simulated margin is the point."
     },
     {
       "q": "The gate charged 37.8 s per swap; the replay pod's swaps took about 25 s. Why does charging 25 s not rescue the gate?",
-      "a": "Then it predicts faster than real and 12 of 13 bins still miss: no fixed swap cost matches, because the model has no term for a swap's effect on nearby requests."
+      "a": "Then it predicts faster than real and 12 of 13 bins still miss: no fixed swap cost matches. The exploratory diagnosis blames a missing term for a swap's effect on nearby requests, unmeasured."
     },
     {
       "q": "What did the gate test, and what did it never test?",
-      "a": "One GPU, three tenants, swapping, 180 s bursts at 0.3 of a GPU. Never co-location (two held-out cells), never a multi-GPU fleet, never the swept 120 s bursts."
+      "a": "One GPU, three tenants, swapping, 180 s bursts at 0.3 of a GPU. Never co-location (two held-out cells), never a multi-GPU fleet or LRU victim choice across GPUs, never the swept 120 s bursts."
     },
     {
       "q": "Which requirement breaks if the GPU counts are presented as findings, and what may be said instead?",
@@ -2222,35 +2222,35 @@
     },
     {
       "value": "1.27",
-      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 1: latency 1.2657 s, to two decimals."
+      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 1: 1.2657 s, to two decimals."
     },
     {
       "value": "1.5",
-      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 2: latency 1.4955 s, to two decimals."
+      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 2: 1.4955 s, to two decimals."
     },
     {
       "value": "1.68",
-      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 4: latency 1.6807 s, to two decimals."
+      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 4: 1.6807 s, to two decimals."
     },
     {
       "value": "2.06",
-      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 8: latency 2.0616 s, to two decimals."
+      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 8: 2.0616 s, to two decimals."
     },
     {
       "value": "2.83",
-      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 16: latency 2.8323 s, to two decimals."
+      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 16: 2.8323 s, to two decimals."
     },
     {
       "value": "4.35",
-      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 32: latency 4.3452 s, to two decimals."
+      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 32: 4.3452 s, to two decimals."
     },
     {
       "value": "7.66",
-      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 64: latency 7.6578 s, to two decimals."
+      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 64: 7.6578 s, to two decimals."
     },
     {
       "value": "14.39",
-      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 128: latency 14.3907 s, to two decimals."
+      "how": "data/a4/analysis.json inputs.solo_curve, concurrency 128: 14.3907 s, to two decimals."
     },
     {
       "value": "4.3",
@@ -2338,7 +2338,7 @@
     },
     {
       "value": "120",
-      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 120 s of the 900 s trace."
+      "how": "data/a4/analysis.json validation.bins[].start = 120 s, a judged bin."
     },
     {
       "value": "135",
@@ -2346,7 +2346,7 @@
     },
     {
       "value": "150",
-      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 150 s of the 900 s trace."
+      "how": "data/a4/analysis.json validation.bins[].start = 150 s, a judged bin."
     },
     {
       "value": "166",
@@ -2354,31 +2354,31 @@
     },
     {
       "value": "180",
-      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 180 s of the 900 s trace."
+      "how": "data/a4/analysis.json validation.bins[].start = 180 s, a judged bin."
     },
     {
       "value": "330",
-      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 330 s of the 900 s trace."
+      "how": "data/a4/analysis.json validation.bins[].start = 330 s, a judged bin."
     },
     {
       "value": "360",
-      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 360 s of the 900 s trace."
+      "how": "data/a4/analysis.json validation.bins[].start = 360 s, a judged bin."
     },
     {
       "value": "690",
-      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 690 s of the 900 s trace."
+      "how": "data/a4/analysis.json validation.bins[].start = 690 s, a judged bin."
     },
     {
       "value": "720",
-      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 720 s of the 900 s trace."
+      "how": "data/a4/analysis.json validation.bins[].start = 720 s, a judged bin."
     },
     {
       "value": "750",
-      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 750 s of the 900 s trace."
+      "how": "data/a4/analysis.json validation.bins[].start = 750 s, a judged bin."
     },
     {
       "value": "780",
-      "how": "data/a4/analysis.json validation.bins[].start: a judged 30 s bin starting at 780 s of the 900 s trace."
+      "how": "data/a4/analysis.json validation.bins[].start = 780 s, a judged bin."
     },
     {
       "value": "809.935",
@@ -2390,7 +2390,7 @@
     },
     {
       "value": "0.77",
-      "how": "10 / 13 judged bins missing = 0.769 (docs/post-a4.md), against the 0.5 allowed."
+      "how": "10 / 13 judged bins missing = 0.769, against the 0.5 allowed."
     },
     {
       "value": "166.1",
@@ -2402,11 +2402,11 @@
     },
     {
       "value": "210",
-      "how": "data/a4/analysis.json validation.bins[start=180].end = 210 s: the bin with the largest miss runs from 180 to 210 s of the trace."
+      "how": "data/a4/analysis.json validation.bins[start=180].end = 210 s: the largest miss's bin ends there."
     },
     {
       "value": "8.6",
-      "how": "Artifact 1 arm C median S4 bracket, data/a4/analysis.json inputs.a1_reference.stages.t_s4_bracket = 8.552 s (drawn as 8.6 in docs/figures/a4/swap_stages.png)."
+      "how": "Artifact 1 arm C median S4 bracket, data/a4/analysis.json inputs.a1_reference.stages.t_s4_bracket = 8.552 s."
     },
     {
       "value": "4.1",
@@ -2418,15 +2418,15 @@
     },
     {
       "value": "0.84",
-      "how": "Teardown 0.8 s + memory release 0.04 s, the post's stage table (docs/post-a4.md, A swap), merged into one segment."
+      "how": "Teardown 0.8 s + memory release 0.04 s, the post's stage table (docs/post-a4.md, A swap)."
     },
     {
       "value": "9.3",
-      "how": "Weight load 2.2 + engine init, rest 6.8 + torch.compile 0.3 s, the post's stage table, merged into one segment."
+      "how": "Weight load 2.2 + engine init, rest 6.8 + torch.compile 0.3 s, the post's stage table."
     },
     {
       "value": "13.0",
-      "how": "Artifact 1 arm C: engine init 8.6 + health 4.1 + first request 0.3 s (data/a4/analysis.json inputs.a1_reference.stages), merged into one segment."
+      "how": "Artifact 1 arm C: engine init 8.6 + health 4.1 + first request 0.3 s (data/a4/analysis.json inputs.a1_reference.stages)."
     }
   ],
   "links": {
