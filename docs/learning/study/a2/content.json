@@ -33,7 +33,7 @@
     {
       "id": "R5",
       "short": "Rules before data; dated amendments",
-      "text": "Hypotheses, grids, control parameters, the traffic rule and the pass rule are committed before the data they govern; later changes are signed, dated [amendments](p2:amendment) saying what had been seen.",
+      "text": "Hypotheses, grids, control parameters, the traffic rule and the pass rule are committed before the data they govern; later changes are dated [amendments](p2:amendment) saying what had been seen.",
       "why": "Otherwise the traffic could be tuned until a signal wins, or the tolerance until the model passes."
     },
     {
@@ -67,7 +67,7 @@
       "id": "frontier",
       "short": "Frontier and iso-cost slice",
       "term": "Frontier, dominance and the iso-cost slice",
-      "plain": "A **policy** is a signal plus its up and down thresholds; over 30 simulated spikes it gives a median cost (**replica-seconds**, billed from each launch) and a median per-run p99. It is **dominated** if another costs no more with no worse p99; the rest are the **frontier**. The **iso-cost budget** is the cheapest spend at which every signal has a policy; the **gap** is best minus worst p99 there. H3: the gap at least halves from arm A to arm C."
+      "plain": "A **policy** is a signal plus its up and down thresholds; over 30 simulated spikes it gives a median cost (**replica-seconds**, billed from each launch) and a median per-run p99. It is **dominated** if another costs no more, has no worse p99 and is better on one; the rest are the **frontier**. The **iso-cost budget** is the cheapest spend at which every signal has a policy; the **gap** is the worst signal's p99 there minus the best's. H3: the gap at least halves from arm A to arm C, on step and ramp."
     },
     {
       "id": "missrule",
@@ -79,14 +79,14 @@
       "id": "hostspeed",
       "short": "Host speed",
       "term": "Host speed",
-      "plain": "Rented GPUs of one model are not equally fast, and RunPod picks the host. Every host measured had 4 to 18% lower latency than the curve's, about the size of the gate's misses."
+      "plain": "Rented GPUs of one model are not equally fast, and RunPod picks the host. Every other host measured had 4 to 18% lower latency than the curve's, about the size of the gate's misses."
     }
   ],
   "views": [
     {
       "level": "context",
       "title": "Who and what the study touches",
-      "caption": "RunPod is rented two ways: queue endpoints for the service-curve sweep and the reconnaissance capture, and a load-balancing endpoint for the probes and the validation replays; its billing API gives the spend. The cold-start lags come from artifact 1's runs, not new ones. Output: a post that leads with the failed test.",
+      "caption": "RunPod is rented two ways: queue endpoints for the curve sweep, recon and host re-measurement, and a load-balancing endpoint for the probes and the validation replays; its billing API gives the spend. The cold-start lags are artifact 1's. Output: a post that leads with the failed test.",
       "nodes": [
         {
           "id": "author",
@@ -123,7 +123,7 @@
         {
           "id": "queue",
           "label": "RunPod queue endpoint",
-          "sub": "service-curve sweep, recon capture",
+          "sub": "curve sweep, recon, host re-measure",
           "kind": "external",
           "col": 1,
           "row": 1
@@ -231,7 +231,7 @@
         {
           "from": "drivers",
           "to": "sweepw",
-          "label": "one job per level"
+          "label": "one job per level and run"
         },
         {
           "from": "drivers",
@@ -394,7 +394,7 @@
     {
       "level": "dynamic",
       "title": "One calibrated validation repeat, in order",
-      "caption": "Steps 1 to 7 are paid, on RunPod; 8 to 10 are free, on the laptop, once all three repeats exist. Step 3 is attempt two's fix. The load balancer (step 5) is why the gate judges engine arrivals, not send times.",
+      "caption": "Steps 1 to 7 are paid, on RunPod; 8 to 10 are free, on the laptop, after all three repeats. Step 3 is attempt two's fix. The load balancer (step 5) is why the gate judges engine arrivals, not send times.",
       "nodes": [
         {
           "id": "s1",
@@ -538,9 +538,9 @@
         "A simulator fed only measured inputs, gated first"
       ],
       "chosen": "A simulator fed only measured inputs, gated first",
-      "why": "No queueing formula reproduces how [continuous batching](p1:batching) bends latency, so the engine enters as a measured curve and only the control loop is code. Discrete events need no tick size, and a seed makes runs reproducible. A new replica is absent until a lag resampled from artifact 1's runs, then fully serving.",
+      "why": "A queueing formula would assume what [continuous batching](p1:batching) does to latency; the curve measures it, and only the control loop is code. Discrete events need no tick size, and a seed makes runs reproducible. A new replica is absent until a lag resampled from artifact 1's runs, then fully serving.",
       "cost": "If the gate fails there is no answer, and it failed twice. The design's second gate, one real closed-loop autoscaling run, was never built.",
-      "why_short": "Live tests cost too much and no formula reproduces continuous batching, so measured inputs feed a gated simulator.",
+      "why_short": "Live tests cost too much and a formula would assume what the curve measures, so measured inputs feed a gated simulator.",
       "cost_short": "No answer if the gate fails; it failed twice.",
       "short": "Simulate, but gate it",
       "serves": [
@@ -604,10 +604,10 @@
         "Three repeats of the exact trace; at most half the 10 s bins may miss"
       ],
       "chosen": "Three repeats of the exact trace; at most half the 10 s bins may miss",
-      "why": "A model cannot be required to be more reproducible than the system it models, so three real repeats set the tolerance, on the exact trace so traffic randomness cannot pose as model error. A perfect model still misses a quarter of bins, so \"every bin\" would often fail it; a biased one misses about three in four. Exactly three repeats: a min–max range only widens with more.",
-      "cost": "Neighbouring bins share queue state, so the stated rates (a perfect model fails about 2% of the time at 10 bins) are approximate. p50, not p99: a bin holds a few hundred requests. At most two attempts.",
+      "why": "A model cannot be required to be more reproducible than the system it models, so three real repeats set the tolerance, on the exact trace so traffic randomness cannot pose as model error. A perfect model still misses up to a quarter of bins, so \"every bin\" would often fail it; a biased one misses about three in four. Exactly three repeats: a min–max range only widens with more.",
+      "cost": "Correlated bins make a perfect model fail more often than the stated 2% at 10 bins (2.5% simulated, near 5% with host effects). p50 suited bins of a few hundred requests; the replay's held over a thousand. Two attempts at most.",
       "why_short": "A model cannot be more reproducible than the system, so three real repeats set the tolerance.",
-      "cost_short": "Neighbouring bins are correlated, so the error rates are approximate; two attempts at most.",
+      "cost_short": "Correlated bins make a perfect model fail more often than stated; two attempts at most.",
       "short": "Tolerance from real repeats",
       "serves": [
         {
@@ -633,11 +633,11 @@
       "options": [
         "Keep the registered traffic and report the tie",
         "Raise the replica cap",
-        "Pick the traffic with the clearest winner",
+        "Widen the threshold grids upward",
         "Search by a measure that cannot prefer a signal"
       ],
       "chosen": "Search by a measure that cannot prefer a signal",
-      "why": "Past every threshold from the first evaluation, every signal says \"scale up\" at once, and with an 81 s cold start no replica arrives in time, so only cost differs. A bigger replica cap was tested and never binds. A count of distinct outcomes cannot pick a winner, and the first re-choice refuted all three hypotheses, which a rigged choice would not.",
+      "why": "Past every threshold from the first evaluation, every signal says \"scale up\" at once, and with an 81 s cold start no replica arrives in time, so only cost differs. A bigger cap never binds; wider grids would redefine each signal's range. A count of distinct outcomes cannot pick a winner, and the first re-choice refuted the hypotheses, which a rigged choice would not.",
       "cost": "Choosing traffic after seeing data is a real hazard: per-policy p99s had been printed before the second search's criteria were written, as the amendment says. The gate stayed at 0.95× capacity while the sweep moved to 1.20×.",
       "why_short": "As registered, all 55 policies gave one p99; counting distinct outcomes cannot prefer a signal.",
       "cost_short": "Choosing traffic after seeing data is a disclosed hazard; the gate never tested the sweep's overload.",
@@ -649,7 +649,7 @@
         },
         {
           "req": "R5",
-          "because": "Each re-choice is a signed amendment; the second search's criteria were committed before its code."
+          "because": "Each re-choice is a dated amendment; the second search's criteria were committed before its code."
         }
       ],
       "uses": [
@@ -697,14 +697,14 @@
         },
         {
           "concept": "curve",
-          "because": "The engine was capped at 128, the curve's top level, so it ran no load the curve never measured."
+          "because": "Capped at 128 running, the curve's top level, the engine queued the rest, as the simulator does."
         }
       ]
     },
     {
       "id": "onefix",
       "title": "One disclosed fix, then publish the failure",
-      "problem": "Attempt one failed; the cause, found afterwards, was host speed. What may change without bending the test?",
+      "problem": "Attempt one failed; an exploratory re-measurement pointed to host speed. What may change without bending the test?",
       "options": [
         "Keep adjusting until it passes",
         "Fit the curve to the validation runs",
@@ -796,7 +796,7 @@
     {
       "phase": "Build offline",
       "label": "Find the traffic made the question unanswerable",
-      "detail": "That morning, after a fix (the three signals had been scored on three different traces), all 55 policies gave the same p99. A ranking-blind probe chose new traffic; medians and intervals replaced means.",
+      "detail": "After a fix (the three signals had been scored on three different traces), all 55 policies gave the same p99. A ranking-blind probe chose new traffic; medians and intervals replaced means.",
       "output": "findings-a2-degenerate-regime.md; traffic and statistics amended",
       "when": "2026-09-17",
       "evidence": [
@@ -1035,7 +1035,7 @@
       "axis": "Measured: one replica of vLLM serving Qwen3-8B on an RTX 4090, median end-to-end latency at each fixed number of requests in flight.",
       "read_as": "Latency only doubles from 1 to 128 in flight while throughput grows about 58-fold: what [continuous batching](p1:batching) buys. The simulator reads every service time from this one host's curve.",
       "so": "simulate",
-      "takeaway": "One replica absorbs 128 times the load for twice the latency: the danger is the queue past 128, not slow requests.",
+      "takeaway": "One replica holds 128 times the requests in flight for twice the latency: the danger is the queue past 128, not slow requests.",
       "arithmetic": "Each point is the median of three runs' medians; 0.606 / 0.284 = 2.1."
     },
     {
@@ -1100,7 +1100,7 @@
         "note": "GPU utilisation (nvidia-smi) read 1.0 at every level from 1 to 128, and 0 when idle, so it is not drawn: it would be a flat line at the top."
       },
       "axis": "Measured: requests one replica completes per second at each fixed number in flight. Dashed: traffic levels set from it, as multiples of saturation (211.2 req/s).",
-      "read_as": "Throughput climbs to 128 in flight while GPU utilisation says \"full\" from one request. The validation replay peaked at 0.95× saturation (200.6 req/s); the sweep's spike went 20% past it and stayed, a regime the gate never tested.",
+      "read_as": "The validation replay peaked at 0.95× saturation (200.6 req/s); the sweep's spike went 20% past it and stayed, a regime the gate never tested.",
       "so": "traffic",
       "takeaway": "Every rate is a fraction of one replica's capacity: the gate checked the model below it, the sweep ran above it.",
       "arithmetic": "Saturation by Little's Law: 128 / 0.606 s = 211.2 req/s (measured at 128: 204.4). Baseline 0.70 × 211.2 = 147.8; peaks add 0.25 or 0.5 × 211.2: 200.6 and 253.4 req/s."
@@ -1431,10 +1431,10 @@
           {
             "y_lo": -0.2,
             "y_hi": 0.2,
-            "label": "±1 ms tolerance"
+            "label": "±1 ms at a 0.5 s p50"
           }
         ],
-        "note": "Attempt one's bins at 40, 230 and 270 s passed: there the three repeats straddled their predictions."
+        "note": "Attempt one's bins at 40, 230 and 270 s did not miss."
       },
       "axis": "Per judged 10 s bin: real p50 ÷ predicted p50 per repeat, median of three, minus 1. Real: measured on RunPod. Predicted: the simulator fed the arrivals that engine received.",
       "read_as": "Below zero, the engine was faster than predicted. Attempt one is below in every bin, down to −89% after load-balancer bursts; attempt two, calibrated to its host, is 12–16% above in every bin.",
@@ -1476,9 +1476,9 @@
         "right_label": "higher"
       },
       "axis": "Measured: server latency on each RunPod host relative to the curve's host (ozhetwnhompob9), at high load. Bars: lowest to highest of three runs; ku80i8usxw3st5 has one reading.",
-      "read_as": "Every host measured had 7 to 18% lower latency than the curve's at high load: the size of the gate's misses. RunPod picks the host; the simulator knows one. Three hosts show a spread, not a distribution.",
+      "read_as": "Every other host measured had 7 to 18% lower latency than the curve's at high load: the size of the gate's misses. RunPod picks the host; the simulator knows one. Three hosts show a spread, not a distribution.",
       "so": "onefix",
-      "takeaway": "The miss is about one host's worth of speed: a one-host curve cannot predict a deployment more closely than hosts differ.",
+      "takeaway": "The miss is about one host's worth of speed, which a one-host curve cannot predict.",
       "arithmetic": "Latency ÷ the curve's: 0.90 at 128 (0.897–0.907); 0.494 / 0.533 = 0.927 at ~100; 0.834 at 128 (0.822–0.841). Percent = (ratio − 1) × 100."
     },
     {
@@ -1840,16 +1840,16 @@
     }
   ],
   "interview": {
-    "pitch30": "I tried to find which autoscaling signal, queue depth, requests in flight or GPU utilisation, gives the best cost and tail-latency trade-off for an LLM server whose new replicas take a minute or so to cold start. Live tests were too expensive, so I built a simulator from measured inputs with a pre-registered test it had to pass. It failed twice, too slow and then, calibrated to the host, too fast, because rented GPUs of one model differ in speed. So I published the failure, and two measured findings: GPU utilisation reads 100% from one request, and RunPod's load balancer caps each worker at 4 requests by default.",
-    "pitch120": "A new LLM replica takes 39 to 81 seconds to start, so the signal an autoscaler watches has to see trouble early. I compared queue depth, requests in flight and GPU utilisation by their whole cost-versus-p99 frontiers, and asked whether a faster cold start shrinks the difference. Dozens of policies run thirty times each was out of budget on real GPUs, so I built a simulator where every input is measured and only the control loop is code, and committed a pass rule before any real run: replay a real spike three times; a 10-second bin misses if all three runs land on one side of the prediction; more than half missing fails. It failed with the engine 14% faster than predicted. I traced that to host speed, made one disclosed fix, declared it the last attempt, and it failed 13% the other way. So I published the failure instead of the frontiers. Two findings are measured: nvidia-smi utilisation reads 1.0 from one request, and RunPod's load balancer caps requests per worker at a setting documented only for autoscaling, which made each request 18 times dearer. The paid part cost $6.07.",
+    "pitch30": "I tried to find which autoscaling signal, queue depth, requests in flight or GPU utilisation, gives the best cost and tail-latency trade-off for an LLM server whose new replicas take tens of seconds to over a minute to start. Live tests were too expensive, so I built a simulator from measured inputs with a pre-registered test it had to pass. It failed twice: too slow, traced to host speed, then, calibrated to the host, too fast, for a reason I could not settle. So I published the failure, and two measured findings: GPU utilisation reads 100% from one request, and RunPod's load balancer caps each worker at 4 requests in flight by default.",
+    "pitch120": "A new LLM replica takes a median 39 to 81 seconds to start, so the signal an autoscaler watches has to see trouble early. I compared queue depth, requests in flight and GPU utilisation by their whole cost-versus-p99 frontiers, and asked whether a faster cold start shrinks the difference. Dozens of policies run thirty times each was out of budget on real GPUs, so I built a simulator where every input is measured and only the control loop is code, and committed a pass rule before any real run: replay a real spike three times; a 10-second bin misses if all three runs land on one side of the prediction; more than half missing fails. It failed with the engine 14% faster than predicted. I traced that to host speed, made one disclosed fix, declared it the last attempt, and it failed 13% the other way. So I published the failure instead of the frontiers. Two findings are measured: nvidia-smi utilisation reads 1.0 from one request, and RunPod's load balancer caps requests per worker at a setting documented only for autoscaling, which made each request 18 times dearer. The paid part cost $6.07.",
     "followups": [
       {
         "q": "So which signal should I use?",
-        "a": "Not answered by measurement. Measured: nvidia-smi utilisation reads 1.0 from one request up, so all 19 simulated utilisation policies ran to the cap. The unvalidated simulator puts the three within 82 ms on arm A's step, queue depth spending 880 replica-seconds against 2,535–3,095. Practically: don't scale vLLM on nvidia-smi utilisation; check the load balancer first."
+        "a": "Not answered by measurement. Measured: nvidia-smi utilisation reads 1.0 from one request up, so all 19 simulated utilisation policies ran to the cap. The unvalidated simulator puts the three within 82 ms on arm A's step, queue depth spending 880 replica-seconds against 2,535–3,095. Practically, on this stack: don't scale on nvidia-smi utilisation; check the load balancer first."
       },
       {
         "q": "Why trust a simulator at all?",
-        "a": "By default I didn't. 55 policies × 30 repetitions × 4 sweeps is 6,600 simulated spikes, unaffordable live, so it had to pass a rule committed on 2026-10-03, before any real run. It failed, and that is what I published. The paid part cost $6.07 against a $35–60 estimate."
+        "a": "By default I didn't. 55 policies × 30 repetitions × 4 sweeps is 6,600 simulated spikes, unaffordable live, so it had to pass a rule committed on 2026-10-03, before any real run. It failed, and that is what I published."
       },
       {
         "q": "Wasn't the calibration just moving the goalposts?",
@@ -1865,7 +1865,7 @@
       },
       {
         "q": "What would you do differently?",
-        "a": "Measure host speed per run from the start; settle the load balancer before the gate; validate in the sweep's overload; build the closed-loop gate. And revisit the grids: in-flight's tops out at 16, while one replica holds over 64 in flight at baseline alone (139.5 req/s at 64, under the 147.8 baseline). My untested reading: that pins in-flight above its grid early, as utilisation is."
+        "a": "Measure host speed per run from the start; settle the load balancer before the gate; validate in the sweep's overload; build the closed-loop gate. And revisit the grids: in-flight's tops out at 16, while one replica holds over 64 in flight at baseline alone (139.5 req/s at 64, under the 147.8 baseline). My untested reading: every in-flight threshold is crossed at once, so its grid only sets where scaling stops; up-2 and up-4 hit the cap."
       }
     ],
     "limits": "No measured answer: every frontier, H1–H4 verdict, gap and per-signal dollar figure is from a simulator that failed validation twice, and H1, H2, H4 were defined after the frontiers were seen. The control loop was never compared with a real autoscaler. The gate tested 0.95× capacity, the sweep ran at 1.20×. Even load splitting is assumed; RunPod fills one worker first. One provider, GPU, model, engine version (vLLM 0.27.1) and request shape; replicas absent or serving; 6 hosts seen, 3 timed. Load-balancer findings: five unregistered probes on 2026-10-05."
@@ -1877,7 +1877,7 @@
     },
     {
       "q": "Why does a perfect model still miss about one bin in four, and how does the pass rule allow for it?",
-      "a": "Unbiased, each repeat lands above or below its prediction like a coin, so all three on one side has probability 2 × 1/8 = 1/4. The rule passes with at least 10 judged bins and at most half missing."
+      "a": "Unbiased, each repeat lands above or below its prediction like a coin, so all three on one side has probability at most 2 × 1/8 = 1/4, less with the 1 ms margin. The rule passes with at least 10 judged bins and at most half missing."
     },
     {
       "q": "Attempt one missed with the engine faster, attempt two, calibrated, with it slower. What does the pair let you conclude?",
