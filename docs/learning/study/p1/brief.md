@@ -10,18 +10,18 @@ Used by: a1, a2, a4, a5
 
 - **GPU memory (HBM)**: The GPU's own fast memory, fixed in size. **Weights**, **scratch space** and the **KV cache** share it. Think of it as: A kitchen counter of fixed size: the recipe book takes most of it, a prep area stays clear, order notes fill the rest. Why it matters: The KV cache gets whatever weights and scratch leave, so free memory decides how many users you can serve.
 - **Weights**: The model's learned numbers, on the GPU before it can answer: about 16 GB for an 8B model at 2 bytes per parameter. Think of it as: The recipe book: big, never edited, on the counter before cooking starts. Why it matters: Loading them sits inside the longest phase of artifact 1's cold start; a weight cache cut that phase by about 15 s.
-- **KV cache**: While generating, the model keeps the **keys (K) and values (V)** of every token so far instead of recomputing them. Q is not cached. Think of it as: Each open order's notes, one line per token: long orders take more counter, so fewer fit. Why it matters: Each request holds cache in proportion to its length, so the cache divides into a number of concurrent requests; past that, new ones wait.
+- **KV cache**: While generating, the model keeps the **keys (K) and values (V)** of every token so far instead of recomputing them. Q is not cached. Think of it as: Each open order's notes, one line per token: long orders take more counter, so fewer fit. Why it matters: Each request holds cache in proportion to its length, so the cache fits a fixed number of concurrent requests; past that, new ones wait.
 - **vLLM**: The serving engine here. At startup it loads the weights, runs the model once to see what memory is left, and gives that to the KV cache. Think of it as: Before opening, cook the biggest order once to see how much counter cooking needs; order notes get the rest. Why it matters: That **memory-profiling** run is in every cold start, and it sets the cache size.
 - **Continuous batching**: One copy of the model serving many users' requests at once. A fresh replica takes work as soon as it is ready. Think of it as: One kitchen cooking many orders at once: more dishes per hour, each a little slower. Why it matters: In artifact 2, as requests in flight rose to 128, one replica's throughput rose and bent while latency rose gently.
-- **Cold start**: The wait from a request being queued to a brand-new replica's first token. Think of it as: Opening a kitchen from empty when a crowd arrives: get a building, bring in the recipe book, prep, then cook. Why it matters: It is artifact 1's subject: a median 81.12 s with nothing cached, mostly launching and loading the model, then compiling.
-- **Serverless GPUs**: GPU replicas added when traffic needs them and removed after. Before your code runs, the platform queues the request, finds a machine and starts a container. Think of it as: Renting kitchens as crowds come and go, paying even while one is still opening (artifact 2 counts every replica-second). Why it matters: Nothing of yours runs during the platform's part, so it is found by subtraction: total time minus the replica's own time.
+- **Cold start**: From a request being queued to a brand-new replica's first request, start to finish. Think of it as: Opening a kitchen from empty when a crowd arrives: get a building, bring in the recipe book, prep, then cook. Why it matters: It is artifact 1's subject: a median 81.12 s with nothing cached, mostly launching and loading the model, then compiling.
+- **Serverless GPUs**: GPU replicas added when traffic needs them and removed after. Before your code runs, the platform queues the request, finds a machine and starts a container. Think of it as: Renting kitchens as crowds come and go, paying even while one is still opening (artifact 2 counts every replica-second). Why it matters: Little of yours runs then (handler set-up, teardown), so it is found by subtraction: total time minus the replica's own time.
 - **torch.compile and CUDA graphs**: Startup steps that pay now to be faster later. **torch.compile** makes faster GPU code and caches it on disk; **CUDA graph capture** records GPU launches for every token to replay. Why it matters: A warm compile cache cut compiling to 0.33 s; graph capture took the same time in every arm, cached or not.
 
 ## Views
 
 ### What a replica does before it answers (concept)
 
-One replica's cold start, in order (two short engine steps not drawn). Each cache shortens one step, as marked. Nothing before 'ready' serves a user.
+One replica's cold start, in order (two short engine steps not drawn). Each cache shortens one step. Nothing before 'ready' serves a user.
 
 - **Platform**: queue, machine, container; found by subtraction
 - **Launch, load weights**: weight cache shortens this
@@ -29,7 +29,7 @@ One replica's cold start, in order (two short engine steps not drawn). Each cach
 - **Memory profiling**: one forward pass; sets KV cache size
 - **CUDA graph capture**: flat 4 s, cached or not
 - **Health check: ready**: now accepts work
-- **First request**: first token to a user
+- **First request**: first answer to a user
 - Platform → Launch, load weights
 - Launch, load weights → Compile
 - Compile → Memory profiling
@@ -48,8 +48,8 @@ One replica's cold start, in order (two short engine steps not drawn). Each cach
 ### Where a cold start's time goes
 
 - Axis: Seconds, each phase's median over 100 cold starts with nothing cached (artifact 1, arm A).
-- Read it as: The coloured segments are most of the wait, and where the two caches act. Platform time is a residual found by subtraction, not just queueing. Medians do not add: these sum to 82.49 s, not the 81.12 s median total.
-- Nothing cached (arm A): Platform (by subtraction) 4.37, Server launch to model loaded 45.83, Compile 19.01, Memory profiling 0.09, Graph capture 4.0, Unattributed 4.46, Ready check 4.43, First token 0.3 (s)
+- Read it as: The highlighted segments are most of the wait: where the two caches act. Platform time is a residual found by subtraction, not just queueing. Medians do not add: these sum to 82.49 s, not the 81.12 s median total.
+- Nothing cached (arm A): Platform (by subtraction) 4.37, Server launch to model loaded 45.83, Compile 19.01, Memory profiling 0.09, Graph capture 4.0, Unattributed engine start 4.46, Ready check 4.43, First request 0.3 (s)
 
 ## Recall questions
 
@@ -60,7 +60,7 @@ One replica's cold start, in order (two short engine steps not drawn). Each cach
 - Q: Why can a cold compile cost KV cache capacity, not only seconds?
   A: The compiler's working memory is still on the GPU during profiling, so the profiler sees less free memory and sizes a smaller cache for the replica's whole life.
 - Q: What do you trade by skipping CUDA graph capture?
-  A: Capture removes per-step launch overhead from every later token. Skipping it saves startup once and pays on every token: arguably fine for a short-lived replica only.
+  A: Capture removes per-step launch overhead from every later token. Skipping it saves startup once and pays on every token: fine only for a short-lived replica.
 - Q: Why is a compile cache more fragile than a weight cache?
   A: Its key includes engine version, model, GPU and flags, which change routinely, so an upgrade silently makes it cold. Weights never change.
 - Q: What changes if a new replica lands on a host that never pulled the image?

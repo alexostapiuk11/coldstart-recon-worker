@@ -30,7 +30,7 @@
       "term": "KV cache",
       "plain": "While generating, the model keeps the **keys (K) and values (V)** of every token so far instead of recomputing them. Q is not cached.",
       "analogy": "Each open order's notes, one line per token: long orders take more counter, so fewer fit.",
-      "why": "Each request holds cache in proportion to its length, so the cache divides into a number of concurrent requests; past that, new ones wait."
+      "why": "Each request holds cache in proportion to its length, so the cache fits a fixed number of concurrent requests; past that, new ones wait."
     },
     {
       "id": "vllm",
@@ -49,7 +49,7 @@
     {
       "id": "coldstart",
       "term": "Cold start",
-      "plain": "The wait from a request being queued to a brand-new replica's first token.",
+      "plain": "From a request being queued to a brand-new replica's first request, start to finish.",
       "analogy": "Opening a kitchen from empty when a crowd arrives: get a building, bring in the recipe book, prep, then cook.",
       "why": "It is artifact 1's subject: a median 81.12 s with nothing cached, mostly launching and loading the model, then compiling."
     },
@@ -58,7 +58,7 @@
       "term": "Serverless GPUs",
       "plain": "GPU replicas added when traffic needs them and removed after. Before your code runs, the platform queues the request, finds a machine and starts a container.",
       "analogy": "Renting kitchens as crowds come and go, paying even while one is still opening (artifact 2 counts every replica-second).",
-      "why": "Nothing of yours runs during the platform's part, so it is found by subtraction: total time minus the replica's own time."
+      "why": "Little of yours runs then (handler set-up, teardown), so it is found by subtraction: total time minus the replica's own time."
     },
     {
       "id": "compile",
@@ -72,7 +72,7 @@
     {
       "level": "concept",
       "title": "What a replica does before it answers",
-      "caption": "One replica's cold start, in order (two short engine steps not drawn). Each cache shortens one step, as marked. Nothing before 'ready' serves a user.",
+      "caption": "One replica's cold start, in order (two short engine steps not drawn). Each cache shortens one step. Nothing before 'ready' serves a user.",
       "nodes": [
         {
           "id": "q",
@@ -125,7 +125,7 @@
         {
           "id": "t",
           "label": "First request",
-          "sub": "first token to a user",
+          "sub": "first answer to a user",
           "kind": "person",
           "col": 1,
           "row": 1
@@ -219,7 +219,7 @@
                 "value": 4.0
               },
               {
-                "name": "Unattributed",
+                "name": "Unattributed engine start",
                 "value": 4.46
               },
               {
@@ -227,7 +227,7 @@
                 "value": 4.43
               },
               {
-                "name": "First token",
+                "name": "First request",
                 "value": 0.3
               }
             ]
@@ -235,7 +235,7 @@
         ]
       },
       "axis": "Seconds, each phase's median over 100 cold starts with nothing cached (artifact 1, arm A).",
-      "read_as": "The coloured segments are most of the wait, and where the two caches act. Platform time is a residual found by subtraction, not just queueing. Medians do not add: these sum to 82.49 s, not the 81.12 s median total."
+      "read_as": "The highlighted segments are most of the wait: where the two caches act. Platform time is a residual found by subtraction, not just queueing. Medians do not add: these sum to 82.49 s, not the 81.12 s median total."
     }
   ],
   "recall": [
@@ -253,7 +253,7 @@
     },
     {
       "q": "What do you trade by skipping CUDA graph capture?",
-      "a": "Capture removes per-step launch overhead from every later token. Skipping it saves startup once and pays on every token: arguably fine for a short-lived replica only."
+      "a": "Capture removes per-step launch overhead from every later token. Skipping it saves startup once and pays on every token: fine only for a short-lived replica."
     },
     {
       "q": "Why is a compile cache more fragile than a weight cache?",
