@@ -179,7 +179,9 @@ def _chart(ch, where):
       where a segment sat in another, see _ghost);
     - bars: items, one value each;
     - interval: rows of {label, estimate, low, high} (low <= estimate <= high), optional
-      `zero_label`, `left_label`, `right_label` and `shade` ('left' or 'right' of zero);
+      `zero_label`, `left_label`, `right_label`, `shade` ('left' or 'right' of zero) and
+      `shade_caption` (the line under the axis explaining the shade); a row may set
+      `decimals` (default: the most decimal places among its three values);
     - percentiles: rows of {label, values: [{name, value}], optional max_label}, on one
       shared axis from zero, optional `note` (see _percentile_rows).
     """
@@ -193,13 +195,15 @@ def _chart(ch, where):
         if f in ch and kind != "stacked_bars":
             raise ContentError(f"{where}.{f}: only stacked_bars charts take {f}")
     if kind == "interval":
-        for f in ("zero_label", "left_label", "right_label"):
+        for f in ("zero_label", "left_label", "right_label", "shade_caption"):
             _opt_str(ch, f, where)
         if ch.get("shade", "left") not in ("left", "right"):
             raise ContentError(f"{where}.shade must be 'left' or 'right'")
         for i, row in enumerate(_items(ch, "rows", where, fields=("label",))):
             w = f"{where}.rows[{i}]"
             low, est, high = (_get(row, f, float, w) for f in ("low", "estimate", "high"))
+            if "decimals" in row and not 0 <= _get(row, "decimals", int, w) <= 6:
+                raise ContentError(f"{w}.decimals must be 0 to 6")
             if not low <= est <= high:
                 raise ContentError(f"{w} '{row['label']}': needs low <= estimate <= high, got "
                                    f"{low}, {est}, {high}")

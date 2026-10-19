@@ -55,6 +55,10 @@ padding:14px 16px;margin:10px 0}
 .grid2>.card{margin:0}
 .grid>.card{margin:0}
 .cgrid{grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr))}
+.rgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,max(300px,calc((100% - 24px)/3))),1fr))}
+.dlegend{color:var(--muted);font-size:14px;margin:6px 0 0}
+details.src{background:transparent}details.src summary{font-size:17px}
+details.src ul{margin:8px 0 4px;padding-left:20px}
 .crow{margin:10px 0 0}.crow b{display:block;color:var(--muted);font-weight:600;font-size:13px;
 text-transform:uppercase;letter-spacing:.05em;margin-bottom:1px}
 .why{color:var(--muted);font-size:14px}
@@ -116,6 +120,8 @@ stroke-width:4px;stroke-linejoin:round}
 .pnum{font-size:12px;fill:var(--fg)}.pmaxt{fill:var(--muted);font-style:italic}
 .pnum,.ptick{paint-order:stroke;stroke:var(--card);stroke-width:4px;stroke-linejoin:round}
 .cnote{color:var(--muted);font-size:14px;margin:4px 0 6px}
+.shswatch{display:inline-block;width:14px;height:10px;margin-right:6px;background:var(--line);
+opacity:.7;border-radius:2px;vertical-align:0}
 .legend{list-style:none;padding:0;margin:6px 0;display:flex;gap:14px;flex-wrap:wrap;font-size:13px}
 .chip{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
 .flow{display:flex;gap:8px;flex-wrap:wrap;counter-reset:s}
@@ -130,7 +136,7 @@ details.more{background:transparent;border-style:dashed;margin-top:10px}
 details{background:var(--card);border:1px solid var(--line);border-radius:8px;
 padding:8px 12px;margin:6px 0}summary{cursor:pointer;font-weight:600}
 code{font-size:.92em;background:var(--soft);padding:1px 5px;border-radius:4px}
-footer.src{font-size:13px;color:var(--muted)}
+.src{font-size:13px;color:var(--muted)}
 .hero .lead,.answer{max-width:1100px}
 .readfirst{display:inline-block;font-size:15px;background:var(--card);border:1px solid var(--line);
 border-left:4px solid var(--warn);border-radius:0 8px 8px 0;padding:5px 12px;margin:0 0 8px}
@@ -152,7 +158,7 @@ font-variant-numeric:tabular-nums}
 .callout.links{font-size:15px;color:var(--fg);margin-top:10px}
 @media (min-width:1100px){body{font-size:18px}h1{font-size:36px}h2{font-size:26px}h3{font-size:18px}
 .lead{font-size:21px}.why{font-size:16px}}
-@media (max-width:600px){.diagram{display:none}.diagram-text{display:block}
+@media (max-width:600px){.diagram{display:none}.diagram-text{display:block}.dlegend{display:none}
 h1{font-size:24px}.lead{font-size:16px}
 .row{display:block}.row b{display:block;margin-bottom:1px}
 nav.pills{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
@@ -221,7 +227,7 @@ def _requirements(c):
                        f'<div class="why">{inline(r["why"])}</div></div>'
                        for r in c["requirements"])
         return (f'<section id="why"><h2>Requirements that drove everything</h2>'
-                f'<div class="grid">{reqs}</div></section>')
+                f'<div class="grid rgrid">{reqs}</div></section>')
     ix = link_index(c)
     cards = []
     for r in c["requirements"]:
@@ -234,17 +240,23 @@ def _requirements(c):
                      f'{esc(r["id"])}</span>{esc(req_label(r))}</h3>{text}'
                      f'<div class="why">{inline(r["why"])}</div>{answered}</div>')
     return (f'<section id="why"><h2>Requirements that drove everything</h2>'
-            f'<div class="grid">{"".join(cards)}</div></section>')
+            f'<div class="grid rgrid">{"".join(cards)}</div></section>')
+
+
+DIAGRAM_LEGEND = ("solid box: part of this system · dashed: outside it · bold: where this "
+                  "study's key step happens")
 
 
 def _views(c):
+    legend = (f'<p class="dlegend">{esc(DIAGRAM_LEGEND)}</p>' if c["kind"] == "artifact"
+              else "")
     tabs, panels = [], []
     for i, v in enumerate(c["views"]):
         name = LEVEL_NAMES.get(v["level"], v["title"])
         tabs.append(f'<button role="tab" aria-selected="false">{esc(name)}</button>')
         panels.append(f'<div role="tabpanel"><h3>{esc(v["title"])}</h3>'
                       f'<p class="why">{inline(v["caption"])}</p>'
-                      f'{diagram_html(v, f"{c["id"]}-{i}")}</div>')
+                      f'{diagram_html(v, f"{c["id"]}-{i}")}{legend}</div>')
     head = "System views" + (" (C4)" if c["kind"] == "artifact" else "")
     return (f'<section id="views"><h2>{head}</h2><div class="card" data-tabs>'
             f'<div class="tabs" role="tablist">{"".join(tabs)}</div>{"".join(panels)}</div>'
@@ -381,8 +393,10 @@ def render_page(c: dict) -> str:
         f'<p class="why">Answer out loud first, then open.</p>{rec}</section>')
     src = "".join(f"<li><code>{esc(s['file'])}</code>: {esc(s['section'])}</li>"
                   for s in c["sources"])
-    add("sources", "Sources", f'<section id="sources"><footer class="src"><h2>Sources</h2>'
-        f'<ul>{src}</ul></footer></section>')
+    n = len(c["sources"])
+    count = "1 file and section" if n == 1 else f"{n} files and sections"
+    add("sources", "Sources", f'<section id="sources"><details class="src"><summary>Sources, '
+        f'{count}</summary><ul>{src}</ul></details></section>')
 
     css, js = (CSS + MAP_CSS, JS + MAP_JS) if has_map(c) else (CSS, JS)
     if art:

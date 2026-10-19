@@ -299,7 +299,8 @@ def test_interval_zero_line_is_left_of_a_positive_interval_and_right_of_a_negati
 def test_interval_prints_estimate_low_high_and_the_labels():
     out = chart_html(_interval([{"label": "A minus B", "estimate": -10.39, "low": -12.5,
                                  "high": -8.25}]), "i3")
-    for shown in (">−10.39 s<", ">−12.5<", ">−8.25<", ">A minus B<", ">no difference<",
+    # the row has two decimals (-10.39), so -12.5 prints as authored precision: -12.50
+    for shown in (">−10.39 s<", ">−12.50<", ">−8.25<", ">A minus B<", ">no difference<",
                   "B faster", "A faster"):
         assert shown in out
     assert 'aria-label="' in out and "var(--" not in out.split("<svg")[0]
@@ -1134,3 +1135,113 @@ def test_read_first_banner_sits_under_the_title():
                       'target="_blank" rel="noopener">LLM serving on a GPU</a>')
     assert hero.index("</h1>") < hero.index('class="readfirst"')
     assert 'class="readfirst"' not in render_page(artifact_unit())
+
+
+# ---- small fixes ----
+
+def test_sources_are_a_collapsed_details_with_a_count():
+    page = render_page(artifact_unit())
+    src = page.split('<section id="sources">')[1].split("</section>")[0]
+    assert src.startswith('<details class="src"><summary>Sources, 1 file and section</summary>')
+    assert "<details open" not in src and "docs/post.md" in src
+    u = artifact_unit()
+    u["sources"] = u["sources"] * 3
+    assert "<summary>Sources, 3 files and sections</summary>" in render_page(u)
+
+
+def test_requirement_grid_is_at_most_three_columns_of_at_least_300px():
+    from study.page import CSS
+    assert (".rgrid{grid-template-columns:repeat(auto-fill,"
+            "minmax(min(100%,max(300px,calc((100% - 24px)/3))),1fr))}") in CSS
+    why = render_page(artifact_unit_with_links()).split('<section id="why">')[1]
+    assert why.split("</h2>")[1].startswith('<div class="grid rgrid">')
+
+
+def _edge_labels(out):
+    return [(float(m.group(1)), float(m.group(2)), m.group(3), m.group(4)) for m in re.finditer(
+        r'<text class="elabel" x="([\d.-]+)" y="([\d.-]+)" text-anchor="(\w+)">([^<]*)<', out)]
+
+
+def _edge_lines(out):
+    return [tuple(float(v) for v in m.groups()) for m in re.finditer(
+        r'<line class="edge" x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)"', out)]
+
+
+def _view3(nodes, edge_label="writes results"):
+    return {"level": "container", "title": "t", "caption": "c",
+            "nodes": [{"id": k, "label": k, "col": c, "row": r} for k, c, r in nodes],
+            "edges": [{"from": nodes[0][0], "to": nodes[1][0], "label": edge_label}]}
+
+
+def test_horizontal_edge_label_sits_clearly_above_its_line():
+    out = diagram_html(_view3([("a", 0, 0), ("b", 1, 0)]), "e0")
+    (_, y1, _, _), = _edge_lines(out)
+    for _x, y, anchor, _ in _edge_labels(out):
+        assert anchor == "middle" and y <= y1 - 8
+
+
+def test_vertical_edge_label_sits_beside_its_line():
+    out = diagram_html(_view3([("a", 0, 0), ("b", 0, 1)]), "e1")
+    (x1, y1, _, y2), = _edge_lines(out)
+    for x, y, anchor, _ in _edge_labels(out):
+        assert anchor == "start" and x >= x1 + 6
+        assert min(y1, y2) < y < max(y1, y2) + 4
+
+
+def test_diagonal_edge_label_is_offset_off_its_line():
+    out = diagram_html(_view3([("a", 0, 0), ("b", 1, 1)], "a long label that wraps"), "e2")
+    (x1, y1, x2, y2), = _edge_lines(out)
+    import math
+    for x, y, anchor, txt in _edge_labels(out):
+        # the label's anchor point is at least 8 px from the line
+        d = abs((y2 - y1) * x - (x2 - x1) * y + x2 * y1 - y2 * x1) / math.hypot(x2 - x1, y2 - y1)
+        assert d >= 8, txt
+        assert anchor in ("start", "end")
+
+
+def test_c4_views_carry_a_one_line_legend_and_prereq_views_do_not():
+    page = render_page(artifact_unit())
+    legend = ("solid box: part of this system · dashed: outside it · bold: where this "
+              "study&#x27;s key step happens")
+    assert page.count(f'<p class="dlegend">{legend}</p>') == 4
+    assert 'class="dlegend"' not in render_page(prereq_unit())
+    from study.page import CSS
+    assert ".dlegend{display:none}" in _media(CSS, "max-width:600px")
+
+
+def test_interval_prints_the_precision_as_authored():
+    rows = [{"label": "d", "estimate": -10.39, "low": -20.3, "high": -5.54}]
+    out = chart_html(_interval(rows), "i8")
+    for shown in (">−20.30<", ">−5.54<", ">−10.39 s<"):
+        assert shown in out, shown
+    rows = [{"label": "d", "estimate": -10.4, "low": -20.3, "high": -5.5}]
+    assert ">−20.3<" in chart_html(_interval(rows), "i8")
+    rows = [{"label": "d", "estimate": -10.4, "low": -20.3, "high": -5.5, "decimals": 2}]
+    out = chart_html(_interval(rows), "i8")
+    assert ">−20.30<" in out and ">−10.40 s<" in out and ">−5.50<" in out
+
+
+def test_interval_shade_is_explained_under_the_axis():
+    rows = [{"label": "d", "estimate": -10.39, "low": -20.3, "high": -5.54}]
+    out = chart_html(dict(_interval(rows), shade="left"), "i9")
+    assert ('<p class="cnote"><span class="shswatch"></span>shaded: the side where '
+            'B faster</p>') in out.split("</svg>")[1]
+    out = chart_html(dict(_interval(rows), shade="right", shade_caption="shaded: A **wins**"),
+                     "i9")
+    assert '<span class="shswatch"></span>shaded: A <strong>wins</strong></p>' in out
+    assert "shaded" not in chart_html(_interval(rows), "i9")
+
+
+def test_edge_label_moves_to_the_other_side_rather_than_under_a_box():
+    # a -> b runs diagonally past c; c sits on the label's first-choice side (up and right)
+    view = _view3([("a", 0, 0), ("b", 1, 2), ("c", 1, 1)], "cache state")
+    out = diagram_html(view, "e3")
+    rects = [(float(x), float(y)) for x, y in re.findall(r'<rect x="([\d.]+)" y="([\d.]+)"', out)]
+    cx, cy = rects[2]  # node c
+    for x, y, anchor, txt in _edge_labels(out):
+        w = len(txt) * 6.2
+        left = {"end": x - w, "middle": x - w / 2}.get(anchor, x)
+        overlaps = left < cx + 170 and left + w > cx and y - 11 < cy + 72 and y + 3 > cy
+        assert not overlaps, (x, y, anchor)
+    # labels are drawn after the boxes, so a label that cannot avoid a box stays on top
+    assert out.rindex('class="elabel"') > out.rindex('<g class="node')

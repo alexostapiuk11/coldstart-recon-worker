@@ -444,3 +444,17 @@ def test_an_inline_link_must_name_a_known_unit():
     _fails(u, r"decisions\[1\]\.why: link to unknown unit 'p9'")
     u["prereqs"] = [{"unit": "p9", "label": "Nine"}]
     validate(u)
+
+
+def test_interval_row_decimals_and_shade_caption_are_checked():
+    u = artifact_unit()
+    u["results"][0]["chart"] = _interval()
+    u["results"][0]["chart"]["rows"][0]["decimals"] = 2
+    u["results"][0]["chart"]["shade_caption"] = "shaded: B is faster"
+    validate(u)
+    u["results"][0]["chart"]["rows"][0]["decimals"] = "2"
+    _fails(u, r"rows\[0\]\.decimals: expected int")
+    u["results"][0]["chart"]["rows"][0]["decimals"] = 9
+    _fails(u, r"rows\[0\]\.decimals must be 0 to 6")
+    u["results"][0]["chart"] = dict(_interval(), shade_caption="")
+    _fails(u, r"shade_caption is empty")

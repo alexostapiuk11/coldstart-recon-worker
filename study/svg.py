@@ -31,6 +31,46 @@ def _clip(cx, cy, tx, ty, hw, hh):
     return cx + dx * s, cy + dy * s
 
 
+def _edge_label_spots(x1, y1, x2, y2, n):
+    """Candidate places for an edge's n label lines, best first, each a (points,
+    text-anchor) pair; every candidate sits off the line, so its halo never covers it:
+
+    - a horizontal edge: centred, the last line's baseline 8 px above the line (then below);
+    - a vertical edge: beside it, 8 px to the right, centred on its middle (then left);
+    - a diagonal edge: 10 px out along the normal that points up (then down), anchored
+      so the text runs away from the line.
+    """
+    mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+    dx, dy = x2 - x1, y2 - y1
+    if abs(dy) < 1:
+        return [([(mx, my - 8 - (n - 1 - i) * 13) for i in range(n)], "middle"),
+                ([(mx, my + 18 + i * 13) for i in range(n)], "middle")]
+    if abs(dx) < 1:
+        ys = [my + 4 - (n - 1) * 6.5 + i * 13 for i in range(n)]
+        return [([(mx + 8, y) for y in ys], "start"), ([(mx - 8, y) for y in ys], "end")]
+    length = math.hypot(dx, dy)
+    nx, ny = dy / length, -dx / length
+    if ny > 0:
+        nx, ny = -nx, -ny
+    up = ([(mx + nx * 10, my + ny * 10 - (n - 1 - i) * 13) for i in range(n)],
+          "start" if nx > 0 else "end")
+    down = ([(mx - nx * 10, my - ny * 10 + 10 + i * 13) for i in range(n)],
+            "end" if nx > 0 else "start")
+    return [up, down]
+
+
+def _label_box(points, anchor, lines):
+    """The estimated (left, top, right, bottom) of label lines drawn at points."""
+    w = max(len(line) for line in lines) * CHAR
+    xs = [x for x, _ in points]
+    left = {"end": xs[0] - w, "middle": xs[0] - w / 2}.get(anchor, xs[0])
+    return left, min(y for _, y in points) - 11, left + w, max(y for _, y in points) + 3
+
+
+def _overlaps(a, b):
+    return a[0] < b[2] and a[2] > b[0] and a[1] < b[3] and a[3] > b[1]
+
+
 def diagram_html(view: dict, uid: str) -> str:
     nodes = {n["id"]: n for n in view["nodes"]}
     cols = max(n["col"] for n in nodes.values()) + 1
@@ -52,6 +92,9 @@ def diagram_html(view: dict, uid: str) -> str:
               'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
               '<path d="M0,0 L10,5 L0,10 z" class="arrow"/></marker></defs>')
     p = [head, marker]
+    boxes = [(cx - W / 2, cy - H / 2, cx + W / 2, cy + H / 2)
+             for cx, cy in (center(n) for n in nodes.values())]
+    labels = []
     for e in edges:
         (ax, ay), (bx, by) = center(nodes[e["from"]]), center(nodes[e["to"]])
         x1, y1 = _clip(ax, ay, bx, by, W / 2 + 2, H / 2 + 2)
@@ -59,10 +102,16 @@ def diagram_html(view: dict, uid: str) -> str:
         p.append(f'<line class="edge" x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" '
                  f'y2="{y2:.1f}" marker-end="url(#arr-{esc(uid)})"/>')
         lines = wrap(e.get("label", ""), LABEL_CHARS)
-        for i, line in enumerate(lines):
-            y = (y1 + y2) / 2 - 5 - (len(lines) - 1 - i) * 13
-            p.append(f'<text class="elabel" x="{(x1 + x2) / 2:.1f}" '
-                     f'y="{y:.1f}" text-anchor="middle">{esc(line)}</text>')
+        if not lines:
+            continue
+        options = _edge_label_spots(x1, y1, x2, y2, len(lines))
+        # The first spot that clears every box; else the first, drawn over the boxes.
+        spots, anchor = next(
+            (o for o in options
+             if not any(_overlaps(_label_box(*o, lines), b) for b in boxes)), options[0])
+        labels += [f'<text class="elabel" x="{lx:.1f}" y="{ly:.1f}" '
+                   f'text-anchor="{anchor}">{esc(line)}</text>'
+                   for (lx, ly), line in zip(spots, lines)]
     for n in nodes.values():
         cx, cy = center(n)
         kind = n.get("kind", "system")
@@ -76,6 +125,8 @@ def diagram_html(view: dict, uid: str) -> str:
             p.append(f'<text class="nsub" x="{cx:.1f}" y="{top + 22 + i * 14:.1f}" '
                      f'text-anchor="middle">{esc(line)}</text>')
         p.append("</g>")
+    # Labels go last, above the boxes: one that cannot avoid a box is still readable.
+    p += labels
     p.append("</svg>")
 
     text = ['<div class="diagram-text"><ul>']
@@ -110,6 +161,25 @@ def _signed(v: float) -> str:
     return ("\u2212" + _num(-v)) if v < 0 else _num(v)
 
 
+def _decimals(v: float) -> int:
+    """Decimal places in a value as written (JSON drops trailing zeros: -20.30 is -20.3)."""
+    text = repr(float(v))
+    return 0 if "e" in text else len(text.split(".")[1].rstrip("0"))
+
+
+def _row_fmt(row: dict):
+    """An interval row's number format: its `decimals`, else the most decimal places any
+    of its three values has, so -10.39, -20.3, -5.54 print as -10.39, -20.30, -5.54."""
+    d = row.get("decimals")
+    if d is None:
+        d = max(_decimals(row[k]) for k in ("low", "estimate", "high"))
+
+    def fmt(v):
+        text = f"{abs(v):,.{d}f}"
+        return ("\u2212" + text) if v < 0 and float(text.replace(",", "")) != 0 else text
+    return fmt
+
+
 def _fit(x: float, text: str, width: float, anchor: str = "middle") -> float:
     """Shift a text's anchor x so its estimated extent stays inside 0..width."""
     w = len(text) * CHART_CHAR
@@ -140,8 +210,9 @@ def interval_html(chart: dict) -> str:
     means and print under the axis; optional `shade` tints that side of zero.
     """
     unit, rows = chart["unit"], chart["rows"]
-    lows = [_signed(r["low"]) for r in rows]
-    highs = [_signed(r["high"]) for r in rows]
+    fmts = [_row_fmt(r) for r in rows]
+    lows = [f(r["low"]) for f, r in zip(fmts, rows)]
+    highs = [f(r["high"]) for f, r in zip(fmts, rows)]
     left_pad = max(len(t) for t in lows) * CHART_CHAR + 10
     right_pad = max(len(t) for t in highs) * CHART_CHAR + 10
     plot = 280.0
@@ -188,8 +259,8 @@ def interval_html(chart: dict) -> str:
     r_lines = side(right_txt, width - x0 - 8)
     n_lines = max(len(l_lines), len(r_lines))
     height = axis_y + 18 * n_lines + 6
-    summary = "; ".join(f"{r['label']}: {_signed(r['estimate'])} {unit}, from "
-                        f"{_signed(r['low'])} to {_signed(r['high'])}" for r in rows)
+    summary = "; ".join(f"{r['label']}: {f(r['estimate'])} {unit}, from "
+                        f"{f(r['low'])} to {f(r['high'])}" for f, r in zip(fmts, rows))
     p = [(f'<svg class="chart interval" viewBox="0 0 {width:.0f} {height:.0f}" role="img" '
           f'aria-label="{esc(f"Interval chart ({unit}). {summary}")}" '
           'xmlns="http://www.w3.org/2000/svg">')]
@@ -207,7 +278,7 @@ def interval_html(chart: dict) -> str:
     for i, r in enumerate(rows):
         y = top + i * pitch
         xl, xe, xh = x(r["low"]), x(r["estimate"]), x(r["high"])
-        est = f"{_signed(r['estimate'])} {unit}"
+        est = f"{fmts[i](r['estimate'])} {unit}"
         p.append(f'<text class="blabel ilabel" x="0" y="{y + 14}">{esc(r["label"])}</text>')
         p.append(f'<line class="whisker" x1="{xl:.1f}" y1="{y + 34}" x2="{xh:.1f}" y2="{y + 34}"/>')
         for cx in (xl, xh):
@@ -227,7 +298,14 @@ def interval_html(chart: dict) -> str:
         p.append(f'<text class="axlabel sider" x="{x0 + 8:.1f}" y="{axis_y + 18 + 18 * k}" '
                  f'text-anchor="start">{esc(line)}</text>')
     p.append("</svg>")
-    return "".join(p)
+    caption = ""
+    if chart.get("shade"):
+        side = chart.get(f"{chart['shade']}_label")
+        text = chart.get("shade_caption") or (
+            f"shaded: the side where {side}" if side
+            else f"shaded: the {chart['shade']} side of zero")
+        caption = f'<p class="cnote"><span class="shswatch"></span>{inline(text)}</p>'
+    return "".join(p) + caption
 
 
 P_LEFT, P_PLOT, P_RIGHT = 14, 360, 16  # percentile chart margins and plot width
