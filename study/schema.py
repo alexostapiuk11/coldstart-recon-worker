@@ -13,9 +13,12 @@ from study.text import SENTINELS, known_units, unknown_link_units, wrap
 
 ARTIFACT_LEVELS = ("context", "container", "component", "dynamic")
 NODE_KINDS = ("person", "system", "external", "store", "focus")
-CHART_TYPES = ("stacked_bars", "bars", "interval", "percentiles", "xy")
+CHART_TYPES = ("stacked_bars", "bars", "interval", "percentiles", "xy", "scatter")
 SERIES_STYLES = ("line", "points", "step")
 MAX_SERIES = 6  # xy series and scatter groups: one colour and one marker shape each
+# Marker shapes, in the order series and groups take them (study.xy draws them).
+SHAPES = ("circle", "diamond", "square", "triangle", "triangle-down", "cross")
+MAX_POINT_LABEL = 30
 MAX_LABEL = 22
 MAX_SUB = 60
 SUB_LINE = 30  # the diagram wraps a node's sub text at this width ...
@@ -275,7 +278,8 @@ def _chart(ch, where):
       `decimals` (default: the most decimal places among its three values);
     - percentiles: rows of {label, values: [{name, value}], optional max_label}, on one
       shared axis from zero, optional `note` (see _percentile_rows);
-    - xy: line, point or step series on two numeric axes (see _xy).
+    - xy: line, point or step series on two numeric axes (see _xy);
+    - scatter: groups of points on two numeric axes, an optional frontier (see _scatter).
     """
     kind = _get(ch, "type", str, where)
     if kind not in CHART_TYPES:
@@ -322,6 +326,8 @@ def _chart(ch, where):
         _percentile_rows(ch, where)
     elif kind == "xy":
         _xy(ch, where)
+    elif kind == "scatter":
+        _scatter(ch, where)
     else:
         for i, it in enumerate(_items(ch, "items", where, fields=("label",))):
             _get(it, "value", float, f"{where}.items[{i}]")
@@ -500,6 +506,57 @@ def _xy(ch, where):
         if not lo < hi:
             raise ContentError(f"{w}: needs y_lo < y_hi, got {lo:g}, {hi:g}")
         _label(b, "label", w)
+
+
+def group_shapes(groups: list[dict]) -> list[str]:
+    """Each scatter group's marker: its own `marker`, else the first shape in SHAPES that
+    no group has taken."""
+    taken = {g["marker"] for g in groups if g.get("marker")}
+    free = iter(s for s in SHAPES if s not in taken)
+    return [g.get("marker") or next(free) for g in groups]
+
+
+def _scatter(ch, where):
+    """groups: 1 to 6 of {name (unique), points: [{x, y, optional label}], optional
+    marker (a shape in SHAPES, one group's only)}; optional frontier {name, points: 2+
+    [{x, y}]} running down and to the right (lower-left is better): x rising strictly, y
+    never rising."""
+    x_log = _numeric_frame(ch, where)
+    names, markers = set(), {}
+    for i, g in enumerate(_items(ch, "groups", where, at_most=MAX_SERIES, fields=("name",))):
+        w = f"{where}.groups[{i}]"
+        _label(g, "name", w)
+        if g["name"] in names:
+            raise ContentError(f"{w}: duplicate group name '{g['name']}'")
+        names.add(g["name"])
+        if "marker" in g:
+            m = _get(g, "marker", str, w)
+            if m not in SHAPES:
+                raise ContentError(f"{w}.marker '{m}' not in {SHAPES}")
+            if m in markers:
+                raise ContentError(f"{w}.marker '{m}' is already used by '{markers[m]}'")
+            markers[m] = g["name"]
+        for j, p in enumerate(_items(g, "points", w)):
+            wp = f"{w}.points[{j}]"
+            _log_x(_finite(p, "x", wp), x_log, wp)
+            _finite(p, "y", wp)
+            _opt_str(p, "label", wp, MAX_POINT_LABEL)
+    if "frontier" in ch:
+        fr = _get(ch, "frontier", dict, where)
+        w = f"{where}.frontier"
+        _label(fr, "name", w)
+        if fr["name"] in names:
+            raise ContentError(f"{w}.name '{fr['name']}' is also a group name")
+        last = None
+        for j, p in enumerate(_items(fr, "points", w, at_least=2)):
+            wp = f"{w}.points[{j}]"
+            x, y = _finite(p, "x", wp), _finite(p, "y", wp)
+            _log_x(x, x_log, wp)
+            if last and not (x > last[0] and y <= last[1]):
+                raise ContentError(f"{w}: x must rise strictly and y never rise (lower-left "
+                                   f"is better); point {j} is ({x:g}, {y:g}) after "
+                                   f"({last[0]:g}, {last[1]:g})")
+            last = (x, y)
 
 
 def _view(v, where, allowed):

@@ -1785,3 +1785,120 @@ def test_xy_values_are_traced(tmp_path):
     ch["series"][0]["points"][0]["hi"] = 0.95
     ch["series"][0]["points"][1]["x"] = 256
     assert untraced_numbers(u) == ["0.95", "256", "1.75", "3.5"]
+
+
+# ---- scatter chart ----
+
+from tests.study_examples import scatter_chart
+
+
+def test_scatter_places_points_on_the_shared_scales():
+    out = chart_html(scatter_chart(), "s0")
+    pts = {title: (px, py) for _, px, py, title in _pts(out)}
+    (xa, ya), (xb, yb) = pts["in-flight: 2535, 14.48 s"], pts["in-flight: 3095, 15.03 s"]
+    xc, yc = pts["utilisation: 3095, 15.52 s"]
+    assert abs(xb - xc) < 0.15 and xa < xb and ya > yb > yc
+    assert abs((yb - yc) / (ya - yb) - (15.52 - 15.03) / (15.03 - 14.48)) < 0.01
+
+
+def test_scatter_groups_differ_in_colour_and_shape_and_marker_can_be_chosen():
+    out = chart_html(scatter_chart(), "s1")
+    shapes = {m.group(1): m.group(2) for m in re.finditer(
+        r'<path class="xym (xk\d)[^"]*" data-px="[\d.-]+" data-py="[\d.-]+" '
+        r'data-shape="([\w-]+)"', out)}
+    assert shapes == {"xk0": "circle", "xk1": "diamond", "xk2": "square"}
+    legend = out.split("</svg>", 1)[1]
+    for name in ("queue depth", "in-flight", "utilisation", "best p99 at each cost"):
+        assert f">{name}</li>" in legend
+
+
+def test_scatter_draws_one_marker_and_a_count_badge_for_duplicate_points():
+    out = chart_html(scatter_chart(), "s2")
+    dup = [p for p in _pts(out) if p[3].startswith("queue depth: 880, 14.44 s")]
+    assert len(dup) == 1 and dup[0][3].endswith("(19 points)")
+    badges = [t for t in _texts(out) if "xyn" in t[0]]
+    assert [t[4] for t in badges] == ["×19"]
+    bx, by = badges[0][1], badges[0][2]
+    assert abs(bx - dup[0][1]) < 40 and abs(by - dup[0][2]) < 30  # beside its marker
+
+
+def test_scatter_points_shared_by_two_groups_nest():
+    c = scatter_chart()
+    c["groups"][1]["points"].append({"x": 3095, "y": 14.53})
+    out = chart_html(c, "s3")
+    spot = [p for p in _pts(out) if " 3095, 14.53 s" in p[3]]
+    assert {p[0] for p in spot} == {"xk1", "xk2"}
+    sizes = {m.group(1): m.group(2) for m in re.finditer(
+        r'class="xym (xk\d)[^"]*" data-px="[\d.]+" data-py="[\d.]+" data-shape="[\w-]+" '
+        r'data-s="([\d.]+)"[^>]*><title>[^:]+: 3095, 14.53', out)}
+    assert float(sizes["xk1"]) > float(sizes["xk2"])  # the earlier group rings the later
+    badges = [t[4] for t in _texts(out) if "xyn" in t[0]]
+    assert "×2" in badges
+
+
+def test_scatter_frontier_is_a_step_line_through_its_points_with_a_label():
+    out = chart_html(scatter_chart(), "s4")
+    d = re.search(r'<path class="xyf" d="M([\d.]+) ([\d.]+)H([\d.]+)V([\d.]+)"', out)
+    pts = {title: (px, py) for _, px, py, title in _pts(out)}
+    x0, y0 = pts["queue depth: 880, 14.44 s (19 points)"]
+    assert abs(float(d.group(1)) - x0) < 0.15 and abs(float(d.group(2)) - y0) < 0.15
+    xb = pts["in-flight: 2535, 14.48 s"][0]
+    assert abs(float(d.group(3)) - xb) < 0.15 and float(d.group(4)) > y0  # 14.4 is lower
+    assert ">best p99 at each cost<" in out
+
+
+def test_scatter_point_labels_avoid_markers_and_each_other():
+    c = scatter_chart()
+    c["groups"][1]["points"] = [{"x": 2535, "y": 14.48, "label": "in-flight best"},
+                                {"x": 2600, "y": 14.5, "label": "a close neighbour"},
+                                {"x": 3095, "y": 15.03, "label": "dear"}]
+    out = chart_html(c, "s5")
+    texts = {t[4]: t for t in _texts(out)}
+    boxes = []
+    for name in ("cheapest", "in-flight best", "a close neighbour", "dear"):
+        _, x, y, anchor, txt = texts[name]
+        w = len(txt) * 8.5
+        left = {"end": x - w, "middle": x - w / 2}.get(anchor, x)
+        boxes.append((left, y - 12, left + w, y + 3))
+    dots = [(px - 7, py - 7, px + 7, py + 7) for _, px, py, _ in _pts(out)]
+    for i, b in enumerate(boxes):
+        for o in boxes[i + 1:] + dots:
+            assert not (b[0] < o[2] and b[2] > o[0] and b[1] < o[3] and b[3] > o[1]), (b, o)
+    _xy_texts_inside(out)
+
+
+def test_scatter_refs_aria_and_phone_width():
+    out = chart_html(scatter_chart(refs=[{"x": 3095, "label": "budget"}]), "s6")
+    assert re.search(r'<line class="xyref"', out) and ">budget<" in out
+    label = re.search(r'aria-label="([^"]+)"', out).group(1)
+    assert label.startswith("Scatter chart: p99 (s) against replica-seconds.")
+    assert "queue depth: 20 points, x 880, y 14.44 to 15.1 s, 19 at (880, 14.44)" in label
+    assert "Frontier best p99 at each cost: (880, 14.44), (2535, 14.4)" in label
+    width, _ = _box(out)
+    assert 309 / width * 15 >= 12
+    assert not re.search(r'(fill|stroke)="#', out)
+    _xy_texts_inside(out)
+
+
+def test_brief_lists_scatter_groups_with_counts_and_the_frontier():
+    u = artifact_unit()
+    u["results"][0]["chart"] = scatter_chart(refs=[{"x": 3095, "label": "budget"}])
+    brief = render_brief(u)
+    assert "- Axes: x is replica-seconds; y is p99 (s)" in brief
+    assert "- queue depth: 880: 14.44 ×19 (cheapest), 880: 15.1" in brief
+    assert "- utilisation (square): 3095: 14.53, 3095: 15.52" in brief
+    assert "- Frontier, best p99 at each cost (lower-left is better): 880: 14.44, 2535: 14.4" in brief
+    assert "- Reference: budget at x = 3095" in brief
+
+
+def test_scatter_values_are_traced(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\n880 14.44 15.1 2,535 14.48 3,095 15.03 "
+                                      "14.53 15.52 14.4\n")
+    u = artifact_unit()
+    u["sources"] = [{"file": src, "section": "Title"}]
+    u["results"][0]["chart"] = scatter_chart(refs=[{"x": 3095, "label": "budget"}])
+    assert untraced_numbers(u) == []
+    ch = u["results"][0]["chart"]
+    ch["frontier"]["points"][1]["y"] = 14.3
+    ch["refs"][0]["x"] = 3100
+    assert untraced_numbers(u) == ["14.3", "3100"]

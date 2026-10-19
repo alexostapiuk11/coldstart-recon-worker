@@ -148,6 +148,31 @@ def _xy_lines(ch):
     return out
 
 
+def _scatter_lines(ch):
+    """The axes, then each group's points as 'x: y' pairs (equal points once, with their
+    count: '880: 14.44 ×19'; a label in brackets), the frontier, refs and note."""
+    out = [_axes_line(ch)]
+    for g in ch["groups"]:
+        spots = {}
+        for p in g["points"]:
+            e = spots.setdefault((p["x"], p["y"]), [0, None])
+            e[0] += 1
+            e[1] = e[1] or p.get("label")
+        pairs = ", ".join(f"{x}: {y}" + (f" \u00d7{n}" if n > 1 else "")
+                          + (f" ({label})" if label else "")
+                          for (x, y), (n, label) in spots.items())
+        head = g["name"] + (f" ({g['marker']})" if g.get("marker") else "")
+        out.append(f"- {head}: {pairs}")
+    if ch.get("frontier"):
+        fr = ch["frontier"]
+        out.append(f"- Frontier, {fr['name']} (lower-left is better): "
+                   + ", ".join(f"{p['x']}: {p['y']}" for p in fr["points"]))
+    out += _refs_lines(ch)
+    if ch.get("note"):
+        out.append(f"- Note: {ch['note']}")
+    return out
+
+
 def _bullets(items):
     return "\n".join(f"- {i}" for i in items)
 
@@ -236,6 +261,8 @@ def render_brief(c: dict) -> str:
                     out.append(f"- Note: {ch['note']}")
             elif ch["type"] == "xy":
                 out += _xy_lines(ch)
+            elif ch["type"] == "scatter":
+                out += _scatter_lines(ch)
             elif ch["type"] == "interval":
                 for row in ch["rows"]:
                     out.append(f"- {row['label']}: {row['estimate']} {ch['unit']} "

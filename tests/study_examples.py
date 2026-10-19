@@ -211,3 +211,20 @@ def xy_chart(**extra) -> dict:
              "points": [{"x": 0, "y": 1, "lo": 0.5, "hi": 1.5}, {"x": 100, "y": 8}]},
         ],
     }, **extra))
+
+
+def scatter_chart(**extra) -> dict:
+    """A `scatter` chart: queue depth has 19 policies on one spot, the others spread; a
+    frontier runs through the best three."""
+    return copy.deepcopy(dict({
+        "type": "scatter", "unit": "s", "x_label": "replica-seconds", "y_label": "p99",
+        "groups": [
+            {"name": "queue depth", "points": [{"x": 880, "y": 14.44, "label": "cheapest"}]
+             + [{"x": 880, "y": 14.44}] * 18 + [{"x": 880, "y": 15.1}]},
+            {"name": "in-flight", "points": [{"x": 2535, "y": 14.48}, {"x": 3095, "y": 15.03}]},
+            {"name": "utilisation", "marker": "square",
+             "points": [{"x": 3095, "y": 14.53}, {"x": 3095, "y": 15.52}]},
+        ],
+        "frontier": {"name": "best p99 at each cost",
+                     "points": [{"x": 880, "y": 14.44}, {"x": 2535, "y": 14.4}]},
+    }, **extra))

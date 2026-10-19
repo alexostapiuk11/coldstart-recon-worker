@@ -665,3 +665,58 @@ def test_xy_needs_axis_labels():
     del c["x_label"]
     _fails(_with(c), r"missing 'x_label'")
     _fails(_with(xy_chart(y_label="")), r"y_label is empty")
+
+
+# ---- scatter chart ----
+
+from tests.study_examples import scatter_chart
+
+
+def test_scatter_chart_validates_with_every_option():
+    validate(_with(scatter_chart()))
+    validate(_with(scatter_chart(x_log=True, y_from_zero=False, note="A note.",
+                                 refs=[{"x": 3095, "label": "budget"}])))
+
+
+def test_scatter_groups_are_named_uniquely_with_distinct_markers():
+    c = scatter_chart()
+    c["groups"][1]["name"] = "queue depth"
+    _fails(_with(c), r"groups\[1\]: duplicate group name 'queue depth'")
+    c = scatter_chart()
+    c["groups"][0]["marker"] = "star"
+    _fails(_with(c), r"groups\[0\]\.marker 'star' not in")
+    c = scatter_chart()
+    c["groups"][0]["marker"] = "square"
+    _fails(_with(c), r"groups\[2\]\.marker 'square' is already used by 'queue depth'")
+    _fails(_with(scatter_chart(groups=[])), r"groups: needs 1 to 6 items")
+
+
+def test_scatter_points_are_finite_with_optional_labels():
+    c = scatter_chart()
+    c["groups"][1]["points"][0]["y"] = float("inf")
+    _fails(_with(c), r"groups\[1\]\.points\[0\]\.y must be a finite number")
+    c = scatter_chart()
+    c["groups"][1]["points"][0]["label"] = ""
+    _fails(_with(c), r"groups\[1\]\.points\[0\]\.label is empty")
+    c = scatter_chart()
+    c["groups"][1]["points"][0]["label"] = "x" * 31
+    _fails(_with(c), r"groups\[1\]\.points\[0\]\.label longer than 30 characters")
+    c = scatter_chart(x_log=True, groups=[{"name": "a", "points": [{"x": 0, "y": 1}]}])
+    del c["frontier"]
+    _fails(_with(c), r"x is 0; a log x axis needs every x > 0")
+
+
+def test_scatter_frontier_runs_down_and_to_the_right():
+    c = scatter_chart()
+    c["frontier"]["points"] = [{"x": 880, "y": 14.44}]
+    _fails(_with(c), r"frontier\.points: needs at least 2 items")
+    c = scatter_chart()
+    c["frontier"]["points"][1]["x"] = 880
+    _fails(_with(c), r"frontier: x must rise strictly and y never rise \(lower-left is "
+                     r"better\); point 1 is \(880, 14.4\) after \(880, 14.44\)")
+    c = scatter_chart()
+    c["frontier"]["points"][1]["y"] = 15
+    _fails(_with(c), r"frontier: x must rise strictly and y never rise")
+    c = scatter_chart()
+    c["frontier"]["name"] = "in-flight"
+    _fails(_with(c), r"frontier\.name 'in-flight' is also a group name")

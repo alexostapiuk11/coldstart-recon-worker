@@ -77,6 +77,12 @@ def _xy(ch):
             + [b[k] for b in ch.get("bands", []) for k in ("y_lo", "y_hi")] + _refs(ch))
 
 
+def _scatter(ch):
+    fr = ch.get("frontier", {}).get("points", [])
+    return ([p[k] for g in ch["groups"] for p in g["points"] for k in ("x", "y")]
+            + [p[k] for p in fr for k in ("x", "y")] + _refs(ch))
+
+
 # Every chart type's numeric values (they are numbers, not strings, so _strings misses
 # them). A new chart type needs an entry here; a test checks this matches CHART_TYPES.
 CHART_NUMBERS = {
@@ -85,6 +91,7 @@ CHART_NUMBERS = {
     "interval": _interval,
     "percentiles": _percentiles,
     "xy": _xy,
+    "scatter": _scatter,
 }
 
 

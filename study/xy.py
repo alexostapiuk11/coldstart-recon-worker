@@ -1,4 +1,5 @@
-"""Inline SVG for charts on two numeric axes: `xy` (line, point and step series).
+"""Inline SVG for charts on two numeric axes: `xy` (line, point and step series) and
+`scatter` (groups of points, an optional stepped frontier).
 
 Sizing: the viewBox is W units wide. A 375 px phone leaves a card 309 px of content, and
 phone CSS sets chart text to 15 units, so text renders at 309 / 386 * 15 = 12 px. Every
@@ -13,8 +14,10 @@ legend.
 
 from __future__ import annotations
 
+import itertools
 import math
 
+from study.schema import SHAPES, group_shapes
 from study.svg import CHART_CHAR, _fit, _note, _num, _overlaps
 from study.text import esc, wrap
 
@@ -23,7 +26,7 @@ PLOT_H = 210  # plot height
 PAD = 10  # inner x padding, so a marker at either end clears the axes
 LINE = 18  # pitch of one line of chart text
 TITLE_CHARS = int(W / CHART_CHAR)
-SHAPES = ("circle", "diamond", "square", "triangle", "triangle-down", "cross")
+NEST = 0.45  # how much larger each enclosing marker is drawn where markers coincide
 
 
 def shape_path(name: str, x: float, y: float, s: float = 1.0) -> str:
@@ -47,6 +50,11 @@ def shape_path(name: str, x: float, y: float, s: float = 1.0) -> str:
     pts = [(-b, -a), (b, -a), (b, -b), (a, -b), (a, b), (b, b), (b, a), (-b, a), (-b, b),
            (-a, b), (-a, -b), (-b, -b)]
     return "M" + "L".join(f"{x + dx:.1f} {y + dy:.1f}" for dx, dy in pts) + "z"
+
+
+def bare(v: float) -> str:
+    """plain() without thousands commas: for an (x, y) pair written with a comma."""
+    return plain(v).replace(",", "")
 
 
 def plain(v: float) -> str:
@@ -296,31 +304,55 @@ class Frame:
         self.labels.append(_text(cls, x, y, text, anchor))
         self.boxes.append(text_box(x, y, text, anchor))
 
-    def place(self, cls: str, text: str, spots: list[tuple], marks: list[tuple]) -> None:
+    def place(self, cls: str, text: str, spots: list[tuple], marks: list[tuple]) -> int:
         """Draw `text` at the first of `spots` [(x, y, anchor)] that lies inside the chart
         above the x axis and clears every label already placed and every marker in
-        `marks` [(x, y)]; if none does, at the first that lies inside."""
-        dots = [(mx - 7, my - 7, mx + 7, my + 7) for mx, my in marks]
+        `marks` [(x, y) or (x, y, marker scale)]; if none does, at the first that lies
+        inside. Returns the index of the spot used."""
+        dots = []
+        for m in marks:
+            r = 7 * (m[2] if len(m) > 2 else 1)
+            dots.append((m[0] - r, m[1] - r, m[0] + r, m[1] + r))
         first = None
-        for x, y, anchor in spots:
+        for i, (x, y, anchor) in enumerate(spots):
             box = text_box(x, y, text, anchor)
             if box[0] < -0.5 or box[2] > W + 0.5 or box[1] < 0 or box[3] > self.pb:
                 continue
-            first = first or (x, y, anchor)
+            first = first if first is not None else i
             if not any(_overlaps(box, b) for b in self.boxes + dots):
                 self._label(cls, x, y, text, anchor)
-                return
-        x, y, anchor = first or (_fit(spots[0][0], text, W, spots[0][2]), spots[0][1],
-                                 spots[0][2])
-        self._label(cls, x, y, text, anchor)
+                return i
+        if first is None:
+            x, y, anchor = spots[0]
+            self._label(cls, _fit(x, text, W, anchor), y, text, anchor)
+            return 0
+        self._label(cls, *spots[first][:2], text, spots[first][2])
+        return first
 
     def place_near(self, cls: str, px: float, py: float, text: str,
                    marks: list[tuple]) -> None:
-        """Label the point (px, py): right of it, above, below, left, then further above
-        or below (see place)."""
-        self.place(cls, text, [(px + 9, py + 5, "start"), (px, py - 11, "middle"),
-                               (px, py + 22, "middle"), (px - 9, py + 5, "end"),
-                               (px, py - 28, "middle"), (px, py + 39, "middle")], marks)
+        """Label the point (px, py): right of it, above, below or left; then at its
+        corners; then further out, joined to the point by a thin leader line (see place)."""
+        near = [(px + 9, py + 5, "start"), (px, py - 11, "middle"), (px, py + 22, "middle"),
+                (px - 9, py + 5, "end"), (px + 9, py - 9, "start"), (px - 9, py - 9, "end"),
+                (px + 9, py + 19, "start"), (px - 9, py + 19, "end")]
+        far = [(px, py - 30, "middle"), (px, py + 41, "middle"), (px - 34, py + 5, "end"),
+               (px + 34, py + 5, "start"), (px, py - 48, "middle"), (px, py + 59, "middle"),
+               (px - 34, py - 22, "end"), (px - 34, py + 32, "end"),
+               (px + 34, py - 22, "start"), (px + 34, py + 32, "start")]
+        i = self.place(cls, text, near + far, marks)
+        if i >= len(near):
+            x, y, anchor = (near + far)[i]
+            left, top, right, bottom = text_box(x, y, text, anchor)
+            tx = min(max(px, left), right)
+            ty = bottom if y < py else top
+            if abs(tx - px) < 1:  # straight up or down: start clear of the marker
+                sy = py - 8 if ty < py else py + 8
+                sx = px
+            else:
+                sx, sy = px + (8 if tx > px else -8), py
+            self.labels.insert(len(self.labels) - 1, f'<line class="xylead" x1="{sx:.1f}" '
+                               f'y1="{sy:.1f}" x2="{tx:.1f}" y2="{ty:.1f}"/>')
 
     def finish(self, marks: list[tuple]) -> None:
         """Place the band and reference labels, clear of the markers."""
@@ -344,19 +376,21 @@ def nested_sizes(series: list[list[tuple]]) -> list[list[float]]:
         for j, (x, y) in enumerate(pts):
             later = {m for m in range(k + 1, len(series))
                      if any(abs(x - a) < 3 and abs(y - b) < 3 for a, b in series[m])}
-            sizes[k][j] = 1.0 + 0.45 * len(later)
+            sizes[k][j] = 1.0 + NEST * len(later)
     return sizes
 
 
 def legend(items: list[tuple]) -> str:
-    """An HTML legend: (k, shape, name, draws a line, on the right axis) per entry."""
+    """An HTML legend: (k, shape, name, draws a line, on the right axis) per entry; k None
+    is a frontier (a plain line)."""
     lis = []
     for k, shape, name, line, right in items:
         r = " r" if right else ""
-        ln = f'<line class="xyl xk{k}{r}" x1="1" y1="7" x2="25" y2="7"/>' if line else ""
+        cls = "xyf" if k is None else f"xyl xk{k}{r}"
+        ln = f'<line class="{cls}" x1="1" y1="7" x2="25" y2="7"/>' if line else ""
         mark = f'<path class="xym xk{k}{r}" d="{shape_path(shape, 13, 7)}"/>' if shape else ""
-        chip = (f'<svg class="xychip xk{k}" width="26" height="14" viewBox="0 0 26 14" '
-                f'aria-hidden="true">{ln}{mark}</svg>')
+        chip = (f'<svg class="xychip{"" if k is None else f" xk{k}"}" width="26" height="14" '
+                f'viewBox="0 0 26 14" aria-hidden="true">{ln}{mark}</svg>')
         tail = " <small>(right axis)</small>" if right else ""
         lis.append(f"<li>{chip}{esc(name)}{tail}</li>")
     return f'<ul class="legend xyleg">{"".join(lis)}</ul>'
@@ -426,9 +460,10 @@ def xy_html(chart: dict) -> str:
                 lohi = f" ({val(lo)} to {val(hi)})"
             tip = f"{s['name']}: {plain(p['x'])} → {_with_unit(val(p['y']), u)}{lohi}"
             marks.append(f'<path class="xym xk{k}{r}" data-px="{px:.1f}" data-py="{py:.1f}" '
-                         f'data-shape="{shape}" d="{shape_path(shape, px, py, sizes[k][j])}">'
+                         f'data-shape="{shape}" data-s="{sizes[k][j]:g}" '
+                         f'd="{shape_path(shape, px, py, sizes[k][j])}">'
                          f"<title>{esc(tip)}</title></path>")
-            coords.append((px, py))
+            coords.append((px, py, sizes[k][j]))
         px, py, p = pts[-1]
         if not any(t == val(p["y"]) and abs(x - px) < 4 and abs(y - py) < 4
                    for x, y, t in ends):  # two series ending on one point: one label
@@ -452,4 +487,103 @@ def xy_html(chart: dict) -> str:
     if len(series) >= 2:
         out += legend([(k, SHAPES[k], s["name"], s.get("style", "line") != "points",
                         on_right(s)) for k, s in enumerate(series)])
+    return out + _note(chart)
+
+
+def _spots(groups: list[dict]) -> dict:
+    """{(x, y): {group index: [count, first label]}} in order of first appearance: equal
+    points collapse into one spot, which keeps a count per group."""
+    spots: dict = {}
+    for k, g in enumerate(groups):
+        for p in g["points"]:
+            e = spots.setdefault((p["x"], p["y"]), {}).setdefault(k, [0, None])
+            e[0] += 1
+            e[1] = e[1] or p.get("label")
+    return spots
+
+
+def scatter_html(chart: dict) -> str:
+    """Groups of points on two numeric axes; see Frame for the axes and
+    study.schema._scatter for the fields. Each group has its own colour and marker shape.
+
+    No jitter: equal points draw one marker with a count badge (×19) beside it, and where
+    groups share a point their markers nest, the earlier group's larger. The optional
+    frontier is a step line through its points (right, then down: lower-left is better),
+    labelled with its name. Point labels take the first free spot around their marker."""
+    unit, groups, fr = chart["unit"], chart["groups"], chart.get("frontier")
+    shapes = group_shapes(groups)
+    fr_pts = fr["points"] if fr else []
+    data_xs = [p["x"] for g in groups for p in g["points"]] + [p["x"] for p in fr_pts]
+    xs = data_xs + [r["x"] for r in chart.get("refs", []) if "x" in r]
+    ys = ([p["y"] for g in groups for p in g["points"]] + [p["y"] for p in fr_pts]
+          + [r["y"] for r in chart.get("refs", []) if "y" in r])
+    f = Frame(chart, xs, ys, None, data_xs)
+    spots = _spots(groups)
+
+    body, coords = [], []
+    if fr:
+        (x0, y0), rest = (f.x(fr_pts[0]["x"]), f.y(fr_pts[0]["y"])), fr_pts[1:]
+        d = f"M{x0:.1f} {y0:.1f}" + "".join(f"H{f.x(p['x']):.1f}V{f.y(p['y']):.1f}"
+                                            for p in rest)
+        body.append(f'<path class="xyf" d="{d}"/>')
+    for (x, y), per in spots.items():
+        px, py = f.x(x), f.y(y)
+        ks = sorted(per)
+        for i, k in enumerate(ks):
+            size = 1.0 + NEST * (len(ks) - 1 - i)
+            count = per[k][0]
+            tip = (f"{groups[k]['name']}: {bare(x)}, {_with_unit(val(y), unit)}"
+                   + (f" ({count} points)" if count > 1 else ""))
+            body.append(f'<path class="xym xk{k}" data-px="{px:.1f}" data-py="{py:.1f}" '
+                        f'data-shape="{shapes[k]}" data-s="{size:g}" '
+                        f'd="{shape_path(shapes[k], px, py, size)}"><title>{esc(tip)}</title>'
+                        "</path>")
+        coords.append((px, py, 1.0 + NEST * (len(ks) - 1)))
+    f.finish(coords)
+    for (x, y), per in spots.items():
+        n = sum(c for c, _ in per.values())
+        if n >= 2:
+            px, py, r = f.x(x), f.y(y), 9 + 7 * NEST * (len(per) - 1)
+            f.place("xyn", f"\u00d7{n}", [(px + r, py - 7, "start"), (px - r, py - 7, "end"),
+                                         (px + r, py + 16, "start"), (px - r, py + 16, "end")],
+                    coords)
+    if fr:
+        # Along a step (under it, then over it), else past either end.
+        steps = [((f.x(a["x"]) + f.x(b["x"])) / 2, f.y(a["y"]))
+                 for a, b in itertools.pairwise(fr_pts)]
+        last, first = fr_pts[-1], fr_pts[0]
+        lx, ly, fx, fy = f.x(last["x"]), f.y(last["y"]), f.x(first["x"]), f.y(first["y"])
+        f.place("xyfl", fr["name"],
+                [(mx, my + 17, "middle") for mx, my in steps]
+                + [(mx, my - 8, "middle") for mx, my in steps]
+                + [(lx + 9, ly + 16, "start"), (lx, ly + 22, "middle"),
+                   (lx - 9, ly + 16, "end"), (fx - 9, fy + 16, "end"), (fx, fy - 26, "middle")],
+                coords)
+    for (x, y), per in spots.items():
+        for _, label in per.values():
+            if label:
+                f.place_near("xypl", f.x(x), f.y(y), label, coords)
+
+    parts = []
+    for k, g in enumerate(groups):
+        n = len(g["points"])
+        dups = [f"{per[k][0]} at ({bare(x)}, {val(y)})" for (x, y), per in spots.items()
+                if k in per and per[k][0] > 1]
+        parts.append(f"{g['name']}: {n} point{'s' if n != 1 else ''}, "
+                     f"x {_range([p['x'] for p in g['points']], bare)}, "
+                     f"y {_with_unit(_range([p['y'] for p in g['points']], val), unit)}"
+                     + "".join(f", {d}" for d in dups))
+    t1 = f"{chart['y_label']} ({unit})" if unit else chart["y_label"]
+    aria = (f"Scatter chart: {t1} against {chart['x_label']}"
+            + (" (log scale)" if chart.get("x_log") else "") + f". {'; '.join(parts)}."
+            + (f" Frontier {fr['name']}: "
+               + ", ".join(f"({bare(p['x'])}, {val(p['y'])})" for p in fr_pts) + "."
+               if fr else "")
+            + refs_summary(chart))
+    out = f.svg("scatter", aria, body)
+    items = [(k, shapes[k], g["name"], False, False) for k, g in enumerate(groups)]
+    if fr:
+        items.append((None, None, fr["name"], True, False))
+    if len(items) >= 2:
+        out += legend(items)
     return out + _note(chart)
