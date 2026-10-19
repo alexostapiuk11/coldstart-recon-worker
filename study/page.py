@@ -157,7 +157,9 @@ def _concepts(c):
             extra += f'<div class="crow"><b>Like</b><div>{inline(t["analogy"])}</div></div>'
         if t.get("why"):
             extra += f'<div class="crow"><b>Matters</b><div>{inline(t["why"])}</div></div>'
-        cards.append(f'<div class="card"><h3>{esc(t["term"])}</h3>'
+        # c- for concepts, d- for decisions, r- for results: the prefixes keep ids unique.
+        anchor = f' id="c-{esc(t["id"])}"' if t.get("id") else ""
+        cards.append(f'<div class="card"{anchor}><h3>{esc(t["term"])}</h3>'
                      f'<div>{inline(t["plain"])}</div>{extra}</div>')
     title = "Need to know first" if c["kind"] == "artifact" else "The ideas"
     return (f'<section id="concepts"><h2>{title}</h2>'

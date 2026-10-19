@@ -631,3 +631,19 @@ def test_concept_cards_are_wide_and_stack_each_label_above_its_text():
     # decision cards keep their side-by-side rows
     decisions = render_page(artifact_unit()).split('<section id="decisions">')[1]
     assert '<div class="row"><b>Problem</b>' in decisions
+
+
+def test_concept_with_an_id_gets_an_anchor_and_every_page_id_is_unique():
+    u = artifact_unit_with_links()
+    u["concepts"].append({"id": 'q"x', "term": "Quoted", "plain": "Plain."})  # escaped
+    u["concepts"].append({"term": "No id", "plain": "Plain."})
+    page = render_page(u)
+    concepts = page.split('<section id="concepts">')[1].split("</section>")[0]
+    assert '<div class="card" id="c-arms">' in concepts
+    assert '<div class="card" id="c-contrast">' in concepts
+    assert '<div class="card" id="c-q&quot;x">' in concepts
+    assert concepts.count('<div class="card"') == 4 and concepts.count(' id="') == 3
+    ids = re.findall(r' id="([^"]+)"', page)
+    assert len(ids) == len(set(ids))
+    from study.page import CSS
+    assert "section,.card[id]{scroll-margin-top:64px}" in CSS
