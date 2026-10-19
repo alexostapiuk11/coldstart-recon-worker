@@ -555,7 +555,8 @@ def test_requirements_section_is_titled_and_shows_ids():
     page = render_page(artifact_unit_with_links())
     why = page.split('<section id="why">')[1].split("</section>")[0]
     assert why.startswith("<h2>Requirements that drove everything</h2>")
-    assert '<span class="rcode">R1</span>' in why
+    assert '<h3><span class="code">R1</span>Split the start into phases</h3>' in why
+    assert "<div>Split one cold start into named phases.</div>" in why
     assert "Does the example hold?" not in why
 
 
@@ -751,3 +752,64 @@ def test_results_heading_is_in_pictures_for_a_prereq():
     del u["results"][0]["so"]
     assert '<section id="results"><h2>In pictures</h2>' in render_page(u)
     assert '<section id="results"><h2>Results, as meaning</h2>' in render_page(artifact_unit())
+
+
+# ---- links on the cards ----
+
+def _card(page, anchor):
+    """The HTML of the card whose id is `anchor`, up to the next card."""
+    return page.split(f'id="{anchor}"')[1].split('<div class="card')[0]
+
+
+def _hrefs(html):
+    return re.findall(r'href="#([^"]+)"', html)
+
+
+def test_traced_cards_carry_codes_and_link_rows():
+    page = render_page(artifact_unit_with_links())
+    r1 = _card(page, "req-R1")
+    assert '<span class="code">R1</span>' in r1
+    assert "Answered by:" in r1 and _hrefs(r1) == ["d-d0", "d-d1", "d-d3"]
+    r3 = _card(page, "req-R3")
+    assert "Answered by:" in r3 and "Served by the process" in r3 and not _hrefs(r3)
+    d1 = _card(page, "d-d1")
+    assert '<span class="code">D2</span>' in d1
+    serves = d1.split("Serves:")[1].split("</div>")[0]
+    assert _hrefs(serves) == ["req-R1", "req-R2"]
+    assert "R1</span> Split the start into phases" in serves
+    seen = d1.split("Seen in:")[1].split("</div>")[0]
+    assert _hrefs(seen) == ["r-0"] and "F1</span> A result" in seen
+    assert "Seen in:" not in _card(page, "d-d2")  # no result rests on d2
+    f1 = _card(page, "r-0")
+    assert '<span class="code">F1</span>' in f1
+    assert "Rests on:" in f1 and "So:" not in f1
+    assert _hrefs(f1.split("Rests on:")[1]) == ["d-d0", "d-d1"]
+    f2 = _card(page, "r-1")
+    assert "Rests on:" in f2 and "no decision rests on it" in f2
+    c1 = _card(page, "c-arms")
+    assert '<span class="code">C1</span>' in c1
+    assert _hrefs(c1.split("Used by:")[1]) == ["d-d0", "d-d3"]
+    assert '<span class="code">C2</span>' in _card(page, "c-contrast")
+
+
+def test_every_card_link_lands_on_an_existing_unique_id():
+    page = render_page(artifact_unit_with_links())
+    ids = re.findall(r' id="([^"]+)"', page)
+    assert len(ids) == len(set(ids))
+    for target in _hrefs(page):
+        assert target in ids, target
+
+
+def test_requirement_anchor_is_escaped():
+    u = artifact_unit_with_links()
+    u["requirements"][2]["id"] = 'R"3'
+    page = render_page(u)
+    assert 'id="req-R&quot;3"' in page
+
+
+def test_untraced_cards_render_as_before():
+    page = render_page(artifact_unit())
+    for marker in ('class="code"', "Answered by", "Serves:", "Seen in:", "Rests on:",
+                   "Used by:", 'id="req-'):
+        assert marker not in page, marker
+    assert '<div class="callout">So: <a href="#d-d0">Decision 0</a></div>' in page

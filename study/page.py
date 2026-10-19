@@ -11,6 +11,7 @@ that colour: black or white, whichever clears 4.5:1 on the fill.
 
 from __future__ import annotations
 
+from study.links import link_index, req_label, traced
 from study.map import MAP_CSS, MAP_JS, has_map, map_section
 from study.schema import so_ids
 from study.svg import chart_html, diagram_html, segment_slots
@@ -126,7 +127,14 @@ padding:10px 14px;margin:10px 0 4px}.answer p{margin:4px 0 8px}
 .achip{padding:3px 10px;border:1px solid var(--accent);border-radius:99px;background:var(--card);
 font-size:14px;text-decoration:none;color:var(--fg)}
 .achip:hover{background:var(--soft)}
-.rcode{color:var(--accent);font-weight:700;margin-right:8px;font-variant-numeric:tabular-nums}
+.code{display:inline-block;font-size:12px;font-weight:700;line-height:1.5;color:var(--accent);
+border:1px solid var(--accent);border-radius:5px;padding:0 5px;margin-right:8px;vertical-align:2px;
+font-variant-numeric:tabular-nums}
+.links{font-size:14px;color:var(--muted);margin:8px 0 0;line-height:1.5}
+.links b{font-weight:600;color:var(--muted);margin-right:2px}
+.links a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:2px}
+.links .lc{font-weight:700;font-variant-numeric:tabular-nums}.links .none{font-style:italic}
+.callout.links{font-size:15px;color:var(--fg);margin-top:10px}
 @media (min-width:1100px){body{font-size:18px}h1{font-size:36px}h2{font-size:26px}h3{font-size:18px}
 .lead{font-size:21px}.why{font-size:16px}}
 @media (max-width:600px){.diagram{display:none}.diagram-text{display:block}
@@ -151,7 +159,27 @@ LEVEL_NAMES = {"context": "1 Context", "container": "2 Containers",
                "component": "3 Components", "dynamic": "4 One run"}
 
 
+def _link(anchor, code, label):
+    return f'<a href="#{esc(anchor)}"><span class="lc">{esc(code)}</span> {esc(label)}</a>'
+
+
+def _links_row(label, links, none="", cls="links"):
+    """One compact line: a label, then links separated by dots (or why there are none)."""
+    if links:
+        body = " · ".join(links)
+    elif none:
+        body = f'<span class="none">{inline(none)}</span>'
+    else:
+        return ""
+    return f'<div class="{cls}"><b>{label}</b> {body}</div>'
+
+
+def _dec_links(ix, decisions):
+    return [_link(f"d-{d['id']}", ix["dec_code"][d["id"]], d["title"]) for d in decisions]
+
+
 def _concepts(c):
+    ix = link_index(c) if traced(c) else None
     cards = []
     for t in c["concepts"]:
         extra = ""
@@ -161,11 +189,37 @@ def _concepts(c):
             extra += f'<div class="crow"><b>Matters</b><div>{inline(t["why"])}</div></div>'
         # c- for concepts, d- for decisions, r- for results: the prefixes keep ids unique.
         anchor = f' id="c-{esc(t["id"])}"' if t.get("id") else ""
-        cards.append(f'<div class="card"{anchor}><h3>{esc(t["term"])}</h3>'
+        code = ""
+        if ix and t.get("id"):
+            code = f'<span class="code">{ix["con_code"][t["id"]]}</span>'
+            extra += _links_row("Used by:", _dec_links(ix, ix["used_by"][t["id"]]))
+        cards.append(f'<div class="card"{anchor}><h3>{code}{esc(t["term"])}</h3>'
                      f'<div>{inline(t["plain"])}</div>{extra}</div>')
     title = "Need to know first" if c["kind"] == "artifact" else "The ideas"
     return (f'<section id="concepts"><h2>{title}</h2>'
             f'<div class="grid cgrid">{"".join(cards)}</div></section>')
+
+
+def _requirements(c):
+    if not traced(c):
+        reqs = "".join(f'<div class="card"><b>{inline(r["text"])}</b>'
+                       f'<div class="why">{inline(r["why"])}</div></div>'
+                       for r in c["requirements"])
+        return (f'<section id="why"><h2>Requirements that drove everything</h2>'
+                f'<div class="grid">{reqs}</div></section>')
+    ix = link_index(c)
+    cards = []
+    for r in c["requirements"]:
+        # The heading is the requirement's short name, the words the map shows; the full
+        # text follows when it says more.
+        text = f'<div>{inline(r["text"])}</div>' if req_label(r) != r["text"] else ""
+        none = f"no decision. {r['unlinked_reason']}" if r.get("unlinked_reason") else ""
+        answered = _links_row("Answered by:", _dec_links(ix, ix["answered_by"][r["id"]]), none)
+        cards.append(f'<div class="card" id="req-{esc(r["id"])}"><h3><span class="code">'
+                     f'{esc(r["id"])}</span>{esc(req_label(r))}</h3>{text}'
+                     f'<div class="why">{inline(r["why"])}</div>{answered}</div>')
+    return (f'<section id="why"><h2>Requirements that drove everything</h2>'
+            f'<div class="grid">{"".join(cards)}</div></section>')
 
 
 def _views(c):
@@ -182,14 +236,28 @@ def _views(c):
             "</section>")
 
 
+def _decision_links(c, ix, d):
+    """The decision's code badge and its 'Serves:' and 'Seen in:' rows (traced units)."""
+    if not ix:
+        return "", ""
+    serves = [_link(f"req-{s['req']}", s["req"], req_label(ix["req"][s["req"]]))
+              for s in d.get("serves", [])]
+    seen = [_link(f"r-{i}", ix["res_code"][i], c["results"][i]["title"])
+            for i in ix["seen_in"][d["id"]]]
+    return (f'<span class="code">{ix["dec_code"][d["id"]]}</span>',
+            _links_row("Serves:", serves) + _links_row("Seen in:", seen))
+
+
 def _decisions(c):
+    ix = link_index(c) if traced(c) else None
     cards = []
     for d in c["decisions"]:
         opts = "".join(
             f'<span class="opt{" chosen" if o == d["chosen"] else ""}">{inline(o)}</span>'
             for o in d["options"])
+        code, rows = _decision_links(c, ix, d)
         cards.append(
-            f'<div class="card" id="d-{esc(d["id"])}"><h3>{esc(d["title"])}</h3>'
+            f'<div class="card" id="d-{esc(d["id"])}"><h3>{code}{esc(d["title"])}</h3>{rows}'
             f'<div class="row"><b>Problem</b><div>{inline(d["problem"])}</div></div>'
             f'<div class="row"><b>Options</b><div>{opts}</div></div>'
             f'<div class="row"><b>Because</b><div>{inline(d["why_short"])}</div></div>'
@@ -206,14 +274,21 @@ def _results(c):
     # One colour per segment name across the page's stacked charts.
     slots = segment_slots([r["chart"] for r in c["results"]
                            if r["chart"]["type"] == "stacked_bars"])
+    ix = link_index(c) if traced(c) else None
+    decs = {d["id"]: d for d in c.get("decisions", [])}
     cards = []
     for i, r in enumerate(c["results"]):
-        so = ""
-        if so_ids(r):
+        so, code = "", ""
+        if ix:
+            code = f'<span class="code">{ix["res_code"][i]}</span>'
+            none = f"no decision. {r['so_none_reason']}" if r.get("so_none_reason") else ""
+            so = _links_row("Rests on:", _dec_links(ix, [decs[d] for d in so_ids(r)]), none,
+                            cls="callout links")
+        elif so_ids(r):
             links = ", ".join(f'<a href="#d-{esc(d)}">{esc(titles[d])}</a>' for d in so_ids(r))
             so = f'<div class="callout">So: {links}</div>'
         cards.append(
-            f'<div class="card" id="r-{i}"><h3>{esc(r["title"])}</h3>'
+            f'<div class="card" id="r-{i}"><h3>{code}{esc(r["title"])}</h3>'
             f'{chart_html(r["chart"], f"r{i}", slots)}'
             f'<div class="row"><b>Axis</b><div>{inline(r["axis"])}</div></div>'
             f'<div class="row"><b>Read it as</b><div>{inline(r["read_as"])}</div></div>{so}</div>')
@@ -259,13 +334,7 @@ def render_page(c: dict) -> str:
     if c.get("concepts"):
         add("concepts", "Concepts", _concepts(c))
     if art:
-        reqs = "".join(
-            '<div class="card"><b>'
-            + (f'<span class="rcode">{esc(r["id"])}</span>' if r.get("id") else "")
-            + f'{inline(r["text"])}</b><div class="why">{inline(r["why"])}</div></div>'
-            for r in c["requirements"])
-        add("why", "Requirements", f'<section id="why"><h2>Requirements that drove everything</h2>'
-            f'<div class="grid">{reqs}</div></section>')
+        add("why", "Requirements", _requirements(c))
     if c.get("views"):
         add("views", "Views", _views(c))
     if c.get("decisions"):
