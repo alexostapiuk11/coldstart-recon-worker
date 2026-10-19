@@ -742,3 +742,12 @@ def test_segment_slots_avoid_a_clash_inside_one_chart_once_eight_are_used():
     slots = segment_slots([_stacked(*nine[:8]), _stacked("n0", "n8")])
     assert [slots[n] for n in nine[:8]] == list(range(8))
     assert slots["n8"] != slots["n0"]
+
+
+def test_results_heading_is_in_pictures_for_a_prereq():
+    from tests.study_examples import prereq_unit
+    u = prereq_unit()
+    u["results"] = artifact_unit()["results"]
+    del u["results"][0]["so"]
+    assert '<section id="results"><h2>In pictures</h2>' in render_page(u)
+    assert '<section id="results"><h2>Results, as meaning</h2>' in render_page(artifact_unit())

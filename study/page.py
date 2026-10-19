@@ -217,7 +217,8 @@ def _results(c):
             f'{chart_html(r["chart"], f"r{i}", slots)}'
             f'<div class="row"><b>Axis</b><div>{inline(r["axis"])}</div></div>'
             f'<div class="row"><b>Read it as</b><div>{inline(r["read_as"])}</div></div>{so}</div>')
-    return (f'<section id="results"><h2>Results, as meaning</h2>'
+    head = "Results, as meaning" if c["kind"] == "artifact" else "In pictures"
+    return (f'<section id="results"><h2>{head}</h2>'
             f'<div class="grid2">{"".join(cards)}</div></section>')
 
 
