@@ -49,7 +49,7 @@ One replica's cold start, in order (two short engine steps not drawn). Each cach
 
 - Axis: Seconds, each phase's median over 100 cold starts with nothing cached (artifact 1, arm A).
 - Read it as: The coloured segments are most of the wait, and where the two caches act. Platform time is a residual found by subtraction, not just queueing. Medians do not add: these sum to 82.49 s, not the 81.12 s median total.
-- Nothing cached (arm A): Platform (by subtraction) 4.37, Server launch to model loaded 45.83, Compile 19.01, Memory profiling 0.09, CUDA graph capture 4.0, Unattributed 4.46, Ready (health poll) 4.43, Cold first token 0.3 (s)
+- Nothing cached (arm A): Platform (by subtraction) 4.37, Server launch to model loaded 45.83, Compile 19.01, Memory profiling 0.09, Graph capture 4.0, Unattributed 4.46, Ready check 4.43, First token 0.3 (s)
 
 ## Recall questions
 

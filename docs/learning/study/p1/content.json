@@ -215,7 +215,7 @@
                 "value": 0.09
               },
               {
-                "name": "CUDA graph capture",
+                "name": "Graph capture",
                 "value": 4.0
               },
               {
@@ -223,11 +223,11 @@
                 "value": 4.46
               },
               {
-                "name": "Ready (health poll)",
+                "name": "Ready check",
                 "value": 4.43
               },
               {
-                "name": "Cold first token",
+                "name": "First token",
                 "value": 0.3
               }
             ]

@@ -4,27 +4,29 @@
 
 Paste this whole file into an AI chat, then paste the prompt at the end (it is already the last section). Ask clarifying questions about anything below. About 45 minutes to study.
 
+Read first: LLM serving on a GPU (P1).
+
 ## Why it exists
 
-**Question:** Where does a cold vLLM start on a rented GPU spend its time, and which empty cache is worth warming more: the weights or the compiled code? One of them also turned out to buy serving memory (KV cache).
+**Question:** Where does a cold vLLM (P1: vllm) start on a rented GPU spend its time, and which empty cache is worth warming more: the weights or the compiled GPU code (P1: compile)? One also bought serving memory (KV cache (P1: kvcache)).
 
 **Requirements that drove everything:**
 
-- Split one cold start into named phases, and label what cannot be attributed instead of hiding it. *Why:* The caches act on different phases (weights on loading, compile on engine start), so one "startup" bar would hide half the experiment. Naming unattributed time is more credible than hiding it.
-- Change exactly one thing between the set-ups being compared. *Why:* Otherwise a difference cannot be pinned on a cache. Same image, entrypoint and engine flags for every arm.
-- Report the distribution and its uncertainty, not an average. *Why:* Cold starts are skewed with a heavy tail, so a mean describes no real run. A claim like "cache X matters more" needs its own interval, not two point estimates side by side.
-- Fix the hypotheses, exclusion rules, stopping rule and headline rule before the first paid measurement run. *Why:* Git timestamps then show the rules came before the data, and the headline cannot be picked by which result cost the most effort.
+- Split one cold start (P1: coldstart) into named phases, and label time that cannot be attributed instead of hiding it. *Why:* The caches act on different phases (weights (P1: weights) on loading, compile (P1: compile) on engine start), so one "startup" bar would hide half the experiment.
+- Any two set-ups compared differ only in cache configuration: same image, entrypoint and engine flags. *Why:* Otherwise a difference cannot be pinned on a cache.
+- Report each arm's spread as percentiles, and give every comparison its own interval. *Why:* Cold starts are skewed with a heavy tail, so a mean describes no real run. "Cache X matters more" needs its own interval, not two point estimates side by side.
+- Commit the hypotheses, which runs get thrown out, when to stop and how the headline is chosen, before the first paid measurement run. *Why:* Git timestamps then show the rules came before the data, and the headline cannot be picked by which result cost the most effort.
 - Run only proven code on paid GPUs, and let anyone re-derive every number on a laptop. *Why:* The whole budget was $200, and debugging on live GPUs eats it. A number a reader cannot re-derive must be taken on trust.
 
 ## Need to know first
 
-- **Arms A, B and C**: Three cache set-ups. **A**: weights from the model hub, compile cache cold. **B**: weights from a network volume, compile cache cold. **C**: weights from the volume, compile cache warm. Background: P1, LLM serving.
-- **Triples**: One run of each arm, in an order shuffled from a seed. 100 triples make the 300 runs, so a busy hour on the fleet falls on all three arms.
-- **Contrast, and difference of contrasts**: A **contrast** is the difference of two arms' medians, with a bootstrap interval: A minus B is the weight cache's saving, B minus C the compile cache's. Their **difference**, (A minus B) minus (B minus C), ranks the caches only if its interval excludes zero; negative favours the compile cache.
-- **Two clocks and the platform residual**: **Clock A** (laptop) brackets the whole job; total cold start is its span minus the worker-clock warmup after first token.**Clock B** (worker, monotonic) starts just before `vllm serve` is launched. **Platform time** = total minus clock B time, the one allowed cross-clock subtraction: queue, container start, handler set-up, teardown, polling lag. **Clock C**, RunPod's own queue and execution durations, is recorded but not used.
-- **Percentiles and the ECDF**: **p90** is the time 90% of runs finish within; p50 is the median. An **ECDF** plots every run (seconds across, share finished up), so the tail stays visible. More in P2.
-- **The five hypotheses**: **H1**: weight handling is over half of worker-clock time to first token (`T_process`) in arm A. **H2**: volume weights cut it materially. **H3**: compiling is a non-trivial part of engine start, and a warm cache cuts it. **H4**: host differences drive the median-to-p95 gap. **H5**: a warm compile cache leaves more KV cache.
-- **Pre-registration**: Hypotheses, contrasts, exclusion rules, stopping rule and headline rule, committed in `docs/experiment.md` before any paid measurement run, four days before the published campaign's first run; later additions are dated in git.
+- **Arms A, B and C**: Three cache set-ups. **A**: weights from the model hub, compile cache (P1: compile) cold. **B**: weights from a network volume, compile cache cold. **C**: weights from the volume, compile cache warm.
+- **Triples**: One run of each arm, in an order shuffled from a seed. 100 triples make the 300 runs, so a busy hour on the rented GPUs falls on all three arms.
+- **Contrast, and difference of contrasts**: A **contrast** is the difference of two arms' medians, with a 95% bootstrap interval (resample the runs 10,000 times, keep the middle 95%): A minus B is the weight cache's saving, B minus C the compile cache's. Their **difference**, (A minus B) minus (B minus C), ranks the caches only if its interval excludes zero; negative favours the compile cache.
+- **Two clocks and the platform residual**: **Clock A** (laptop) brackets the whole job; total cold start (P1: coldstart) is its span minus the worker-clock warmup after first token. **Clock B** (worker) starts just before `vllm serve` is launched. **Platform time** = total minus clock B time, the one allowed cross-clock subtraction: queue, container start, handler set-up, teardown, polling lag.
+- **Percentiles and the ECDF**: **p90** is the time 90% of runs finish within; p50 is the median. An **ECDF** plots every run (seconds across, share finished up), so the tail stays visible.
+- **The five hypotheses**: **H1**: weight handling is over half of worker-clock time to first token in arm A. **H2**: volume weights cut it materially. **H3**: compiling is a non-trivial part of engine start, and a warm cache cuts it. **H4**: host differences drive how far p95 sits above the median. **H5**: a warm compile cache leaves more KV cache (P1: kvcache).
+- **Pre-registration**: Hypotheses, contrasts, which runs to throw out, when to stop and how to pick the headline, committed in `docs/experiment.md` before any paid measurement run, four days before the published campaign's first run; later additions are dated in git.
 
 ## System views (C4)
 
@@ -49,7 +51,7 @@ RunPod serverless rents the GPU, one job at a time. Weights come from the model 
 The laptop schedules, submits and stores; the worker image runs vLLM on the rented GPU and returns its measurements in the job result. Analysis runs on the laptop only.
 
 - **Driver + scheduler**: laptop: seeded triples, submit, clock A
-- **RunPod endpoint**: queues the job, boots a worker, clock C
+- **RunPod endpoint**: queues the job, boots a worker
 - **JSONL store**: append-only, one line per run
 - **Worker image**: handler + probe running vllm serve, clock B
 - **Model hub**: weights for arm A
@@ -64,7 +66,7 @@ The laptop schedules, submits and stores; the worker image runs vLLM on the rent
 
 ### Inside one run: the worker opened up (component)
 
-Solid boxes run in the worker: the handler sets two cache paths and checks the cache directories; the probe launches `vllm serve`, stamps phase marks on clock B and returns the raw log in the result bundle. Dashed boxes are outside the worker code; the parser and run record are built later on the laptop.
+Solid boxes run in the worker: the handler sets two cache paths and checks the cache directories; the probe launches `vllm serve`, stamps phase marks on clock B and returns the raw log. Dashed boxes are outside the worker code; the parser and run record are built later on the laptop.
 
 - **Handler**: reads arm and run id from the job
 - **Cache config**: arm to two paths: weights, compile cache
@@ -88,7 +90,7 @@ Solid boxes run in the worker: the handler sets two cache paths and checks the c
 
 ### One run, in order (dynamic)
 
-Clock A (laptop) brackets the job from step 2; clock B (worker) starts between steps 4 and 5. Steps 5 and 6, highlighted, are where the caches act; the compile cache also shortened step 5 by about 9 s, for reasons this campaign does not settle. Platform time is everything clock A sees outside clock B.
+Clock A (laptop) runs from step 2; clock B (worker) starts between steps 4 and 5. The caches act in the highlighted steps 5 and 6; the compile cache also shortened step 5 by about 9 s, unexplained. Platform time is everything clock A sees outside clock B.
 
 - **1 Schedule picks arm**: next slot in a seeded, shuffled triple
 - **2 Driver submits**: new run id; clock A starts
@@ -125,9 +127,9 @@ Clock A (laptop) brackets the job from step 2; clock B (worker) starts between s
 
 **Chosen:** One variable, cache configuration, at three levels: A, B, C
 
-**Why:** A to B isolates the weight cache. B to C isolates the compile cache with weight handling held constant. The configuration is one frozen object that sets two paths, so the single-variable claim is true by structure. A baked image does not remove the bytes; it moves them into the image pull, which happens before any measuring code runs, so it would flatter the number for a reason the harness cannot see. Nobody warms a compile cache while re-downloading weights, so the fourth cell answers no question.
+**Why:** A to B isolates the weight cache. B to C isolates the compile cache with weight handling held constant. The configuration is one frozen object that sets two paths, so the single-variable claim is true by structure. A baked image only moves the bytes into the image pull, before any measuring code runs, where the harness cannot see them. Nobody warms a compile cache while re-downloading weights, so the fourth cell answers no question.
 
-**Cost:** Arm C exists only because the reconnaissance run showed this vLLM compiles at startup. A warm arm needs a primed volume, and a test has to check that the arms differ nowhere else.
+**Cost:** Arm C exists only because a trial run before measuring showed this vLLM compiles at startup. A warm arm needs a primed volume, and a test has to check that the arms differ nowhere else.
 
 ### Measure from outside the engine
 
@@ -137,17 +139,17 @@ Clock A (laptop) brackets the job from step 2; clock B (worker) starts between s
 
 - Time startup through vLLM's Python engine API
 - One clock, and give all the time to the stages you can see
-- Run the real `vllm serve`, bracket it with a monotonic clock, split phases from its log, and get platform time by subtraction
+- Run the real `vllm serve`, bracket it with a worker clock, split phases from its log, and get platform time by subtraction
 
-**Chosen:** Run the real `vllm serve`, bracket it with a monotonic clock, split phases from its log, and get platform time by subtraction
+**Chosen:** Run the real `vllm serve`, bracket it with a worker clock, split phases from its log, and get platform time by subtraction
 
-**Why:** The Python API would measure a startup path nobody deploys. With one clock you cannot detect that it is lying. The design names three; the implemented check compares the driver and worker clocks and discards a run whose total leaves no room for a network round trip. The platform residual is the one named cross-clock subtraction; total time to first token is itself the job's laptop-clock span minus the worker-clock warmup tail.
+**Why:** The Python API would measure a startup path nobody deploys. With one clock you cannot detect that it is lying; the implemented check compares the laptop and worker clocks and discards a run whose total leaves no room for a network round trip.
 
 **Cost:** Platform time is one residual, and it holds teardown and polling lag as well as queueing. RunPod's queue and execution durations (clock C) are recorded but not used to split it. Two engine sub-phases (device init and KV allocation) are not delineated by this vLLM build, so they sit merged in an unattributed row. The log patterns are tied to vLLM 0.27.1.
 
 ### Interleave the arms in random triples
 
-**Problem:** A rented GPU fleet changes over hours and days. Run the arms in blocks and a busy evening gets labelled as an arm effect.
+**Problem:** Conditions on rented GPUs change over hours and days. Run the arms in blocks and a busy evening gets labelled as an arm effect.
 
 **Options considered:**
 
@@ -156,7 +158,7 @@ Clock A (laptop) brackets the job from step 2; clock B (worker) starts between s
 
 **Chosen:** Interleaved triples: one run of each arm per triple, order shuffled from a seed
 
-**Why:** Blocking confounds the cache with time-of-day fleet conditions, and on a rented fleet that confound can be large enough to make or erase the whole effect. The design calls interleaving its most important validity decision. Triples also allow a paired, same-host check as supporting evidence.
+**Why:** Blocking confounds the cache with time-of-day conditions, and on rented GPUs that confound can be large enough to make or erase the whole effect. The design calls interleaving its most important validity decision. Triples also allow a paired, same-host check as supporting evidence.
 
 **Cost:** A resumed campaign must rebuild the exact schedule, so the harness refuses a resume whose stored arms disagree with the seed. The windows ended up hours apart rather than on separate days, so drift between windows is only partly covered; the post says so.
 
@@ -172,7 +174,7 @@ Clock A (laptop) brackets the job from step 2; clock B (worker) starts between s
 
 **Chosen:** Prime arm C outside the campaign, isolate cold paths per run, and check the compile-cache state on every run
 
-**Why:** Without priming, arm C's early runs compile cold and later ones do not: a mixture whose effect grows with run index, which looks like a real trend. So two priming runs go to a separate store, and the second must show the cache present and compile under one second. Cold paths are named by run id so a reused worker cannot hand one run's files to another. The handler checks whether the compile cache exists before the engine starts, because a cold compile creates that directory as it finishes; a run whose observed state disagrees with its arm is discarded.
+**Why:** Without priming, arm C's early runs compile cold and later ones do not: a mixture whose effect grows with run index, which looks like a real trend. So two priming runs go to a separate store, and the second must show the cache present and compile under one second. Cold paths are named by run id so a reused worker cannot hand one run's files to another. The cache state is checked before the engine starts, since a cold compile creates the directory as it finishes; a run whose state disagrees with its arm is discarded.
 
 **Cost:** Priming runs cost GPU time and are excluded from every number. Moving the check to after the engine run would look harmless but quietly discard about two thirds of a paid campaign, so the code carries a do-not-move warning.
 
@@ -213,47 +215,48 @@ Clock A (laptop) brackets the job from step 2; clock B (worker) starts between s
 
 **Requirements and the decisions that meet them:**
 
-- R1: Split one cold start into named phases, and label what cannot be attributed instead of hiding it.
-  - `clocks` Measure from outside the engine: R1 asks for named phases and a label on what cannot be attributed; this decision splits phases from vLLM's log, names platform time as a residual, and puts the sub-phases the log does not delineate "in an unattributed row".
-- R2: Change exactly one thing between the set-ups being compared.
-  - `arms` Three arms, one variable: R2 asks to change exactly one thing; here cache configuration is one frozen object that sets two paths, "so the single-variable claim is true by structure".
-  - `interleave` Interleave the arms in random triples: R2's "one thing" covers when a run happens too: in blocks, fleet conditions change along with the arm, so "a busy evening gets labelled as an arm effect".
-  - `state` Check each arm's cache state: A warm cache leaking into a cold arm, or a cold compile inside arm C, would make the arms differ in more than their configured cache; "the configuration alone does not show what was on disk", so the compile-cache state is checked before every run, and cold weight paths are isolated per run.
-- R3: Report the distribution and its uncertainty, not an average.
-  - `rank` Rank the caches by the difference's interval: R3: "cache X matters more" needs its own interval, "not two point estimates side by side"; the decision rejects "Compare the two point estimates".
-  - `shape` Report the shape, and what it cannot answer: R3: "a mean describes no real run"; the decision: "A mean is pulled by the tail", so it reports p50, p90, p95 and a full ECDF.
-- R4: Fix the hypotheses, exclusion rules, stopping rule and headline rule before the first paid measurement run.
-  - `rank` Rank the caches by the difference's interval: R4 fixes the headline rule in advance; here "the headline rule ... was committed before data".
-  - `shape` Report the shape, and what it cannot answer: R4 fixes the hypotheses in advance; so H4 is reported as unanswerable, and the option to drop it "quietly once every run lands on one host" is rejected.
+- R1: Split one cold start (P1: coldstart) into named phases, and label time that cannot be attributed instead of hiding it.
+  - `clocks` Measure from outside the engine: Phases come from vLLM's own log; what it cannot split goes in a labelled unattributed row and a named platform residual, so nothing is hidden.
+- R2: Any two set-ups compared differ only in cache configuration: same image, entrypoint and engine flags.
+  - `arms` Three arms, one variable: One frozen configuration sets both cache paths, so each arm differs from the next in exactly one thing.
+  - `interleave` Interleave the arms in random triples: In blocks, the time of day changes along with the arm, so a busy evening would pose as an arm effect.
+  - `state` Check each arm's cache state: A leaked warm cache, or a cold compile in arm C, would make the arms differ in more than their configured cache, and the configuration alone does not show what was on disk.
+- R3: Report each arm's spread as percentiles, and give every comparison its own interval.
+  - `rank` Rank the caches by the difference's interval: Two savings side by side do not rank the caches; only an interval on their difference can.
+  - `shape` Report the shape, and what it cannot answer: A mean is pulled by the tail, so percentiles and the full ECDF describe real runs instead.
+- R4: Commit the hypotheses, which runs get thrown out, when to stop and how the headline is chosen, before the first paid measurement run.
+  - `rank` Rank the caches by the difference's interval: Leading with what transfers furthest, a rule committed before data, stops the headline being picked afterwards.
+  - `shape` Report the shape, and what it cannot answer: H4 was fixed in advance, so it is reported as unanswerable instead of quietly dropped.
 - R5: Run only proven code on paid GPUs, and let anyone re-derive every number on a laptop.
-  - No decision: It is met by process: the flow step "Capture, then build offline" tests the code against recorded fixtures and a free stub before paid runs, and "Publish what re-derives" re-derives every figure from the committed store with no GPU.
+  - No decision: It is met by process: the flow step "Capture, then build offline" tests the code on recorded logs and a free fake engine before paid runs, and "Publish what re-derives" re-derives every figure with no GPU.
 
 **Decisions and the concepts they use:**
 
-- `arms` Three arms, one variable uses Arms A, B and C: It chooses the three set-ups A, B and C that the concept defines.
-- `arms` Three arms, one variable uses Contrast, and difference of contrasts: "A to B isolates the weight cache. B to C isolates the compile cache": each adjacent pair of arms is one contrast.
-- `clocks` Measure from outside the engine uses Two clocks and the platform residual: It uses the driver and worker clocks, and platform time "is the one named cross-clock subtraction".
-- `interleave` Interleave the arms in random triples uses Triples: The chosen option is "one run of each arm per triple, order shuffled from a seed".
-- `state` Check each arm's cache state uses Arms A, B and C: Each arm has an expected cache state, and "a run whose observed state disagrees with its arm is discarded".
-- `rank` Rank the caches by the difference's interval uses Contrast, and difference of contrasts: The chosen option bootstraps "the difference of contrasts on total cold start".
-- `rank` Rank the caches by the difference's interval uses Pre-registration: The pre-registration requires the difference's interval to be "reported before any ranking claim is made".
-- `shape` Report the shape, and what it cannot answer uses Percentiles and the ECDF: The chosen option is "p50, p90, p95 and a full ECDF, no p99".
-- `shape` Report the shape, and what it cannot answer uses The five hypotheses: It reports H4, whether host placement drives the tail, as unanswerable.
+- `arms` Three arms, one variable uses Arms A, B and C: Three arms give each cache its own one-step comparison: A to B for weights, B to C for compile.
+- `arms` Three arms, one variable uses Contrast, and difference of contrasts: Each adjacent pair of arms yields one contrast, so each cache's saving is measured on its own.
+- `clocks` Measure from outside the engine uses Two clocks and the platform residual: Two clocks let platform time be found by subtraction, and let a run whose clocks disagree be caught.
+- `interleave` Interleave the arms in random triples uses Triples: Each triple puts all three arms in the same stretch of time, so drift lands on every arm alike.
+- `state` Check each arm's cache state uses Arms A, B and C: Each arm has an expected cache state, so a run whose observed state disagrees can be caught and discarded.
+- `rank` Rank the caches by the difference's interval uses Contrast, and difference of contrasts: The ranking is the difference of the two contrasts.
+- `rank` Rank the caches by the difference's interval uses Pre-registration: The pre-registration requires the difference's interval before any ranking claim, so the claim never appears without it.
+- `shape` Report the shape, and what it cannot answer uses Percentiles and the ECDF: p50 to p95 hold up at 100 runs per arm; a p99 would be one or two runs.
+- `shape` Report the shape, and what it cannot answer uses The five hypotheses: H4 asked whether host placement drives the tail, and one host cannot answer it.
 
 **Results and the decisions they support:**
 
 - Where each arm's median cold start goes → `arms` Three arms, one variable, `clocks` Measure from outside the engine
+- How spread out the runs are → `shape` Report the shape, and what it cannot answer
 - The two effects, each measured on its own → `arms` Three arms, one variable
 - Which cache bought more: the interval on the difference → `rank` Rank the caches by the difference's interval
 - KV cache left for serving, by arm → `arms` Three arms, one variable
 
 ## Implementation flow
 
-1. **Capture, then build offline**: Real vLLM logs and RunPod responses from a cheap reconnaissance run become fixtures; the code is tested on them and a free stub. A disk-fill defect still cost one discarded 27-run window.
+1. **Capture, then build offline**: Real vLLM logs and RunPod responses from a cheap trial run are saved as test inputs; the code is tested on them and on a free fake engine. A disk-fill defect still cost one discarded 27-run window.
 2. **Pre-register**: Hypotheses, contrasts and rules are committed in `docs/experiment.md` before the first paid measurement run.
-3. **Prime arm C**: Two arm C runs go to a separate store and never count; the second must show the compile cache warm (compile under one second).
+3. **Prime arm C**: Two arm C runs go to a separate store and never count; the second must show compile under one second. Each run checks its compile cache before the engine starts, because a cold compile creates it as it finishes.
 4. **Run interleaved triples**: 100 seeded triples, one job in flight. Any change to a pinned setting ends the experiment.
-5. **Store, never retry**: One JSON line per run, appended as it lands. A failure is its own row, never retried.
+5. **Store, never retry**: One JSON line per run, appended as it lands. A failure is its own row, never retried: a retry would swap slow or unlucky runs for faster ones.
 6. **Partition, then analyse**: A gate sorts rows into publishable, discarded and failed before any statistic; then seeded bootstrap intervals (10,000 iterations).
 7. **Publish what re-derives**: Figures and the post come from the committed store; a re-run reproduces the analysis byte for byte, with no GPU.
 
@@ -261,34 +264,51 @@ Clock A (laptop) brackets the job from step 2; clock B (worker) starts between s
 
 ### Where each arm's median cold start goes
 
-- Axis: Median seconds per phase, 100 runs per arm. Each segment is its own median, so bars do not sum to the median totals (81.12, 65.43 and 39.37 s).
-- Read it as: The launch segment (the post's `T_weights`) runs from starting `vllm serve` to its "Model loading took" line, so it also holds process start-up. Graph capture's median is 4 s in every arm (vLLM logs it in whole seconds, almost always 4 or 5); it barely differs between arms.
-- A: nothing cached: Platform (by subtraction) 4.37, Launch to model loaded 45.83, Compile 19.01, Memory profiling 0.09, Graph capture 4.0, Unattributed engine start 4.46, Ready check 4.43, First token 0.3 (s)
-- B: weights cached: Platform (by subtraction) 4.07, Launch to model loaded 30.35, Compile 18.79, Memory profiling 0.11, Graph capture 4.0, Unattributed engine start 4.38, Ready check 4.57, First token 0.3 (s)
-- C: weights + compile: Platform (by subtraction) 4.83, Launch to model loaded 21.34, Compile 0.33, Memory profiling 0.17, Graph capture 4.0, Unattributed engine start 3.83, Ready check 4.1, First token 0.3 (s)
-- Changed A → B: Only the weight cache changes. The launch segment falls from 45.83 to 30.35 s (vLLM's own loading time, 17.40 to 4.57 s); compile stays near 19 s.
-- Changed B → C: Only the compile cache changes. Compile nearly vanishes, 18.79 to 0.33 s. But the launch segment also shrank, 30.35 to 21.34 s, with vLLM's own loading time unchanged (4.57 vs 4.54 s); this campaign does not explain why.
+- Axis: Median seconds per phase, 100 runs per arm. A: nothing cached; B: weights cached; C: both cached. Compile is drawn last. Other fixed steps: memory profiling (P1: vllm), graph capture (P1: compile), an unattributed engine step, the ready check (polling until vLLM answers health), first token.
+- Read it as: The launch segment runs from starting `vllm serve` to its "Model loading took" line, so it holds process start-up too; vLLM's own loading time is 17.40, 4.57, 4.54 s. Dashed box on C: where B's compile sat.
+- How it is computed: Each segment is one phase's median over 100 runs; Other fixed steps adds five such medians (A: 13.28 s), so it is not itself a median, and bars miss the median totals (81.12, 65.43, 39.37 s).
+- A: Platform (by subtraction) 4.37, Server launch to model loaded 45.83, Memory profiling 0.09, Graph capture 4.0, Unattributed engine start 4.46, Ready check 4.43, First token 0.3, Compile 19.01 (s)
+- B: Platform (by subtraction) 4.07, Server launch to model loaded 30.35, Memory profiling 0.11, Graph capture 4.0, Unattributed engine start 4.38, Ready check 4.57, First token 0.3, Compile 18.79 (s)
+- C: Platform (by subtraction) 4.83, Server launch to model loaded 21.34, Memory profiling 0.17, Graph capture 4.0, Unattributed engine start 3.83, Ready check 4.1, First token 0.3, Compile 0.33 (s)
+- Drawn as one segment, Other fixed steps: Memory profiling + Graph capture + Unattributed engine start + Ready check + First token
+- On bar C, a dashed outline shows where Compile sat in B (18.79 s)
+- Changed A → B: Weight cache only: launch to model loaded falls 45.83 → 30.35 s; compile stays near 19 s.
+- Changed B → C: Compile cache only: compile falls 18.79 → 0.33 s. Launch to model loaded also falls, 30.35 → 21.34 s, unexplained.
 - So: see decisions `arms`, `clocks`
+
+### How spread out the runs are
+
+- Axis: Seconds of total cold start per arm: p50 (median), p90, p95.
+- Read it as: The arm order holds at every percentile shown, but B's largest runs are longer than A's: the far tail does not follow the median. No p99: at 100 runs it would be one or two runs.
+- How it is computed: Percentiles use all 300 publishable runs, among them arm A's 2266.6 s run on a host's first image pull (far past p95); hollow markers are the largest of the 299 repeat-host runs.
+- A: p50 81.1, p90 96.3, p95 96.4 (s); largest 111.6 s
+- B: p50 65.4, p90 85.9, p95 86.4 (s); largest 148.2 s
+- C: p50 39.4, p90 54.8, p95 54.9 (s)
+- Note: Hollow circle: the arm's largest repeat-host run; the post gives it for A and B only.
+- So: see decision `shape`
 
 ### The two effects, each measured on its own
 
-- Axis: Median seconds of total cold start each cache saves (the two contrasts).
-- Read it as: Side by side these do not rank the caches; the next chart does. Only 18.46 s of the compile cache's 26.07 s is compilation; most of the rest matches the unexplained launch-segment gap above.
-- Weight cache (A minus B): 15.68 s
-- Compile cache (B minus C): 26.07 s
+- Axis: Seconds of total cold start each cache saves (median difference), with a 95% bootstrap interval.
+- Read it as: Both clear zero, but side by side they do not rank the caches; the next chart does. Only 18.46 s of the compile cache's 26.07 s is compilation; most of the rest matches the unexplained launch-segment gap.
+- How it is computed: A − B and B − C use unrounded medians, so 15.68 and 26.07 s, not the 15.69 and 26.06 the rounded medians (81.12, 65.43, 39.37) give.
+- Weight cache, A − B: 15.68 s (interval 10.67 to 20.47)
+- Compile cache, B − C: 26.07 s (interval 25.97 to 31.01)
 - So: see decision `arms`
 
 ### Which cache bought more: the interval on the difference
 
 - Axis: Weight-cache saving minus compile-cache saving: seconds of total cold start, 95% bootstrap interval.
-- Read it as: The whole interval, −20.30 to −5.54 s, lies left of zero: the compile cache saves about 10 s more per cold start. That is what licenses the ranking; the pre-registration requires this interval before any ranking claim.
+- Read it as: The whole interval, −20.30 to −5.54 s, lies left of zero: the compile cache saves about 10 s more per cold start. That licenses the ranking; the pre-registration requires this interval before any ranking claim.
+- How it is computed: 15.68 − 26.07 = −10.39 s (contrasts use unrounded medians, so they do not equal differences of the rounded medians in the first chart); the interval comes from 10,000 resamples of the runs.
 - (A − B) − (B − C), total cold start: -10.39 s (interval -20.3 to -5.54)
 - So: see decision `rank`
 
 ### KV cache left for serving, by arm
 
 - Axis: KV cache tokens vLLM allocated at startup, same card and flags in every arm.
-- Read it as: C keeps 20.3 % more KV cache: one more concurrent request at 8192 context (5 instead of 4). On a cold arm the compiler's working set is resident while vLLM measures free memory, so the cache is sized smaller for the replica's life. Pre-registered as H5.
+- Read it as: C keeps 20.3 % more KV cache: one more full-length (8192-token) request served at once, 5 instead of 4. On a cold arm the compiler's working set is resident while vLLM measures free memory, so the cache is sized smaller for the replica's life. Pre-registered as H5.
+- How it is computed: 43,040 / 8,192 = 5.25 and 35,792 / 8,192 = 4.37 full-length requests; the code keeps whole requests (rounds down), so 5 against 4. 43,040 / 35,792 = 1.203, so 20.3 % more.
 - A: 35792 tokens
 - B: 35792 tokens
 - C: 43040 tokens
@@ -296,45 +316,43 @@ Clock A (laptop) brackets the job from step 2; clock B (worker) starts between s
 
 ## Interview card
 
-**30-second pitch:** I measured where the time goes when a vLLM server starts cold on a rented GPU, and which of two caches is worth warming: the model weights or the engine's compiled code. I ran three set-ups differing in one thing only, interleaved, a hundred times each, and split every start into phases. The compile cache bought more than the weight cache, and it also left more memory for serving.
+**30-second pitch:** I measured where the time goes when a vLLM server starts cold on a rented GPU, and which of two caches is worth warming: the model weights or the engine's compiled code. I ran three set-ups differing in one thing only, interleaved, a hundred times each, and split every start into phases. The compile cache saved about 10 seconds more per cold start than the weight cache, with an interval of minus 20 to minus 5.5 seconds, and it left about 20% more KV cache for serving.
 
-**2-minute version:** Everyone talks about caching the weights. But vLLM also compiles parts of the model at startup and caches that on disk, and that second cache is almost invisible unless you have operated the engine. So I asked which one matters more. I set up three arms that differ only in cache configuration: nothing cached, weights on a network volume, and weights plus a warm compile cache. I ran them as shuffled triples so platform drift could not pose as an arm effect, and I wrote down the hypotheses, the exclusion rules and how I would pick the headline before the first paid measurement run. The measuring code ran the real `vllm serve` and read its log, with one clock inside the worker and one on my laptop, so everything outside the worker clock, platform start-up included, is a named residual, not hidden. The answer: warming the compile cache saved about 10 seconds more per cold start than caching the weights, and the interval on that difference never crossed zero. It also left about a fifth more KV cache, because profiling no longer ran next to the compiler's memory. What it cannot tell you is anything about other hardware, or whether host placement drives the tail: every run landed on one machine, and I reported that rather than dropping the question.
+**2-minute version:** Everyone talks about caching the weights. But vLLM also compiles parts of the model at startup and caches that on disk, a cache that is almost invisible unless you have operated the engine. I set up three arms that differ only in cache configuration: nothing cached, weights on a network volume, and weights plus a warm compile cache. I ran them as shuffled triples so platform drift could not pose as an arm effect, and I wrote down the hypotheses, which runs I would throw out and how I would pick the headline before the first paid measurement run. I timed the real `vllm serve` with one clock in the worker and one on my laptop, so platform start-up is a named residual, not hidden. The answer: warming the compile cache saved about 10 seconds more per cold start than caching the weights, and the interval on that difference never crossed zero. It also left about a fifth more KV cache, because profiling no longer ran next to the compiler's memory. What it cannot tell you is anything about other hardware, or whether host placement drives the tail: every run landed on one machine, and I reported that rather than dropping the question.
 
 **Hard follow-ups:**
 
 - Q: Why three arms and not two, or four?
-  A: Two arms (hub vs volume) only test the weight cache, and that was the fallback if this vLLM had not compiled at startup; it does. A to B isolates weights, B to C isolates compile with weights held fixed. The fourth cell, weights cold but compile warm, has no operational meaning. A baked-image arm would just move the bytes into the image pull, which I cannot observe.
+  A: Two arms (hub vs volume) only test the weight cache: the fallback had this vLLM not compiled at startup; it does. A to B isolates weights, B to C compile with weights fixed. The fourth cell, weights cold but compile warm, has no operational meaning. A baked-image arm would only move the bytes into the image pull, which I cannot observe.
 - Q: Why pre-register a one-person experiment?
-  A: The git timestamp is the only evidence that the hypotheses and the headline rule came before the data. It was committed four days before the published campaign's first run, about three before the discarded first window. Later amendments are dated: after that window, the image re-pins and the H4 host-count commitment; after the campaign began, the first-touch separation rule (about half an hour after window one showed a 2174 s platform time; flat-warmup note in the same commit), the window-spacing note and the stopping decision. None changed a hypothesis or a contrast.
+  A: The git timestamp is the only evidence that the hypotheses and the headline rule came before the data: they were committed four days before the published campaign's first run. Later amendments are dated, among them the rule separating a host's first image pull, written about half an hour after window one showed a 2174 s platform time. None changed a hypothesis or a contrast.
 - Q: What surprised you?
-  A: Two things. C reached "model loaded" 8.85 s sooner than B, on arms that differ only in compile cache. It is not in vLLM's own model-loading time, which is the same in B and C (4.57 vs 4.54 s): the gap opens before loading begins; not host, not position in the triple, and this campaign does not explain it. And "ready is not fast" was wrong here: vLLM does its warmup before answering health, so the first request is already near steady state.
+  A: Two things. C reached "model loaded" 8.85 s sooner than B, on arms that differ only in compile cache, while vLLM's own model-loading time is the same in B and C (4.57 vs 4.54 s): not host, not position in the triple, and this campaign does not explain it. And "ready is not fast" was wrong here: vLLM (P1: vllm) does its warmup before answering health, so the first request is already near steady state.
 - Q: What would you do differently?
-  A: What the record flags. The host question failed: a serially-submitting driver kept landing on the one machine that had the image cached, and no endpoint setting changes that. The windows were hours apart, not separate days. And the first window was thrown out because arm A's per-run weights filled the worker disk, so A failed 3 of its 9 runs, B none, which would have biased the contrast by survivorship; the worker now empties cold directories before and after each run.
+  A: What the record flags. The host question failed: a serially-submitting driver kept landing on the one machine that had the image cached. The windows were hours apart, not separate days. And the first window was thrown out because arm A's per-run weights (P1: weights) filled the worker disk (A failed 3 of its 9 runs, B none), which would have biased the contrast; the worker now empties cold directories before and after each run.
 - Q: What does this not tell you?
-  A: The seconds for any other GPU, model, engine version, region or provider. Anything about many replicas starting at once and contending for the same volume; every run was one replica alone. Anything past p95. And whether host placement drives the tail.
+  A: The seconds for any other GPU, model, engine version, region or provider. Anything about many serverless (P1: serverless) replicas starting at once and contending for the same volume; every run was one replica alone. Anything past p95. And whether host placement drives the tail.
 - Q: So should everyone warm the compile cache?
-  A: It is the better buy and the more fragile one. It costs nothing to store, but any change to engine version, model, hardware or flags invalidates it, so every upgrade pays the cold compile again unless warming is built into the deploy. The weight cache is a volume you rent every month whether you scale or not.
+  A: It is the better buy and the more fragile one. A compile cache (P1: compile) costs nothing to store, but any change to engine version, model, hardware or flags invalidates it, so every upgrade pays the cold compile again unless warming is built into the deploy. The weight cache is a volume you rent every month whether you scale or not.
 
 **Limits (what I must not claim):** One provider, GPU model, model, engine version, region and host: the seconds do not transfer; the mechanisms do. H4 (does host placement drive the tail?) is unanswerable: all 300 runs landed on one host. Single replica, no contention. No percentile past p95. The first-touch rule that keeps the 2266.6 s run out of the ECDF (it stays in the medians) was written after seeing the data and is disclosed as post hoc. Why C reaches "model loaded" 8.85 s sooner than B is not settled.
 
 ## Recall questions
 
-- Q: Why are there three arms and not four?
-  A: The fourth cell, weights cold with compile warm, has no operational meaning, so measuring it fills a table without answering a question. A baked-image arm was also excluded: it moves the weight bytes into the image pull, which is inside the platform residual the harness cannot see.
 - Q: B and C differ only in the compile cache. Which chart segment should change, and which other one changed?
-  A: Only the compile segment should move, and it does: 18.79 to 0.33 s. The launch segment also shrank, 30.35 to 21.34 s, although vLLM's own loading time is the same in B and C (4.57 vs 4.54 s). The campaign does not explain it, and it is why only 18.46 s of the compile cache's 26.07 s saving is compilation.
+  A: Only compile should move, and it does: 18.79 to 0.33 s. The launch segment also shrank, 30.35 to 21.34 s, though vLLM's own loading time is the same in B and C (4.57 vs 4.54 s). The campaign does not explain it.
 - Q: On the one-run view, where does clock B start, and what lands in platform time?
-  A: Between steps 4 and 5: the probe starts clock B just before it launches `vllm serve`. Everything the laptop clock sees outside clock B is platform time: queueing, finding a GPU, starting the container and the handler's set-up before it, and teardown and the driver's 5 s polling after it.
+  A: Between steps 4 and 5: the probe starts clock B just before launching `vllm serve`. Platform time is everything the laptop clock sees outside it: queueing, finding a GPU, starting the container and handler set-up before; teardown and the driver's 5 s polling after.
 - Q: Why is arm C primed outside the campaign?
   A: Otherwise its early runs compile cold and its later runs do not, making the arm a mixture whose effect grows with run index and looks like a trend.
 - Q: Why is the compile cache checked before the engine starts, not after?
   A: A cold compile creates the cache directory as it finishes. Checked afterwards, every healthy cold run would look warm and be discarded, and a cold compile inside arm C would pass as warm.
 - Q: How is a contrast obtained, and why does the ranking need a third number?
-  A: Subtract the medians of two arms that differ in one cache, with a seeded bootstrap interval: A minus B for the weight cache, B minus C for the compile cache. Which cache saves more is a claim about their difference, (A minus B) minus (B minus C), so it needs its own interval, on one shared unit: total cold start. Weight time minus compile time would difference two different quantities.
+  A: Subtract the medians of two arms that differ in one cache, with a bootstrap interval. Which cache saves more is a claim about the difference of the two contrasts, so it needs its own interval, on one shared unit: total cold start.
 - Q: If the difference's interval had run from −20 to +3 s, what could you claim?
   A: Not the ranking: no difference, or a slightly larger weight-cache saving, would still fit, and the design makes the ranking a finding only if the interval excludes zero. Each cache's own saving, with its interval, could still be reported.
 - Q: Which requirement breaks if the arms run in blocks, and what protects it?
-  A: R2, change exactly one thing. In blocks, time-of-day fleet conditions change along with the cache, so a busy evening is labelled as an arm effect. Interleaved triples protect it, together with one frozen cache configuration (three arms, one variable) and the per-run check of each arm's compile-cache state.
+  A: R2, change exactly one thing: in blocks, time-of-day platform conditions change along with the cache. Interleaved triples protect it, with one frozen cache configuration and the per-run check of each arm's compile-cache state.
 - Q: Why is a failed run never retried in place?
   A: A retry quietly replaces slow or unlucky runs with faster ones and makes the distribution look better than it is. Failures are their own rows and are counted per arm.
 - Q: Why does the warm compile cache leave more KV cache?
