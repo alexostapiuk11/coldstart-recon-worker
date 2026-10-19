@@ -347,12 +347,12 @@ Milestones: 1. Specify, get it reviewed, approve (2026-10-08 (−07:00)); 6. Pre
 - Axis: E1 at D1, 30 forks per point over three hosts. H2's D: the wait strategy's effect minus the structure's, in log p99.99; D > 0 means waiting matters more.
 - Read it as: 10,000/s: spinning 1.43 and 4.08 µs, parking 5.32 and 6.13; waiting matters more (D +0.257, holds). 500,000/s: the queue arms jump to milliseconds (D −5.957, fails). 100,000/s: mixed. No arm saturated.
 - How it is computed: Post "Ring or spin?" table; 2.16 and 2.02 ms drawn as 2,160 and 2,020 µs. D's 97.9% intervals: +0.176 to +0.282, −0.128 to +0.052, −5.996 to −5.813.
-- Axes: x is offered rate, messages/s (log scale); y is p99.99, all hosts' forks (µs)
+- Axes: x is offered rate, messages/s (log scale); y is p99.99, all hosts' forks (µs); log y
 - ring + busy-spin: 10000: 1.43 (1.42 to 1.45), 100000: 1.39 (1.38 to 1.41), 500000: 1.53 (1.52 to 1.55)
 - ring + park: 10000: 5.32 (5.27 to 5.38), 100000: 5.15 (5.12 to 5.18), 500000: 5.56 (5.53 to 5.58)
 - queue + busy-spin: 10000: 4.08 (4.04 to 4.13), 100000: 5.5 (5.33 to 5.79), 500000: 2160 (1980 to 2220)
 - queue + park: 10000: 6.13 (5.66 to 6.52), 100000: 8.09 (7.78 to 12.8), 500000: 2020 (1950 to 2280)
-- Note: Linear axis: points below 8.1 µs sit on the floor (values in the read-as line). Whiskers: 95% interval over 30 forks.
+- Note: Whiskers: 95% interval over 30 forks.
 - So: see decision `e1`
 
 ### Group commit and per-order sync against the page-cache write

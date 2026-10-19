@@ -29,6 +29,11 @@ LINE = 18  # pitch of one line of chart text
 TITLE_CHARS = int(W / CHART_CHAR)
 DIRECT_LABELS = 4  # an xy chart prints each series' last value up to this many series
 NEST = 0.45  # how much larger each enclosing marker is drawn where markers coincide
+# Markers of different series whose centres are closer than this nest (see nested_sizes).
+# A log y axis packs distinct values closer (a ratio of 1.15 is 3 units on four decades),
+# so there a marker nests any later one centred inside its outline (radius about 6.5 plus
+# its 1.5 ring); linear charts keep 3, so their pages stay as they were.
+NEAR, NEAR_LOG = 3, 8
 
 
 def shape_path(name: str, x: float, y: float, s: float = 1.0) -> str:
@@ -197,6 +202,27 @@ def y_title(chart: dict) -> str:
     return f"{label} ({inner})" if inner else label
 
 
+def _crosses(seg: tuple, box: tuple) -> bool:
+    """Whether the segment (x1, y1, x2, y2) passes through the box (left, top, right,
+    bottom): Liang-Barsky clipping."""
+    x1, y1, x2, y2 = seg
+    dx, dy = x2 - x1, y2 - y1
+    t0, t1 = 0.0, 1.0
+    for p, q in ((-dx, x1 - box[0]), (dx, box[2] - x1), (-dy, y1 - box[1]), (dy, box[3] - y1)):
+        if p == 0:
+            if q < 0:
+                return False
+            continue
+        t = q / p
+        if p < 0:
+            t0 = max(t0, t)
+        else:
+            t1 = min(t1, t)
+        if t0 > t1:
+            return False
+    return True
+
+
 def text_box(x: float, y: float, text: str, anchor: str = "start"):
     """Estimated (left, top, right, bottom) of one line of chart text at baseline y."""
     w = len(text) * CHART_CHAR
@@ -232,6 +258,7 @@ class Frame:
         self.back: list[str] = []  # drawn under the data
         self.labels: list[str] = []  # drawn over it
         self.boxes: list[tuple] = []  # text already placed, for collision checks
+        self.segs: list[tuple] = []  # series lines (x1, y1, x2, y2) data labels avoid
         # Band and horizontal reference labels: (class, text, candidate spots), placed by
         # finish() once the markers they must avoid are known.
         self.pending: list[tuple] = []
@@ -365,7 +392,8 @@ class Frame:
             if box[0] < -0.5 or box[2] > W + 0.5 or box[1] < 0 or box[3] > self.pb:
                 continue
             first = first if first is not None else i
-            if not any(_overlaps(box, b) for b in self.boxes + dots):
+            if not (any(_overlaps(box, b) for b in self.boxes + dots)
+                    or any(_crosses(sg, box) for sg in self.segs)):
                 self._label(cls, x, y, text, anchor)
                 return i
         if first is None:
@@ -415,16 +443,17 @@ class Frame:
                 f'{"".join(self.back)}{"".join(body)}{"".join(self.labels)}</svg>')
 
 
-def nested_sizes(series: list[list[tuple]]) -> list[list[float]]:
+def nested_sizes(series: list[list[tuple]], near: float = NEAR) -> list[list[float]]:
     """A marker scale per point, per series [[(px, py)]]: 1, except where points of
-    several series land within 3 units of each other. There the earlier series' marker
-    is drawn larger (1.45, 1.9, ...), so each later, smaller one sits inside it, ringed by
-    the surface colour, and every series stays visible."""
+    several series land within `near` units of each other, where a later marker would
+    hide an earlier one. There the earlier series' marker is drawn larger (1.45, 1.9, ...), so
+    each later, smaller one sits inside it, ringed by the surface colour, and every series
+    stays visible."""
     sizes = [[1.0] * len(pts) for pts in series]
     for k, pts in enumerate(series):
         for j, (x, y) in enumerate(pts):
             later = {m for m in range(k + 1, len(series))
-                     if any(abs(x - a) < 3 and abs(y - b) < 3 for a, b in series[m])}
+                     if any(abs(x - a) < near and abs(y - b) < near for a, b in series[m])}
             sizes[k][j] = 1.0 + NEST * len(later)
     return sizes
 
@@ -480,8 +509,9 @@ def xy_html(chart: dict) -> str:
     f = Frame(chart, xs, ys, ys2, data_xs)
 
     sizes = nested_sizes([[(f.x(p["x"]), (f.y2 if on_right(s) else f.y)(p["y"]))
-                           for p in s["points"]] for s in series])
-    lines, whiskers, marks, ends, coords = [], [], [], [], []
+                           for p in s["points"]] for s in series],
+                         NEAR_LOG if chart.get("y_log") else NEAR)
+    lines, whiskers, marks, ends, coords, segs = [], [], [], [], [], []
     for k, s in enumerate(series):
         right = on_right(s)
         yf, u = (f.y2, unit2) if right else (f.y, unit)
@@ -491,6 +521,10 @@ def xy_html(chart: dict) -> str:
         style = s.get("style", "line")
         if style != "points" and len(pts) > 1:
             (x0, y0, _), rest = pts[0], pts[1:]
+            corners = [(x0, y0)]
+            for x, y, _ in rest:  # a step runs across, then up or down
+                corners += [(x, corners[-1][1]), (x, y)] if style == "step" else [(x, y)]
+            segs += [(a[0], a[1], b[0], b[1]) for a, b in itertools.pairwise(corners)]
             if style == "step":
                 d = f"M{x0:.1f} {y0:.1f}" + "".join(f"H{x:.1f}V{y:.1f}" for x, y, _ in rest)
             else:
@@ -519,7 +553,10 @@ def xy_html(chart: dict) -> str:
             ends.append((px, py, val(p["y"]), sizes[k][-1]))
     f.finish(coords)
     # Direct labels for up to four series (dataviz); five or six rely on the legend and
-    # each marker's tooltip, since six crowded end values cannot be matched to lines.
+    # each marker's tooltip, since six crowded end values cannot be matched to lines. On a
+    # log y axis, where series crowd, the labels also keep clear of every line (linear
+    # charts do not yet, so their pages stay as they were).
+    f.segs = segs if chart.get("y_log") else []
     for px, py, text, size in ends if len(series) <= DIRECT_LABELS else []:
         f.place_near("xyv", px, py, text, coords, size)
 

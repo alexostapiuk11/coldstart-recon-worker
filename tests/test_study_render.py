@@ -2110,3 +2110,59 @@ def test_brief_notes_a_log_y_axis():
     assert "- a: 1: 1, 50: 10, 100: 1000\n" in brief
     u["results"][0]["chart"] = scatter_chart(y_log=True)
     assert "- Axes: x is replica-seconds; y is p99 (s); log y\n" in render_brief(u)
+
+
+# ---- marks that overlap without coinciding; labels off the lines ----
+
+def _arms_chart():
+    """A7 F2's shape: four arms at three rates on log axes, three arms within a few units
+    at the lowest rate."""
+    return xy_chart(y_log=True, x_log=True, series=[
+        {"name": f"arm {k}", "points": [{"x": 10000, "y": a}, {"x": 100000, "y": b},
+                                        {"x": 500000, "y": c}]}
+        for k, (a, b, c) in enumerate([(1.43, 1.39, 1.53), (5.32, 5.15, 5.56),
+                                       (4.08, 5.5, 2160), (6.13, 8.09, 2020)])])
+
+
+def test_markers_closer_than_a_marker_nest_so_none_is_hidden():
+    out = chart_html(_arms_chart(), "n0")
+    marks = [(m.group(1), float(m.group(2)), float(m.group(3)), float(m.group(4))) for m in
+             re.finditer(r'class="xym (xk\d)" data-px="([\d.]+)" data-py="([\d.]+)" '
+                         r'data-shape="[\w-]+" data-s="([\d.]+)"', out)]
+    at10k = {k: (py, s) for k, px, py, s in marks if px == min(m[1] for m in marks)}
+    assert 3 < abs(at10k["xk1"][0] - at10k["xk3"][0]) < 6  # 5.32 and 6.13: overlapping
+    # the earlier (ring + park, 5.32) rings both later ones (6.13 above, 4.08 below)
+    assert at10k["xk1"][1] == 1.9 and at10k["xk2"][1] == at10k["xk3"][1] == 1
+    # a linear chart still nests only within 3 units (its pages stay as they were)
+    c = xy_chart(series=[{"name": "a", "points": [{"x": 0, "y": 0}, {"x": 1, "y": 10}]},
+                         {"name": "b", "points": [{"x": 0, "y": 0.1}, {"x": 1, "y": 9.75}]}])
+    sizes = re.findall(r'class="xym xk0" data-px="[\d.]+" data-py="[\d.]+" '
+                       r'data-shape="[\w-]+" data-s="([\d.]+)"', chart_html(c, "n1"))
+    assert sizes == ["1.45", "1"]
+
+
+def _segments(out):
+    """Every straight piece of every series line, as (x1, y1, x2, y2)."""
+    segs = []
+    for d in re.findall(r'<path class="xyl[^"]*" d="([^"]+)"', out):
+        pts = [tuple(map(float, p.split())) for p in re.findall(r"[ML]([\d.]+ [\d.]+)", d)]
+        segs += [(a[0], a[1], b[0], b[1]) for a, b in itertools.pairwise(pts)]
+    return segs
+
+
+def _crosses(seg, box, n=200):
+    x1, y1, x2, y2 = seg
+    return any(box[0] < x1 + (x2 - x1) * i / n < box[2] and box[1] < y1 + (y2 - y1) * i / n
+               < box[3] for i in range(n + 1))
+
+
+def test_end_labels_stay_off_the_series_lines():
+    out = chart_html(_arms_chart(), "n2")
+    labels = [t for t in _texts(out) if "xyv" in t[0]]
+    assert sorted(t[4] for t in labels) == ["1.53", "2,020", "2,160", "5.56"]
+    for _, x, y, anchor, txt in labels:
+        w = len(txt) * 8.5
+        left = {"end": x - w, "middle": x - w / 2}.get(anchor, x)
+        for seg in _segments(out):
+            assert not _crosses(seg, (left, y - 12, left + w, y + 3)), (txt, seg)
+    _xy_texts_inside(out)
