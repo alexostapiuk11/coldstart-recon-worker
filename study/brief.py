@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from study.schema import so_ids
+
 INTERVIEW_PROMPT = """\
 You are my interview coach. The brief above is the only ground truth about my project;
 do not add facts it does not contain, and say "the brief does not say" when asked.
@@ -92,8 +94,11 @@ def render_brief(c: dict) -> str:
             else:
                 for i in ch["items"]:
                     out.append(f"- {i['label']}: {i['value']} {ch['unit']}")
-            if r.get("so"):
-                out.append(f"- So: see decision `{r['so']}`")
+            ids = so_ids(r)
+            if len(ids) == 1:
+                out.append(f"- So: see decision `{ids[0]}`")
+            elif ids:
+                out.append("- So: see decisions " + ", ".join(f"`{i}`" for i in ids))
             out.append("")
     if c.get("interview"):
         iv = c["interview"]

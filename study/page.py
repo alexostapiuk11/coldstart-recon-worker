@@ -11,6 +11,7 @@ that colour: black or white, whichever clears 4.5:1 on the fill.
 
 from __future__ import annotations
 
+from study.schema import so_ids
 from study.svg import chart_html, diagram_html
 from study.text import esc, inline
 
@@ -175,9 +176,9 @@ def _results(c):
     cards = []
     for i, r in enumerate(c["results"]):
         so = ""
-        if r.get("so"):
-            so = (f'<div class="callout">So: <a href="#d-{esc(r["so"])}">'
-                  f'{esc(titles[r["so"]])}</a></div>')
+        if so_ids(r):
+            links = ", ".join(f'<a href="#d-{esc(d)}">{esc(titles[d])}</a>' for d in so_ids(r))
+            so = f'<div class="callout">So: {links}</div>'
         cards.append(
             f'<div class="card"><h3>{esc(r["title"])}</h3>{chart_html(r["chart"], f"r{i}")}'
             f'<div class="row"><b>Axis</b>{inline(r["axis"])}</div>'

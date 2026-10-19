@@ -252,3 +252,12 @@ def test_decision_shows_one_line_and_hides_the_full_reasoning_behind_a_click():
     assert "The short reason." in card.split("<details")[0]
     assert "The long full reasoning." in card.split("<details")[1]
     assert "<summary>Full reasoning and cost</summary>" in card
+
+
+def test_result_supporting_several_decisions_links_to_each():
+    from tests.study_examples import artifact_unit_with_links
+    u = artifact_unit_with_links()
+    page = render_page(u)
+    assert 'href="#d-d0"' in page and 'href="#d-d1"' in page
+    brief = render_brief(u)
+    assert "- So: see decisions `d0`, `d1`" in brief

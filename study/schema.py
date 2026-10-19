@@ -18,6 +18,8 @@ SUB_LINES = 2  # ... and has room for two lines
 MAX_COL = 3
 MAX_ROW = 3
 MAX_ONE_LINE = 160
+MAX_SHORT = 40  # a map node's label
+MAX_TAKEAWAY = 200
 
 
 class ContentError(ValueError):
@@ -45,6 +47,122 @@ def _items(d, key, where, *, at_least=1, at_most=None, fields=()):
         for f in fields:
             _get(it, f, str, f"{where}.{key}[{i}]")
     return items
+
+
+def _opt_str(d, key, where, max_len=None):
+    """An optional string field: absent is fine; present must be a non-empty str."""
+    if key not in d:
+        return None
+    v = _get(d, key, str, where)
+    if not v.strip():
+        raise ContentError(f"{where}.{key} is empty")
+    if max_len is not None and len(v) > max_len:
+        raise ContentError(f"{where}.{key} longer than {max_len} characters")
+    return v
+
+
+def so_ids(result: dict) -> list[str]:
+    """The decision ids a result supports: `so` may be one id or a list of ids."""
+    so = result.get("so")
+    if so is None:
+        return []
+    return [so] if isinstance(so, str) else list(so)
+
+
+def _links(d, key, ref, known, kind, where):
+    """A decision's `serves` or `uses` list: [{ref: <known id>, because: <text>}]."""
+    for j, link in enumerate(_get(d, key, list, where)):
+        w = f"{where}.{key}[{j}]"
+        target = _get(link, ref, str, w)
+        if target not in known:
+            raise ContentError(f"{w}.{ref} '{target}' is not a {kind} id")
+        if not _get(link, "because", str, w).strip():
+            raise ContentError(f"{w}.because is empty")
+
+
+def _relationships(c, where):
+    """Ids and the links between requirements, decisions, concepts and results.
+
+    Every field is checked when present. Once any requirement has an `id` the unit has
+    opted in to traceability, and the links must be complete: every requirement has an
+    id and is served by a decision (or says why not), every decision serves at least one
+    requirement, and every result supports a decision (or says why not).
+    """
+    reqs = c.get("requirements", [])
+    traced = any(isinstance(r, dict) and "id" in r for r in reqs)
+    req_ids = []
+    for i, r in enumerate(reqs):
+        w = f"{where}.requirements[{i}]"
+        if traced and "id" not in r:
+            raise ContentError(f"{w}: missing 'id' (once one requirement has an id, "
+                               "all need one)")
+        rid = _opt_str(r, "id", w)
+        if rid is not None:
+            if rid in req_ids:
+                raise ContentError(f"{w}: duplicate id '{rid}'")
+            req_ids.append(rid)
+        _opt_str(r, "short", w, MAX_SHORT)
+        _opt_str(r, "unlinked_reason", w)
+
+    concept_ids = set()
+    for i, t in enumerate(c.get("concepts", [])):
+        w = f"{where}.concepts[{i}]"
+        cid = _opt_str(t, "id", w)
+        if cid is not None:
+            if cid in concept_ids:
+                raise ContentError(f"{w}: duplicate id '{cid}'")
+            concept_ids.add(cid)
+        _opt_str(t, "short", w, MAX_SHORT)
+
+    decision_ids = [d["id"] for d in c.get("decisions", [])]
+    served = {}
+    for i, d in enumerate(c.get("decisions", [])):
+        w = f"{where}.decisions[{i}]"
+        _opt_str(d, "short", w, MAX_SHORT)
+        if traced:
+            _items(d, "serves", w)
+        if "serves" in d:
+            _links(d, "serves", "req", set(req_ids), "requirement", w)
+            for link in d["serves"]:
+                served.setdefault(link["req"], []).append(d["id"])
+        if "uses" in d:
+            _links(d, "uses", "concept", concept_ids, "concept", w)
+
+    for i, r in enumerate(reqs):
+        if not traced:
+            break
+        w = f"{where}.requirements[{i}] '{r['id']}'"
+        if r["id"] in served and "unlinked_reason" in r:
+            raise ContentError(f"{w} has an unlinked_reason but is served by "
+                               f"{', '.join(served[r['id']])}; drop one")
+        if r["id"] not in served and "unlinked_reason" not in r:
+            raise ContentError(f"{w}: no decision serves it; add it to a decision's "
+                               "`serves` or give an unlinked_reason")
+
+    for i, r in enumerate(c.get("results", [])):
+        w = f"{where}.results[{i}]"
+        _opt_str(r, "short", w, MAX_SHORT)
+        _opt_str(r, "takeaway", w, MAX_TAKEAWAY)
+        _opt_str(r, "so_none_reason", w)
+        so = r.get("so")
+        if so is not None:
+            if not isinstance(so, (str, list)) or (
+                    isinstance(so, list) and not all(isinstance(x, str) for x in so)):
+                raise ContentError(f"{w}.so: expected a decision id or a list of them")
+            for x in so_ids(r):
+                if x not in decision_ids:
+                    raise ContentError(f"{w}.so '{x}' is not a decision id")
+        if so_ids(r) and "so_none_reason" in r:
+            raise ContentError(f"{w} has both `so` and `so_none_reason`; keep one")
+        if traced and not so_ids(r) and "so_none_reason" not in r:
+            raise ContentError(f"{w}: needs `so` (the decision ids it supports) or a "
+                               "so_none_reason")
+
+    for i, s in enumerate(c.get("flow", [])):
+        w = f"{where}.flow[{i}]"
+        dec = _opt_str(s, "decision", w)
+        if dec is not None and dec not in decision_ids:
+            raise ContentError(f"{w}.decision '{dec}' is not a decision id")
 
 
 def _chart(ch, where):
@@ -143,8 +261,6 @@ def validate(c: dict) -> None:
         for f in ("title", "axis", "read_as"):
             _get(r, f, str, w)
         _chart(_get(r, "chart", dict, w), w)
-        if "so" in r and r["so"] not in decision_ids:
-            raise ContentError(f"{w}.so '{r['so']}' is not a decision id")
 
     if kind == "artifact":
         _get(c, "question", str, where)
@@ -164,3 +280,4 @@ def validate(c: dict) -> None:
             _get(t, "analogy", str, f"{where}.concepts[{i}]")
             _get(t, "why", str, f"{where}.concepts[{i}]")
         _items(c, "used_by", where, at_least=1)
+    _relationships(c, where)

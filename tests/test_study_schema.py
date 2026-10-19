@@ -1,7 +1,7 @@
 import pytest
 
 from study.schema import ContentError, validate
-from tests.study_examples import artifact_unit, prereq_unit
+from tests.study_examples import artifact_unit, artifact_unit_with_links, prereq_unit
 
 
 def test_valid_units_pass():
@@ -134,3 +134,134 @@ def test_decision_needs_one_line_reason_and_cost():
         u = artifact_unit()
         u["decisions"][0][key] = "x" * 161
         _fails(u, key)
+
+
+# ---- relationships (traceability) ----
+
+
+def test_linked_unit_passes():
+    validate(artifact_unit_with_links())
+
+
+def test_units_without_requirement_ids_need_no_links():
+    u = artifact_unit()
+    assert "serves" not in u["decisions"][0]
+    validate(u)
+
+
+def test_requirement_ids_are_unique():
+    u = artifact_unit_with_links()
+    u["requirements"][1]["id"] = "R1"
+    _fails(u, r"requirements\[1\].*duplicate id 'R1'")
+
+
+def test_once_one_requirement_has_an_id_all_need_one():
+    u = artifact_unit_with_links()
+    del u["requirements"][2]["id"]
+    _fails(u, r"requirements\[2\].*'id'")
+
+
+def test_short_labels_are_bounded():
+    for path in (("requirements", 0), ("decisions", 0), ("results", 0), ("concepts", 0)):
+        u = artifact_unit_with_links()
+        u[path[0]][path[1]]["short"] = "x" * 41
+        _fails(u, rf"{path[0]}\[0\]\.short longer than 40")
+
+
+def test_result_takeaway_is_one_bounded_sentence():
+    u = artifact_unit_with_links()
+    u["results"][0]["takeaway"] = "x" * 201
+    _fails(u, r"results\[0\]\.takeaway longer than 200")
+    u["results"][0]["takeaway"] = 5
+    _fails(u, r"results\[0\]\.takeaway: expected str")
+
+
+def test_every_decision_serves_a_requirement():
+    u = artifact_unit_with_links()
+    u["decisions"][2]["serves"] = []
+    _fails(u, r"decisions\[2\]\.serves: needs at least 1")
+    del u["decisions"][2]["serves"]
+    _fails(u, r"decisions\[2\].*'serves'")
+
+
+def test_every_requirement_is_served_or_says_why_not():
+    u = artifact_unit_with_links()
+    del u["requirements"][2]["unlinked_reason"]
+    _fails(u, r"requirements\[2\] 'R3'.*no decision serves it.*unlinked_reason")
+
+
+def test_unlinked_reason_contradicts_a_serving_decision():
+    u = artifact_unit_with_links()
+    u["requirements"][0]["unlinked_reason"] = "None."
+    _fails(u, r"requirements\[0\] 'R1'.*unlinked_reason.*served by")
+
+
+def test_every_result_supports_a_decision_or_says_why_not():
+    u = artifact_unit_with_links()
+    del u["results"][1]["so_none_reason"]
+    _fails(u, r"results\[1\].*so.*so_none_reason")
+    u = artifact_unit_with_links()
+    u["results"][0]["so"] = []
+    _fails(u, r"results\[0\].*so.*so_none_reason")
+
+
+def test_result_so_and_so_none_reason_are_exclusive():
+    u = artifact_unit_with_links()
+    u["results"][0]["so_none_reason"] = "None."
+    _fails(u, r"results\[0\].*both")
+
+
+def test_result_so_may_be_a_list_of_real_decisions():
+    u = artifact_unit_with_links()
+    u["results"][0]["so"] = ["d0", "nope"]
+    _fails(u, r"results\[0\]\.so 'nope' is not a decision id")
+    u["results"][0]["so"] = ["d0", 3]
+    _fails(u, r"results\[0\]\.so")
+    u = artifact_unit()
+    u["results"][0]["so"] = ["d0", "d1"]
+    validate(u)
+
+
+def test_references_must_exist():
+    u = artifact_unit_with_links()
+    u["decisions"][0]["serves"][0]["req"] = "R9"
+    _fails(u, r"decisions\[0\]\.serves\[0\]\.req 'R9' is not a requirement id")
+    u = artifact_unit_with_links()
+    u["decisions"][0]["uses"][0]["concept"] = "nope"
+    _fails(u, r"decisions\[0\]\.uses\[0\]\.concept 'nope' is not a concept id")
+    u = artifact_unit_with_links()
+    u["flow"][0]["decision"] = "nope"
+    _fails(u, r"flow\[0\]\.decision 'nope' is not a decision id")
+
+
+def test_every_because_is_non_empty():
+    u = artifact_unit_with_links()
+    u["decisions"][1]["serves"][1]["because"] = "  "
+    _fails(u, r"decisions\[1\]\.serves\[1\]\.because is empty")
+    u = artifact_unit_with_links()
+    u["decisions"][0]["uses"][0]["because"] = ""
+    _fails(u, r"decisions\[0\]\.uses\[0\]\.because is empty")
+    u = artifact_unit_with_links()
+    del u["decisions"][0]["uses"][0]["because"]
+    _fails(u, r"decisions\[0\]\.uses\[0\].*'because'")
+
+
+def test_concept_ids_are_unique():
+    u = artifact_unit_with_links()
+    u["concepts"][1]["id"] = "arms"
+    _fails(u, r"concepts\[1\].*duplicate id 'arms'")
+
+
+def test_optional_reason_fields_must_be_non_empty_strings():
+    u = artifact_unit_with_links()
+    u["requirements"][2]["unlinked_reason"] = ""
+    _fails(u, r"requirements\[2\]\.unlinked_reason is empty")
+    u = artifact_unit_with_links()
+    u["results"][1]["so_none_reason"] = 1
+    _fails(u, r"results\[1\]\.so_none_reason: expected str")
+
+
+def test_link_fields_are_checked_even_without_requirement_ids():
+    u = artifact_unit()
+    u["decisions"][0]["uses"] = [{"concept": "nope", "because": "x"}]
+    _fails(u, r"uses\[0\]\.concept 'nope' is not a concept id")
