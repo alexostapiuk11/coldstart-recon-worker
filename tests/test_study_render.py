@@ -149,7 +149,7 @@ def test_page_is_self_contained_and_themed():
 def test_page_sections_in_the_specified_order():
     page = render_page(artifact_unit())
     ids = re.findall(r'<section id="([\w-]+)"', page)
-    assert ids == ["why", "concepts", "views", "decisions", "flow", "results", "interview",
+    assert ids == ["concepts", "why", "views", "decisions", "flow", "results", "interview",
                    "recall", "sources"]
 
 
@@ -526,3 +526,35 @@ def test_requirements_are_ordered_by_the_decisions_that_serve_them():
     u["decisions"][0]["serves"] = [{"req": "R2", "because": "x"}]
     left = map_section(u).split('class="mcol mcol-req"')[1].split('class="mcol mcol-dec"')[0]
     assert re.findall(r'data-ref="(R\d)"', left) == ["R2", "R1", "R3"]
+
+
+def test_nav_follows_the_section_order():
+    page = render_page(artifact_unit_with_links())
+    sections = re.findall(r'<section id="([\w-]+)"', page)
+    nav = re.findall(r'<a href="#([\w-]+)">', page.split('<nav class="pills">')[1].split("</nav>")[0])
+    assert nav == sections == ["concepts", "why", "views", "decisions", "flow", "results", "map",
+                               "interview", "recall", "sources"]
+
+
+def test_hero_states_the_question_and_the_answer_first():
+    u = artifact_unit_with_links()
+    hero = render_page(u).split('<header class="hero">')[1].split("</header>")[0]
+    assert '<p class="lead">Does the example hold?</p>' in hero
+    assert "Answer first" in hero and "Thirty seconds." in hero
+    chips = re.findall(r'<a class="achip" href="#(r-\d+)">([^<]+)</a>', hero)
+    assert chips == [("r-0", "Where the time goes"), ("r-1", "A side result"),]
+
+
+def test_answer_strip_needs_a_pitch_and_results():
+    u = artifact_unit()
+    u["results"] = []
+    hero = render_page(u).split('<header class="hero">')[1].split("</header>")[0]
+    assert "Does the example hold?" in hero and "Answer first" not in hero
+
+
+def test_requirements_section_is_titled_and_shows_ids():
+    page = render_page(artifact_unit_with_links())
+    why = page.split('<section id="why">')[1].split("</section>")[0]
+    assert why.startswith("<h2>Requirements that drove everything</h2>")
+    assert '<span class="rcode">R1</span>' in why
+    assert "Does the example hold?" not in why

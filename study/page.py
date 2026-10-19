@@ -113,6 +113,15 @@ details{background:var(--card);border:1px solid var(--line);border-radius:8px;
 padding:8px 12px;margin:6px 0}summary{cursor:pointer;font-weight:600}
 code{font-size:.92em;background:var(--soft);padding:1px 5px;border-radius:4px}
 footer.src{font-size:13px;color:var(--muted)}
+.hero .lead,.answer{max-width:1100px}
+.answer{border-left:4px solid var(--accent);background:var(--soft);border-radius:0 10px 10px 0;
+padding:10px 14px;margin:10px 0 4px}.answer p{margin:4px 0 8px}
+.akicker{color:var(--muted);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.achips{display:flex;flex-wrap:wrap;gap:6px}
+.achip{padding:3px 10px;border:1px solid var(--accent);border-radius:99px;background:var(--card);
+font-size:14px;text-decoration:none;color:var(--fg)}
+.achip:hover{background:var(--soft)}
+.rcode{color:var(--accent);font-weight:700;margin-right:8px;font-variant-numeric:tabular-nums}
 @media (min-width:1100px){body{font-size:18px}h1{font-size:36px}h2{font-size:26px}h3{font-size:18px}
 .lead{font-size:21px}.why{font-size:16px}.row b{min-width:104px}}
 @media (max-width:600px){.diagram{display:none}.diagram-text{display:block}
@@ -214,6 +223,17 @@ def _interview(c):
         'AI chat; its last section is the interview-mode prompt.</p></section>')
 
 
+def _answer_first(c):
+    """The 30-second answer and one chip per result, so the page opens on the conclusion."""
+    pitch = c.get("interview", {}).get("pitch30")
+    if not pitch or not c.get("results"):
+        return ""
+    chips = "".join(f'<a class="achip" href="#r-{i}">{esc(r.get("short") or r["title"])}</a>'
+                    for i, r in enumerate(c["results"]))
+    return (f'<div class="answer"><div class="akicker">Answer first</div>'
+            f'<p>{inline(pitch)}</p><div class="achips">{chips}</div></div>')
+
+
 def render_page(c: dict) -> str:
     art = c["kind"] == "artifact"
     sections, nav = [], []
@@ -222,15 +242,16 @@ def render_page(c: dict) -> str:
         sections.append(html)
         nav.append(f'<a href="#{sid}">{label}</a>')
 
-    if art:
-        reqs = "".join(f'<div class="card"><b>{inline(r["text"])}</b>'
-                       f'<div class="why">{inline(r["why"])}</div></div>'
-                       for r in c["requirements"])
-        add("why", "Why", f'<section id="why"><h2>Why it exists</h2>'
-            f'<p class="lead">{inline(c["question"])}</p>'
-            f'<h3>Requirements that drove everything</h3><div class="grid">{reqs}</div></section>')
     if c.get("concepts"):
         add("concepts", "Concepts", _concepts(c))
+    if art:
+        reqs = "".join(
+            '<div class="card"><b>'
+            + (f'<span class="rcode">{esc(r["id"])}</span>' if r.get("id") else "")
+            + f'{inline(r["text"])}</b><div class="why">{inline(r["why"])}</div></div>'
+            for r in c["requirements"])
+        add("why", "Requirements", f'<section id="why"><h2>Requirements that drove everything</h2>'
+            f'<div class="grid">{reqs}</div></section>')
     if c.get("views"):
         add("views", "Views", _views(c))
     if c.get("decisions"):
@@ -256,12 +277,15 @@ def render_page(c: dict) -> str:
         f'<ul>{src}</ul></footer></section>')
 
     css, js = (CSS + MAP_CSS, JS + MAP_JS) if has_map(c) else (CSS, JS)
-    used = "" if art else f'<p class="why">Used by: {esc(", ".join(c["used_by"]))}</p>'
+    if art:
+        lead = f'<p class="lead">{inline(c["question"])}</p>{_answer_first(c)}'
+    else:
+        lead = f'<p class="why">Used by: {esc(", ".join(c["used_by"]))}</p>'
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<title>{esc(c["short_title"])}</title><style>{css}</style></head><body><main>'
         f'<header class="hero"><div class="kicker">Study page · about {c["minutes"]} min</div>'
-        f'<h1>{esc(c["title"])}</h1>{used}</header>'
+        f'<h1>{esc(c["title"])}</h1>{lead}</header>'
         f'<nav class="pills">{"".join(nav)}</nav>{"".join(sections)}</main>'
         f'<script>{js}</script></body></html>')
