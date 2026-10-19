@@ -23,9 +23,9 @@ Read first: How these experiments earn trust (P2).
 
 - **Coordinated omission, open versus closed loop**: **Closed loop**: send the next request when the last response arrives. During a stall it sends one request instead of the many that were due, so the stall is sampled once and the tail under-reported (Gil Tene named this). **Open loop**: send times are fixed in advance and latency runs from the **intended** time, so a generator that falls behind counts against the system.
 - **HdrHistogram and what a p99.99 rests on**: p99.99 (P2: percentiles): the latency 99.99% of messages stay at or under. **HdrHistogram** keeps 3 significant digits over a huge range and merges without loss. A percentile is reported only with at least 100 samples above it: 2,000,000 messages leave 200 above p99.99, so p99.999 and the maximum never are.
-- **The Disruptor ring, the queue, and wait strategies**: **Ring buffer**: a preallocated array with sequence counters; one producer and one consumer need no lock and allocate nothing. `ArrayBlockingQueue`: one lock; a thread that finds it held enqueues a node (allocates) and parks. **Wait strategy**: what an idle consumer does, **busy-spin** (poll in a loop, burning a core) or **park** (sleep until woken).
+- **The Disruptor ring, the queue, and wait strategies**: **Ring buffer**: a preallocated array with sequence counters; one producer and one consumer allocate nothing; with busy-spin they take no lock (the blocking strategy enters a monitor per publish). `ArrayBlockingQueue`: one lock; a thread that finds it held enqueues a node (allocates) and parks. **Wait strategy**: what an idle consumer does, **busy-spin** (poll in a loop, burning a core) or **park** (sleep until woken).
 - **Page-cache write, fdatasync, group commit**: `write` lands in the **page cache**: it survives a killed JVM, not a power loss. `fdatasync` returns once data is on stable storage; a drive with a volatile write cache must flush first (these report none, VWC 0). **D0** no journal; **D1** page-cache write, response not gated; **D2** group commit: up to 4,096 entries per `fdatasync`; **D3** one `fdatasync` per order.
-- **JVM safepoints and G1 pauses**: Some JVM operations stop **every** Java thread: GC pauses, some deoptimisation. So a thread that allocates nothing still stops when another thread's allocation triggers a collection; a **handshake** stops one thread. Here: G1 with one GC thread on the housekeeping core. The generator stops too, but latency runs from the intended time, so the stop counts.
+- **JVM safepoints and G1 pauses**: Some JVM operations stop **every** Java thread: GC pauses, some deoptimisation. So a thread that allocates nothing still stops when another thread's allocation triggers a collection; a **handshake** acts on one thread without stopping the rest. Here: G1 with one GC thread on the housekeeping core. The generator stops too, but latency runs from the intended time, so the stop counts.
 - **Deterministic replay and the hash gate**: One thread over a totally ordered input, depending on nothing else: replaying the input rebuilds the same state. Breakers: hash-ordered iteration, clock reads, floating-point prices, threads in the core; the engine has none. The matcher's rolling output hash, checkpointed every million sequence numbers, must reappear when a fresh matcher replays the journal.
 - **Tail attribution against a shifted null**: **Excess**: a tail message's latency minus the fork's median. **Busy period**: back to when the in-flight count last rose above its median. A cause is credited if it covers **at least 50% of the excess**: durability wait and matcher path from the message's own stamps; safepoints and **sentinel gaps** (idle polls over 5 µs apart) by time in the busy period, checked against a **null** of 200 circular shifts. Credits are non-exclusive; uncredited is **residual**.
 
@@ -33,10 +33,10 @@ Read first: How these experiments earn trust (P2).
 
 ### Who and what the study touches (context)
 
-The laptop builds and tests, never produces data. Three rented hosts run the campaign; each host's second NVMe drive holds only the journal. Prior art is credited where methods are borrowed.
+The laptop builds and tests, never produces data. Three rented hosts run the campaign; each host's second NVMe drive holds only the journal.
 
 - **Laptop**: build and tests; never data
-- **Prior art**: LMAX, exchange-core, Tene
+- **Prior art**: LMAX, Tene, Yoon
 - **Author**: designs, pre-registers
 - **Matching-engine tail**: Java pipeline, Python analysis
 - **Reader**: platform, trading-firm engineers
@@ -59,7 +59,7 @@ One JVM per fork, one thread per isolated core. The wire ring is fixed; E1 swaps
 - **Output (core 5)**: releases; D2, D3 wait
 - **Stream file**: 45M frames, pre-encoded
 - **Journaler (core 4)**: Durability D0 to D3
-- **Core 0 housekeeping**: OS, IRQs, GC and JIT
+- **Core 0 housekeeping**: OS, movable IRQs, GC, JIT
 - **Journal file**: own drive, pre-written
 - Stream file → Generator (core 1): frames
 - Generator (core 1) → Gateway (core 2): wire ring (fixed)
@@ -81,7 +81,7 @@ The host post-processes the stamps after each window; tail rows, histograms and 
 - **Credit rules**: a cause covers half the excess
 - **JVM logs**: safepoints, same clock
 - **Credit matrix**: shares + residual; H6
-- **Shifted null**: 200 circular shifts
+- **Shifted null**: safepoints, gaps; 200 shifts
 - **Exclusive bars**: first cause; figure only
 - Stamp store → Post-processor
 - Post-processor → Tail rows: rows
@@ -131,7 +131,7 @@ The host post-processes the stamps after each window; tail rows, histograms and 
 
 **Why:** `ArrayBlockingQueue` cannot multicast, so a multicast ring would give the queue arms another topology, not one swapped object. Serial write-ahead puts durability on the path and inflates its penalty. Beside the matcher, latency is the slower branch, and D0 keeps the fan-out, so D0 against D1 isolates the journal I/O.
 
-**Cost:** At D0 and D1 a response can leave before its order reaches the page cache, so a process crash can lose an answered order (3 of 10 laptop kills at D1 failed the crash check). Power loss could not be tested on rented hardware.
+**Cost:** At D0 and D1 a response can leave before its order reaches the page cache, so a process crash can lose an answered order (3 of 10 laptop kills at D1 failed the crash check). Power loss was not tested.
 
 ### Open-loop from a fixed schedule, stamped in one clock
 
@@ -145,7 +145,7 @@ The host post-processes the stamps after each window; tail rows, histograms and 
 
 **Chosen:** A Poisson schedule fixed before the run; latency from the intended send time; every stage stamped by one host's clock
 
-**Why:** Closed loop is coordinated omission; demonstration cells were cut for build hours, with Tene cited instead. Stamps on one message make each stage a subtraction, in one host's clock. Frames are pre-encoded, so the generator computes nothing in the window.
+**Why:** Closed loop is coordinated omission; demonstration cells were cut for build hours, with Tene cited instead. Stamps on one message make each stage a subtraction, in one host's clock. Frames are pre-encoded, so the generator encodes nothing in the window.
 
 **Cost:** Full stamping added 134–139 ns at the median and 141–166 ns at p99.99 in one calibration cell (exploratory), not netted out. Generator lag includes wire-ring backpressure. No network is measured.
 
@@ -177,7 +177,7 @@ The host post-processes the stamps after each window; tail rows, histograms and 
 
 **Chosen:** D0 to D3 at 5,000, 20,000 and 100,000/s; D3's ceiling stated as arithmetic; a recon rule for slow drives
 
-**Why:** The senior review found one rate set left D3 saturated at every hypothesis rate. Arithmetic stays arithmetic: 1 ÷ fio's median put D3's ceiling near 68,200/s, between 20,000 and 100,000. A pre-written journal makes `fdatasync` flush data, not allocation metadata.
+**Why:** The senior review found one rate set left D3 saturated at every hypothesis rate. By arithmetic, 1 ÷ fio's median put D3's ceiling near 68,200/s, between 20,000 and 100,000. A pre-written journal makes `fdatasync` flush data, not allocation metadata.
 
 **Cost:** Sizes are drive-specific. Saturated D3 forks sustained 23,929–23,979/s, 35% of the arithmetic, and the pipeline's median sync (23.5 µs) sat above fio's 14.7 µs, unexplained. NVMe interrupts land on the journaler's core. Power loss untested.
 
@@ -210,7 +210,7 @@ The host post-processes the stamps after each window; tail rows, histograms and 
 
 **Chosen:** Launches as the unit: 10 rounds × 28 forks × 3 hosts, contrasts within rounds, intervals over rounds, same-seed replicates
 
-**Why:** Messages in one JVM share its JIT decisions, layout and host. Same-seed replicates change only the launch (H4). A round is one host in one stretch of time, paired (P2: pairing) like earlier artifacts. With ten blocks a percentile bootstrap of a median under-covers; resampling across rounds breaks the pairing.
+**Why:** Messages in one JVM share its JIT decisions, layout and host. Same-seed replicates change only the launch (H4). A round is one host in one stretch of time, paired (P2: pairing). With ten blocks a percentile bootstrap of a median under-covers; resampling across rounds breaks the pairing.
 
 **Cost:** Hosts share each round's seed, so the 30 blocks are not independent, and the intervals (2nd and 9th of ten values, 97.9%) are coarse. H5 is descriptive; generalising rests on n = 3 hosts.
 
@@ -233,7 +233,7 @@ The host post-processes the stamps after each window; tail rows, histograms and 
 - R5: The JVM launch on one host is the unit: contrasts within rounds, intervals (P2: interval) over rounds, per host and pooled.
   - `unit` The launch is the unit; intervals over rounds: Every interval is over rounds or launches, never messages.
 - R6: Every fork: replay reproduces the live output hashes, and at D2 and D3 no response leaves before its order is durable; host settings read back every round.
-  - `topo` Journal beside the matcher; release gated by sequence number: Release waits on the durable sequence, checked by sequence number on every message.
+  - `topo` Journal beside the matcher; release gated by sequence number: Release waits on the durable sequence, checked by sequence number on every message. No decision covers the per-round host read-back.
 
 **Decisions and the concepts they use:**
 
@@ -317,11 +317,11 @@ Milestones: 1. Specify, get it reviewed, approve (2026-10-08 (−07:00)); 6. Pre
    - When: 2026-10-11 (−07:00)
    - Decision: `unit` The launch is the unit; intervals over rounds
    - Evidence: a83741b1d7 in ~/projects/matching-engine-tail (analysis.json); ee30b86bd2 in ~/projects/matching-engine-tail (results-a7.md); e1c2794a62 in ~/projects/matching-engine-tail (headline ranking)
-9. **Draft, review, add the post hoc GC check**: Unverified prior-art claims corrected or cut. Review: the queue's load dependence is partly G1 pauses crossing the p99.99 rank, and "met" means the median launch; added as post hoc.
+9. **Draft, review, add the post hoc GC check**: Prior-art claims checked first. Review: the queue's load dependence is partly G1 pauses crossing the p99.99 rank, and "met" means the median launch; added as post hoc.
    - Output: docs/post.md and data/a7/exploratory-gc.json, labelled post hoc; no verdict changed
    - When: 2026-10-11 (−07:00)
    - Decision: `e1` Split the hand-off into structure and wait strategy
-   - Evidence: cb9b36192c in ~/projects/matching-engine-tail (draft); 9598a22ccb in ~/projects/matching-engine-tail (G1 pauses, post hoc)
+   - Evidence: 21dc73aac3 in ~/projects/matching-engine-tail (S and U claims checked); cb9b36192c in ~/projects/matching-engine-tail (draft); 9598a22ccb in ~/projects/matching-engine-tail (G1 pauses, post hoc)
 10. **Pass the pre-publish gate** [MILESTONE]: Honesty constraints line by line, number drift test, byte-identical re-analysis and figures, tag before first fork. README and LICENSE tripped the pinned-code guard; fixed.
    - Output: every controller check passes; final bill, post URL and licence holder deferred by the owner
    - When: 2026-10-11 to 10-18 (−07:00)
@@ -332,7 +332,7 @@ Milestones: 1. Specify, get it reviewed, approve (2026-10-08 (−07:00)); 6. Pre
 
 ### Who owns the tail, by durability level
 
-- Axis: Host h1, ring + busy-spin, 20,000/s, about 2,000 tail messages per level over 10 forks. Each message goes to its first credited cause in a fixed order: a figure-only view. h2 and h3 look the same.
+- Axis: Host h1, ring + busy-spin, 20,000/s, about 2,000 tail messages per level over 10 forks. Each message goes to its first credited cause in a fixed order, for the figure only; h2 and h3 look the same.
 - Read it as: No sync on the path: the match stage and its queue are the tail. A sync on the path: durability wait is all of it. At D3, arrival burst was also credited on 100%, a tie the bars hide.
 - How it is computed: results-a7.md §8.2 as percent. Non-exclusive matcher-path credit at D0 and D1: 89.1%–93.1%. Engine service alone: 35.1%–45.1% of a 1.39 µs tail.
 - D0 no journal: Matcher path 91.8, Host hiccup 0.3, Residual 7.9 (% of tail messages)
@@ -344,7 +344,7 @@ Milestones: 1. Specify, get it reviewed, approve (2026-10-08 (−07:00)); 6. Pre
 
 ### Hand-off p99.99 against load: ring or queue, spin or park
 
-- Axis: E1 at D1, 30 forks per point over three hosts. Queue: `ArrayBlockingQueue`; ring: the Disruptor. H2's D: the wait strategy's effect minus the structure's, in log p99.99; D > 0 means waiting matters more.
+- Axis: E1 at D1, 30 forks per point over three hosts. H2's D: the wait strategy's effect minus the structure's, in log p99.99; D > 0 means waiting matters more.
 - Read it as: 10,000/s: spinning 1.43 and 4.08 µs, parking 5.32 and 6.13; waiting matters more (D +0.257, holds). 500,000/s: the queue arms jump to milliseconds (D −5.957, fails). 100,000/s: mixed. No arm saturated.
 - How it is computed: Post "Ring or spin?" table; 2.16 and 2.02 ms drawn as 2,160 and 2,020 µs. D's 97.9% intervals: +0.176 to +0.282, −0.128 to +0.052, −5.996 to −5.813.
 - Axes: x is offered rate, messages/s (log scale); y is p99.99, all hosts' forks (µs)
@@ -352,7 +352,7 @@ Milestones: 1. Specify, get it reviewed, approve (2026-10-08 (−07:00)); 6. Pre
 - ring + park: 10000: 5.32 (5.27 to 5.38), 100000: 5.15 (5.12 to 5.18), 500000: 5.56 (5.53 to 5.58)
 - queue + busy-spin: 10000: 4.08 (4.04 to 4.13), 100000: 5.5 (5.33 to 5.79), 500000: 2160 (1980 to 2220)
 - queue + park: 10000: 6.13 (5.66 to 6.52), 100000: 8.09 (7.78 to 12.8), 500000: 2020 (1950 to 2280)
-- Note: Linear axis: every point below 8.1 µs sits on its floor; those values are in the read-as line. Whiskers: 95% interval over 30 forks.
+- Note: Linear axis: points below 8.1 µs sit on the floor (values in the read-as line). Whiskers: 95% interval over 30 forks.
 - So: see decision `e1`
 
 ### Group commit and per-order sync against the page-cache write
@@ -393,7 +393,7 @@ Milestones: 1. Specify, get it reviewed, approve (2026-10-08 (−07:00)); 6. Pre
 
 - Axis: E1's queue arms. Counted after the analysis: every in-window safepoint there was a G1 allocation pause, median 2.49–2.68 ms; the ring arms had none.
 - Read it as: A p99.99 registers a pause once the messages it delays outnumber 0.01% of the window: not at 10,000/s, nearly at 100,000/s, far past at 500,000/s. Measured: queue + park over 100 µs in 0, 9 and 30 of 30 launches.
-- How it is computed: Pauses per window, queue + park: 1, 2, 5–7. Ring arms: 0 of 180 launches over 100 µs. 97.2%–99.1% of the queue arms' gap time lies inside pauses.
+- How it is computed: Pauses per window, queue + park: 1, 2, 5–7. Ring arms: 0 of 180 launches over 100 µs. At 100,000 and 500,000/s, 97.2%–99.1% of the queue arms' gap time lies inside pauses.
 - Axes: x is offered rate, messages/s (log scale); y is messages per window (messages)
 - delayed by the window's G1 pauses (arithmetic): 10000: 27, 100000: 500, 500000: 7500
 - p99.99 rank: 0.01% of the window: 10000: 200, 100000: 600, 500000: 3000
@@ -404,24 +404,24 @@ Milestones: 1. Specify, get it reviewed, approve (2026-10-08 (−07:00)); 6. Pre
 
 **30-second pitch:** I built a deterministic Java matching engine, ran it open-loop as one in-process pipeline on three rented bare-metal servers, and attributed its slowest messages to causes, with rules fixed before the campaign. The lead finding: which hand-off decision sets the tail depends on load. At low load, spinning versus parking matters more than ring versus queue; at 500,000 messages a second the queue's tail goes to milliseconds while the ring's stays in single microseconds. And once an fdatasync is on the response path, waiting for it is the whole tail.
 
-**2-minute version:** In 2011 the Disruptor paper showed a ring beating a queue, but not whether that was the data structure or the consumer spinning instead of sleeping. I built a deterministic matching engine in Java, eight order books behind a sequencer and a journal, as one pipeline of five pinned threads, and drove it open-loop, every message scored from its intended send time. Two experiments: ring or `ArrayBlockingQueue` crossed with spin or park, and four durability levels from no journal to an fdatasync per order. Six hypotheses pre-registered, 840 JVM launches on three hosts, tail messages attributed against a shifted null with the residual published. Most predictions did not hold, and those are the findings. At 10,000 messages a second waiting mattered more than structure; at 500,000 the queue went to about two milliseconds while the spinning ring stayed at 1.53 µs, and a post hoc count showed G1 pauses crossing the p99.99 rank. With no sync on the path the match stage is the tail; with one, durability wait is all of it, and group commit came out 52 times the page-cache write here, against a predicted under 2. And launches of the same JVM differed several times more than one run's interval admits.
+**2-minute version:** In 2011 the Disruptor paper showed a ring beating a queue, but not whether that was the data structure or the consumer spinning instead of sleeping. I built a deterministic Java matching engine, eight order books behind a sequencer and a journal, as one pipeline of five pinned threads, driven open-loop from each message's intended send time. Two experiments: ring or `ArrayBlockingQueue` crossed with spin or park, and four durability levels from no journal to an fdatasync per order. Six hypotheses pre-registered, 840 JVM launches on three hosts, tail messages attributed against a shifted null with the residual published. Most predictions did not hold, and those are the findings. At 10,000 messages a second waiting mattered more than structure; at 500,000 the queue went to about two milliseconds while the spinning ring stayed at 1.53 µs, and a post hoc count, with arithmetic, puts G1 pauses across the p99.99 rank. With no sync on the path the match stage is the tail; with one, durability wait is all of it, and group commit came out 52 times the page-cache write here, against a predicted under 2. And same-seed JVM launches differed several times more than one run's interval admits.
 
 **Hard follow-ups:**
 
 - Q: Your queue's millisecond tail at 500,000/s: is that the queue, or your one-GC-thread collector setup?
-  A: Both, separably. The allocation is structural: the queue's lock makes a contending thread enqueue a node and park, while the ring arms allocated nothing on the matcher, journaler and output threads. The pause length is partly configuration: one G1 thread on a core shared with the OS and JIT. The breakdown is post hoc (every queue-arm safepoint a G1 allocation pause, medians 2.49 to 2.68 ms). A better-tuned JVM was not tested.
+  A: Both. The allocation is structural: the queue's lock makes a contending thread enqueue a node and park, while the ring arms' stages allocated nothing. The pause length is partly configuration: one G1 thread on a core shared with the OS and JIT. The breakdown is post hoc (every queue-arm safepoint a G1 allocation pause, medians 2.49 to 2.68 ms). A better-tuned JVM was not tested.
 - Q: Why `ArrayBlockingQueue` at all? Does "ring beats queue" still mean anything?
   A: It is the queue the 2011 comparison used, and the question was structure against waiting, with the lock counted as structure. So the claim is ring against `ArrayBlockingQueue`, one JDK, one collector. No lock-free, non-allocating queue was tested; I would not claim the ring beats queues in general.
 - Q: Your drives sync in about 15 µs. What does that tell me about my hardware, and what did you test about power loss?
-  A: Only the direction transfers. These drives report no volatile write cache; one published measurement puts a consumer drive with a write-back cache at 1,643 µs against 24 µs for an enterprise one, so check the write-cache bit. Power loss was not tested: the crash check kills the JVM, which proves process-crash safety only, and at D1 a pass is timing.
+  A: Only the direction transfers. These drives report no volatile write cache; one published measurement: 1,643 µs on a consumer drive with a write-back cache, 24 µs on an enterprise one. Check the write-cache bit. Power loss was not tested: the crash check kills the JVM, which tests process-crash safety only, and at D1 a pass is timing.
 - Q: The workload is synthetic, Poisson and thin. Which conclusions move with real order flow?
-  A: Not tested; the sequel fits an IEX workload with a Nasdaq ITCH oracle. Arrivals were Poisson on purpose, since bursts would confound the rate factor, and the books are thin, about 264 resting orders over 8 symbols. The matcher's cost depends on how many levels a crossing order touches, so matcher-path numbers depend on book shape.
+  A: Not tested; a planned sequel uses an IEX-fitted workload. Arrivals were Poisson on purpose, since bursts would confound the rate factor, and the books are thin, about 264 resting orders over 8 symbols. The matcher's cost depends on how many levels a crossing order touches, so matcher-path numbers depend on book shape.
 - Q: How much of what you measured is your own instrumentation?
   A: Stamping cost 134–139 ns at the median and 141–166 ns at p99.99 in one calibration cell, exploratory and not netted out, large against a 1.39 µs tail. Logs are synchronous. Sentinels see gaps only between idle polls, handshakes are uncredited, and 6.66%–10.1% of the ungated tail is residual.
 - Q: How do you know the rules came before the data?
-  A: The hypotheses are in the design approved 2026-10-08, before any host was rented; amendment 1 changed definitions with no data collected. Reconnaissance ran single forks on h1, not data; its D3 probe had already saturated near 23,900/s, which the pre-registration records. Tag 18:24:42Z on 2026-10-10, first campaign fork 18:28:23Z, no amendment since.
+  A: The hypotheses are in the design approved 2026-10-08, before any host was rented; amendment 1 changed definitions with no data collected. Reconnaissance's single forks on h1 (not data) had shown D2's and D3's tails and D3 saturating near 23,900/s; the pre-registration records this, hypotheses unchanged. Tag 18:24:42Z on 2026-10-10, first campaign fork 18:28:23Z, no amendment since.
 
-**Limits (what I must not claim):** Three hosts of one server type and one provider, identical journal drives: n = 3. Synthetic workload, Poisson arrivals, no fills. In-process, no network. One JDK and one collector (G1, one GC thread); one queue. Process crash tested, power loss not. D3's arithmetic is not a measurement (35% reached). Coarse money: three rates, the median launch; a 1.00× tax means invisible to the grid. Attribution floor: the residual, sentinel blind spots, lower-bound nulls, uncredited handshakes. Stamp cost and synchronous logs not netted out. The GC breakdown is post hoc.
+**Limits (what I must not claim):** Three hosts of one server type and one provider, identical journal drives: n = 3. Synthetic workload, thin books, Poisson arrivals, no fills. In-process, no network. One JDK and one collector (G1, one GC thread); one queue. Process crash tested, not power loss. D3's arithmetic is not a measurement (35% reached). Coarse money: three rates, the median launch; a 1.00× tax means invisible to the grid. Attribution floor: the residual, sentinel blind spots, lower-bound nulls, uncredited handshakes; a pause can also count as a gap. Stamp cost and synchronous logs not netted out. The GC breakdown is post hoc.
 
 ## Recall questions
 
@@ -442,7 +442,7 @@ Milestones: 1. Specify, get it reviewed, approve (2026-10-08 (−07:00)); 6. Pre
 - Q: A tail message overlaps a safepoint. When is the safepoint credited, and why not on overlap alone?
   A: Only if safepoint time inside its busy period covers at least half its excess over the median. Slow messages overlap more of everything; coverage removes most of that bias, and the shifted null gives chance.
 - Q: A colleague shows one fork's very tight interval on p99.99 and calls it the answer. What do you say?
-  A: That interval assumes independent messages. Same-seed launches differed 5.64× to 8.90× more than one run's own error (H4), so honest intervals are over launches or rounds.
+  A: That interval assumes independent messages. Same-seed launches spread 5.64 to 8.90 times one run's own error (H4), so honest intervals are over launches or rounds.
 
 Sources: see the page
 
