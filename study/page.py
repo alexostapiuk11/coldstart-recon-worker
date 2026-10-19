@@ -104,6 +104,9 @@ font-size:13px;text-transform:uppercase;letter-spacing:.04em}
 .shade{fill:var(--line);opacity:.45}.inum{font-size:12px;fill:var(--muted)}
 .axlabel{font-size:12px;fill:var(--muted)}.iest{font-weight:600}
 .ilabel,.inum,.iest,.axlabel{paint-order:stroke;stroke:var(--card);stroke-width:4px;stroke-linejoin:round}
+.ghost{fill:none;stroke:var(--fg);stroke-width:1.5;stroke-dasharray:5 3}
+.gcap{font-size:12px;fill:var(--fg);font-style:italic;paint-order:stroke;stroke:var(--card);
+stroke-width:4px;stroke-linejoin:round}
 .prange{stroke:var(--muted);stroke-width:2.5;stroke-linecap:round}
 .pgap{stroke:var(--muted);stroke-width:1.5;stroke-dasharray:3 4}
 .pgrid{stroke:var(--line);stroke-width:1}.paxis{stroke:var(--muted);stroke-width:1.2}
@@ -151,7 +154,7 @@ h1{font-size:24px}.lead{font-size:16px}
 .row{display:block}.row b{display:block;margin-bottom:1px}
 nav.pills{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 nav.pills::-webkit-scrollbar{display:none}nav.pills a{flex:none}
-.blabel,.btotal,.inum,.pnum{font-size:15px}.segtext,.axlabel{font-size:14px}}
+.blabel,.btotal,.inum,.pnum,.gcap{font-size:15px}.segtext,.axlabel{font-size:14px}}
 """
 
 JS = """

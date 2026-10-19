@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from study.schema import so_ids
+from study.schema import merged_segments, so_ids
 
 INTERVIEW_PROMPT = """\
 You are my interview coach. The brief above is the only ground truth about my project;
@@ -31,6 +31,11 @@ Rules:
    an answer.
 6. Start now with my current settings and the first question.
 """
+
+
+def _num(v):
+    """A summed value without float noise: 18.79 + 8.0 prints 26.79."""
+    return str(round(v, 6))
 
 
 def _sentence(text):
@@ -126,6 +131,14 @@ def render_brief(c: dict) -> str:
                 for b in ch["bars"]:
                     parts = ", ".join(f"{s['name']} {s['value']}" for s in b["segments"])
                     out.append(f"- {b['label']}: {parts} ({ch['unit']})")
+                for g in ch.get("merge", []):
+                    out.append(f"- Drawn as one segment, {g['label']}: " + " + ".join(g["names"]))
+                if ch.get("ghost"):
+                    g = ch["ghost"]
+                    src = next(b for b in ch["bars"] if b["label"] == g["from_bar"])
+                    value = next(v for n, v, _ in merged_segments(ch, src) if n == g["segment"])
+                    out.append(f"- On bar {g['on_bar']}, a dashed outline shows where "
+                               f"{g['segment']} sat in {g['from_bar']} ({_num(value)} {ch['unit']})")
                 for d in ch.get("deltas", []):
                     out.append(f"- Changed {d['between']}: {d['text']}")
             elif ch["type"] == "percentiles":

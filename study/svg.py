@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 
+from study.schema import merged_segments
 from study.text import esc, inline, wrap
 
 W, H, GX, GY, PAD = 170, 72, 50, 44, 24
@@ -359,7 +360,26 @@ def _note(chart: dict) -> str:
 
 
 def _segment_names(chart: dict) -> list[str]:
-    return list(dict.fromkeys(s["name"] for b in chart["bars"] for s in b["segments"]))
+    """The names a stacked chart draws (merged groups by their label), in order."""
+    return list(dict.fromkeys(n for b in chart["bars"] for n, _, _ in merged_segments(chart, b)))
+
+
+def _ghost_geometry(chart: dict) -> tuple[str, float, float] | None:
+    """(on_bar label, start value, width value) of a chart's ghost outline, or None.
+
+    The outline is as wide as the segment was in from_bar and starts where that segment
+    starts in on_bar (or at on_bar's end, if on_bar does not have it)."""
+    g = chart.get("ghost")
+    if not g:
+        return None
+    bars = {b["label"]: merged_segments(chart, b) for b in chart["bars"]}
+    width = next(v for n, v, _ in bars[g["from_bar"]] if n == g["segment"])
+    start = 0.0
+    for n, v, _ in bars[g["on_bar"]]:
+        if n == g["segment"]:
+            break
+        start += v
+    return g["on_bar"], start, width
 
 
 def segment_slots(charts: list[dict]) -> dict[str, int]:
@@ -397,18 +417,25 @@ def chart_html(chart: dict, uid: str, slots: dict[str, int] | None = None) -> st
     unit = esc(chart["unit"])
     stacked = chart["type"] == "stacked_bars"
     if stacked:
-        bars = [(b["label"], [(s["name"], s["value"]) for s in b["segments"]])
-                for b in chart["bars"]]
+        bars = [(b["label"], merged_segments(chart, b)) for b in chart["bars"]]
     else:
-        bars = [(i["label"], [(i["label"], i["value"])]) for i in chart["items"]]
-    totals = [sum(v for _, v in segs) for _, segs in bars]
-    names = list(dict.fromkeys(n for _, segs in bars for n, _ in segs))
+        bars = [(i["label"], [(i["label"], i["value"], [])]) for i in chart["items"]]
+    totals = [sum(v for _, v, _ in segs) for _, segs in bars]
+    names = list(dict.fromkeys(n for _, segs in bars for n, _, _ in segs))
     slot = slots or {n: i % 8 for i, n in enumerate(names)}
     full, pitch = 340.0, 58
-    scale = full / max(totals)
-    height = len(bars) * pitch + 4
+    ghost = _ghost_geometry(chart) if stacked else None
+    scale = full / max(totals + ([ghost[1] + ghost[2]] if ghost else []))
+    # The bar with a ghost outline gets an extra line under it for the outline's caption.
+    tops, y = [], 0
+    for label, _ in bars:
+        tops.append(y)
+        y += pitch + (16 if ghost and label == ghost[0] else 0)
+    height = y + 4
     show_end = not stacked or chart.get("show_totals") is True
     lit = set(chart.get("highlight") or [])
+    # Highlighting a merged member lights the merged segment it is drawn in.
+    lit |= {g["label"] for g in chart.get("merge", []) if lit & set(g["names"])}
 
     def dim(name):
         return " dim" if lit and name not in lit else ""
@@ -419,17 +446,18 @@ def chart_html(chart: dict, uid: str, slots: dict[str, int] | None = None) -> st
     width = round(full + 6 + tail)
     p = [(f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
           f'aria-label="{unit} by bar" xmlns="http://www.w3.org/2000/svg">')]
-    for r, ((label, segs), total) in enumerate(zip(bars, totals)):
-        y = r * pitch
+    for (label, segs), total, y in zip(bars, totals, tops):
         p.append(f'<text class="blabel" x="0" y="{y + 14}">{esc(label)}</text>')
         x = 0.0
-        for name, v in segs:
+        for name, v, members in segs:
             w = v * scale
             cls = slot[name] if stacked else 0
             # A 2 px surface gap separates touching segments; a sliver keeps its width.
             drawn = w - GAP if w > 2 * GAP else w
+            parts = (" (" + " + ".join(f"{esc(m)} {_num(mv)}" for m, mv in members) + ")"
+                     if len(members) > 1 else "")
             p.append(f'<rect class="seg s{cls}{dim(name)}" x="{x:.1f}" y="{y + 20}" width="{drawn:.1f}" '
-                     f'height="24" rx="2"><title>{esc(name)}: {_num(v)} {unit}</title></rect>')
+                     f'height="24" rx="2"><title>{esc(name)}: {_num(v)} {unit}{parts}</title></rect>')
             # A plain bar's value is its total, shown at the tip; label stacked segments only,
             # greyed ones too (in a muted ink), so a flat phase stays visible as a number.
             if stacked and drawn >= len(_num(v)) * CHART_CHAR + 4:
@@ -439,6 +467,14 @@ def chart_html(chart: dict, uid: str, slots: dict[str, int] | None = None) -> st
         if show_end:
             p.append(f'<text class="btotal" x="{x + 6:.1f}" y="{y + 36}">'
                      f'{_num(total)} {unit}</text>')
+        if ghost and label == ghost[0]:
+            g = chart["ghost"]
+            gx, gw = ghost[1] * scale, ghost[2] * scale
+            cap = f"was {_num(ghost[2])} {chart['unit']} in {g['from_bar']}"
+            p.append(f'<rect class="ghost" x="{gx:.1f}" y="{y + 19}" width="{gw:.1f}" '
+                     f'height="26" rx="3"><title>{esc(g["segment"])} {esc(cap)}</title></rect>')
+            p.append(f'<text class="gcap" x="{_fit(gx, cap, width, "start"):.1f}" y="{y + 60}" '
+                     f'text-anchor="start">{esc(cap)}</text>')
     p.append("</svg>")
     legend = ""
     if stacked:

@@ -984,3 +984,83 @@ def test_percentile_values_are_traced(tmp_path):
     assert untraced_numbers(u) == []
     u["results"][0]["chart"]["rows"][0]["max_label"]["value"] = 150.5
     assert untraced_numbers(u) == ["150.5"]
+
+
+# ---- stacked chart: merge and ghost ----
+
+def _three():
+    return {"type": "stacked_bars", "unit": "s", "bars": [
+        {"label": "B", "segments": [{"name": "load", "value": 30.35},
+                                    {"name": "compile", "value": 18.79},
+                                    {"name": "rest", "value": 8.0}]},
+        {"label": "C", "segments": [{"name": "load", "value": 21.34},
+                                    {"name": "compile", "value": 0.33},
+                                    {"name": "rest", "value": 8.0}]}]}
+
+
+def _segs(out):
+    """(name, x, width) per drawn segment, in order."""
+    return [(m.group(3), float(m.group(1)), float(m.group(2))) for m in re.finditer(
+        r'<rect class="seg [^"]+" x="([\d.]+)" y="[\d.]+" width="([\d.]+)"[^>]*><title>([^:]+):',
+        out)]
+
+
+def test_merge_draws_one_segment_with_the_summed_value_and_one_legend_entry():
+    out = chart_html(dict(_three(), merge=[{"names": ["compile", "rest"], "label": "Other"}]), "m0")
+    segs = _segs(out)
+    assert [n for n, _, _ in segs] == ["load", "Other", "load", "Other"]
+    plain = _segs(chart_html(_three(), "m0"))
+    # the merged width is the two segments' widths together (each loses a 2 px gap once)
+    assert abs(segs[1][2] - (plain[1][2] + plain[2][2] + 2)) < 0.3
+    assert ">26.79<" in out  # 18.79 + 8.0, printed inside
+    assert "Other: 26.79 s (compile 18.79 + rest 8)" in out
+    chips = re.findall(r'<span class="chip [^"]+"></span>([^<]+)<', out)
+    assert chips == ["load", "Other"]
+
+
+def test_merge_keeps_one_colour_per_drawn_name_across_charts():
+    from study.svg import segment_slots
+    merged = dict(_three(), merge=[{"names": ["compile", "rest"], "label": "Other"}])
+    assert segment_slots([merged]) == {"load": 0, "Other": 1}
+
+
+def test_ghost_outlines_where_the_segment_sat_in_the_other_bar():
+    out = chart_html(dict(_three(), ghost={"segment": "compile", "from_bar": "B", "on_bar": "C"}),
+                     "g0")
+    segs = _segs(out)
+    b_compile = segs[1]
+    c_compile = segs[4]
+    m = re.search(r'<rect class="ghost" x="([\d.]+)" y="([\d.]+)" width="([\d.]+)"', out)
+    gx, gy, gw = (float(v) for v in m.groups())
+    assert abs(gx - c_compile[1]) < 0.11  # starts where compile starts in C
+    assert abs(gw - (b_compile[2] + 2)) < 0.3  # as wide as compile was in B
+    c_y = float(re.findall(r'<rect class="seg [^"]+" x="[\d.]+" y="([\d.]+)"', out)[3])
+    assert abs(gy - c_y) < 2  # on C's row
+    assert ">was 18.79 s in B<" in out
+    assert not re.search(r'(fill|stroke)="#', out)
+    from study.page import CSS
+    assert ".ghost{fill:none;stroke:var(--fg)" in CSS
+
+
+def test_ghost_caption_gets_its_own_room_and_stays_in_the_viewbox():
+    out = chart_html(dict(_three(), ghost={"segment": "compile", "from_bar": "B", "on_bar": "C"}),
+                     "g1")
+    plain = chart_html(_three(), "g1")
+    h = float(re.search(r'viewBox="0 0 [\d.]+ ([\d.]+)"', out).group(1))
+    assert h > float(re.search(r'viewBox="0 0 [\d.]+ ([\d.]+)"', plain).group(1))
+    width = float(re.search(r'viewBox="0 0 ([\d.]+)', out).group(1))
+    for cls, x, y, anchor, txt in _texts(out):
+        w = len(txt) * 8.5
+        left = {"end": x - w, "middle": x - w / 2}.get(anchor, x)
+        assert left >= 0 and left + w <= width + 0.5 and y <= h, txt
+
+
+def test_brief_notes_merge_and_ghost():
+    u = artifact_unit()
+    u["results"][0]["chart"] = dict(_three(), merge=[{"names": ["compile", "rest"],
+                                                       "label": "Other"}],
+                                    ghost={"segment": "load", "from_bar": "B", "on_bar": "C"})
+    brief = render_brief(u)
+    assert "- B: load 30.35, compile 18.79, rest 8.0 (s)" in brief
+    assert "- Drawn as one segment, Other: compile + rest" in brief
+    assert "- On bar C, a dashed outline shows where load sat in B (30.35 s)" in brief

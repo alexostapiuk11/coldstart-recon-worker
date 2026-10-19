@@ -173,8 +173,10 @@ def _chart(ch, where):
 
     - stacked_bars: bars of named segments, optional bool `show_totals` (default false)
       that prints each bar's summed total at its end, optional `deltas`
-      ([{between, text}], what changed from one bar to another) and `highlight` (segment
-      names drawn in colour; the rest go grey);
+      ([{between, text}], what changed from one bar to another), `highlight` (segment
+      names or merge labels drawn in colour; the rest go grey), `merge` (groups of
+      segments drawn as one, see _merge) and `ghost` (a dashed outline on one bar of
+      where a segment sat in another, see _ghost);
     - bars: items, one value each;
     - interval: rows of {label, estimate, low, high} (low <= estimate <= high), optional
       `zero_label`, `left_label`, `right_label` and `shade` ('left' or 'right' of zero);
@@ -187,7 +189,7 @@ def _chart(ch, where):
     _get(ch, "unit", str, where)
     if "show_totals" in ch and not isinstance(ch["show_totals"], bool):
         raise ContentError(f"{where}.show_totals: expected bool")
-    for f in ("deltas", "highlight"):
+    for f in ("deltas", "highlight", "merge", "ghost"):
         if f in ch and kind != "stacked_bars":
             raise ContentError(f"{where}.{f}: only stacked_bars charts take {f}")
     if kind == "interval":
@@ -213,15 +215,73 @@ def _chart(ch, where):
             for f in ("between", "text"):
                 if not _get(dl, f, str, f"{where}.deltas[{i}]").strip():
                     raise ContentError(f"{where}.deltas[{i}].{f} is empty")
+        labels = _merge(ch, names, where)
         if "highlight" in ch:
             for name in _get(ch, "highlight", list, where):
-                if name not in names:
+                if name not in names | labels:
                     raise ContentError(f"{where}.highlight '{name}' is not a segment name")
+        if "ghost" in ch:
+            _ghost(ch, where)
     elif kind == "percentiles":
         _percentile_rows(ch, where)
     else:
         for i, it in enumerate(_items(ch, "items", where, fields=("label",))):
             _get(it, "value", float, f"{where}.items[{i}]")
+
+
+def _merge(ch, names, where):
+    """`merge`: [{names: [2+ segment names], label}]; a name joins at most one group.
+    Returns the merge labels."""
+    if "merge" not in ch:
+        return set()
+    merged, labels = set(), set()
+    for i, g in enumerate(_get(ch, "merge", list, where)):
+        w = f"{where}.merge[{i}]"
+        for name in _items(g, "names", w, at_least=2):
+            if name not in names:
+                raise ContentError(f"{w}: '{name}' is not a segment name")
+            if name in merged:
+                raise ContentError(f"{w}: '{name}' is already merged in an earlier group")
+            merged.add(name)
+        if not _get(g, "label", str, w).strip():
+            raise ContentError(f"{w}.label is empty")
+        labels.add(g["label"])
+    return labels
+
+
+def _ghost(ch, where):
+    """`ghost`: {segment, from_bar, on_bar}: two different bar labels, and a segment drawn
+    in from_bar (a segment name, or a merge label)."""
+    g = _get(ch, "ghost", dict, where)
+    w = f"{where}.ghost"
+    seg, src, dst = (_get(g, f, str, w) for f in ("segment", "from_bar", "on_bar"))
+    bars = {b["label"]: b for b in ch["bars"]}
+    for f, label in (("from_bar", src), ("on_bar", dst)):
+        if label not in bars:
+            raise ContentError(f"{w}.{f} '{label}' is not a bar label")
+    if src == dst:
+        raise ContentError(f"{w}: from_bar and on_bar must be two different bars")
+    if seg not in [n for n, _, _ in merged_segments(ch, bars[src])]:
+        raise ContentError(f"{w}.segment '{seg}' is not drawn in bar '{src}'")
+
+
+def merged_segments(chart: dict, bar: dict) -> list[tuple[str, float, list]]:
+    """A stacked bar's segments as drawn: (name, value, members). A `merge` group becomes
+    one segment named by its label, at its first member's place, whose value is the sum
+    of its members ([(name, value)], in bar order); other segments have no members."""
+    group = {n: g["label"] for g in chart.get("merge", []) for n in g["names"]}
+    out, at = [], {}
+    for s in bar["segments"]:
+        label = group.get(s["name"])
+        if label is None:
+            out.append((s["name"], s["value"], []))
+        elif label in at:
+            name, value, members = out[at[label]]
+            out[at[label]] = (name, value + s["value"], members + [(s["name"], s["value"])])
+        else:
+            at[label] = len(out)
+            out.append((label, s["value"], [(s["name"], s["value"])]))
+    return out
 
 
 def _percentile_rows(ch, where):

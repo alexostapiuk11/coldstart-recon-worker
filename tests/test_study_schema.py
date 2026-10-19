@@ -363,3 +363,55 @@ def test_percentiles_chart_fields_are_checked():
     bad(lambda ch: ch.update(note=3), r"note: expected str")
     bad(lambda ch: ch.update(rows=[]), "rows")
     bad(lambda ch: ch.update(highlight=["p50"]), r"highlight.*stacked_bars")
+
+
+def _three_phase():
+    return {"type": "stacked_bars", "unit": "s", "bars": [
+        {"label": "B", "segments": [{"name": "load", "value": 30.35},
+                                    {"name": "compile", "value": 18.79},
+                                    {"name": "rest", "value": 8.0}]},
+        {"label": "C", "segments": [{"name": "load", "value": 21.34},
+                                    {"name": "compile", "value": 0.33},
+                                    {"name": "rest", "value": 8.0}]}]}
+
+
+def test_merge_and_ghost_validate():
+    u = artifact_unit()
+    u["results"][0]["chart"] = dict(_three_phase(),
+                                    merge=[{"names": ["load", "rest"], "label": "Other"}],
+                                    ghost={"segment": "compile", "from_bar": "B", "on_bar": "C"})
+    validate(u)
+    # a ghost may name a merged segment by its label
+    u["results"][0]["chart"]["ghost"]["segment"] = "Other"
+    validate(u)
+
+
+def test_merge_fields_are_checked():
+    def bad(merge, match):
+        u = artifact_unit()
+        u["results"][0]["chart"] = dict(_three_phase(), merge=merge)
+        _fails(u, match)
+
+    bad([{"names": ["load", "nope"], "label": "x"}], r"merge\[0\].*'nope' is not a segment name")
+    bad([{"names": ["load"], "label": "x"}], r"merge\[0\]\.names: needs at least 2")
+    bad([{"names": ["load", "rest"], "label": " "}], r"merge\[0\]\.label is empty")
+    bad([{"names": ["load", "rest"], "label": "a"}, {"names": ["rest", "compile"], "label": "b"}],
+        r"merge\[1\].*'rest' is already merged")
+    bad({"names": ["load", "rest"], "label": "x"}, r"merge: expected list")
+    u = artifact_unit()
+    u["results"][0]["chart"] = {"type": "bars", "unit": "s", "items": [{"label": "a", "value": 1.0}],
+                                "merge": [{"names": ["a", "b"], "label": "x"}]}
+    _fails(u, r"merge.*stacked_bars")
+
+
+def test_ghost_fields_are_checked():
+    def bad(ghost, match):
+        u = artifact_unit()
+        u["results"][0]["chart"] = dict(_three_phase(), ghost=ghost)
+        _fails(u, match)
+
+    bad({"segment": "nope", "from_bar": "B", "on_bar": "C"}, r"ghost\.segment 'nope'.*bar 'B'")
+    bad({"segment": "compile", "from_bar": "X", "on_bar": "C"}, r"ghost\.from_bar 'X' is not a bar")
+    bad({"segment": "compile", "from_bar": "B", "on_bar": "Y"}, r"ghost\.on_bar 'Y' is not a bar")
+    bad({"segment": "compile", "from_bar": "B", "on_bar": "B"}, r"ghost.*two different bars")
+    bad({"segment": "compile", "from_bar": "B"}, r"ghost.*'on_bar'")
