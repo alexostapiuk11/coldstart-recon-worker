@@ -67,6 +67,16 @@ def _percentiles(ch):
             + [row["max_label"]["value"] for row in ch["rows"] if "max_label" in row])
 
 
+def _refs(ch):
+    return [r[k] for r in ch.get("refs", []) for k in ("x", "y") if k in r]
+
+
+def _xy(ch):
+    return ([p[k] for s in ch["series"] for p in s["points"] for k in ("x", "y", "lo", "hi")
+             if k in p]
+            + [b[k] for b in ch.get("bands", []) for k in ("y_lo", "y_hi")] + _refs(ch))
+
+
 # Every chart type's numeric values (they are numbers, not strings, so _strings misses
 # them). A new chart type needs an entry here; a test checks this matches CHART_TYPES.
 CHART_NUMBERS = {
@@ -74,6 +84,7 @@ CHART_NUMBERS = {
     "bars": _bars,
     "interval": _interval,
     "percentiles": _percentiles,
+    "xy": _xy,
 }
 
 

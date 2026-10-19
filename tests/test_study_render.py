@@ -1569,3 +1569,219 @@ def test_large_chart_values_are_traced_without_an_exponent(tmp_path):
     u["results"][0]["chart"] = {"type": "bars", "unit": "tokens",
                                 "items": [{"label": "a", "value": 1234567}]}
     assert untraced_numbers(u) == []
+
+
+# ---- xy chart ----
+
+import html
+import itertools
+
+from tests.study_examples import xy_chart
+
+
+def _pts(out, cls="xym"):
+    """(series class, px, py, title) for every marker."""
+    return [(m.group(1), float(m.group(2)), float(m.group(3)), m.group(4)) for m in re.finditer(
+        rf'<path class="{cls}[^"]*? (xk\d)[^"]*" data-px="([\d.-]+)" data-py="([\d.-]+)"'
+        r'[^>]*><title>([^<]*)</title>', out)]
+
+
+def _box(out):
+    w, h = re.search(r'viewBox="0 0 ([\d.]+) ([\d.]+)"', out).groups()
+    return float(w), float(h)
+
+
+def _xy_texts_inside(out):
+    """Every text's estimated extent lies inside the viewBox."""
+    width, height = _box(out)
+    for cls, x, y, anchor, txt in _texts(out):
+        w = len(html.unescape(txt)) * 8.5
+        left = {"end": x - w, "middle": x - w / 2}.get(anchor, x)
+        assert left >= -0.5 and left + w <= width + 0.5, txt
+        assert y - 12 >= 0 and y + 3 <= height, txt
+
+
+def test_xy_places_a_known_point_at_its_pixel():
+    out = chart_html(xy_chart(), "x0")
+    m = {(k, title.split(": ")[1].split(" ")[0]): (px, py) for k, px, py, title in _pts(out)}
+    (x0, y0), (x50, y50), (x100, y100) = m[("xk0", "0")], m[("xk0", "50")], m[("xk0", "100")]
+    assert abs(x50 - (x0 + x100) / 2) < 0.15 and abs(y50 - (y0 + y100) / 2) < 0.15
+    assert x0 < x50 < x100 and y0 > y50 > y100  # y grows upwards
+    # the x tick labelled 50 sits under the point at x = 50; the gridline for 10 at y = 10
+    ticks = {t[4]: t[1] for t in _texts(out) if "xyt" in t[0] and t[3] == "middle"}
+    assert abs(ticks["50"] - x50) < 0.15
+    grid = {float(v): float(y) for v, y in re.findall(
+        r'<line class="xygrid" data-v="([\d.-]+)" x1="[\d.]+" y1="([\d.]+)"', out)}
+    assert abs(grid[10] - y100) < 0.15
+    # the axis starts at zero by default: y = 0 is on the x axis line
+    axis_y = float(re.search(r'<line class="xyaxis" x1="[\d.]+" y1="([\d.]+)" x2="[\d.]+" '
+                             r'y2="\1"', out).group(1))
+    assert abs(axis_y - y0) < 0.15
+
+
+def test_xy_log_x_spaces_decades_evenly_and_ticks_them():
+    c = xy_chart(x_log=True, series=[{"name": "a", "points": [
+        {"x": 1, "y": 1}, {"x": 10, "y": 2}, {"x": 100, "y": 3}]}])
+    out = chart_html(c, "x1")
+    xs = [px for _, px, _, _ in _pts(out)]
+    assert abs((xs[1] - xs[0]) - (xs[2] - xs[1])) < 0.15
+    ticks = [t[4] for t in _texts(out) if "xyt" in t[0] and t[3] == "middle"]
+    assert ticks[0] == "1" and "10" in ticks and ticks[-1] == "100"
+
+
+def test_xy_log_x_of_powers_of_two_ticks_each_power():
+    c = xy_chart(x_log=True, series=[{"name": "a", "points": [
+        {"x": 2 ** k, "y": k} for k in range(8)]}])
+    out = chart_html(c, "x2")
+    ticks = [t for t in _texts(out) if "xyt" in t[0] and t[3] == "middle"]
+    assert [t[4] for t in ticks] == ["1", "2", "4", "8", "16", "32", "64", "128"]
+    gaps = [b[1] - a[1] for a, b in itertools.pairwise(ticks)]
+    assert max(gaps) - min(gaps) < 0.3
+
+
+def test_xy_band_spans_the_plot_between_its_values_behind_the_series():
+    c = xy_chart(bands=[{"y_lo": 5, "y_hi": 10, "label": "tolerance"}])
+    out = chart_html(c, "x3")
+    pts = {title: (px, py) for _, px, py, title in _pts(out)}
+    y5, y10 = pts["measured: 50 → 5 s"][1], pts["measured: 100 → 10 s"][1]
+    x, y, w, h = map(float, re.search(r'<rect class="xyband" x="([\d.]+)" y="([\d.]+)" '
+                                      r'width="([\d.]+)" height="([\d.]+)"', out).groups())
+    assert abs(y - y10) < 0.15 and abs(y + h - y5) < 0.15
+    axis = re.search(r'<line class="xyaxis" x1="([\d.]+)" y1="[\d.]+" x2="([\d.]+)"', out)
+    assert abs(x - float(axis.group(1))) < 0.15 and abs(x + w - float(axis.group(2))) < 0.15
+    assert out.index('class="xyband"') < out.index('class="xyl')
+    assert ">tolerance<" in out
+
+
+def test_xy_refs_are_dashed_lines_with_labels():
+    c = xy_chart(refs=[{"y": 5, "label": "target"}, {"x": 50, "label": "cap"}])
+    out = chart_html(c, "x4")
+    pts = {title: (px, py) for _, px, py, title in _pts(out)}
+    px50, py5 = pts["measured: 50 → 5 s"]
+    refs = re.findall(r'<line class="xyref" x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" '
+                      r'y2="([\d.]+)"', out)
+    horiz = [r for r in refs if r[1] == r[3]]
+    vert = [r for r in refs if r[0] == r[2]]
+    assert abs(float(horiz[0][1]) - py5) < 0.15 and abs(float(vert[0][0]) - px50) < 0.15
+    assert ">target<" in out and ">cap<" in out
+    from study.page import CSS
+    assert "stroke-dasharray" in CSS.split(".xyref{")[1].split("}")[0]
+
+
+def test_xy_whisker_runs_from_lo_to_hi():
+    out = chart_html(xy_chart(), "x5")
+    pts = {title: (px, py) for _, px, py, title in _pts(out)}
+    px, py = pts["model: 0 → 1 s (0.5 to 1.5)"]
+    w = re.search(r'<line class="xyw xk1" x1="([\d.]+)" y1="([\d.]+)" x2="\1" y2="([\d.]+)"', out)
+    assert abs(float(w.group(1)) - px) < 0.15
+    lo_y, hi_y = float(w.group(2)), float(w.group(3))
+    assert lo_y > py > hi_y and abs((lo_y - py) - (py - hi_y)) < 0.15
+
+
+def test_xy_series_differ_in_colour_and_shape_and_have_a_legend():
+    c = xy_chart(series=[{"name": f"s{k}", "points": [{"x": 0, "y": k}, {"x": 1, "y": k + 1}]}
+                         for k in range(6)])
+    out = chart_html(c, "x6")
+    shapes = {}
+    for m in re.finditer(r'<path class="xym (xk\d)" data-px="[\d.-]+" data-py="[\d.-]+" '
+                         r'data-shape="([\w-]+)"', out):
+        shapes.setdefault(m.group(1), set()).add(m.group(2))
+    assert len(shapes) == 6 and len({s.pop() for s in shapes.values()}) == 6
+    legend = out.split("</svg>", 1)[1]
+    for k in range(6):
+        assert f'class="xychip xk{k}"' in legend and f">s{k}</li>" in legend
+    from study.page import CSS
+    colours = [re.search(rf"\.xk{k}{{color:(var\(--c\d\))}}", CSS).group(1) for k in range(6)]
+    assert len(set(colours)) == 6
+    assert not re.search(r'(fill|stroke)="#', out)
+
+
+def test_xy_one_series_needs_no_legend():
+    out = chart_html(xy_chart(series=[xy_chart()["series"][0]]), "x7")
+    assert 'class="legend' not in out
+
+
+def test_xy_labels_the_last_value_of_each_series():
+    out = chart_html(xy_chart(), "x8")
+    values = [t[4] for t in _texts(out) if "xyv" in t[0]]
+    assert sorted(values) == ["10", "8"]
+
+
+def test_xy_line_and_step_paths():
+    c = xy_chart()
+    out = chart_html(c, "x9")
+    assert re.search(r'<path class="xyl xk0" d="M[\d.]+ [\d.]+L[\d.]+ [\d.]+L', out)
+    assert 'class="xyl xk1"' not in out  # a points series draws no line
+    c["series"][0]["style"] = "step"
+    out = chart_html(c, "x9")
+    assert re.search(r'<path class="xyl xk0" d="M[\d.]+ [\d.]+H[\d.]+V[\d.]+H', out)
+
+
+def test_xy_text_stays_inside_the_viewbox_and_readable_on_a_phone():
+    for c in (xy_chart(), xy_chart(x_log=True, series=[{"name": "a", "points": [
+            {"x": 1, "y": 0.284}, {"x": 128, "y": 0.6061}]}],
+            refs=[{"x": 128, "label": "max-num-seqs, the engine's cap"},
+                  {"y": 0.6, "label": "a long reference label here"}],
+            bands=[{"y_lo": 0.2, "y_hi": 0.3, "label": "the band"}])):
+        out = chart_html(c, "xa")
+        _xy_texts_inside(out)
+        width, _ = _box(out)
+        assert width <= 420 and 309 / width * 15 >= 12
+
+
+def test_xy_dual_axes_scale_the_right_series_on_its_own_ticks():
+    c = xy_chart(y_axes="dual", y2_label="throughput", y2_unit="req/s")
+    c["series"][1].update(axis="right", points=[{"x": 0, "y": 50}, {"x": 100, "y": 100}])
+    out = chart_html(c, "xb")
+    right = [t for t in _texts(out) if "xyt" in t[0] and t[3] == "start"]
+    assert [t[4] for t in right] == ["0", "20", "40", "60", "80", "100"]
+    pts = {title: (px, py) for _, px, py, title in _pts(out)}
+    # 100 req/s is the right axis' top tick, at the same height as 10 s on the left
+    assert abs(pts["model: 100 → 100 req/s"][1] - pts["measured: 100 → 10 s"][1]) < 0.15
+    assert re.search(r'<path class="xym xk1 r"', out)  # hollow: right-axis marks
+    assert "throughput (req/s)" in out and "latency (s)" in out
+    assert "(right axis)" in out.split("</svg>", 1)[1]
+    _xy_texts_inside(out)
+
+
+def test_xy_aria_label_names_each_series_and_its_ranges():
+    out = chart_html(xy_chart(refs=[{"y": 5, "label": "target"}]), "xc")
+    label = re.search(r'aria-label="([^"]+)"', out).group(1)
+    assert "measured: 3 points, x 0 to 100, y 0 to 10 s" in label
+    assert "model: 2 points, x 0 to 100, y 1 to 8 s" in label
+    assert "requests in flight" in label and "target at y = 5" in label
+
+
+def test_xy_note_prints_under_the_chart():
+    out = chart_html(xy_chart(note="Read **this**."), "xd")
+    assert '<p class="cnote">Read <strong>this</strong>.</p>' in out
+
+
+def test_brief_lists_xy_series_as_x_y_pairs():
+    u = artifact_unit()
+    u["results"][0]["chart"] = xy_chart(bands=[{"y_lo": 2, "y_hi": 4, "label": "tolerance"}],
+                                        refs=[{"y": 5, "label": "target"}], note="A note.")
+    brief = render_brief(u)
+    assert "- Axes: x is requests in flight; y is latency (s)" in brief
+    assert "- measured: 0: 0, 50: 5, 100: 10" in brief
+    assert "- model (points): 0: 1 (0.5 to 1.5), 100: 8" in brief
+    assert "- Band: tolerance, 2 to 4 s" in brief
+    assert "- Reference: target at y = 5 s" in brief
+    assert "- Note: A note." in brief
+
+
+def test_xy_values_are_traced(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\n0.284 0.606 1.5 128 0.25 0.75 2.5\n")
+    u = artifact_unit()
+    u["sources"] = [{"file": src, "section": "Title"}]
+    u["results"][0]["chart"] = xy_chart(
+        series=[{"name": "a", "points": [{"x": 1, "y": 0.284, "lo": 0.25, "hi": 0.75},
+                                         {"x": 128, "y": 0.606}]}],
+        bands=[{"y_lo": 0.25, "y_hi": 1.5, "label": "b"}], refs=[{"y": 2.5, "label": "r"}])
+    assert untraced_numbers(u) == []
+    ch = u["results"][0]["chart"]
+    ch["bands"][0]["y_hi"] = 1.75
+    ch["refs"] = [{"x": 3.5, "label": "r"}]
+    ch["series"][0]["points"][0]["hi"] = 0.95
+    ch["series"][0]["points"][1]["x"] = 256
+    assert untraced_numbers(u) == ["0.95", "256", "1.75", "3.5"]

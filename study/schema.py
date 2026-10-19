@@ -6,13 +6,16 @@ here, naming the field, instead of producing a broken page.
 
 from __future__ import annotations
 
+import math
 import re
 
 from study.text import SENTINELS, known_units, unknown_link_units, wrap
 
 ARTIFACT_LEVELS = ("context", "container", "component", "dynamic")
 NODE_KINDS = ("person", "system", "external", "store", "focus")
-CHART_TYPES = ("stacked_bars", "bars", "interval", "percentiles")
+CHART_TYPES = ("stacked_bars", "bars", "interval", "percentiles", "xy")
+SERIES_STYLES = ("line", "points", "step")
+MAX_SERIES = 6  # xy series and scatter groups: one colour and one marker shape each
 MAX_LABEL = 22
 MAX_SUB = 60
 SUB_LINE = 30  # the diagram wraps a node's sub text at this width ...
@@ -271,7 +274,8 @@ def _chart(ch, where):
       `shade_caption` (the line under the axis explaining the shade); a row may set
       `decimals` (default: the most decimal places among its three values);
     - percentiles: rows of {label, values: [{name, value}], optional max_label}, on one
-      shared axis from zero, optional `note` (see _percentile_rows).
+      shared axis from zero, optional `note` (see _percentile_rows);
+    - xy: line, point or step series on two numeric axes (see _xy).
     """
     kind = _get(ch, "type", str, where)
     if kind not in CHART_TYPES:
@@ -316,6 +320,8 @@ def _chart(ch, where):
             _ghost(ch, where)
     elif kind == "percentiles":
         _percentile_rows(ch, where)
+    elif kind == "xy":
+        _xy(ch, where)
     else:
         for i, it in enumerate(_items(ch, "items", where, fields=("label",))):
             _get(it, "value", float, f"{where}.items[{i}]")
@@ -399,6 +405,101 @@ def _percentile_rows(ch, where):
             if _get(m, "value", float, f"{w}.max_label") < top:
                 raise ContentError(f"{w}.max_label.value {m['value']} is below the row's "
                                    f"highest percentile {top}")
+
+
+def _finite(d, key, where):
+    v = _get(d, key, float, where)
+    if not math.isfinite(v):
+        raise ContentError(f"{where}.{key} must be a finite number")
+    return v
+
+
+def _label(d, key, where):
+    if not _get(d, key, str, where).strip():
+        raise ContentError(f"{where}.{key} is empty")
+
+
+def _log_x(x, x_log, where):
+    if x_log and x <= 0:
+        raise ContentError(f"{where}.x is {x:g}; a log x axis needs every x > 0")
+
+
+def _numeric_frame(ch, where):
+    """Fields `xy` and `scatter` share: x_label, y_label, optional bools x_log and
+    y_from_zero, optional `note`, and optional `refs` [{x or y: number, label}] (dashed
+    reference lines). Returns x_log."""
+    _label(ch, "x_label", where)
+    _label(ch, "y_label", where)
+    for f in ("x_log", "y_from_zero"):
+        if f in ch:
+            _get(ch, f, bool, where)
+    x_log = ch.get("x_log", False)
+    _opt_str(ch, "note", where)
+    for i, r in enumerate(_get(ch, "refs", list, where) if "refs" in ch else []):
+        w = f"{where}.refs[{i}]"
+        axes = [k for k in ("x", "y") if isinstance(r, dict) and k in r]
+        if len(axes) != 1:
+            raise ContentError(f"{w}: needs exactly one of 'x' or 'y'")
+        v = _finite(r, axes[0], w)
+        if axes[0] == "x":
+            _log_x(v, x_log, w)
+        _label(r, "label", w)
+    return x_log
+
+
+def _xy(ch, where):
+    """series: 1 to 6 of {name (unique), points: [{x, y, optional lo, hi}] with x sorted
+    ascending (equal x allowed) and lo <= y <= hi, optional style 'line' | 'points' |
+    'step' (default line), optional axis 'left' | 'right'}; optional `bands`
+    [{y_lo < y_hi, label}] (on the left axis); optional y_axes 'single' | 'dual' (dual
+    needs `y2_label`, optional `y2_unit`, and a series on each axis)."""
+    x_log = _numeric_frame(ch, where)
+    axes = ch.get("y_axes", "single")
+    if axes not in ("single", "dual"):
+        raise ContentError(f"{where}.y_axes must be 'single' or 'dual'")
+    names, sides = set(), set()
+    for i, s in enumerate(_items(ch, "series", where, at_most=MAX_SERIES, fields=("name",))):
+        w = f"{where}.series[{i}]"
+        _label(s, "name", w)
+        if s["name"] in names:
+            raise ContentError(f"{w}: duplicate series name '{s['name']}'")
+        names.add(s["name"])
+        if s.get("style", "line") not in SERIES_STYLES:
+            raise ContentError(f"{w}.style '{s['style']}' not in {SERIES_STYLES}")
+        side = s.get("axis", "left")
+        if side not in ("left", "right"):
+            raise ContentError(f"{w}.axis must be 'left' or 'right'")
+        if side == "right" and axes != "dual":
+            raise ContentError(f"{w}: the right axis needs y_axes 'dual'")
+        sides.add(side)
+        last = None
+        for j, p in enumerate(_items(s, "points", w)):
+            wp = f"{w}.points[{j}]"
+            x, y = _finite(p, "x", wp), _finite(p, "y", wp)
+            _log_x(x, x_log, wp)
+            lo = _finite(p, "lo", wp) if "lo" in p else y
+            hi = _finite(p, "hi", wp) if "hi" in p else y
+            if not lo <= y <= hi:
+                raise ContentError(f"{wp}: needs lo <= y <= hi, got {lo:g}, {y:g}, {hi:g}")
+            if last is not None and x < last:
+                raise ContentError(f"{w} '{s['name']}': x must be sorted ascending; "
+                                   f"{x:g} comes after {last:g}")
+            last = x
+    if axes == "dual":
+        _label(ch, "y2_label", where)
+        _opt_str(ch, "y2_unit", where)
+        if sides != {"left", "right"}:
+            raise ContentError(f"{where}: a dual chart needs at least one series on each axis")
+    else:
+        for f in ("y2_label", "y2_unit"):
+            if f in ch:
+                raise ContentError(f"{where}.{f} needs y_axes 'dual'")
+    for i, b in enumerate(_get(ch, "bands", list, where) if "bands" in ch else []):
+        w = f"{where}.bands[{i}]"
+        lo, hi = _finite(b, "y_lo", w), _finite(b, "y_hi", w)
+        if not lo < hi:
+            raise ContentError(f"{w}: needs y_lo < y_hi, got {lo:g}, {hi:g}")
+        _label(b, "label", w)
 
 
 def _view(v, where, allowed):

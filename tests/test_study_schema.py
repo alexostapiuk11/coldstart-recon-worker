@@ -575,3 +575,93 @@ def test_phase_rules_apply_to_artifacts_only_and_opt_in_by_phase_or_milestone():
     u = artifact_unit()
     u["flow"][0].update(output="a thing", when="2026-09-01")  # neither phase nor milestone
     validate(u)
+
+
+# ---- xy chart ----
+
+from tests.study_examples import xy_chart
+
+
+def _with(chart):
+    u = artifact_unit()
+    u["results"][0]["chart"] = chart
+    return u
+
+
+def test_xy_chart_validates_with_every_option():
+    validate(_with(xy_chart()))
+    validate(_with(xy_chart(
+        x_log=True, y_from_zero=False, note="A note.", y_axes="dual", y2_label="throughput",
+        y2_unit="req/s", bands=[{"y_lo": 2, "y_hi": 4, "label": "tolerance"}],
+        refs=[{"y": 1.0, "label": "curve's host"}, {"x": 64, "label": "cap"}],
+        series=[{"name": "a", "points": [{"x": 1, "y": 0.28}, {"x": 128, "y": 0.61}]},
+                {"name": "b", "axis": "right", "style": "step",
+                 "points": [{"x": 1, "y": 3.5}, {"x": 128, "y": 204.4}]}])))
+
+
+def test_xy_series_names_are_unique_and_styles_known():
+    series = xy_chart()["series"]
+    _fails(_with(xy_chart(series=[series[0], dict(series[1], name="measured")])),
+           r"series\[1\]: duplicate series name 'measured'")
+    _fails(_with(xy_chart(series=[dict(series[0], style="area")])),
+           r"series\[0\]\.style 'area' not in")
+    _fails(_with(xy_chart(series=[])), r"series: needs 1 to 6 items")
+
+
+def test_xy_numbers_are_finite_sorted_and_whiskers_bracket_y():
+    c = xy_chart()
+    c["series"][0]["points"][1]["y"] = float("nan")
+    _fails(_with(c), r"series\[0\]\.points\[1\]\.y must be a finite number")
+    c = xy_chart()
+    c["series"][0]["points"][1]["x"] = 150
+    _fails(_with(c), r"series\[0\] 'measured': x must be sorted ascending; 100 comes after 150")
+    c = xy_chart()
+    c["series"][1]["points"][0]["lo"] = 1.2
+    _fails(_with(c), r"series\[1\]\.points\[0\]: needs lo <= y <= hi, got 1.2, 1, 1.5")
+    c = xy_chart()
+    c["series"][0]["points"][0]["x"] = "zero"
+    _fails(_with(c), r"points\[0\]\.x: expected float")
+
+
+def test_xy_equal_x_values_are_allowed():
+    c = xy_chart()
+    c["series"][1]["points"] = [{"x": 64, "y": 0.875}, {"x": 64, "y": 0.871}]
+    validate(_with(c))
+
+
+def test_xy_log_axis_needs_positive_x():
+    _fails(_with(xy_chart(x_log=True)), r"points\[0\]\.x is 0; a log x axis needs every x > 0")
+    c = xy_chart(x_log=True, refs=[{"x": 0, "label": "zero"}])
+    for s in c["series"]:
+        s["points"] = [dict(p, x=p["x"] + 1) for p in s["points"]]
+    _fails(_with(c), r"refs\[0\]\.x is 0; a log x axis needs every x > 0")
+
+
+def test_xy_bands_and_refs_are_checked():
+    _fails(_with(xy_chart(bands=[{"y_lo": 4, "y_hi": 4, "label": "b"}])),
+           r"bands\[0\]: needs y_lo < y_hi, got 4, 4")
+    _fails(_with(xy_chart(bands=[{"y_lo": 1, "y_hi": 4, "label": " "}])),
+           r"bands\[0\]\.label is empty")
+    _fails(_with(xy_chart(refs=[{"x": 1, "y": 2, "label": "r"}])),
+           r"refs\[0\]: needs exactly one of 'x' or 'y'")
+    _fails(_with(xy_chart(refs=[{"y": 2}])), r"refs\[0\]: missing 'label'")
+
+
+def test_xy_dual_axes_need_y2_label_and_a_series_on_each_side():
+    c = xy_chart(y_axes="dual")
+    c["series"][1]["axis"] = "right"
+    _fails(_with(c), r"missing 'y2_label'")
+    _fails(_with(xy_chart(y_axes="dual", y2_label="other")),
+           r"a dual chart needs at least one series on each axis")
+    c = xy_chart()
+    c["series"][1]["axis"] = "right"
+    _fails(_with(c), r"series\[1\]: the right axis needs y_axes 'dual'")
+    _fails(_with(xy_chart(y_axes="triple")), r"y_axes must be 'single' or 'dual'")
+    _fails(_with(xy_chart(y2_label="x")), r"y2_label needs y_axes 'dual'")
+
+
+def test_xy_needs_axis_labels():
+    c = xy_chart()
+    del c["x_label"]
+    _fails(_with(c), r"missing 'x_label'")
+    _fails(_with(xy_chart(y_label="")), r"y_label is empty")

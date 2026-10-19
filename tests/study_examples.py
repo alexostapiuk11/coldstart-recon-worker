@@ -197,3 +197,17 @@ def prereq_unit() -> dict:
         "sources": [{"file": "docs/post.md", "section": "Where a vLLM cold start actually goes"}],
         "derived_numbers": [],
     })
+
+
+def xy_chart(**extra) -> dict:
+    """An `xy` chart: a line through (0, 0), (50, 5), (100, 10) and a points series with
+    a whisker on its first point."""
+    return copy.deepcopy(dict({
+        "type": "xy", "unit": "s", "x_label": "requests in flight", "y_label": "latency",
+        "series": [
+            {"name": "measured", "points": [{"x": 0, "y": 0}, {"x": 50, "y": 5},
+                                            {"x": 100, "y": 10}]},
+            {"name": "model", "style": "points",
+             "points": [{"x": 0, "y": 1, "lo": 0.5, "hi": 1.5}, {"x": 100, "y": 8}]},
+        ],
+    }, **extra))

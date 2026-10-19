@@ -531,6 +531,9 @@ def chart_html(chart: dict, uid: str, slots: dict[str, int] | None = None) -> st
         return interval_html(chart)
     if chart["type"] == "percentiles":
         return percentiles_html(chart)
+    if chart["type"] == "xy":
+        from study.xy import xy_html  # study.xy imports this module's helpers
+        return xy_html(chart)
     unit = esc(chart["unit"])
     stacked = chart["type"] == "stacked_bars"
     if stacked:

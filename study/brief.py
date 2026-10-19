@@ -108,6 +108,46 @@ def _commit(e):
     return f"{e['commit']}{repo}{note}"
 
 
+def _axes_line(ch):
+    """'- Axes: x is <x_label> (log scale); y is <y_label> (<unit>)[; right y is ...]'."""
+    x = ch["x_label"] + (" (log scale)" if ch.get("x_log") else "")
+    unit = f" ({ch['unit']})" if ch["unit"] else ""
+    line = f"- Axes: x is {x}; y is {ch['y_label']}{unit}"
+    if ch.get("y_axes") == "dual":
+        line += f"; right y is {ch['y2_label']} ({ch.get('y2_unit', ch['unit'])})"
+    return line
+
+
+def _refs_lines(ch):
+    out = []
+    for r in ch.get("refs", []):
+        at = f"x = {r['x']}" if "x" in r else f"y = {r['y']} {ch['unit']}".rstrip()
+        out.append(f"- Reference: {r['label']} at {at}")
+    return out
+
+
+def _xy_lines(ch):
+    """The axes, then each series as 'x: y' pairs (whiskers as '(lo to hi)'), its bands,
+    reference lines and note."""
+    out = [_axes_line(ch)]
+    for s in ch["series"]:
+        tags = [t for t in (s.get("style") if s.get("style", "line") != "line" else None,
+                            f"right axis, {ch.get('y2_unit', ch['unit'])}"
+                            if s.get("axis") == "right" else None) if t]
+        head = s["name"] + (f" ({', '.join(tags)})" if tags else "")
+        pairs = ", ".join(f"{p['x']}: {p['y']}" + (f" ({p.get('lo', p['y'])} to "
+                                                   f"{p.get('hi', p['y'])})"
+                                                   if "lo" in p or "hi" in p else "")
+                          for p in s["points"])
+        out.append(f"- {head}: {pairs}")
+    for b in ch.get("bands", []):
+        out.append(f"- Band: {b['label']}, {b['y_lo']} to {b['y_hi']} {ch['unit']}".rstrip())
+    out += _refs_lines(ch)
+    if ch.get("note"):
+        out.append(f"- Note: {ch['note']}")
+    return out
+
+
 def _bullets(items):
     return "\n".join(f"- {i}" for i in items)
 
@@ -194,6 +234,8 @@ def render_brief(c: dict) -> str:
                     out.append(f"- {row['label']}: {vals} ({ch['unit']}){tail}")
                 if ch.get("note"):
                     out.append(f"- Note: {ch['note']}")
+            elif ch["type"] == "xy":
+                out += _xy_lines(ch)
             elif ch["type"] == "interval":
                 for row in ch["rows"]:
                     out.append(f"- {row['label']}: {row['estimate']} {ch['unit']} "
