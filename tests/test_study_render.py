@@ -654,3 +654,15 @@ def test_prereq_brief_titles_its_views_without_c4():
     brief = render_brief(prereq_unit())
     assert "\n## Views\n" in brief and "(C4)" not in brief
     assert "\n## System views (C4)\n" in render_brief(artifact_unit())
+
+
+def test_phone_list_keeps_focus_emphasis_and_marks_external_nodes():
+    out = diagram_html(artifact_unit()["views"][0], "u")
+    text = out.split('class="diagram-text"')[1].split("<ol>")[0]
+    items = re.findall(r"<li>(.*?)</li>", text)
+    # Author is a person, Harness the focus, GPU worker external
+    assert items[1].startswith('<strong>Harness</strong> <small class="kmark">key step</small>')
+    assert items[2].startswith("GPU worker <small>(external)</small>")
+    assert "<strong>" not in items[0] and "<strong>" not in items[2]
+    from study.page import CSS
+    assert ".kmark{" in CSS

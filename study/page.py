@@ -69,7 +69,9 @@ background:var(--card);color:var(--fg);border-radius:8px;cursor:pointer}
 .tabs button[aria-selected="true"]{background:var(--soft);border-color:var(--accent);
 font-weight:600}
 .diagram{width:100%;height:auto;display:block}
-.diagram-text{display:none;font-size:15px}
+.diagram-text{display:none;font-size:15px}.diagram-text small{color:var(--muted);font-size:13px}
+.diagram-text .kmark{color:var(--accent);font-weight:600;text-transform:uppercase;letter-spacing:.04em;font-size:11px}
+.kmark{white-space:nowrap}
 .edge{stroke:var(--muted);stroke-width:1.5}.arrow{fill:var(--muted)}
 .elabel{font-size:11px;fill:var(--muted);paint-order:stroke;stroke:var(--card);stroke-width:4px}
 .node rect{fill:var(--card);stroke:var(--accent);stroke-width:1.5}

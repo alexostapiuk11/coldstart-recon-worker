@@ -78,7 +78,16 @@ def diagram_html(view: dict, uid: str) -> str:
     text = ['<div class="diagram-text"><ul>']
     for n in nodes.values():
         sub = f" — {esc(n['sub'])}" if n.get("sub") else ""
-        text.append(f'<li><strong>{esc(n["label"])}</strong>{sub}</li>')
+        kind = n.get("kind", "system")
+        # The list keeps the diagram's emphasis: the focus is bold and marked, an
+        # external system says so (on the SVG that is a dashed border).
+        if kind == "focus":
+            name = f'<strong>{esc(n["label"])}</strong> <small class="kmark">key step</small>'
+        elif kind == "external":
+            name = f"{esc(n['label'])} <small>(external)</small>"
+        else:
+            name = esc(n["label"])
+        text.append(f"<li>{name}{sub}</li>")
     text.append("</ul><ol>")
     for e in edges:
         lab = f": {esc(e['label'])}" if e.get("label") else ""
