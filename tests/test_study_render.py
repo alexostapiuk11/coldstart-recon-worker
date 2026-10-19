@@ -1472,3 +1472,74 @@ def test_brief_phased_flow_is_numbered_and_grouped_by_phase():
     assert lines[j + 1:j + 3] == ["   - Output: failure rows kept next to the successes",
                                   "   - When: 2026-09-04"]
     assert not lines[j + 3].startswith("   - ")
+
+
+# ---- flow evidence: not numeric claims, and every commit must exist ----
+
+import subprocess
+
+from study.trace import missing_commits
+
+
+def test_evidence_shas_and_dates_are_not_numeric_claims(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\nnothing numeric\n")
+    u = artifact_unit_with_flow()
+    u["results"] = []
+    u["sources"] = [{"file": src, "section": "Title"}]
+    u["flow"][1]["when"] = "14.09.2026"
+    u["flow"][1]["evidence"] = [{"commit": "a123456", "note": "run 812 stored"}]
+    u["flow"][1]["output"] = "a store of 812 rows"
+    assert untraced_numbers(u) == ["812"]  # the output is a claim; the when and evidence are not
+
+
+def _repo(tmp_path):
+    repo = Path(tmp_path) / "repo"
+    repo.mkdir()
+    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+           "GIT_COMMITTER_EMAIL": "t@t", "HOME": str(tmp_path), "PATH": "/usr/bin:/bin"}
+
+    def git(*args):
+        return subprocess.run(["git", "-C", str(repo), *args], check=True, env=env,
+                              capture_output=True, text=True).stdout.strip()
+    git("init", "-q")
+    (repo / "f.txt").write_text("x\n")
+    git("add", "f.txt")
+    git("commit", "-q", "-m", "one")
+    return repo, git("rev-parse", "HEAD"), git("rev-parse", "HEAD:f.txt")
+
+
+def _cite(*evidence):
+    u = artifact_unit_with_flow()
+    for s in u["flow"]:
+        s.pop("evidence", None)
+    u["flow"][1]["evidence"] = list(evidence)
+    return u
+
+
+def test_missing_commits_finds_real_commits_and_flags_the_rest(tmp_path):
+    repo, head, blob = _repo(tmp_path)
+    u = _cite({"commit": head[:7]}, {"commit": head, "repo": str(repo)},
+              {"commit": "deadbee"}, {"commit": blob, "repo": str(repo)})
+    missing, unavailable = missing_commits(u, repo)
+    assert missing == [f"deadbee in {repo}", f"{blob} in {repo}"]  # a blob is not a commit
+    assert unavailable == []
+
+
+def test_missing_commits_expands_the_home_tilde(tmp_path, monkeypatch):
+    _, head, _ = _repo(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert missing_commits(_cite({"commit": head, "repo": "~/repo"}), Path("/")) == ([], [])
+
+
+def test_missing_commits_reports_what_it_cannot_check(tmp_path, monkeypatch):
+    repo, head, _ = _repo(tmp_path)
+    plain = Path(tmp_path) / "plain"
+    plain.mkdir()
+    u = _cite({"commit": head, "repo": str(tmp_path / "gone")},
+              {"commit": head, "repo": str(plain)}, {"commit": head})
+    missing, unavailable = missing_commits(u, repo)
+    assert missing == []
+    assert unavailable == [f"{tmp_path / 'gone'}: no such directory",
+                           f"{plain}: not a git repository"]
+    monkeypatch.setattr("study.trace.shutil.which", lambda name: None)
+    assert missing_commits(u, repo) == ([], ["git is not on PATH"])

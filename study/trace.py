@@ -3,16 +3,24 @@
 A number counts if it has a decimal point or three or more digits (small integers such
 as "three arms" are prose), and is not a year. It is traced if the same digits appear in
 one of the unit's source files, or if the unit declares it in `derived_numbers` with a
-reason. Section citations must be exact substrings of their file.
+reason. A flow step's `when` and `evidence` (dates, commit shas, notes on commits) are not
+numeric claims and are not scanned. Section citations must be exact substrings of their
+file.
+
+Evidence commits are checked separately (missing_commits): each must exist in its repo.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
+# Keys whose strings are never numeric claims.
+NOT_CLAIMS = ("sources", "derived_numbers", "links", "when", "evidence")
 
 
 def _normalise(token: str) -> str:
@@ -33,7 +41,7 @@ def _strings(node):
         yield node
     elif isinstance(node, dict):
         for k, v in node.items():
-            if k not in ("sources", "derived_numbers", "links"):
+            if k not in NOT_CLAIMS:
                 yield from _strings(v)
     elif isinstance(node, list):
         for v in node:
@@ -80,6 +88,44 @@ def untraced_numbers(content: dict) -> list[str]:
 def missing_sections(content: dict) -> list[str]:
     return [f"{s['file']}: {s['section']}" for s in content["sources"]
             if s["section"] not in _read(s["file"])]
+
+
+def evidence_commits(content: dict) -> list[tuple[str | None, str]]:
+    """(repo or None for this repo, sha) for every evidence commit in the flow."""
+    return [(e.get("repo"), e["commit"]) for s in content.get("flow", [])
+            for e in s.get("evidence", [])]
+
+
+def missing_commits(content: dict, root: Path) -> tuple[list[str], list[str]]:
+    """(missing, unavailable): evidence commits that are not commits in their repo, as
+    "<sha> in <repo>", and why some could not be checked (git not on PATH, a repo path
+    that does not exist or is not a git repository). A repo defaults to `root`; '~'
+    expands to the home directory."""
+    if shutil.which("git") is None:
+        return [], ["git is not on PATH"]
+    missing, unavailable, usable = [], [], {}
+    for repo, sha in evidence_commits(content):
+        path = Path(repo).expanduser() if repo else Path(root)
+        if path not in usable:
+            usable[path] = _git_repo(path)
+            if usable[path]:
+                unavailable.append(f"{path}: {usable[path]}")
+        if usable[path]:
+            continue
+        found = subprocess.run(["git", "-C", str(path), "cat-file", "-e", f"{sha}^{{commit}}"],
+                               capture_output=True, check=False).returncode == 0
+        if not found:
+            missing.append(f"{sha} in {path}")
+    return missing, unavailable
+
+
+def _git_repo(path: Path) -> str:
+    """Why `path` cannot be checked, or "" when it is a git repository."""
+    if not path.is_dir():
+        return "no such directory"
+    ok = subprocess.run(["git", "-C", str(path), "rev-parse", "--git-dir"],
+                        capture_output=True, check=False).returncode == 0
+    return "" if ok else "not a git repository"
 
 
 def load(unit_dir: Path) -> dict:
