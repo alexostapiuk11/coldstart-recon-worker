@@ -43,7 +43,7 @@ def cell_text(cell: dict) -> str:
 
 def _head(h: dict) -> str:
     sub = f"<small>{esc(h['sub'])}</small>" if h.get("sub") else ""
-    return f"{esc(h['label'])}{sub}"
+    return f'<span class="mxl">{esc(h["label"])}</span>{sub}'  # a label never breaks
 
 
 def matrix_html(chart: dict) -> str:

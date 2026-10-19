@@ -2316,7 +2316,7 @@ def test_sequence_viewbox_fits_every_text_and_grows_with_the_sq_steps():
     out = sequence_html(v, "s7")
     w, h = _box(out)
     for cls, x, y, anchor, txt in _texts(out):
-        cw = {"sqh": 8.6, "sqtext": 6.8, "sqsub": 6.8, "sqbt": 7.3}.get(cls.split()[0], 7.4)
+        cw = {"sqh": 8.6, "sqtext": 7.0, "sqsub": 7.0, "sqbt": 7.3}.get(cls.split()[0], 7.4)
         tw = len(html.unescape(txt)) * cw
         left = {"end": x - tw, "middle": x - tw / 2}.get(anchor, x)
         assert left >= -0.5 and left + tw <= w + 0.5, txt
@@ -2410,9 +2410,10 @@ def test_matrix_is_a_real_table_with_scoped_headers():
     assert out.count("<table") == 1 and "<svg" not in out
     heads = re.findall(r'<th scope="col"[^>]*>(.*?)</th>', out)
     assert len(heads) == 4 and "trials" in heads[0]
-    assert heads[2].startswith("F4-con-t") and "<small>hook</small>" in heads[2]
+    assert heads[2] == '<span class="mxl">F4-con-t</span><small>hook</small>'
     rows = re.findall(r'<th scope="row">(.*?)</th>', out)
-    assert [re.sub(r"<small>.*", "", r) for r in rows] == ["N", "K", "I", "O+I"]
+    assert [re.sub(r"<[^>]+>", "", re.sub(r"<small>.*", "", r)) for r in rows] == [
+        "N", "K", "I", "O+I"]
     cells = _mx_cells(out)
     assert len(cells) == 12
     assert [col for _, col, _ in cells[:3]] == ["F1", "F4-con-t", "F5"]

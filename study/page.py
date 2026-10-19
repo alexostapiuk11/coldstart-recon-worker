@@ -310,6 +310,7 @@ MATRIX_CSS = """
 .mx{border-collapse:separate;border-spacing:3px;width:100%;font-size:14px;line-height:1.35}
 .mx th{font-weight:600;text-align:left;vertical-align:bottom;padding:4px 6px;color:var(--fg)}
 .mx th small,.mx td small{display:block;font-weight:400;color:var(--muted);font-size:12px}
+.mxl{white-space:nowrap}
 .mx tbody th{vertical-align:middle;white-space:nowrap}
 .mxunit{color:var(--muted);font-weight:400;font-size:12px}
 .mx td{padding:6px 8px;border-radius:5px;border:1px solid var(--line);vertical-align:middle;

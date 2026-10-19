@@ -21,7 +21,7 @@ from study.schema import SEQ_MARKS
 from study.text import esc, wrap
 
 CH_L = 7.4  # width allowance per character: 13 px step labels
-CH_T = 6.8  # 12 px text under an arrow, participant sub text
+CH_T = 7.0  # 12 px italic text under an arrow, participant sub text
 CH_B = 7.3  # 12 px bold badge words
 CH_H = 8.6  # 14 px bold participant names
 L = 44  # lifelines start right of the step-number column
@@ -183,11 +183,12 @@ def _geometry(view: dict):
             labels.append(_text("sqgap", mid, y + 19, s["label"], "middle"))
         elif kind == "note":
             a, b = sorted((col[s["from"]], col[s.get("to", s["from"])]))
-            lines = wrap(s["label"], NOTE_WRAP)
-            if s.get("text"):
-                lines += wrap(s["text"], NOTE_WRAP)
-            tw = max(len(line) for line in lines) * CH_L + 20
             span = xs[b] - xs[a] + (60 if b > a else 0)
+            chars = max(NOTE_WRAP, int((span - 20) / CH_L))  # a wide note wraps less
+            lines = wrap(s["label"], chars)
+            if s.get("text"):
+                lines += wrap(s["text"], chars)
+            tw = max(len(line) for line in lines) * CH_L + 20
             bw = max(tw, span)
             bx = max(L, (xs[a] + xs[b]) / 2 - bw / 2)
             right = max(right, bx + bw)
@@ -213,8 +214,8 @@ def _geometry(view: dict):
             x = xs[col[s["from"]]]
             lines = wrap(s["label"], WRAP)
             bw, tw = _below(s)
-            ry = y + 4
-            h = max(LINE * len(lines), 18) + (18 if bw or tw else 0) + 14
+            ry = y + 16  # number circles a row apart, as under a one-line message
+            h = max(LINE * len(lines), 18) + (18 if bw or tw else 0) + 28
             acts[s["from"]].append(ry)
             g.append(f'<path class="sqa sqself{_mark_cls(s)}" d="M{x:.1f} {ry:.1f}h{SELF_W}'
                      f'v14h-{SELF_W - 4}" marker-end="url(#{_marker(s)})"/>')
