@@ -85,9 +85,10 @@ def _with_unit(text: str, unit: str) -> str:
 
 class Axis:
     def __init__(self, lo: float, hi: float, ticks: list[float], log: bool = False,
-                 minor: list[float] | None = None):
+                 minor: list[float] | None = None, keep: list[float] | None = None):
         self.lo, self.hi, self.ticks, self.log = lo, hi, ticks, log
         self.minor = minor or []  # unlabelled ticks (a log y axis' 2 to 9 per decade)
+        self.keep = keep or []  # when given, the only ticks that are labelled
 
     def frac(self, v: float) -> float:
         if self.log:
@@ -142,10 +143,21 @@ def _pow2(v: float) -> bool:
     return v > 0 and abs(math.log2(v) - round(math.log2(v))) < 1e-9
 
 
+def _on125(v: float) -> bool:
+    """Whether v is 1, 2 or 5 times a power of ten."""
+    m = v / 10.0 ** math.floor(math.log10(v) + 1e-9)
+    return any(abs(m - k) < 1e-6 for k in (1, 2, 5))
+
+
+KEEP_MAX = 6  # up to this many distinct data x on the 1-2-5 grid are each labelled
+
+
 def log_axis(values: list[float], data: list[float]) -> Axis:
     """A log axis over the values. Ticks at each power of two when every data x is one
     (a doubling sweep: 1, 2, 4, ... 128), else at 1, 2 and 5 times each power of ten
-    (only the powers of ten when that gives more than seven)."""
+    (only the powers of ten when that gives more than seven). When the data has at most
+    six distinct x values, all on that 1-2-5 grid, each is a tick and only those are
+    labelled (`keep`): the ticks between them stay as unlabelled marks."""
     lo, hi = min(values), max(values)
     if hi / lo < 1.0001:
         lo, hi = lo / 2, hi * 2
@@ -158,6 +170,10 @@ def log_axis(values: list[float], data: list[float]) -> Axis:
                  for m in (1, 2, 5) if lo * (1 - 1e-9) <= m * 10.0 ** e <= hi * (1 + 1e-9)]
         if len(ticks) > 7:
             ticks = [t for t in ticks if abs(math.log10(t) - round(math.log10(t))) < 1e-9]
+        distinct = sorted(set(data))
+        if len(distinct) <= KEEP_MAX and all(_on125(v) for v in distinct):
+            ticks = sorted(set(ticks) | set(distinct))
+            return Axis(lo, hi, ticks, log=True, keep=distinct)
     if len(ticks) < 2:
         ticks = sorted(set(ticks) | {lo, hi})
     return Axis(lo, hi, ticks, log=True)
@@ -333,6 +349,7 @@ class Frame:
         for t in self.ya2.ticks if self.ya2 else []:
             self._label("axlabel xyt", self.pr + 6, self.y2(t) + 4, plain(t), "start")
         right_edge = 0.0
+        shown = self._x_labels() if self.xa.keep else None
         for t in self.xa.ticks:
             cx = self.x(t)
             self.back.append(f'<line class="xytick" x1="{cx:.1f}" y1="{self.pb:.1f}" '
@@ -340,7 +357,10 @@ class Frame:
             text = plain(t)
             ax = _fit(cx, text, W)
             box = text_box(ax, self.pb + LINE, text, "middle")
-            if box[0] >= right_edge + 4:  # thin out labels that would touch
+            if shown is not None:
+                if t in shown:
+                    self._label("axlabel xyt", ax, self.pb + LINE, text, "middle")
+            elif box[0] >= right_edge + 4:  # thin out labels that would touch
                 self._label("axlabel xyt", ax, self.pb + LINE, text, "middle")
                 right_edge = box[2]
         xt = chart["x_label"] + (" (log scale)" if chart.get("x_log") else "")
@@ -363,6 +383,20 @@ class Frame:
                 (self.pl + 6, ry - 5, "start"), (self.pl + 6, ry + 15, "start"),
                 ((self.pl + self.pr) / 2, ry - 5, "middle"),
                 ((self.pl + self.pr) / 2, ry + 15, "middle")]))
+
+    def _x_labels(self) -> set[float]:
+        """The x ticks to label when the axis keeps the data's own x values: only those
+        (each that clears the ones already chosen by 4 units); the 1-2-5 ticks between
+        them stay as unlabelled tick marks."""
+        chosen: list[tuple] = []
+        out = set()
+        for t in self.xa.keep:
+            text = plain(t)
+            box = text_box(_fit(self.x(t), text, W), 0, text, "middle")
+            if all(box[0] >= b[2] + 4 or box[2] + 4 <= b[0] for b in chosen):
+                chosen.append(box)
+                out.add(t)
+        return out
 
     def x(self, v: float) -> float:
         return self.pl + PAD + self.xa.frac(v) * (self.pr - self.pl - 2 * PAD)

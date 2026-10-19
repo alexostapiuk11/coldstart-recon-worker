@@ -2497,3 +2497,42 @@ def test_matrix_text_is_traced(tmp_path):
     c["cols"][0]["label"] = "F 760"
     u["results"][0]["chart"] = c
     assert sorted(untraced_numbers(u)) == ["123", "4.5", "760"]
+
+
+def _x_tick_labels(out):
+    return [t[4] for t in _texts(out) if "xyt" in t[0] and t[3] == "middle"]
+
+
+def _x_tick_marks(out):
+    return len(re.findall(r'<line class="xytick" x1', out))
+
+
+def test_xy_log_x_labels_every_data_x_on_a_1_2_5_grid():
+    # A7's F2: data at 10,000, 100,000 and 500,000 per second
+    c = xy_chart(x_log=True, series=[{"name": "a", "points": [
+        {"x": 10000, "y": 1}, {"x": 100000, "y": 2}, {"x": 500000, "y": 3}]}])
+    out = chart_html(c, "t0")
+    assert _x_tick_labels(out) == ["10,000", "100,000", "500,000"]
+    assert _x_tick_marks(out) == 6  # 20,000, 50,000 and 200,000 stay as unlabelled ticks
+    # the data's own x values survive even where the 1-2-5 ticks thin to powers of ten
+    c = xy_chart(x_log=True, series=[{"name": "a", "points": [
+        {"x": x, "y": 1} for x in (2, 20, 200, 5000)]}])
+    assert _x_tick_labels(chart_html(c, "t1")) == ["2", "20", "200", "5,000"]
+    _xy_texts_inside(chart_html(c, "t1"))
+
+
+def test_xy_log_x_off_the_grid_or_with_many_values_keeps_1_2_5_ticks():
+    c = xy_chart(x_log=True, series=[{"name": "a", "points": [
+        {"x": x, "y": 1} for x in (3, 30, 300)]}])
+    assert _x_tick_labels(chart_html(c, "t2")) == ["5", "10", "20", "50", "100", "200"]
+    many = (1, 2, 4, 8, 16, 24, 32, 48, 64, 128)  # A4's sweep: not all powers of two
+    c = xy_chart(x_log=True, series=[{"name": "a", "points": [{"x": x, "y": 1} for x in many]}])
+    assert _x_tick_labels(chart_html(c, "t3")) == ["1", "2", "5", "10", "20", "50", "100"]
+
+
+def test_scatter_log_x_labels_every_data_x_on_a_1_2_5_grid():
+    c = scatter_chart(x_log=True, groups=[{"name": "a", "points": [
+        {"x": 5000, "y": 1}, {"x": 20000, "y": 2}]}])
+    del c["frontier"]
+    out = chart_html(c, "t4")
+    assert _x_tick_labels(out) == ["5,000", "20,000"] and _x_tick_marks(out) == 3
