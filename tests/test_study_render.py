@@ -613,3 +613,21 @@ def test_brief_relationships_only_with_links():
     assert "- `d0` Decision 0 uses Arm: d0 is built on arms." in rel
     assert "- A result → `d0` Decision 0, `d1` Decision 1" in rel
     assert "- A side result → no decision: Reported for completeness; no decision rests on it." in rel
+
+
+# ---- comprehension-review fixes ----
+
+def test_concept_cards_are_wide_and_stack_each_label_above_its_text():
+    from study.page import CSS
+    from tests.study_examples import prereq_unit
+    # 360 px minimum: three columns in the 1448 px content box of a 1560 px page, not four.
+    assert ".cgrid{grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr))}" in CSS
+    assert ".crow b{display:block;" in CSS
+    concepts = render_page(prereq_unit()).split('<section id="concepts">')[1].split("</section>")[0]
+    assert '<div class="grid cgrid">' in concepts
+    assert 'class="row"' not in concepts
+    assert concepts.count('<div class="crow"><b>Like</b>') == 3
+    assert concepts.count('<div class="crow"><b>Matters</b>') == 3
+    # decision cards keep their side-by-side rows
+    decisions = render_page(artifact_unit()).split('<section id="decisions">')[1]
+    assert '<div class="row"><b>Problem</b>' in decisions

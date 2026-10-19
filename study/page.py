@@ -53,6 +53,9 @@ padding:14px 16px;margin:10px 0}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr));gap:12px;align-items:start}
 .grid2>.card{margin:0}
 .grid>.card{margin:0}
+.cgrid{grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr))}
+.crow{margin:10px 0 0}.crow b{display:block;color:var(--muted);font-weight:600;font-size:13px;
+text-transform:uppercase;letter-spacing:.05em;margin-bottom:1px}
 .why{color:var(--muted);font-size:14px}
 .row{display:grid;grid-template-columns:104px 1fr;gap:10px;margin:6px 0;align-items:baseline}
 .row b{color:var(--muted);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
@@ -151,13 +154,14 @@ def _concepts(c):
     for t in c["concepts"]:
         extra = ""
         if t.get("analogy"):
-            extra += f'<div class="row"><b>Like</b><div>{inline(t["analogy"])}</div></div>'
+            extra += f'<div class="crow"><b>Like</b><div>{inline(t["analogy"])}</div></div>'
         if t.get("why"):
-            extra += f'<div class="row"><b>Matters</b><div>{inline(t["why"])}</div></div>'
+            extra += f'<div class="crow"><b>Matters</b><div>{inline(t["why"])}</div></div>'
         cards.append(f'<div class="card"><h3>{esc(t["term"])}</h3>'
                      f'<div>{inline(t["plain"])}</div>{extra}</div>')
     title = "Need to know first" if c["kind"] == "artifact" else "The ideas"
-    return f'<section id="concepts"><h2>{title}</h2><div class="grid">{"".join(cards)}</div></section>'
+    return (f'<section id="concepts"><h2>{title}</h2>'
+            f'<div class="grid cgrid">{"".join(cards)}</div></section>')
 
 
 def _views(c):
