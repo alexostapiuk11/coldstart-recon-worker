@@ -13,7 +13,7 @@
   "concepts": [
     {
       "term": "GPU memory (HBM)",
-      "plain": "The GPU's own fast memory, separate from the computer's RAM, and fixed in size. Three things share it: the model **weights**, **scratch space** for one forward pass, and the **KV cache**.",
+      "plain": "The GPU's own fast memory, separate from the computer's RAM, and fixed in size. Three main things share it: the model **weights**, **scratch space** for one forward pass, and the **KV cache**.",
       "analogy": "A fixed-size desk: the reference book takes most of it, a work area stays clear, and the rest holds open notebooks, one per conversation.",
       "why": "What is left after weights and scratch is the cache, so \"how much memory is left\" and \"how many users can I serve\" are the same question. Artifact 1 used a 24 GB RTX 4090."
     },
@@ -21,13 +21,13 @@
       "term": "Weights",
       "plain": "The model's learned numbers. They must be on the GPU before it can answer anything. An 8B model at 2 bytes per parameter is about 16 GB.",
       "analogy": "The reference book: big, never edited, and it has to be on the desk before work starts.",
-      "why": "Moving those 16 GB is the biggest piece of a cold start: with weights downloaded from the hub, loading took a median 45.83 s in artifact 1. Weights never change, so a weight cache stays valid until you switch models."
+      "why": "The weight phase (download plus load into HBM) is the biggest piece of a cold start on a host that already has the image: a median 45.83 s in artifact 1's arm A. Part of that phase changes with the compile cache, so not all of it is moving bytes. Weights never change, so a weight cache stays valid until you switch models."
     },
     {
       "term": "KV cache",
       "plain": "When generating, the model re-reads everything written so far. To avoid recomputing it, it stores the **keys (K) and values (V)** for every token. Only K and V are cached; Q is not.",
       "analogy": "A notebook per conversation that gains a line with every token. The desk only has room for so many open notebooks.",
-      "why": "Each active request holds cache in proportion to its length, so **the cache size divides into a number of concurrent requests**. Run out and new requests queue. In artifact 1, 35,792 tokens of cache at 8192 context meant 4 requests at once."
+      "why": "Each active request holds cache in proportion to its length, so **the cache size divides into a number of concurrent requests**. Run out and new requests wait. In artifact 1 with a cold compile cache, 35,792 tokens of cache fit 4 requests at the full 8192-token context (5 with a warm compile cache); shorter requests fit more, which is how artifact 2 ran 128 in flight."
     },
     {
       "term": "vLLM",
@@ -38,8 +38,8 @@
     {
       "term": "Continuous batching",
       "plain": "Serving many users' requests through one copy of the model at once. A fresh replica takes work the instant it reports ready.",
-      "analogy": "One bus instead of a taxi each: far more riders per hour, each trip a bit slower, and a fixed number of seats (the KV cache).",
-      "why": "It shapes artifact 2's service curve: from 1 to 128 requests in flight per replica, throughput rises and bends while latency rises gently; at 256 the engine ran out of GPU memory. It also means a just-ready replica serves real users at once."
+      "analogy": "One bus instead of a taxi each: more riders per hour, each trip a bit slower, and riders get on and off at every stop. Floor space (the KV cache) is fixed, so how many fit depends on what each rider carries.",
+      "why": "Artifact 2 measured one replica serving 1 to 128 requests in flight: throughput rises and bends while latency rises gently. At 256 the engine died of CUDA out of memory at its first step (post-a2 does not say why). A just-ready replica serves real users at once."
     },
     {
       "term": "Cold start",
@@ -49,15 +49,15 @@
     },
     {
       "term": "Serverless GPUs",
-      "plain": "You rent GPU replicas that are added when traffic needs them and removed afterwards, and you pay per replica-second. Before your code runs, the platform queues the request, finds a machine, creates a container and pulls the image.",
-      "analogy": "Calling a taxi instead of owning a car: you pay per ride, including the meter running while it drives to you.",
-      "why": "Every new replica starts cold. The platform part, `T_platform`, cannot be instrumented because nothing of yours is running yet; it is found by subtraction. A host that has never pulled the image is far worse: artifact 1's one such run took 2266.6 s."
+      "plain": "You rent GPU replicas that are added when traffic needs them and removed afterwards, and cost scales with how long replicas run (artifact 2 counts replica-seconds, starting ones included). Before your code runs, the platform queues the request, finds a machine, creates a container and pulls the image.",
+      "analogy": "Calling a taxi instead of owning a car: you pay per ride, and the artifacts' cost model also counts the time it takes to reach you.",
+      "why": "Every new replica pays a cold start, even with warm caches. The platform part, `T_platform`, cannot be instrumented because nothing of yours is running yet; it is found by subtraction. A host that has never pulled the image is far worse: artifact 1's one such run took 2266.6 s."
     },
     {
       "term": "torch.compile and CUDA graphs",
       "plain": "Two startup steps that pay now to be faster later. **torch.compile** turns the model into faster GPU code and caches it on disk. **CUDA graph capture** records a fixed sequence of GPU operations so every token replays it without per-step launch overhead.",
-      "analogy": "Meal prep: chopping everything on Sunday costs an hour, but every weeknight dinner is quicker. Change the recipe and the prep is wasted.",
-      "why": "Both sit inside every cold start: compiling took 19.01 s with an empty cache and 0.33 s with a warm one; graph capture a flat 4.00 s. A compile cache goes cold on any change of engine version, model, GPU or flags."
+      "analogy": "Meal prep: chopping on Sunday costs an hour but makes weeknight dinners quicker. The compile step's prep can be frozen and reused (until the recipe changes); the graph-capture step's prep is redone every time a kitchen opens.",
+      "why": "Both sit inside every cold start: compiling took 19.01 s with an empty cache and 0.33 s with a warm one; graph capture a flat 4.00 s. A compile cache goes cold on a change of engine version, model, GPU type or engine flags."
     }
   ],
   "views": [
@@ -133,7 +133,7 @@
     {
       "level": "concept",
       "title": "What a replica does before it answers",
-      "caption": "A vLLM replica's cold start, in order. Everything up to the health check happens before any user is served.",
+      "caption": "The main phases of a vLLM replica's cold start, in order (device setup and KV allocation, merged as 'unattributed' in the chart, are not drawn). Everything up to the health check happens before any user is served.",
       "nodes": [
         {
           "id": "q",
@@ -146,7 +146,7 @@
         {
           "id": "w",
           "label": "Load weights",
-          "sub": "into HBM",
+          "sub": "fetch, then into HBM",
           "kind": "system",
           "col": 1,
           "row": 0
@@ -267,13 +267,13 @@
         ]
       },
       "axis": "Seconds, the median of each phase over 100 runs of artifact 1's arm A (weights from the hub, no compile cache).",
-      "read_as": "The longest segment is where the waiting happens: loading weights, then compiling. This unit uses the chart only to show that shape. Each segment is its own median, so they add to 82.49 s, a little more than the 81.12 s median total."
+      "read_as": "The longest segment is where the waiting happens: loading weights, then compiling. This unit uses the chart only to show that shape. Each segment is its own median, and medians do not add: these sum to 82.49 s, not the 81.12 s median total (in arm C they sum to less than the total)."
     }
   ],
   "recall": [
     {
       "q": "Why does the KV cache size decide how many requests run at once?",
-      "a": "Each active request keeps K and V for every token so far, in proportion to its length. So the cache divides into a number of concurrent requests (35,792 tokens at 8192 context gave 4). Past that, new requests queue."
+      "a": "Each active request keeps K and V for every token so far, in proportion to its length. So the cache divides into a number of concurrent requests (35,792 tokens fit 4 full-length 8192-token requests). Past that, new requests wait."
     },
     {
       "q": "Why must the engine run the model once before serving anyone?",
@@ -308,6 +308,14 @@
     {
       "file": "docs/post.md",
       "section": "## KV capacity — the second dividend"
+    },
+    {
+      "file": "docs/post.md",
+      "section": "### The part the compile cache saves that isn't compilation"
+    },
+    {
+      "file": "docs/post.md",
+      "section": "### The number that dwarfs all of them"
     },
     {
       "file": "docs/post.md",
