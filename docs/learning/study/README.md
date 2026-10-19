@@ -23,8 +23,9 @@ page (`page.html`) and a pasteable chat brief (`brief.md`). Design:
 | a2 | An autoscaling simulator that failed its own test | 45 | `a2/page.html`, `a2/brief.md` |
 | a4 | Dedicate, swap or share | 45 | `a4/page.html`, `a4/brief.md` |
 | a5 | How many LoRA adapters fit on one GPU | 45 | `a5/page.html`, `a5/brief.md` |
+| a7 | The anatomy of a matching engine's tail | 45 | `a7/page.html`, `a7/brief.md` |
 
-The units for artifacts 6 and 7 are not built yet (they live in other repositories).
+The unit for artifact 6 (in `~/projects/ledger-faults`) is not built yet.
 
 ## Published pages
 
@@ -38,6 +39,7 @@ Private Artifacts.
 | a2 | https://claude.ai/artifact/7HwprMXHbJWfYWouMhLfDR |
 | a4 | https://claude.ai/artifact/RsJ9cD9eNMWorL5EgVgrat |
 | a5 | https://claude.ai/artifact/SAgFc2UtJ4GuyyRX3ZZmu2 |
+| a7 | https://claude.ai/artifact/6mvtEiZeGL1qtiR2ySxif5 |
 
 The published copy is the page body only (the Artifact tool adds its own document wrapper);
 the source is `docs/learning/study/<unit>/page.html`.
