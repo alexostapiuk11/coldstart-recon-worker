@@ -1,0 +1,208 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Experiment Trust Basics</title><style>
+:root{--bg:#fafaf7;--fg:#1d2330;--muted:#5b6475;--card:#fff;--line:#d9dce3;
+--accent:#2f5fd0;--soft:#e8eefc;--warn:#b4540a;--warnsoft:#fdf0e3;--ok:#1f7a4d;
+--c0:#2a78d6;--c1:#eb6834;--c2:#1baf7a;--c3:#eda100;--c4:#e87ba4;--c5:#008300;
+--c6:#4a3aa7;--c7:#e34948;--t0:#000;--t1:#000;--t2:#000;--t3:#000;--t4:#000;
+--t5:#fff;--t6:#fff;--t7:#000}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#14171f;
+--fg:#e6e8ee;--muted:#9aa3b5;--card:#1c202b;--line:#323849;--accent:#7ea2ff;
+--soft:#222b45;--warn:#f0a15e;--warnsoft:#33261a;--ok:#5fcf9a;--c0:#3987e5;--c1:#d95926;
+--c2:#199e70;--c3:#c98500;--c4:#d55181;--c5:#008300;--c6:#9085e9;--c7:#e66767;
+--t6:#000;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#14171f;--fg:#e6e8ee;--muted:#9aa3b5;--card:#1c202b;
+--line:#323849;--accent:#7ea2ff;--soft:#222b45;--warn:#f0a15e;--warnsoft:#33261a;
+--ok:#5fcf9a;--c0:#3987e5;--c1:#d95926;--c2:#199e70;--c3:#c98500;--c4:#d55181;
+--c5:#008300;--c6:#9085e9;--c7:#e66767;--t6:#000;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans-serif}
+main{max-width:1560px;margin:0 auto;padding:0 clamp(16px,4vw,56px) 64px}
+header.hero{padding:32px 0 8px}
+.kicker{color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.06em}
+h1{font-size:28px;line-height:1.2;margin:6px 0 10px}
+h2{font-size:21px;margin:0 0 12px}
+h3{font-size:16px;margin:0 0 6px}
+.lead{font-size:18px}
+nav.pills{position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);padding:8px 0;display:flex;gap:6px;
+flex-wrap:wrap;z-index:2;border-bottom:1px solid var(--line)}
+nav.pills a{padding:3px 10px;border:1px solid var(--line);border-radius:99px;
+color:var(--fg);text-decoration:none;font-size:13px}
+section{margin-top:36px}
+section,.card[id]{scroll-margin-top:64px}
+a{color:var(--accent)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+padding:14px 16px;margin:10px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr));gap:12px;align-items:start}
+.grid2>.card{margin:0}
+.grid>.card{margin:0}
+.cgrid{grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr))}
+.rgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,max(300px,calc((100% - 24px)/3))),1fr))}
+.dlegend{color:var(--muted);font-size:14px;margin:6px 0 0}
+details.src{background:transparent}details.src summary{font-size:17px}
+details.src ul{margin:8px 0 4px;padding-left:20px}
+.crow{margin:10px 0 0}.crow b{display:block;color:var(--muted);font-weight:600;font-size:13px;
+text-transform:uppercase;letter-spacing:.05em;margin-bottom:1px}
+.why{color:var(--muted);font-size:14px}
+.row{display:grid;grid-template-columns:104px 1fr;gap:10px;margin:6px 0;align-items:baseline}
+.row b{color:var(--muted);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+.opt{display:inline-block;margin:2px 6px 2px 0;padding:2px 10px;border:1px solid var(--line);
+border-radius:99px;font-size:14px}.opt.chosen{background:var(--soft);border-color:var(--accent);
+font-weight:600}
+.cost{color:var(--warn)}
+.tabs{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+.tabs button{font:inherit;font-size:14px;padding:5px 12px;border:1px solid var(--line);
+background:var(--card);color:var(--fg);border-radius:8px;cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--soft);border-color:var(--accent);
+font-weight:600}
+.diagram{width:100%;height:auto;display:block}
+.diagram-text{display:none;font-size:15px}.diagram-text small{color:var(--muted);font-size:13px}
+.diagram-text .kmark{color:var(--accent);font-weight:600;text-transform:uppercase;letter-spacing:.04em;font-size:11px}
+.kmark{white-space:nowrap}
+.edge{stroke:var(--muted);stroke-width:1.5}.arrow{fill:var(--muted)}
+.elabel{font-size:11px;fill:var(--muted);paint-order:stroke;stroke:var(--card);stroke-width:4px}
+.node rect{fill:var(--card);stroke:var(--accent);stroke-width:1.5}
+.node.k-person rect{fill:var(--soft)}.node.k-external rect{stroke:var(--muted);
+stroke-dasharray:4 3}.node.k-store rect{fill:var(--warnsoft);stroke:var(--warn)}
+.node.k-focus rect{fill:var(--soft);stroke-width:2.5}
+.nlabel{font-size:13px;font-weight:600;fill:var(--fg)}.nsub{font-size:11px;fill:var(--muted)}
+.chart{width:100%;max-width:760px;height:auto;display:block}
+.blabel{font-size:12px;fill:var(--fg);font-weight:600}.segtext{font-size:11px}
+.btotal{font-size:12px;fill:var(--fg)}
+.seg.s0,.chip.s0{fill:var(--c0);background:var(--c0)}
+.seg.s1,.chip.s1{fill:var(--c1);background:var(--c1)}
+.seg.s2,.chip.s2{fill:var(--c2);background:var(--c2)}
+.seg.s3,.chip.s3{fill:var(--c3);background:var(--c3)}
+.seg.s4,.chip.s4{fill:var(--c4);background:var(--c4)}
+.seg.s5,.chip.s5{fill:var(--c5);background:var(--c5)}
+.seg.s6,.chip.s6{fill:var(--c6);background:var(--c6)}
+.seg.s7,.chip.s7{fill:var(--c7);background:var(--c7)}
+.segtext.s0{fill:var(--t0)}.segtext.s1{fill:var(--t1)}.segtext.s2{fill:var(--t2)}
+.segtext.s3{fill:var(--t3)}.segtext.s4{fill:var(--t4)}.segtext.s5{fill:var(--t5)}
+.segtext.s6{fill:var(--t6)}.segtext.s7{fill:var(--t7)}
+.seg.dim{fill:var(--line);stroke:var(--muted);stroke-width:.75}.segtext.dim{fill:var(--muted)}
+.chip.dim{background:var(--line);box-shadow:inset 0 0 0 1px var(--muted)}
+.deltas{margin:8px 0 4px;font-size:.9em}.deltas .dhead{color:var(--muted);font-weight:600;
+font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+.deltas ul{margin:4px 0;padding-left:18px}.deltas li{margin:2px 0}.deltas b{margin-right:4px}
+.zero{stroke:var(--fg);stroke-width:1.5;stroke-dasharray:4 3}.axis{stroke:var(--line);stroke-width:1.5}
+.whisker{stroke:var(--c0);stroke-width:2.5;stroke-linecap:round}.est{fill:var(--c0);stroke:var(--card);stroke-width:2}
+.shade{fill:var(--line);opacity:.45}.inum{font-size:12px;fill:var(--muted)}
+.axlabel{font-size:12px;fill:var(--muted)}.iest{font-weight:600}
+.ilabel,.inum,.iest,.axlabel{paint-order:stroke;stroke:var(--card);stroke-width:4px;stroke-linejoin:round}
+.ghost{fill:none;stroke:var(--fg);stroke-width:1.5;stroke-dasharray:5 3}
+.gcap{font-size:12px;fill:var(--fg);font-style:italic;paint-order:stroke;stroke:var(--card);
+stroke-width:4px;stroke-linejoin:round}
+.prange{stroke:var(--muted);stroke-width:2.5;stroke-linecap:round}
+.pgap{stroke:var(--muted);stroke-width:1.5;stroke-dasharray:3 4}
+.pgrid{stroke:var(--line);stroke-width:1}.paxis{stroke:var(--muted);stroke-width:1.2}
+.pdot{stroke:var(--card);stroke-width:1.5}
+.pk0{fill:var(--c0)}.pk1{fill:var(--c1)}.pk2{fill:var(--c6)}.pk3{fill:var(--c3)}
+.pmax{fill:var(--card);stroke:var(--fg);stroke-width:2}
+.pnum{font-size:12px;fill:var(--fg)}.pmaxt{fill:var(--muted);font-style:italic}
+.pnum,.ptick{paint-order:stroke;stroke:var(--card);stroke-width:4px;stroke-linejoin:round}
+.cnote{color:var(--muted);font-size:14px;margin:4px 0 6px}
+.shswatch{display:inline-block;width:14px;height:10px;margin-right:6px;background:var(--line);
+opacity:.7;border-radius:2px;vertical-align:0}
+.legend{list-style:none;padding:0;margin:6px 0;display:flex;gap:14px;flex-wrap:wrap;font-size:13px}
+.chip{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
+.flow{display:flex;gap:8px;flex-wrap:wrap;counter-reset:s}
+.step{flex:1 1 160px;background:var(--card);border:1px solid var(--line);border-radius:10px;
+padding:10px 12px;position:relative}.step:before{counter-increment:s;content:counter(s);
+position:absolute;top:-10px;left:10px;background:var(--accent);color:var(--bg);width:20px;
+height:20px;border-radius:50%;font-size:12px;text-align:center;line-height:20px}
+.fl-sum{margin:0 0 10px}
+.fl-strip{list-style:none;padding:0;margin:0 0 18px;display:flex;flex-wrap:wrap;gap:8px}
+.fl-strip a{display:flex;flex-direction:column;gap:1px;padding:6px 12px 6px 30px;position:relative;
+border:1.5px solid var(--accent);border-radius:8px;background:var(--card);color:var(--fg);
+text-decoration:none;font-size:14px;line-height:1.35;max-width:100%}
+.fl-strip a:hover{background:var(--soft)}
+.fl-strip a:before{content:"";position:absolute;left:11px;top:50%;width:9px;height:9px;
+margin-top:-5px;background:var(--accent);transform:rotate(45deg)}
+.fl-sdate{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.fl-slabel{font-weight:600}
+.fl-tl{position:relative}
+.fl-tl:before{content:"";position:absolute;left:16.5px;top:12px;bottom:0;width:3px;opacity:.55;
+background:var(--muted)}
+.fl-phase:last-child .fl-step:last-child:after{content:"";position:absolute;left:12px;top:48px;
+bottom:0;width:12px;background:var(--bg)}
+.fl-phase{position:relative}
+.fl-band{position:relative;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px;
+margin:6px 0 10px 48px;padding:6px 0 4px;border-bottom:2px solid var(--fg)}
+.fl-band:before{content:"";position:absolute;left:-37px;top:12px;width:14px;height:14px;
+background:var(--fg);border:3px solid var(--bg);box-sizing:content-box;margin:-3px}
+.fl-band h3{margin:0;font-size:18px}
+.fl-pn{color:var(--muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.fl-pc{color:var(--muted);font-size:13px;margin-left:auto}
+.fl-steps{list-style:none;margin:0;padding:0}
+.fl-step{position:relative;padding:0 0 12px 48px;scroll-margin-top:64px}
+.fl-node{position:absolute;left:4px;top:12px;width:28px;height:28px;border-radius:50%;
+background:var(--card);border:2px solid var(--muted);color:var(--fg);font-size:13px;font-weight:700;
+display:flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums}
+.fl-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+.fl-card h4{margin:0 0 4px;font-size:16px;line-height:1.35}
+.fl-detail{color:var(--muted);font-size:15px}
+.fl-side{margin-top:8px;font-size:14px}
+.fl-side>*+*{margin-top:6px}
+.fl-out b,.fl-ev b{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;
+letter-spacing:.05em;margin-right:4px}
+.fl-when{display:inline-block;color:var(--muted);font-size:12px;border:1px solid var(--line);
+border-radius:99px;padding:0 8px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.fl-dec{display:inline-block;font-size:13px;border:1px solid var(--accent);border-radius:99px;
+padding:1px 10px;text-decoration:none;background:var(--card)}
+.fl-dec:hover{background:var(--soft)}.fl-dec b{font-weight:700}
+.fl-ev{color:var(--muted);font-size:12.5px;overflow-wrap:anywhere}
+.fl-ev code{background:transparent;padding:0;font-size:12px}
+.fl-tag{display:inline-block;background:var(--accent);color:var(--bg);font-size:11px;font-weight:700;
+letter-spacing:.08em;text-transform:uppercase;border-radius:4px;padding:1px 7px;margin-bottom:4px}
+.fl-ms .fl-node{left:0;top:8px;width:36px;height:36px;background:var(--accent);
+border-color:var(--accent);color:var(--bg);font-size:15px;box-shadow:0 0 0 4px var(--soft)}
+.fl-ms .fl-card{border:2px solid var(--accent);border-left-width:6px;background:var(--soft)}
+.fl-ms .fl-card h4{font-size:17px}
+.callout{border-left:4px solid var(--accent);padding:6px 12px;background:var(--soft);
+border-radius:0 8px 8px 0;margin:8px 0}
+.limits{border-left-color:var(--warn);background:var(--warnsoft)}
+details.more{background:transparent;border-style:dashed;margin-top:10px}
+details{background:var(--card);border:1px solid var(--line);border-radius:8px;
+padding:8px 12px;margin:6px 0}summary{cursor:pointer;font-weight:600}
+code{font-size:.92em;background:var(--soft);padding:1px 5px;border-radius:4px}
+.src{font-size:13px;color:var(--muted)}
+.hero .lead,.answer{max-width:1100px}
+.readfirst{display:inline-block;font-size:15px;background:var(--card);border:1px solid var(--line);
+border-left:4px solid var(--warn);border-radius:0 8px 8px 0;padding:5px 12px;margin:0 0 8px}
+.readfirst b{color:var(--muted);font-weight:600;margin-right:4px}
+.answer{border-left:4px solid var(--accent);background:var(--soft);border-radius:0 10px 10px 0;
+padding:10px 14px;margin:10px 0 4px}.answer p{margin:4px 0 8px}
+.akicker{color:var(--muted);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.achips{display:flex;flex-wrap:wrap;gap:6px}
+.achip{padding:3px 10px;border:1px solid var(--accent);border-radius:99px;background:var(--card);
+font-size:14px;text-decoration:none;color:var(--fg)}
+.achip:hover{background:var(--soft)}
+.code{display:inline-block;font-size:12px;font-weight:700;line-height:1.5;color:var(--accent);
+border:1px solid var(--accent);border-radius:5px;padding:0 5px;margin-right:8px;vertical-align:2px;
+font-variant-numeric:tabular-nums}
+.links{font-size:14px;color:var(--muted);margin:8px 0 0;line-height:1.5}
+.links b{font-weight:600;color:var(--muted);margin-right:2px}
+.links a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:2px}
+.links .lc{font-weight:700;font-variant-numeric:tabular-nums}.links .none{font-style:italic}
+.callout.links{font-size:15px;color:var(--fg);margin-top:10px}
+@media (min-width:1100px){body{font-size:18px}h1{font-size:36px}h2{font-size:26px}h3{font-size:18px}
+.lead{font-size:21px}.why{font-size:16px}
+.fl-card{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:4px 32px;padding:12px 18px}
+.fl-side{margin-top:0;padding-left:20px;border-left:1px solid var(--line)}
+.fl-card h4{font-size:18px}.fl-ms .fl-card h4{font-size:19px}.fl-detail{font-size:16px}
+.fl-side{font-size:15px}.fl-band h3{font-size:20px}}
+@media (max-width:600px){.diagram{display:none}.diagram-text{display:block}.dlegend{display:none}
+h1{font-size:24px}.lead{font-size:16px}
+.row{display:block}.row b{display:block;margin-bottom:1px}
+nav.pills{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+nav.pills::-webkit-scrollbar{display:none}nav.pills a{flex:none}
+.blabel,.btotal,.inum,.pnum,.gcap{font-size:15px}.segtext,.axlabel{font-size:14px}}
+</style></head><body><main><header class="hero"><div class="kicker">Study page · about 20 min</div><h1>How these experiments earn trust</h1><p class="why">Used by: a1, a2, a4, a5, a6, a7</p></header><nav class="pills"><a href="#concepts">Concepts</a><a href="#views">Views</a><a href="#results">Results</a><a href="#recall">Recall</a><a href="#sources">Sources</a></nav><section id="concepts"><h2>The ideas</h2><div class="grid cgrid"><div class="card" id="c-percentiles"><h3>Percentiles and the tail</h3><div><strong>p95</strong> is the time 95% of runs finish within; <strong>p50</strong> is the median; the <strong>tail</strong> is the slow end. One huge run drags a mean, so artifacts 1, 2 and 5 publish none for skewed data.</div><div class="crow"><b>Like</b><div>Your usual commute is p50; the day the bridge closed is the tail. Their average is no real day.</div></div><div class="crow"><b>Matters</b><div>A1 publishes no p99 (at about 100 runs that is one or two runs); A7 publishes p99.99 because every run has at least 200 messages above it.</div></div></div><div class="card" id="c-ecdf"><h3>ECDF</h3><div>One curve of every run: time across, <strong>share of runs finished by then</strong> up. Every percentile, and the tail, reads off it.</div><div class="crow"><b>Like</b><div>Race results: at each clock time, the share of runners over the line.</div></div><div class="crow"><b>Matters</b><div>A1&#x27;s showed arm B&#x27;s largest repeat-host run (148.2 s) beyond arm A&#x27;s (111.6 s), despite B&#x27;s lower median.</div></div></div><div class="card" id="c-interval"><h3>Spread versus interval</h3><div><strong>Spread</strong> is where single runs land. A 95% <strong>interval</strong> is where the <strong>median</strong> would land on a re-run. A <strong>bootstrap</strong> redraws the runs with replacement 10,000 times and keeps the middle 95% of medians.</div><div class="crow"><b>Matters</b><div>A1&#x27;s arm A interval spans a stretch where no run landed and excludes a value where nine did.</div></div></div><div class="card" id="c-prereg"><h3>Pre-registration</h3><div>Commit the hypotheses, analysis, exclusions and stopping rule <strong>before the data exists</strong>. The git timestamp is the proof.</div><div class="crow"><b>Like</b><div>Sealing your prediction in an envelope before the match.</div></div><div class="crow"><b>Matters</b><div>A1&#x27;s predates its campaign data, not three paid reconnaissance captures, and says so; A6&#x27;s campaign stays unread by its own rule.</div></div></div><div class="card" id="c-pairing"><h3>Paired, interleaved runs</h3><div>Run the arms side by side in a shuffled order, so a slow hour or a drifting host hits every arm alike. Arm A today, arm B tomorrow mixes the arm with the day.</div><div class="crow"><b>Like</b><div>Weighing two parcels on one scale in the same minute: if the scale drifts, the difference survives.</div></div><div class="crow"><b>Matters</b><div>A1 ran 100 shuffled triples, one run per arm; A5 ran both traffic patterns inside every server start.</div></div></div><div class="card" id="c-gate"><h3>Validation gate</h3><div>A test, fixed in advance, that a model must pass against real runs before its answers count: <strong>pass</strong>, <strong>fail</strong>, or <strong>inconclusive</strong> (could not resolve its own margin; not a pass).</div><div class="crow"><b>Like</b><div>Checking a new scale against known weights, and remembering it was only checked up to the heaviest.</div></div><div class="crow"><b>Matters</b><div>A2&#x27;s and A4&#x27;s simulators had to match three real repeats in at least half the time bins; A5&#x27;s synthetic adapters, real ones within ±5%.</div></div></div><div class="card" id="c-amendment"><h3>Amendment versus forking path</h3><div>An <strong>amendment</strong> is a dated, written rule change: what changed, why, what had been seen. A <strong>forking path</strong> is an unrecorded choice made after seeing the data. A change after the data is labelled post hoc.</div><div class="crow"><b>Matters</b><div>A4&#x27;s amendments were dated and made before its cell data was analysed; A5&#x27;s Amendment 3 extended its gate after an inconclusive verdict, and its post says so.</div></div></div><div class="card" id="c-failed"><h3>A failed gate is a result</h3><div>Publish the failure, every miss and the likely cause, instead of the model&#x27;s answer. Measured inputs stand; model numbers appear only labelled unvalidated.</div><div class="crow"><b>Matters</b><div>A2&#x27;s simulator failed twice, 34 of 37 bins then 37 of 37; A4&#x27;s failed with 10 of 13, so its GPU counts are not validated.</div></div></div></div></section><section id="views"><h2>System views</h2><div class="card" data-tabs><div class="tabs" role="tablist"><button role="tab" aria-selected="false">From claim to trust</button></div><div role="tabpanel"><h3>From claim to trust</h3><p class="why">Each step guards the next; the boxes are the cards above: <a href="#c-prereg">rules</a>, <a href="#c-percentiles">spread</a>, <a href="#c-interval">intervals</a>, <a href="#c-pairing">fair comparison</a>, <a href="#c-gate">the gate</a>.</p><svg class="diagram" viewBox="0 0 658 236" role="img" aria-label="From claim to trust" xmlns="http://www.w3.org/2000/svg"><defs><marker id="arr-p2-0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrow"/></marker></defs><line class="edge" x1="196.0" y1="60.0" x2="238.0" y2="60.0" marker-end="url(#arr-p2-0)"/><line class="edge" x1="416.0" y1="60.0" x2="458.0" y2="60.0" marker-end="url(#arr-p2-0)"/><line class="edge" x1="549.0" y1="98.0" x2="549.0" y2="134.0" marker-end="url(#arr-p2-0)"/><line class="edge" x1="462.0" y1="176.0" x2="420.0" y2="176.0" marker-end="url(#arr-p2-0)"/><line class="edge" x1="242.0" y1="176.0" x2="200.0" y2="176.0" marker-end="url(#arr-p2-0)"/><g class="node k-person"><rect x="24.0" y="24.0" width="170" height="72" rx="8"/><text class="nlabel" x="109.0" y="49.0" text-anchor="middle">A claim</text><text class="nsub" x="109.0" y="66.0" text-anchor="middle">e.g. one cache saves more than</text><text class="nsub" x="109.0" y="80.0" text-anchor="middle">the other</text></g><g class="node k-focus"><rect x="244.0" y="24.0" width="170" height="72" rx="8"/><text class="nlabel" x="329.0" y="49.0" text-anchor="middle">Rules fixed first</text><text class="nsub" x="329.0" y="66.0" text-anchor="middle">pre-registration; later</text><text class="nsub" x="329.0" y="80.0" text-anchor="middle">changes dated</text></g><g class="node k-system"><rect x="464.0" y="24.0" width="170" height="72" rx="8"/><text class="nlabel" x="549.0" y="56.0" text-anchor="middle">Measured with spread</text><text class="nsub" x="549.0" y="73.0" text-anchor="middle">percentiles, ECDF, intervals</text></g><g class="node k-system"><rect x="464.0" y="140.0" width="170" height="72" rx="8"/><text class="nlabel" x="549.0" y="172.0" text-anchor="middle">Compared fairly</text><text class="nsub" x="549.0" y="189.0" text-anchor="middle">paired, interleaved runs</text></g><g class="node k-focus"><rect x="244.0" y="140.0" width="170" height="72" rx="8"/><text class="nlabel" x="329.0" y="172.0" text-anchor="middle">Model checked by gate</text><text class="nsub" x="329.0" y="189.0" text-anchor="middle">pass, fail or inconclusive</text></g><g class="node k-system"><rect x="24.0" y="140.0" width="170" height="72" rx="8"/><text class="nlabel" x="109.0" y="172.0" text-anchor="middle">Limits stated</text><text class="nsub" x="109.0" y="189.0" text-anchor="middle">what the result cannot claim</text></g></svg><div class="diagram-text"><ul><li>A claim — e.g. one cache saves more than the other</li><li><strong>Rules fixed first</strong> <small class="kmark">key step</small> — pre-registration; later changes dated</li><li>Measured with spread — percentiles, ECDF, intervals</li><li>Compared fairly — paired, interleaved runs</li><li><strong>Model checked by gate</strong> <small class="kmark">key step</small> — pass, fail or inconclusive</li><li>Limits stated — what the result cannot claim</li></ul><ol><li>A claim → Rules fixed first</li><li>Rules fixed first → Measured with spread</li><li>Measured with spread → Compared fairly</li><li>Compared fairly → Model checked by gate</li><li>Model checked by gate → Limits stated</li></ol></div></div></div></section><section id="results"><h2>In pictures</h2><div class="grid2"><div class="card" id="r-0"><h3>Same two clusters, different split: the interval&#x27;s width</h3><svg class="chart" viewBox="0 0 378 120" role="img" aria-label="s by bar" xmlns="http://www.w3.org/2000/svg"><text class="blabel" x="0" y="14">Split 51 / 48</text><rect class="seg s0" x="0.0" y="20" width="338.0" height="24" rx="2"><title>Split 51 / 48: 5 s</title></rect><text class="btotal" x="346.0" y="36">5 s</text><text class="blabel" x="0" y="72">Split 70 / 29</text><rect class="seg s0" x="0.0" y="78" width="0.0" height="24" rx="2"><title>Split 70 / 29: 0 s</title></rect><text class="btotal" x="6.0" y="94">0 s</text></svg><div class="row"><b>Axis</b><div>Width of the bootstrap interval on the median, in seconds. Same two clusters of runs; only how many fall in each changes.</div></div><div class="row"><b>Read it as</b><div>Near an even split, redrawn medians land in either cluster, so the interval spans the gap. At 70/29 they all land in the big one. Width follows where the median sits, not how far runs scatter.</div></div></div><div class="card" id="r-1"><h3>Median versus tail, artifact 1&#x27;s three cache set-ups</h3><svg class="chart percentiles" viewBox="0 0 390 352" role="img" aria-label="Percentiles (s). A: nothing cached: p50 81.1, p90 96.3, p95 96.4; largest 111.6; B: weights cached: p50 65.4, p90 85.9, p95 86.4; largest 148.2; C: weights and compile cached: p50 39.4, p90 54.8, p95 54.9" xmlns="http://www.w3.org/2000/svg"><line class="pgrid" x1="14.0" y1="0" x2="14.0" y2="324.0"/><line class="pgrid" x1="128.6" y1="0" x2="128.6" y2="324.0"/><line class="pgrid" x1="243.2" y1="0" x2="243.2" y2="324.0"/><line class="pgrid" x1="357.7" y1="0" x2="357.7" y2="324.0"/><text class="blabel" x="0" y="14.0">A: nothing cached</text><line class="prange" x1="199.9" y1="64.0" x2="234.9" y2="64.0"/><line class="pgap" x1="234.9" y1="64.0" x2="269.7" y2="64.0"/><circle class="pmax" cx="269.7" cy="64.0" r="6"><title>A: nothing cached: largest 111.6 s</title></circle><path class="pdot pk0" data-x="199.9" d="M193.9 64.0a6 6 0 1 0 12 0a6 6 0 1 0 -12 0z"><title>A: nothing cached: p50 81.1 s</title></path><path class="pdot pk1" data-x="234.7" d="M234.7 57.0L241.7 64.0L234.7 71.0L227.7 64.0z"><title>A: nothing cached: p90 96.3 s</title></path><path class="pdot pk2" data-x="234.9" d="M229.4 58.5h11v11h-11z"><title>A: nothing cached: p95 96.4 s</title></path><text class="pnum" x="199.9" y="52.0" text-anchor="middle">p50 81.1</text><text class="pnum" x="234.7" y="88.0" text-anchor="middle">p90 96.3</text><text class="pnum" x="234.9" y="35.0" text-anchor="middle">p95 96.4</text><text class="pnum pmaxt" x="269.7" y="105.0" text-anchor="middle">largest 111.6</text><text class="blabel" x="0" y="132.0">B: weights cached</text><line class="prange" x1="163.9" y1="182.0" x2="212.0" y2="182.0"/><line class="pgap" x1="212.0" y1="182.0" x2="353.6" y2="182.0"/><circle class="pmax" cx="353.6" cy="182.0" r="6"><title>B: weights cached: largest 148.2 s</title></circle><path class="pdot pk0" data-x="163.9" d="M157.9 182.0a6 6 0 1 0 12 0a6 6 0 1 0 -12 0z"><title>B: weights cached: p50 65.4 s</title></path><path class="pdot pk1" data-x="210.9" d="M210.9 175.0L217.9 182.0L210.9 189.0L203.9 182.0z"><title>B: weights cached: p90 85.9 s</title></path><path class="pdot pk2" data-x="212.0" d="M206.5 176.5h11v11h-11z"><title>B: weights cached: p95 86.4 s</title></path><text class="pnum" x="163.9" y="170.0" text-anchor="middle">p50 65.4</text><text class="pnum" x="210.9" y="206.0" text-anchor="middle">p90 85.9</text><text class="pnum" x="212.0" y="153.0" text-anchor="middle">p95 86.4</text><text class="pnum pmaxt" x="334.8" y="170.0" text-anchor="middle">largest 148.2</text><text class="blabel" x="0" y="233.0">C: weights and compile cached</text><line class="prange" x1="104.3" y1="283.0" x2="139.8" y2="283.0"/><path class="pdot pk0" data-x="104.3" d="M98.3 283.0a6 6 0 1 0 12 0a6 6 0 1 0 -12 0z"><title>C: weights and compile cached: p50 39.4 s</title></path><path class="pdot pk1" data-x="139.6" d="M139.6 276.0L146.6 283.0L139.6 290.0L132.6 283.0z"><title>C: weights and compile cached: p90 54.8 s</title></path><path class="pdot pk2" data-x="139.8" d="M134.3 277.5h11v11h-11z"><title>C: weights and compile cached: p95 54.9 s</title></path><text class="pnum" x="104.3" y="271.0" text-anchor="middle">p50 39.4</text><text class="pnum" x="139.6" y="307.0" text-anchor="middle">p90 54.8</text><text class="pnum" x="139.8" y="254.0" text-anchor="middle">p95 54.9</text><line class="paxis" x1="14.0" y1="324.0" x2="374.0" y2="324.0"/><line class="paxis" x1="14.0" y1="324.0" x2="14.0" y2="329.0"/><text class="axlabel ptick" x="14.0" y="345.0" text-anchor="middle">0</text><line class="paxis" x1="128.6" y1="324.0" x2="128.6" y2="329.0"/><text class="axlabel ptick" x="128.6" y="345.0" text-anchor="middle">50</text><line class="paxis" x1="243.2" y1="324.0" x2="243.2" y2="329.0"/><text class="axlabel ptick" x="243.2" y="345.0" text-anchor="middle">100</text><line class="paxis" x1="357.7" y1="324.0" x2="357.7" y2="329.0"/><text class="axlabel ptick" x="357.7" y="345.0" text-anchor="middle">150 s</text></svg><p class="cnote">Hollow circle: largest repeat-host run, given for A and B only.</p><div class="row"><b>Axis</b><div>Seconds of total cold start, about 100 runs per set-up: p50, p90, p95.</div></div><div class="row"><b>Read it as</b><div>The order holds out to p95, yet B&#x27;s largest run is longer than A&#x27;s: the median ranking says nothing about the far tail.</div></div></div><div class="card" id="r-2"><h3>Three gate runs that failed</h3><svg class="chart" viewBox="0 0 412 178" role="img" aria-label="bins by bar" xmlns="http://www.w3.org/2000/svg"><text class="blabel" x="0" y="14">A2, attempt one</text><rect class="seg s0" x="0.0" y="20" width="310.4" height="24" rx="2"><title>Missed: 34 bins</title></rect><text class="segtext s0" x="155.2" y="36" text-anchor="middle">34</text><rect class="seg s1 dim" x="312.4" y="20" width="25.6" height="24" rx="2"><title>Not missed: 3 bins</title></rect><text class="segtext s1 dim" x="325.2" y="36" text-anchor="middle">3</text><text class="btotal" x="346.0" y="36">37 bins</text><text class="blabel" x="0" y="72">A2, attempt two (calibrated)</text><rect class="seg s0" x="0.0" y="78" width="338.0" height="24" rx="2"><title>Missed: 37 bins</title></rect><text class="segtext s0" x="169.0" y="94" text-anchor="middle">37</text><text class="btotal" x="346.0" y="94">37 bins</text><text class="blabel" x="0" y="130">A4</text><rect class="seg s0" x="0.0" y="136" width="89.9" height="24" rx="2"><title>Missed: 10 bins</title></rect><text class="segtext s0" x="44.9" y="152" text-anchor="middle">10</text><rect class="seg s1 dim" x="91.9" y="136" width="25.6" height="24" rx="2"><title>Not missed: 3 bins</title></rect><text class="segtext s1 dim" x="104.7" y="152" text-anchor="middle">3</text><text class="btotal" x="125.5" y="152">13 bins</text></svg><ul class="legend"><li><span class="chip s0"></span>Missed</li><li><span class="chip s1 dim"></span>Not missed</li></ul><div class="row"><b>Axis</b><div>Judged time bins per gate run; a pass allows at most half to miss.</div></div><div class="row"><b>Read it as</b><div>All far past half. A2 missed on one side, then, calibrated, on the other; in A4&#x27;s misses the simulator always predicted the engine slower than it was.</div></div></div></div></section><section id="recall"><h2>Recall check</h2><p class="why">Answer out loud first, then open.</p><details><summary>What does a 95% bootstrap interval on a median range over?</summary><p>Medians of imagined re-runs of the experiment, not the runs themselves. It can cover a stretch where no run landed.</p></details><details><summary>Same two clusters: why does 51/48 give a 5.00 s interval and 70/29 give 0.00 s? Must intervals shrink with more runs?</summary><p>Near an even split the median can fall in either cluster, so the interval spans the gap. Width follows the data&#x27;s shape, so no: A1&#x27;s own data contradicted &#x27;it shrinks as runs accumulate&#x27;.</p></details><details><summary>Why don&#x27;t 10,000 more resamples make an interval more trustworthy?</summary><p>Resampling is free computation on the same runs; it adds no evidence. Only real runs, which cost GPU-hours, set the width.</p></details><details><summary>Why is a failed gate a result, and what may you still conclude?</summary><p>It is the pre-registered test answering no, which is its job. Measured inputs stand; model output appears only labelled unvalidated, and so does anything built on it.</p></details><details><summary>What separates an amendment from a forking path?</summary><p>The record and the timing: an amendment is dated in git and says what had been seen. A change after the data stays honest only if labelled post hoc, like A1&#x27;s first-touch rule.</p></details><details><summary>Why interleave arms instead of running each in a block?</summary><p>In blocks, drift over time lands on one arm and looks like its effect, inseparable afterwards. Interleaved, drift hits every arm alike.</p></details></section><section id="sources"><details class="src"><summary>Sources, 22 files and sections</summary><ul><li><code>docs/post.md</code>: ## The distribution, not the mean</li><li><code>docs/post.md</code>: ## What was measured</li><li><code>docs/post.md</code>: ### The number that dwarfs all of them</li><li><code>docs/post.md</code>: ## Reproducing this</li><li><code>docs/experiment.md</code>: ## Analysis plan</li><li><code>docs/post-a2.md</code>: ## The test the simulator had to pass</li><li><code>docs/post-a2.md</code>: ## Attempt one: the engine was faster than the curve</li><li><code>docs/post-a2.md</code>: ## Attempt two: calibrated, and wrong the other way</li><li><code>docs/post-a2.md</code>: ## What the unvalidated simulator says</li><li><code>docs/experiment-a2.md</code>: ### Amendment, 2026-09-17: the statistical layer</li><li><code>docs/experiment-a2.md</code>: ## Validation gate — pass rule</li><li><code>docs/post-a5.md</code>: ## The main chart</li><li><code>docs/post-a5.md</code>: ## Synthetic adapters, and how I know they are valid here</li><li><code>docs/experiment-a5.md</code>: ## Rules fixed now</li><li><code>docs/experiment-a5.md</code>: ## Amendment 1 — a larger equivalence gate (2026-10-05)</li><li><code>docs/experiment-a5.md</code>: ## Amendment 3 — replacing the instances a host fault cost the larger gate (2026-10-05)</li><li><code>docs/post-a4.md</code>: ### The amendments</li><li><code>docs/post-a4.md</code>: ### The validation, and its failure</li><li><code>docs/experiment-a4.md</code>: ### The validation gate</li><li><code>docs/learning/progress.md</code>: ### The interval misconception, and what fixed it</li><li><code>~/projects/matching-engine-tail/docs/post.md</code>: ## Method</li><li><code>docs/superpowers/specs/2026-10-18-interview-learning-resources-design.md</code>: Out: artifact 3 (no results yet). Artifact 6 results (the campaign is unread by</li></ul></details></section></main><script>
+for (const g of document.querySelectorAll('[data-tabs]')) {
+  const tabs = g.querySelectorAll('[role=tab]'), panels = g.querySelectorAll('[role=tabpanel]');
+  const show = i => { tabs.forEach((t, j) => t.setAttribute('aria-selected', j === i));
+    panels.forEach((p, j) => { p.hidden = j !== i; }); };
+  tabs.forEach((t, i) => t.addEventListener('click', () => show(i)));
+  show(0);
+}
+</script></body></html>

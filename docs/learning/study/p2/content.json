@@ -1,0 +1,416 @@
+{
+  "id": "p2",
+  "kind": "prereq",
+  "title": "How these experiments earn trust",
+  "short_title": "Experiment Trust Basics",
+  "minutes": 20,
+  "used_by": [
+    "a1",
+    "a2",
+    "a4",
+    "a5",
+    "a6",
+    "a7"
+  ],
+  "concepts": [
+    {
+      "id": "percentiles",
+      "term": "Percentiles and the tail",
+      "plain": "**p95** is the time 95% of runs finish within; **p50** is the median; the **tail** is the slow end. One huge run drags a mean, so artifacts 1, 2 and 5 publish none for skewed data.",
+      "analogy": "Your usual commute is p50; the day the bridge closed is the tail. Their average is no real day.",
+      "why": "A1 publishes no p99 (at about 100 runs that is one or two runs); A7 publishes p99.99 because every run has at least 200 messages above it."
+    },
+    {
+      "id": "ecdf",
+      "term": "ECDF",
+      "plain": "One curve of every run: time across, **share of runs finished by then** up. Every percentile, and the tail, reads off it.",
+      "analogy": "Race results: at each clock time, the share of runners over the line.",
+      "why": "A1's showed arm B's largest repeat-host run (148.2 s) beyond arm A's (111.6 s), despite B's lower median."
+    },
+    {
+      "id": "interval",
+      "term": "Spread versus interval",
+      "plain": "**Spread** is where single runs land. A 95% **interval** is where the **median** would land on a re-run. A **bootstrap** redraws the runs with replacement 10,000 times and keeps the middle 95% of medians.",
+      "analogy": "",
+      "why": "A1's arm A interval spans a stretch where no run landed and excludes a value where nine did."
+    },
+    {
+      "id": "prereg",
+      "term": "Pre-registration",
+      "plain": "Commit the hypotheses, analysis, exclusions and stopping rule **before the data exists**. The git timestamp is the proof.",
+      "analogy": "Sealing your prediction in an envelope before the match.",
+      "why": "A1's predates its campaign data, not three paid reconnaissance captures, and says so; A6's campaign stays unread by its own rule."
+    },
+    {
+      "id": "pairing",
+      "term": "Paired, interleaved runs",
+      "plain": "Run the arms side by side in a shuffled order, so a slow hour or a drifting host hits every arm alike. Arm A today, arm B tomorrow mixes the arm with the day.",
+      "analogy": "Weighing two parcels on one scale in the same minute: if the scale drifts, the difference survives.",
+      "why": "A1 ran 100 shuffled triples, one run per arm; A5 ran both traffic patterns inside every server start."
+    },
+    {
+      "id": "gate",
+      "term": "Validation gate",
+      "plain": "A test, fixed in advance, that a model must pass against real runs before its answers count: **pass**, **fail**, or **inconclusive** (could not resolve its own margin; not a pass).",
+      "analogy": "Checking a new scale against known weights, and remembering it was only checked up to the heaviest.",
+      "why": "A2's and A4's simulators had to match three real repeats in at least half the time bins; A5's synthetic adapters, real ones within ±5%."
+    },
+    {
+      "id": "amendment",
+      "term": "Amendment versus forking path",
+      "plain": "An **amendment** is a dated, written rule change: what changed, why, what had been seen. A **forking path** is an unrecorded choice made after seeing the data. A change after the data is labelled post hoc.",
+      "analogy": "",
+      "why": "A4's amendments were dated and made before its cell data was analysed; A5's Amendment 3 extended its gate after an inconclusive verdict, and its post says so."
+    },
+    {
+      "id": "failed",
+      "term": "A failed gate is a result",
+      "plain": "Publish the failure, every miss and the likely cause, instead of the model's answer. Measured inputs stand; model numbers appear only labelled unvalidated.",
+      "analogy": "",
+      "why": "A2's simulator failed twice, 34 of 37 bins then 37 of 37; A4's failed with 10 of 13, so its GPU counts are not validated."
+    }
+  ],
+  "views": [
+    {
+      "level": "concept",
+      "title": "From claim to trust",
+      "caption": "Each step guards the next; the boxes are the cards above: [rules](p2:prereg), [spread](p2:percentiles), [intervals](p2:interval), [fair comparison](p2:pairing), [the gate](p2:gate).",
+      "nodes": [
+        {
+          "id": "claim",
+          "label": "A claim",
+          "sub": "e.g. one cache saves more than the other",
+          "kind": "person",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "id": "prereg",
+          "label": "Rules fixed first",
+          "sub": "pre-registration; later changes dated",
+          "kind": "focus",
+          "col": 1,
+          "row": 0
+        },
+        {
+          "id": "interval",
+          "label": "Measured with spread",
+          "sub": "percentiles, ECDF, intervals",
+          "kind": "system",
+          "col": 2,
+          "row": 0
+        },
+        {
+          "id": "pairing",
+          "label": "Compared fairly",
+          "sub": "paired, interleaved runs",
+          "kind": "system",
+          "col": 2,
+          "row": 1
+        },
+        {
+          "id": "gate",
+          "label": "Model checked by gate",
+          "sub": "pass, fail or inconclusive",
+          "kind": "focus",
+          "col": 1,
+          "row": 1
+        },
+        {
+          "id": "limits",
+          "label": "Limits stated",
+          "sub": "what the result cannot claim",
+          "kind": "system",
+          "col": 0,
+          "row": 1
+        }
+      ],
+      "edges": [
+        {
+          "from": "claim",
+          "to": "prereg"
+        },
+        {
+          "from": "prereg",
+          "to": "interval"
+        },
+        {
+          "from": "interval",
+          "to": "pairing"
+        },
+        {
+          "from": "pairing",
+          "to": "gate"
+        },
+        {
+          "from": "gate",
+          "to": "limits"
+        }
+      ]
+    }
+  ],
+  "results": [
+    {
+      "title": "Same two clusters, different split: the interval's width",
+      "chart": {
+        "type": "bars",
+        "unit": "s",
+        "items": [
+          {
+            "label": "Split 51 / 48",
+            "value": 5
+          },
+          {
+            "label": "Split 70 / 29",
+            "value": 0
+          }
+        ]
+      },
+      "axis": "Width of the bootstrap interval on the median, in seconds. Same two clusters of runs; only how many fall in each changes.",
+      "read_as": "Near an even split, redrawn medians land in either cluster, so the interval spans the gap. At 70/29 they all land in the big one. Width follows where the median sits, not how far runs scatter."
+    },
+    {
+      "title": "Median versus tail, artifact 1's three cache set-ups",
+      "chart": {
+        "type": "percentiles",
+        "unit": "s",
+        "rows": [
+          {
+            "label": "A: nothing cached",
+            "values": [
+              {
+                "name": "p50",
+                "value": 81.1
+              },
+              {
+                "name": "p90",
+                "value": 96.3
+              },
+              {
+                "name": "p95",
+                "value": 96.4
+              }
+            ],
+            "max_label": {
+              "text": "largest",
+              "value": 111.6
+            }
+          },
+          {
+            "label": "B: weights cached",
+            "values": [
+              {
+                "name": "p50",
+                "value": 65.4
+              },
+              {
+                "name": "p90",
+                "value": 85.9
+              },
+              {
+                "name": "p95",
+                "value": 86.4
+              }
+            ],
+            "max_label": {
+              "text": "largest",
+              "value": 148.2
+            }
+          },
+          {
+            "label": "C: weights and compile cached",
+            "values": [
+              {
+                "name": "p50",
+                "value": 39.4
+              },
+              {
+                "name": "p90",
+                "value": 54.8
+              },
+              {
+                "name": "p95",
+                "value": 54.9
+              }
+            ]
+          }
+        ],
+        "note": "Hollow circle: largest repeat-host run, given for A and B only."
+      },
+      "axis": "Seconds of total cold start, about 100 runs per set-up: p50, p90, p95.",
+      "read_as": "The order holds out to p95, yet B's largest run is longer than A's: the median ranking says nothing about the far tail."
+    },
+    {
+      "title": "Three gate runs that failed",
+      "chart": {
+        "type": "stacked_bars",
+        "unit": "bins",
+        "show_totals": true,
+        "highlight": [
+          "Missed"
+        ],
+        "bars": [
+          {
+            "label": "A2, attempt one",
+            "segments": [
+              {
+                "name": "Missed",
+                "value": 34
+              },
+              {
+                "name": "Not missed",
+                "value": 3
+              }
+            ]
+          },
+          {
+            "label": "A2, attempt two (calibrated)",
+            "segments": [
+              {
+                "name": "Missed",
+                "value": 37
+              }
+            ]
+          },
+          {
+            "label": "A4",
+            "segments": [
+              {
+                "name": "Missed",
+                "value": 10
+              },
+              {
+                "name": "Not missed",
+                "value": 3
+              }
+            ]
+          }
+        ]
+      },
+      "axis": "Judged time bins per gate run; a pass allows at most half to miss.",
+      "read_as": "All far past half. A2 missed on one side, then, calibrated, on the other; in A4's misses the simulator always predicted the engine slower than it was."
+    }
+  ],
+  "recall": [
+    {
+      "q": "What does a 95% bootstrap interval on a median range over?",
+      "a": "Medians of imagined re-runs of the experiment, not the runs themselves. It can cover a stretch where no run landed."
+    },
+    {
+      "q": "Same two clusters: why does 51/48 give a 5.00 s interval and 70/29 give 0.00 s? Must intervals shrink with more runs?",
+      "a": "Near an even split the median can fall in either cluster, so the interval spans the gap. Width follows the data's shape, so no: A1's own data contradicted 'it shrinks as runs accumulate'."
+    },
+    {
+      "q": "Why don't 10,000 more resamples make an interval more trustworthy?",
+      "a": "Resampling is free computation on the same runs; it adds no evidence. Only real runs, which cost GPU-hours, set the width."
+    },
+    {
+      "q": "Why is a failed gate a result, and what may you still conclude?",
+      "a": "It is the pre-registered test answering no, which is its job. Measured inputs stand; model output appears only labelled unvalidated, and so does anything built on it."
+    },
+    {
+      "q": "What separates an amendment from a forking path?",
+      "a": "The record and the timing: an amendment is dated in git and says what had been seen. A change after the data stays honest only if labelled post hoc, like A1's first-touch rule."
+    },
+    {
+      "q": "Why interleave arms instead of running each in a block?",
+      "a": "In blocks, drift over time lands on one arm and looks like its effect, inseparable afterwards. Interleaved, drift hits every arm alike."
+    }
+  ],
+  "sources": [
+    {
+      "file": "docs/post.md",
+      "section": "## The distribution, not the mean"
+    },
+    {
+      "file": "docs/post.md",
+      "section": "## What was measured"
+    },
+    {
+      "file": "docs/post.md",
+      "section": "### The number that dwarfs all of them"
+    },
+    {
+      "file": "docs/post.md",
+      "section": "## Reproducing this"
+    },
+    {
+      "file": "docs/experiment.md",
+      "section": "## Analysis plan"
+    },
+    {
+      "file": "docs/post-a2.md",
+      "section": "## The test the simulator had to pass"
+    },
+    {
+      "file": "docs/post-a2.md",
+      "section": "## Attempt one: the engine was faster than the curve"
+    },
+    {
+      "file": "docs/post-a2.md",
+      "section": "## Attempt two: calibrated, and wrong the other way"
+    },
+    {
+      "file": "docs/post-a2.md",
+      "section": "## What the unvalidated simulator says"
+    },
+    {
+      "file": "docs/experiment-a2.md",
+      "section": "### Amendment, 2026-09-17: the statistical layer"
+    },
+    {
+      "file": "docs/experiment-a2.md",
+      "section": "## Validation gate — pass rule"
+    },
+    {
+      "file": "docs/post-a5.md",
+      "section": "## The main chart"
+    },
+    {
+      "file": "docs/post-a5.md",
+      "section": "## Synthetic adapters, and how I know they are valid here"
+    },
+    {
+      "file": "docs/experiment-a5.md",
+      "section": "## Rules fixed now"
+    },
+    {
+      "file": "docs/experiment-a5.md",
+      "section": "## Amendment 1 — a larger equivalence gate (2026-10-05)"
+    },
+    {
+      "file": "docs/experiment-a5.md",
+      "section": "## Amendment 3 — replacing the instances a host fault cost the larger gate (2026-10-05)"
+    },
+    {
+      "file": "docs/post-a4.md",
+      "section": "### The amendments"
+    },
+    {
+      "file": "docs/post-a4.md",
+      "section": "### The validation, and its failure"
+    },
+    {
+      "file": "docs/experiment-a4.md",
+      "section": "### The validation gate"
+    },
+    {
+      "file": "docs/learning/progress.md",
+      "section": "### The interval misconception, and what fixed it"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/post.md",
+      "section": "## Method"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-18-interview-learning-resources-design.md",
+      "section": "Out: artifact 3 (no results yet). Artifact 6 results (the campaign is unread by"
+    }
+  ],
+  "derived_numbers": [
+    {
+      "value": "3",
+      "how": "A2 attempt one's bins not missed: 37 judged bins minus 34 missed (docs/post-a2.md 'Attempt one'). A4's 3 is stated in docs/post-a5.md ('10 of 13 judged bins ... (3 agreed)')."
+    }
+  ]
+}
