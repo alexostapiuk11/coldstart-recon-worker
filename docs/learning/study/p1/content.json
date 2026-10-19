@@ -21,7 +21,7 @@
       "term": "Weights",
       "plain": "The model's learned numbers. They must be on the GPU before it can answer anything. An 8B model at 2 bytes per parameter is about 16 GB.",
       "analogy": "The reference book: big, never edited, and it has to be on the desk before work starts.",
-      "why": "The weight phase (download plus load into HBM) is the biggest piece of a cold start on a host that already has the image: a median 45.83 s in artifact 1's arm A. Part of that phase changes with the compile cache, so not all of it is moving bytes. Weights never change, so a weight cache stays valid until you switch models."
+      "why": "Downloading and loading them is part of the longest phase of artifact 1's cold starts, server launch to model loaded (a median 45.83 s in arm A). vLLM's own \"Model loading took\" line was 17.40 s of that; much of the rest is server and engine start before loading. Weights never change, so a weight cache stays valid until you switch models."
     },
     {
       "term": "KV cache",
@@ -45,7 +45,7 @@
       "term": "Cold start",
       "plain": "The wait while a machine boots and loads a model, before anyone gets an answer: from the request being queued to the first token.",
       "analogy": "Opening a restaurant from an empty building each time a crowd shows up: get the keys, deliver the stock, set up the kitchen, then serve the first dish.",
-      "why": "It is artifact 1's subject: with nothing cached the median was 81.12 s, mostly loading weights and compiling. Artifact 2 asks whether this delay changes which autoscaling signal works best."
+      "why": "It is artifact 1's subject: with nothing cached the median was 81.12 s, mostly server launch to model loaded, then compiling. Artifact 2 asks whether this delay changes which autoscaling signal works best."
     },
     {
       "term": "Serverless GPUs",
@@ -145,8 +145,8 @@
         },
         {
           "id": "w",
-          "label": "Load weights",
-          "sub": "fetch, then into HBM",
+          "label": "Launch, load weights",
+          "sub": "server and engine start; weights into HBM",
           "kind": "system",
           "col": 1,
           "row": 0
@@ -235,7 +235,7 @@
                 "value": 4.37
               },
               {
-                "name": "Load weights",
+                "name": "Server launch to model loaded",
                 "value": 45.83
               },
               {
@@ -267,7 +267,7 @@
         ]
       },
       "axis": "Seconds, the median of each phase over 100 runs of artifact 1's arm A (weights from the hub, no compile cache).",
-      "read_as": "The longest segment is where the waiting happens: loading weights, then compiling. This unit uses the chart only to show that shape. Each segment is its own median, and medians do not add: these sum to 82.49 s, not the 81.12 s median total (in arm C they sum to less than the total)."
+      "read_as": "The longest segments are where the waiting happens: server launch to model loaded (the post calls it T_weights; it includes server and engine start, and vLLM's own model loading was 17.40 s of it), then compiling. This unit uses the chart only to show that shape. Each segment is its own median, and medians do not add: these sum to 82.49 s, not the 81.12 s median total (in arm C they sum to less than the total)."
     }
   ],
   "recall": [
@@ -308,10 +308,6 @@
     {
       "file": "docs/post.md",
       "section": "## KV capacity — the second dividend"
-    },
-    {
-      "file": "docs/post.md",
-      "section": "### The part the compile cache saves that isn't compilation"
     },
     {
       "file": "docs/post.md",
@@ -367,6 +363,10 @@
     }
   ],
   "derived_numbers": [
+    {
+      "value": "17.40",
+      "how": "vLLM's Model loading took line, median over 100 runs, from data/campaign.jsonl (arm A; arms B and C 4.57 and 4.54)."
+    },
     {
       "value": "82.49",
       "how": "Sum of arm A's phase medians in docs/post.md 'The decomposition': 4.37 + 0.00 + 45.83 + 19.01 + 0.09 + 4.00 + 4.46 + 4.43 + 0.30."
