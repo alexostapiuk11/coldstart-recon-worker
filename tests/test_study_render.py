@@ -1272,9 +1272,9 @@ def test_edge_label_moves_to_the_other_side_rather_than_under_a_box():
 
 def test_canonical_phases_have_one_colour_on_every_page():
     from study.svg import CANONICAL_SEGMENT_SLOTS, segment_slots
-    page_a = segment_slots([_stacked("Platform (by subtraction)", "Compile", "First token")])
+    page_a = segment_slots([_stacked("Platform (by subtraction)", "Compile", "First request")])
     page_b = segment_slots([_stacked("Weights", "Everything else: scratch space and the KV cache"),
-                            _stacked("First token", "Server launch to model loaded", "Compile")])
+                            _stacked("First request", "Server launch to model loaded", "Compile")])
     for slots in (page_a, page_b):
         for name, slot in slots.items():
             assert slot == CANONICAL_SEGMENT_SLOTS[name], name

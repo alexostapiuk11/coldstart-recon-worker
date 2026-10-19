@@ -470,7 +470,7 @@ CANONICAL_SEGMENT_SLOTS = {
     "Graph capture": 3,
     "Memory profiling": 4,
     "Ready check": 5,
-    "First token": 6,
+    "First request": 6,
     "Weights": 7,
     "Everything else: scratch space and the KV cache": 2,
 }
