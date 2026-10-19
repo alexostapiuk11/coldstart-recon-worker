@@ -176,6 +176,18 @@ def test_result_takeaway_is_one_bounded_sentence():
     _fails(u, r"results\[0\]\.takeaway: expected str")
 
 
+def test_result_arithmetic_is_an_optional_bounded_string():
+    u = artifact_unit()
+    u["results"][0]["arithmetic"] = "15.68 - 26.07 = -10.39 s"
+    validate(u)
+    u["results"][0]["arithmetic"] = "x" * 221
+    _fails(u, r"results\[0\]\.arithmetic longer than 220")
+    u["results"][0]["arithmetic"] = 5
+    _fails(u, r"results\[0\]\.arithmetic: expected str")
+    u["results"][0]["arithmetic"] = "  "
+    _fails(u, r"results\[0\]\.arithmetic is empty")
+
+
 def test_every_decision_serves_a_requirement():
     u = artifact_unit_with_links()
     u["decisions"][2]["serves"] = []

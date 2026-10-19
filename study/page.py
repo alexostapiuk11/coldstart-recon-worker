@@ -314,11 +314,14 @@ def _results(c):
         elif so_ids(r):
             links = ", ".join(f'<a href="#d-{esc(d)}">{esc(titles[d])}</a>' for d in so_ids(r))
             so = f'<div class="callout">So: {links}</div>'
+        computed = (f'<div class="row"><b>How it is computed</b><div>{inline(r["arithmetic"])}'
+                    '</div></div>' if r.get("arithmetic") else "")
         cards.append(
             f'<div class="card" id="r-{i}"><h3>{code}{esc(r["title"])}</h3>'
             f'{chart_html(r["chart"], f"r{i}", slots)}'
             f'<div class="row"><b>Axis</b><div>{inline(r["axis"])}</div></div>'
-            f'<div class="row"><b>Read it as</b><div>{inline(r["read_as"])}</div></div>{so}</div>')
+            f'<div class="row"><b>Read it as</b><div>{inline(r["read_as"])}</div></div>'
+            f'{computed}{so}</div>')
     head = "Results, as meaning" if c["kind"] == "artifact" else "In pictures"
     return (f'<section id="results"><h2>{head}</h2>'
             f'<div class="grid2">{"".join(cards)}</div></section>')

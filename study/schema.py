@@ -23,6 +23,7 @@ MAX_ONE_LINE = 160
 # map labels them with their card titles.
 MAX_SHORT = 40
 MAX_TAKEAWAY = 200
+MAX_ARITHMETIC = 220  # a result's "How it is computed" row
 
 
 class ContentError(ValueError):
@@ -420,6 +421,7 @@ def validate(c: dict) -> None:
         w = f"{where}.results[{i}]"
         for f in ("title", "axis", "read_as"):
             _get(r, f, str, w)
+        _opt_str(r, "arithmetic", w, MAX_ARITHMETIC)
         _chart(_get(r, "chart", dict, w), w)
 
     if kind == "artifact":

@@ -131,6 +131,8 @@ def render_brief(c: dict) -> str:
         out += ["## Results as meaning", ""]
         for r in c["results"]:
             out += [f"### {r['title']}", "", f"- Axis: {r['axis']}", f"- Read it as: {r['read_as']}"]
+            if r.get("arithmetic"):
+                out.append(f"- How it is computed: {r['arithmetic']}")
             ch = r["chart"]
             if ch["type"] == "stacked_bars":
                 for b in ch["bars"]:

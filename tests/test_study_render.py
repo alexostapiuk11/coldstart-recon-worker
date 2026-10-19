@@ -384,6 +384,22 @@ def test_highlight_greys_out_the_other_segments_and_their_legend_chips():
     assert " dim" not in plain
 
 
+def test_result_arithmetic_is_a_row_under_read_it_as_on_page_and_in_brief():
+    u = artifact_unit()
+    u["results"][0]["arithmetic"] = "45.83 - 30.35 = 15.48 s"
+    page = render_page(u)
+    card = page.split('id="r-0"')[1].split('<div class="card"')[0]
+    read_as = card.index("<b>Read it as</b>")
+    computed = card.index("<b>How it is computed</b><div>45.83 - 30.35 = 15.48 s</div>")
+    assert read_as < computed
+    brief = render_brief(u)
+    result = brief.split(f"### {u['results'][0]['title']}")[1]
+    assert result.index("- Read it as:") < result.index(
+        "- How it is computed: 45.83 - 30.35 = 15.48 s")
+    assert "How it is computed" not in render_page(artifact_unit())
+    assert "How it is computed" not in render_brief(artifact_unit())
+
+
 def test_brief_lists_deltas():
     u = artifact_unit()
     u["results"][0]["chart"]["deltas"] = [{"between": "A → C", "text": "Compile vanishes."}]
