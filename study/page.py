@@ -11,6 +11,7 @@ that colour: black or white, whichever clears 4.5:1 on the fill.
 
 from __future__ import annotations
 
+from study.map import MAP_CSS, MAP_JS, has_map, map_section
 from study.schema import so_ids
 from study.svg import chart_html, diagram_html
 from study.text import esc, inline
@@ -190,7 +191,8 @@ def _results(c):
             links = ", ".join(f'<a href="#d-{esc(d)}">{esc(titles[d])}</a>' for d in so_ids(r))
             so = f'<div class="callout">So: {links}</div>'
         cards.append(
-            f'<div class="card"><h3>{esc(r["title"])}</h3>{chart_html(r["chart"], f"r{i}")}'
+            f'<div class="card" id="r-{i}"><h3>{esc(r["title"])}</h3>'
+            f'{chart_html(r["chart"], f"r{i}")}'
             f'<div class="row"><b>Axis</b>{inline(r["axis"])}</div>'
             f'<div class="row"><b>Read it as</b>{inline(r["read_as"])}</div>{so}</div>')
     return (f'<section id="results"><h2>Results, as meaning</h2>'
@@ -240,6 +242,8 @@ def render_page(c: dict) -> str:
             f'<div class="flow">{steps}</div></section>')
     if c.get("results"):
         add("results", "Results", _results(c))
+    if has_map(c):
+        add("map", "Map", map_section(c))
     if c.get("interview"):
         add("interview", "Interview", _interview(c))
     rec = "".join(f"<details><summary>{inline(r['q'])}</summary><p>{inline(r['a'])}</p></details>"
@@ -251,12 +255,13 @@ def render_page(c: dict) -> str:
     add("sources", "Sources", f'<section id="sources"><footer class="src"><h2>Sources</h2>'
         f'<ul>{src}</ul></footer></section>')
 
+    css, js = (CSS + MAP_CSS, JS + MAP_JS) if has_map(c) else (CSS, JS)
     used = "" if art else f'<p class="why">Used by: {esc(", ".join(c["used_by"]))}</p>'
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        f'<title>{esc(c["short_title"])}</title><style>{CSS}</style></head><body><main>'
+        f'<title>{esc(c["short_title"])}</title><style>{css}</style></head><body><main>'
         f'<header class="hero"><div class="kicker">Study page · about {c["minutes"]} min</div>'
         f'<h1>{esc(c["title"])}</h1>{used}</header>'
         f'<nav class="pills">{"".join(nav)}</nav>{"".join(sections)}</main>'
-        f'<script>{JS}</script></body></html>')
+        f'<script>{js}</script></body></html>')

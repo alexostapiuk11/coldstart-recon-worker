@@ -388,3 +388,141 @@ def test_brief_lists_deltas():
     u = artifact_unit()
     u["results"][0]["chart"]["deltas"] = [{"between": "A → C", "text": "Compile vanishes."}]
     assert "- Changed A → C: Compile vanishes." in render_brief(u)
+
+
+# ---- the relationship map ----
+
+from study.map import barycentre_order, map_section
+from tests.study_examples import artifact_unit_with_links, prereq_unit
+
+
+def _dom_ids(html):
+    """content ref -> DOM id, per node kind."""
+    out = {}
+    for kind, dom, ref in re.findall(
+            r'<button type="button" class="mnode (\w+)" id="(m-[\w-]+)" data-ref="([^"]*)"', html):
+        out[(kind, ref)] = dom
+    return out
+
+
+def _edges(html):
+    return set(re.findall(r'<path class="medge" data-from="([\w-]+)" data-to="([\w-]+)"', html))
+
+
+def test_map_only_when_requirements_have_ids():
+    assert 'id="map"' not in render_page(artifact_unit())
+    assert 'id="map"' not in render_page(prereq_unit())
+    assert map_section(artifact_unit()) == ""
+    page = render_page(artifact_unit_with_links())
+    assert '<section id="map"><h2>How the pieces connect</h2>' in page
+    assert '<a href="#map">Map</a>' in page
+
+
+def test_map_sits_after_results_and_before_interview():
+    ids = re.findall(r'<section id="([\w-]+)"', render_page(artifact_unit_with_links()))
+    assert ids.index("results") + 1 == ids.index("map") == ids.index("interview") - 1
+
+
+def test_map_css_and_js_ship_only_with_a_map():
+    assert ".mnode" not in render_page(artifact_unit())
+    page = render_page(artifact_unit_with_links())
+    assert page.count("<style>") == 1 and page.count("<script>") == 1
+    assert ".mnode" in page and "mgrid" in page.split("<script>")[1]
+
+
+def test_every_link_in_the_content_is_an_edge_and_nothing_else_is():
+    u = artifact_unit_with_links()
+    html = map_section(u)
+    dom = _dom_ids(html)
+    expected = set()
+    for d in u["decisions"]:
+        for s in d["serves"]:
+            expected.add((dom[("req", s["req"])], dom[("dec", d["id"])]))
+        for k in d["uses"]:
+            expected.add((dom[("dec", d["id"])], dom[("con", k["concept"])]))
+    for i, r in enumerate(u["results"]):
+        so = r.get("so", [])
+        for d in [so] if isinstance(so, str) else so:
+            expected.add((dom[("dec", d)], dom[("res", str(i))]))
+    assert _edges(html) == expected
+    assert len(expected) == 5 + 3 + 2  # serves, uses, so
+
+
+def test_every_node_has_a_panel_with_its_one_line_text_and_link_reasons():
+    u = artifact_unit_with_links()
+    html = map_section(u)
+    dom = _dom_ids(html)
+
+    def panel(kind, ref):
+        return html.split(f'<template id="mp-{dom[(kind, ref)]}">')[1].split("</template>")[0]
+
+    assert "Split one cold start into named phases." in panel("req", "R1")
+    assert "d1 meets R1." in panel("req", "R1")  # the because of a serves link
+    assert "A short reason." in panel("dec", "d0")  # why_short
+    assert "d0 is built on arms." in panel("dec", "d0")
+    assert "Loading weights is most of a cold start." in panel("res", "0")  # takeaway
+    assert "One set-up under test." in panel("con", "arms")  # plain
+    assert "no decision rests on it" in panel("res", "1")  # so_none_reason
+
+
+def test_unlinked_requirement_shows_its_reason():
+    u = artifact_unit_with_links()
+    html = map_section(u)
+    dom = _dom_ids(html)
+    tpl = html.split(f'<template id="mp-{dom[("req", "R3")]}">')[1].split("</template>")[0]
+    assert "Served by the process: the flow&#x27;s last step, not a decision." in tpl
+    node = re.search(rf'id="{dom[("req", "R3")]}".*?</button>', html, re.DOTALL).group(0)
+    assert "No decision" in node
+
+
+def test_node_text_is_escaped():
+    u = artifact_unit_with_links()
+    u["requirements"][0]["short"] = "<b>bold</b>"
+    u["decisions"][0]["serves"][0]["because"] = "<script>x</script>"
+    u["concepts"][0]["plain"] = "<img src=x>"
+    html = map_section(u)
+    assert "<b>bold</b>" not in html and "&lt;b&gt;bold&lt;/b&gt;" in html
+    assert "<script>x" not in html and "<img src=x>" not in html
+
+
+def test_labels_fall_back_to_truncated_text_and_titles():
+    u = artifact_unit_with_links()
+    del u["requirements"][0]["short"]
+    u["requirements"][0]["text"] = "A requirement whose text runs well past forty characters."
+    del u["decisions"][0]["short"]
+    html = map_section(u)
+    assert "A requirement whose text runs well past…" in html
+    assert '<span class="mlab">Decision 0</span>' in html
+
+
+def test_narrow_list_names_each_nodes_links():
+    html = map_section(artifact_unit_with_links())
+    dom = _dom_ids(html)
+    node = re.search(rf'id="{dom[("req", "R1")]}".*?</button>', html, re.DOTALL).group(0)
+    assert "Links: D1 · D2 · D4" in node
+
+
+def test_barycentre_order_is_deterministic_and_follows_neighbours():
+    # item -> positions of its neighbours in the fixed column
+    assert barycentre_order(["a", "b", "c", "d"],
+                            {"a": [3], "b": [0], "c": [], "d": [0, 3]}) == ["b", "d", "a", "c"]
+    # ties keep the input order
+    assert barycentre_order(["x", "y"], {"x": [1], "y": [1]}) == ["x", "y"]
+
+
+def test_right_column_interleaves_results_and_concepts_by_their_decisions():
+    html = map_section(artifact_unit_with_links())
+    right = html.split('class="mcol mcol-right"')[1]
+    order = re.findall(r'class="mnode (res|con)" id="[\w-]+" data-ref="([^"]*)"', right)
+    # F1 rests on D1,D2 (0.5); arms is used by D1,D4 (1.5); contrast by D3 (2); F2 by none.
+    assert order == [("res", "0"), ("con", "arms"), ("con", "contrast"), ("res", "1")]
+
+
+def test_requirements_are_ordered_by_the_decisions_that_serve_them():
+    u = artifact_unit_with_links()
+    for d in u["decisions"]:
+        d["serves"] = [{"req": "R2", "because": "x"}]
+    u["decisions"][3]["serves"] = [{"req": "R1", "because": "x"}]
+    u["decisions"][0]["serves"] = [{"req": "R2", "because": "x"}]
+    left = map_section(u).split('class="mcol mcol-req"')[1].split('class="mcol mcol-dec"')[0]
+    assert re.findall(r'data-ref="(R\d)"', left) == ["R2", "R1", "R3"]
