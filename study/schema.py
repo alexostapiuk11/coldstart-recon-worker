@@ -6,6 +6,8 @@ here, naming the field, instead of producing a broken page.
 
 from __future__ import annotations
 
+import re
+
 from study.text import SENTINELS, known_units, unknown_link_units, wrap
 
 ARTIFACT_LEVELS = ("context", "container", "component", "dynamic")
@@ -24,6 +26,15 @@ MAX_ONE_LINE = 160
 MAX_SHORT = 40
 MAX_TAKEAWAY = 200
 MAX_ARITHMETIC = 220  # a result's "How it is computed" row
+# Implementation flow steps (see _flow).
+MAX_STEP_LABEL = 60
+MAX_OUTPUT = 140
+MAX_WHEN = 32
+MAX_PHASE = 40
+MAX_EVIDENCE_NOTE = 80
+PHASED_STEPS = (5, 12)
+MILESTONES = (2, 6)
+SHA = re.compile(r"[0-9a-f]{7,40}")
 
 
 class ContentError(ValueError):
@@ -167,6 +178,71 @@ def _relationships(c, where):
         dec = _opt_str(s, "decision", w)
         if dec is not None and dec not in decision_ids:
             raise ContentError(f"{w}.decision '{dec}' is not a decision id")
+
+
+def phased(c: dict) -> bool:
+    """A unit opts in to the phased flow (timeline, milestones) once any step has a
+    `phase` or a `milestone`."""
+    return any(isinstance(s, dict) and ("phase" in s or "milestone" in s)
+               for s in c.get("flow", []))
+
+
+def _flow_step(s, w):
+    """One step's optional fields: phase, output, when, milestone, evidence. A milestone
+    needs an output, a when and at least one evidence commit."""
+    if len(_get(s, "label", str, w)) > MAX_STEP_LABEL:
+        raise ContentError(f"{w}.label longer than {MAX_STEP_LABEL} characters")
+    _opt_str(s, "phase", w, MAX_PHASE)
+    _opt_str(s, "output", w, MAX_OUTPUT)
+    _opt_str(s, "when", w, MAX_WHEN)
+    if "milestone" in s:
+        _get(s, "milestone", bool, w)
+    if "evidence" in s:
+        for j, e in enumerate(_items(s, "evidence", w)):
+            we = f"{w}.evidence[{j}]"
+            sha = _get(e, "commit", str, we)
+            if not SHA.fullmatch(sha):
+                raise ContentError(f"{we}.commit '{sha}' must be 7 to 40 hex characters "
+                                   "(lower case)")
+            _opt_str(e, "repo", we)
+            _opt_str(e, "note", we, MAX_EVIDENCE_NOTE)
+    if s.get("milestone"):
+        for f in ("output", "when", "evidence"):
+            if f not in s:
+                raise ContentError(f"{w} '{s['label']}' is a milestone; it needs `{f}`")
+
+
+def _flow(c, where):
+    """Every step's fields; then, for an artifact whose flow is phased (see `phased`), the
+    timeline's rules: 5 to 12 steps, 2 to 6 milestones, every step with a phase and an
+    output, at least two phases, and each phase's steps consecutive (the page groups them
+    in the order written)."""
+    steps = c.get("flow", [])
+    for i, s in enumerate(steps):
+        _flow_step(s, f"{where}.flow[{i}]")
+    if c["kind"] != "artifact" or not phased(c):
+        return
+    lo, hi = PHASED_STEPS
+    if not lo <= len(steps) <= hi:
+        raise ContentError(f"{where}.flow: a phased flow needs {lo} to {hi} steps, "
+                           f"has {len(steps)}")
+    for i, s in enumerate(steps):
+        for f in ("phase", "output"):
+            _get(s, f, str, f"{where}.flow[{i}]")
+    lo, hi = MILESTONES
+    n = sum(1 for s in steps if s.get("milestone"))
+    if not lo <= n <= hi:
+        raise ContentError(f"{where}.flow: needs {lo} to {hi} milestones, has {n}")
+    order = []
+    for i, s in enumerate(steps):
+        if order and s["phase"] == order[-1]:
+            continue
+        if s["phase"] in order:
+            raise ContentError(f"{where}.flow[{i}].phase '{s['phase']}' comes back after "
+                               f"'{order[-1]}'; a phase's steps must be consecutive")
+        order.append(s["phase"])
+    if len(order) < 2:
+        raise ContentError(f"{where}.flow: needs at least 2 phases, has {len(order)}")
 
 
 def _chart(ch, where):
@@ -442,5 +518,6 @@ def validate(c: dict) -> None:
             _get(t, "analogy", str, f"{where}.concepts[{i}]")
             _get(t, "why", str, f"{where}.concepts[{i}]")
         _items(c, "used_by", where, at_least=1)
+    _flow(c, where)
     _relationships(c, where)
     _cross_page(c, where)

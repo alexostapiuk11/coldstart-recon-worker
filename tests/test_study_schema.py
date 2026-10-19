@@ -470,3 +470,108 @@ def test_interval_row_decimals_and_shade_caption_are_checked():
     _fails(u, r"rows\[0\]\.decimals must be 0 to 6")
     u["results"][0]["chart"] = dict(_interval(), shade_caption="")
     _fails(u, r"shade_caption is empty")
+
+
+# ---- phased implementation flow ----
+
+from tests.study_examples import artifact_unit_with_flow
+
+
+def test_phased_flow_passes_and_plain_flow_still_passes():
+    validate(artifact_unit_with_flow())
+    validate(artifact_unit())  # no phase, no milestone: the old rules only
+
+
+def test_flow_step_fields_are_typed_and_bounded():
+    for field, value, match in [
+        ("label", "x" * 61, r"flow\[0\]\.label longer than 60"),
+        ("output", "x" * 141, r"flow\[0\]\.output longer than 140"),
+        ("output", " ", r"flow\[0\]\.output is empty"),
+        ("phase", 3, r"flow\[0\]\.phase: expected str"),
+        ("when", "x" * 33, r"flow\[0\]\.when longer than 32"),
+        ("milestone", "yes", r"flow\[0\]\.milestone: expected bool"),
+        ("evidence", "abc1234", r"flow\[0\]\.evidence: expected list"),
+        ("evidence", [], r"flow\[0\]\.evidence: needs at least 1"),
+    ]:
+        u = artifact_unit_with_flow()
+        u["flow"][0][field] = value
+        _fails(u, match)
+
+
+def test_plain_flow_labels_are_bounded_too():
+    u = artifact_unit()
+    u["flow"][0]["label"] = "x" * 61
+    _fails(u, r"flow\[0\]\.label longer than 60")
+
+
+def test_evidence_commits_are_hex_shas_of_7_to_40_characters():
+    for sha in ("abc123", "a" * 41, "abcdefg", "ABC 1234"):
+        u = artifact_unit_with_flow()
+        u["flow"][0]["evidence"] = [{"commit": sha}]
+        _fails(u, r"flow\[0\]\.evidence\[0\]\.commit .* 7 to 40 hex")
+    u = artifact_unit_with_flow()
+    u["flow"][0]["evidence"] = [{"commit": "a" * 40, "repo": "~/projects/x", "note": "n"}]
+    validate(u)
+    for field, value, match in [("repo", "", "repo is empty"), ("note", 5, "note: expected str"),
+                                ("note", "x" * 81, "note longer than 80")]:
+        u = artifact_unit_with_flow()
+        u["flow"][0]["evidence"][0][field] = value
+        _fails(u, r"flow\[0\]\.evidence\[0\]\." + match)
+
+
+def test_a_milestone_needs_output_when_and_evidence():
+    for field in ("output", "when", "evidence"):
+        u = artifact_unit_with_flow()
+        del u["flow"][1][field]
+        _fails(u, rf"flow\[1\].*milestone.*needs `{field}`")
+
+
+def test_phased_flow_has_5_to_12_steps():
+    u = artifact_unit_with_flow()
+    u["flow"] = u["flow"][:2] + u["flow"][3:4] + u["flow"][-1:]
+    _fails(u, r"flow: a phased flow needs 5 to 12 steps, has 4")
+    u = artifact_unit_with_flow()
+    u["flow"] = u["flow"][:6] + [dict(u["flow"][6]) for _ in range(7)]
+    _fails(u, r"needs 5 to 12 steps, has 13")
+
+
+def test_phased_flow_has_2_to_6_milestones():
+    u = artifact_unit_with_flow()
+    for s in u["flow"][2:]:
+        s.pop("milestone", None)
+    _fails(u, r"flow: needs 2 to 6 milestones, has 1")
+    u = artifact_unit_with_flow()
+    for s in u["flow"]:
+        s.update(milestone=True, when="2026-09-01", evidence=[{"commit": "abc1234"}])
+    _fails(u, r"needs 2 to 6 milestones, has 8")
+
+
+def test_every_step_of_a_phased_flow_has_an_output_and_a_phase():
+    u = artifact_unit_with_flow()
+    del u["flow"][4]["output"]
+    _fails(u, r"flow\[4\]: missing 'output'")
+    u = artifact_unit_with_flow()
+    del u["flow"][4]["phase"]
+    _fails(u, r"flow\[4\]: missing 'phase'")
+
+
+def test_phased_flow_has_at_least_two_phases_each_in_one_run():
+    u = artifact_unit_with_flow()
+    for s in u["flow"]:
+        s["phase"] = "Everything"
+    _fails(u, r"flow: needs at least 2 phases, has 1")
+    u = artifact_unit_with_flow()
+    u["flow"][5]["phase"] = "Design"  # Design, Measure, then Design again
+    _fails(u, r"flow\[5\]\.phase 'Design' comes back after 'Measure'")
+
+
+def test_phase_rules_apply_to_artifacts_only_and_opt_in_by_phase_or_milestone():
+    u = artifact_unit()
+    u["flow"][0]["milestone"] = True
+    _fails(u, r"flow\[0\].*milestone.*needs `output`")
+    u = artifact_unit()
+    u["flow"][0]["phase"] = "Design"
+    _fails(u, r"flow: a phased flow needs 5 to 12 steps, has 3")
+    u = artifact_unit()
+    u["flow"][0].update(output="a thing", when="2026-09-01")  # neither phase nor milestone
+    validate(u)

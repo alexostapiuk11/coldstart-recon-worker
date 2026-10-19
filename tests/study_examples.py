@@ -125,6 +125,60 @@ def artifact_unit_with_links() -> dict:
     return u
 
 
+def artifact_unit_with_flow() -> dict:
+    """artifact_unit_with_links() with a phased flow: 8 steps in 3 phases, 3 milestones,
+    evidence commits (invented shas, one in another repo) and two steps tied to decisions.
+    The text is as long as real content is, so the fixture page shows real wrapping."""
+    u = artifact_unit_with_links()
+    u["flow"] = [
+        {"phase": "Design", "label": "Capture real responses, then build offline",
+         "detail": "Saved engine logs and provider responses from one cheap trial run become "
+                   "test inputs; the harness is built against them and a free fake engine.",
+         "output": "a test suite that replays captured logs with no GPU",
+         "when": "2026-08-20 to 08-24",
+         "evidence": [{"commit": "1a2b3c4", "note": "fixtures from the trial run"}]},
+        {"phase": "Design", "label": "Pre-register the hypotheses and rules",
+         "detail": "Hypotheses, contrasts, stopping rules and the gate are committed before "
+                   "the first paid run.",
+         "output": "a frozen pre-registration in docs/experiment.md",
+         "milestone": True, "when": "2026-08-28", "decision": "d1",
+         "evidence": [{"commit": "5d6e7f8a9b"}]},
+        {"phase": "Measure", "label": "Prime arm C in a separate store",
+         "detail": "Two priming runs never count; the second must show compile under one "
+                   "second.",
+         "output": "a warm compile cache, checked before every arm C run",
+         "when": "2026-09-01", "decision": "d2"},
+        {"phase": "Measure", "label": "Run interleaved triples",
+         "detail": "Seeded triples, one job in flight; a change to any pinned setting ends "
+                   "the experiment.",
+         "output": "a complete store of one JSON line per run",
+         "milestone": True, "when": "2026-09-02 to 09-04",
+         "evidence": [{"commit": "abcdef0", "note": "store committed"},
+                      {"commit": "0fedcba987", "repo": "~/projects/other-repo",
+                       "note": "worker image pinned"}]},
+        {"phase": "Measure", "label": "Store, never retry",
+         "detail": "A failure is its own row: a retry would swap unlucky runs for faster ones.",
+         "output": "failure rows kept next to the successes",
+         "when": "2026-09-04"},
+        {"phase": "Analyse and publish", "label": "Partition, then analyse",
+         "detail": "A gate sorts rows into publishable, discarded and failed before any "
+                   "statistic; then seeded bootstrap intervals.",
+         "output": "intervals computed only from publishable rows",
+         "when": "2026-09-06"},
+        {"phase": "Analyse and publish", "label": "Draw the figures from the store",
+         "detail": "Every figure is a function of the committed store.",
+         "output": "figures that rebuild byte for byte",
+         "when": "2026-09-08"},
+        {"phase": "Analyse and publish", "label": "Publish what re-derives",
+         "detail": "The post and its numbers come from the committed store; a re-run "
+                   "reproduces the analysis with no GPU.",
+         "output": "a published post whose every number re-derives on a laptop",
+         "milestone": True, "when": "2026-09-12",
+         "evidence": [{"commit": "9f8e7d6c5b4a"}]},
+    ]
+    return u
+
+
 def prereq_unit() -> dict:
     return copy.deepcopy({
         "id": "px",
