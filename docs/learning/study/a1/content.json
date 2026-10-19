@@ -79,14 +79,14 @@
       "id": "prereg",
       "short": "Pre-registration",
       "term": "Pre-registration",
-      "plain": "Hypotheses, contrasts, which runs to throw out, when to stop and how to pick the headline, committed in `docs/experiment.md` before any paid measurement run, four days before the published campaign's first run; later additions are dated in git."
+      "plain": "Hypotheses, contrasts, which runs to throw out, when to stop and how to pick the headline, committed in `docs/experiment.md` before any priming or campaign run (after three paid reconnaissance captures), four days before the first retained run; later additions dated in git."
     }
   ],
   "views": [
     {
       "level": "context",
       "title": "Who and what the study touches",
-      "caption": "RunPod serverless rents the GPU, one job at a time. Weights come from the model hub (arm A) or from a network volume mounted into the worker (arms B and C). Output: a post plus the raw data.",
+      "caption": "RunPod serverless rents the GPU, one job at a time. Weights come from the model hub (arm A) or from a network volume (arms B and C). Output: a post plus the raw data.",
       "nodes": [
         {
           "id": "author",
@@ -263,7 +263,7 @@
     {
       "level": "component",
       "title": "Inside one run: the worker opened up",
-      "caption": "Solid boxes run in the worker: the handler sets two cache paths and checks the cache directories; the probe launches `vllm serve`, stamps phase marks on clock B and returns the raw log. Dashed boxes are outside the worker code; the parser and run record are built later on the laptop.",
+      "caption": "Solid boxes run in the worker: the handler sets two cache paths and checks the cache directories; the probe launches `vllm serve`, stamps phase marks on clock B and returns the raw log. Dashed boxes are outside the worker code; the parser and record are built later, on the laptop.",
       "nodes": [
         {
           "id": "handler",
@@ -538,7 +538,7 @@
         "One variable, cache configuration, at three levels: A, B, C"
       ],
       "chosen": "One variable, cache configuration, at three levels: A, B, C",
-      "why": "A to B isolates the weight cache. B to C isolates the compile cache with weight handling held constant. The configuration is one frozen object that sets two paths, so the single-variable claim is true by structure. A baked image only moves the bytes into the image pull, inside the platform residual the harness cannot split, so it would flatter the weight time unseen. Nobody warms a compile cache while re-downloading weights, so the fourth cell answers no question.",
+      "why": "A to B isolates the weight cache. B to C isolates the compile cache, weight handling held constant. The configuration is one frozen object that sets two paths, so the single-variable claim is true by structure. A baked image only moves the bytes into the image pull, inside the unsplit platform residual, flattering the weight time unseen. Nobody warms a compile cache while re-downloading weights, so the fourth cell answers no question.",
       "cost": "A warm arm needs a primed volume, and a test has to check that the arms differ nowhere else.",
       "why_short": "A to B isolates the weight cache, B to C the compile cache; one frozen configuration makes the single-variable claim true by structure.",
       "cost_short": "Arm C needs a primed volume, and a test checks that the arms differ nowhere else.",
@@ -597,7 +597,7 @@
         "Interleaved triples: one run of each arm per triple, order shuffled from a seed"
       ],
       "chosen": "Interleaved triples: one run of each arm per triple, order shuffled from a seed",
-      "why": "Blocking confounds the cache with time-of-day conditions, and on rented GPUs that confound can be large enough to make or erase the whole effect. The design calls interleaving its most important validity decision. Triples also allow a paired, same-host check as supporting evidence.",
+      "why": "Blocking confounds the cache with time-of-day conditions, and on rented GPUs that confound can make or erase the whole effect. Triples also allow a paired, same-host check as supporting evidence.",
       "cost": "A resumed campaign must rebuild the exact schedule, so the harness refuses a resume whose stored arms disagree with the seed. The windows ended up hours apart rather than on separate days, so drift between windows is only partly covered; the post says so.",
       "why_short": "Running all of one arm first would mix the cache effect with time-of-day conditions on the platform.",
       "cost_short": "A resume must rebuild the exact schedule; drift between windows hours apart is only partly covered.",
@@ -626,7 +626,7 @@
       ],
       "chosen": "Prime arm C outside the campaign, isolate cold paths per run, and check the compile-cache state on every run",
       "why": "Without priming, arm C's early runs compile cold and later ones do not: a mixture whose effect grows with run index, which looks like a real trend. So two priming runs go to a separate store, and the second must show the cache present and compile under one second. Cold paths are named by run id so a reused worker cannot hand one run's files to another. The cache state is checked before the engine starts, since a cold compile creates the directory as it finishes; a run whose state disagrees with its arm is discarded.",
-      "cost": "Priming runs cost GPU time and are excluded from every number. Moving the check to after the engine run would look harmless but quietly discard about two thirds of a paid campaign, so the code carries a do-not-move warning.",
+      "cost": "Priming runs cost GPU time and are excluded from every number. Checking after the engine run would look harmless but quietly discard about two thirds of a paid campaign, so the code carries a do-not-move warning.",
       "why_short": "Unprimed, arm C's early runs compile cold and later ones do not, which looks like a real trend.",
       "cost_short": "Priming runs cost GPU time and are excluded from every number.",
       "short": "Check each arm's cache state",
@@ -691,7 +691,7 @@
       ],
       "chosen": "p50, p90, p95 and a full ECDF, no p99, and H4 reported as unanswerable",
       "why": "A mean is pulled by the tail. At 100 runs a p99 is one or two observations, not an estimate. Before the published campaign began (a discarded window had already shown runs piling onto one host), the pre-registration committed to publishing the host count whatever it was. The same single host made every triple host-complete, so the paired check is fully supplied.",
-      "cost": "The far tail stays unresolved: the post can say that B's largest repeat-host runs were longer than A's, but not why. The question of whether host placement drives the tail is lost.",
+      "cost": "The far tail stays unresolved: B's largest repeat-host runs were longer than A's, for no known reason, and whether host placement drives the tail is unanswered.",
       "why_short": "A mean hides the tail, and at 100 runs a p99 would be one or two observations.",
       "cost_short": "The far tail stays unresolved, and whether host placement drives it is unanswered.",
       "short": "Report the shape and its limits",
@@ -721,13 +721,17 @@
     {
       "phase": "Design",
       "label": "Specify one variable at three levels",
-      "detail": "Three arms differing only in cache configuration, named phases and two clocks; then a task-by-task harness plan.",
+      "detail": "First spec: hub vs volume weights, named phases, two clocks; a same-day revision added arm C for the compile cache. Then the harness plan.",
       "output": "the design spec and the harness plan, before any code",
       "when": "2026-08-17 to 08-19",
       "evidence": [
         {
           "commit": "c778863484",
-          "note": "design spec"
+          "note": "first spec: two arms"
+        },
+        {
+          "commit": "540589bfa1",
+          "note": "arm C added"
         },
         {
           "commit": "ddcce86605",
@@ -795,13 +799,17 @@
     {
       "phase": "Prepare the paid run",
       "label": "Pre-register the rules",
-      "detail": "Hypotheses, contrasts, and the exclusion, stopping and headline rules, committed before any priming or campaign run; the captures shaped it.",
+      "detail": "Hypotheses, contrasts, and exclusion, stopping and headline rules, shaped by the captures; next morning, total cold start became the ranking's unit. All before any priming run.",
       "output": "docs/experiment.md, changed afterwards only by dated amendments",
       "milestone": true,
-      "when": "2026-08-28",
+      "when": "2026-08-28 to 08-29",
       "evidence": [
         {
           "commit": "95dd30726b"
+        },
+        {
+          "commit": "42f87ec172",
+          "note": "ranking unit: total"
         }
       ],
       "decision": "rank"
@@ -835,10 +843,10 @@
     {
       "phase": "Measure",
       "label": "Discard the first window and restart",
-      "detail": "Arm A lost 3 of its 9 runs to a full worker disk. The fix changed the pinned image, so the 27-run window was discarded whole, not spliced.",
-      "output": "data/discarded-window-0.jsonl, kept as evidence; a re-pinned image",
+      "detail": "Arm A lost 3 of its 9 runs to a full worker disk (C one, B none). The fix changed the pinned image, so the 27-run window was discarded whole, not spliced. H4 was then scoped.",
+      "output": "data/discarded-window-0.jsonl and -0b.jsonl, kept as evidence; image re-pinned twice",
       "milestone": true,
-      "when": "2026-08-31",
+      "when": "2026-08-31 to 09-01",
       "evidence": [
         {
           "commit": "740e1eafaf",
@@ -850,7 +858,11 @@
         },
         {
           "commit": "4d7b4017a0",
-          "note": "restart's first run failed too; purge at start"
+          "note": "restart's first run failed; purge at start"
+        },
+        {
+          "commit": "1f288a5f01",
+          "note": "H4 scoped"
         }
       ]
     },
@@ -860,7 +872,7 @@
       "detail": "Seeded triples, one job in flight, one JSON line per run, no retries. Three windows hours apart, all on one host.",
       "output": "data/campaign.jsonl: 300 runs, 100 per arm, no failures, no discards",
       "milestone": true,
-      "when": "2026-09-02 to 09-04 UTC",
+      "when": "2026-09-01 to 09-03 (−07:00)",
       "evidence": [
         {
           "commit": "68ece63079",
@@ -1148,7 +1160,7 @@
         "note": "Hollow circle: the arm's largest repeat-host run; the post gives it for A and B only."
       },
       "axis": "Seconds of total cold start per arm: p50 (median), p90, p95.",
-      "read_as": "The arm order holds at every percentile shown, but among repeat-host runs B's largest is longer than A's: the far tail does not follow the median. No p99: at 100 runs it would be one or two runs.",
+      "read_as": "The arm order holds at every percentile shown; hollow markers show it break in the far tail. No p99: at 100 runs it would be one or two runs.",
       "arithmetic": "Percentiles use all 300 publishable runs, among them arm A's 2266.6 s run on a host's first image pull (far past p95); each hollow marker is that arm's largest repeat-host run (A: 99 runs, B: 100).",
       "so": "shape",
       "takeaway": "The ranking holds out to p95, yet among repeat-host runs B's largest exceeds A's: the far tail is not the median."
@@ -1178,7 +1190,7 @@
       "read_as": "Both clear zero, but side by side they do not rank the caches; the next chart does. Only 18.46 s of the compile cache's 26.07 s is compilation; the other 7.6 s roughly matches the unexplained launch-segment gap (8.85 s).",
       "so": "arms",
       "short": "Each cache's saving, alone",
-      "takeaway": "Each cache saves time on its own, and neither interval comes near zero; these are context, not the ranking.",
+      "takeaway": "Each cache saves time on its own, with neither interval near zero; context, not the ranking.",
       "arithmetic": "A − B and B − C use unrounded medians, so 15.68 and 26.07 s, not the 15.69 and 26.06 the rounded medians (81.12, 65.43, 39.37) give."
     },
     {
@@ -1227,7 +1239,7 @@
         ]
       },
       "axis": "KV cache tokens vLLM allocated at startup, same card and flags in every arm.",
-      "read_as": "C keeps 20.3 % more KV cache: one more full-length (8192-token) request served at once, 5 instead of 4. On a cold arm the compiler's working set is resident while vLLM measures free memory, so the cache is sized smaller for the replica's life. Pre-registered as H5.",
+      "read_as": "C keeps 20.3 % more KV cache: one more full-length (8192-token) request served at once, 5 instead of 4. On a cold arm the compiler's working set is resident while vLLM measures free memory, so the cache is sized smaller. Registered ahead as H5, though reconnaissance had logged both values once.",
       "short": "KV cache left for serving",
       "so": "arms",
       "takeaway": "B and C differ only in the compile cache, yet C gets 20.3 % more KV cache: one more full-length request at a time, for the replica's whole life.",
@@ -1236,7 +1248,7 @@
   ],
   "interview": {
     "pitch30": "I measured where the time goes when a vLLM server starts cold on a rented GPU, and which of two caches is worth warming: the model weights or the engine's compiled code. I ran three set-ups differing in one thing only, interleaved, a hundred times each, and split every start into phases. The compile cache saved about 10 seconds more per cold start than the weight cache, 95% interval 5.5 to 20 seconds more, and it left about 20% more KV cache for serving.",
-    "pitch120": "Everyone talks about caching the weights. But vLLM also compiles parts of the model at startup and caches that on disk, a cache few notice unless they have operated the engine. I set up three arms that differ only in cache configuration: nothing cached, weights on a network volume, and weights plus a warm compile cache. I ran them as shuffled triples so platform drift could not pose as an arm effect, and I committed my hypotheses and rules before the first paid measurement run. I timed the real `vllm serve` with one clock in the worker and one on my laptop, so platform start-up is a named residual, not hidden. The answer: warming the compile cache saved about 10 seconds more per cold start than caching the weights, and the interval on that difference never crossed zero. It also left about a fifth more KV cache, because profiling no longer ran next to the compiler's memory. What it cannot tell you is anything about other hardware, or whether host placement drives the tail: every run landed on one machine, and I reported that rather than dropping the question.",
+    "pitch120": "Everyone talks about caching the weights, but vLLM also compiles parts of the model at startup and caches that on disk. I set up three arms that differ only in cache configuration: nothing cached, weights on a network volume, and weights plus a warm compile cache. I ran them as shuffled triples so platform drift could not pose as an arm effect, and I committed my hypotheses and rules before any campaign data. I timed the real `vllm serve` with one clock in the worker and one on my laptop, so platform start-up is a named residual, not hidden. The answer: warming the compile cache saved about 10 seconds more per cold start than caching the weights, and the interval on that difference never crossed zero. It also left about a fifth more KV cache, because profiling no longer ran next to the compiler's memory. What it cannot tell you is anything about other hardware, or whether host placement drives the tail: every run landed on one machine, and I reported that rather than dropping the question.",
     "followups": [
       {
         "q": "Why three arms and not two, or four?",
@@ -1244,15 +1256,15 @@
       },
       {
         "q": "Why pre-register a one-person experiment?",
-        "a": "The git timestamp is the only evidence that the hypotheses and the headline rule came before the data: they were committed four days before the published campaign's first run. Later amendments are dated, among them the rule separating a host's first image pull, written about half an hour after window one showed a 2174 s platform time. None changed a hypothesis or a contrast."
+        "a": "The git timestamp is the only evidence that the hypotheses and headline rule came before the campaign data; three paid reconnaissance captures came first and had already shown H5's two KV values once. Later amendments are dated: the first-touch rule, 32 minutes after window one showed a 2174 s platform time, and the H4 scoping after the discarded window. None changed a contrast or the headline rule; the H4 scoping narrowed a hypothesis."
       },
       {
         "q": "What surprised you?",
-        "a": "Two things. C reached \"model loaded\" 8.85 s sooner than B, on arms that differ only in compile cache, while vLLM's own model-loading time is the same in B and C (4.57 vs 4.54 s): not host, not position in the triple, and this campaign does not explain it. And \"ready is not fast\" was wrong here: [vLLM](p1:vllm) does its warmup before answering health, so the first request is already near steady state."
+        "a": "C reached \"model loaded\" 8.85 s sooner than B, on arms differing only in compile cache, while vLLM's own model-loading time is the same in B and C (4.57 vs 4.54 s): not host, not position in the triple, and this campaign does not explain it. And \"ready is not fast\" was wrong here: [vLLM](p1:vllm) does its warmup before answering health, so the first request is already near steady state."
       },
       {
         "q": "What would you do differently?",
-        "a": "The host question failed: a serially-submitting driver kept landing on the one machine that had the image cached. The windows were hours apart, not separate days. And the first window was thrown out because arm A's per-run [weights](p1:weights) filled the worker disk (A failed 3 of its 9 runs, B none), which would have biased the contrast; the worker now empties cold directories before and after each run."
+        "a": "The host question failed: a serially-submitting driver kept landing on the one machine that had the image cached. The windows were hours apart, not separate days. And the first window was thrown out because arm A's per-run [weights](p1:weights) filled the worker disk (A failed 3 of its 9 runs, C one, B none), which would have biased the contrast; the worker now empties cold directories before and after each run."
       },
       {
         "q": "What does this not tell you?",
@@ -1288,7 +1300,7 @@
     },
     {
       "q": "If the difference's interval had run from −20 to +3 s, what could you claim?",
-      "a": "Not the ranking: no difference, or a slightly larger weight-cache saving, would still fit, and the design makes the ranking a finding only if the interval excludes zero. Each cache's own saving, with its interval, could still be reported."
+      "a": "Not the ranking, which needs the interval to exclude zero: no difference, or a slightly larger weight-cache saving, would still fit. Each cache's own saving could still be reported."
     },
     {
       "q": "Which requirement breaks if the arms run in blocks, and what protects it?",
@@ -1296,7 +1308,7 @@
     },
     {
       "q": "Why is a failed run never retried in place?",
-      "a": "A retry quietly replaces slow or unlucky runs with faster ones and makes the distribution look better than it is. Failures are their own rows and are counted per arm."
+      "a": "A retry quietly swaps slow or unlucky runs for faster ones, flattering the distribution. Failures are their own rows, counted per arm."
     },
     {
       "q": "Why does the warm compile cache leave more KV cache?",
@@ -1495,20 +1507,8 @@
   ],
   "derived_numbers": [
     {
-      "value": "17.40",
-      "how": "Median over arm A of vLLM's own \"Model loading took ... seconds\" figure, computed from the log lines in data/campaign.jsonl."
-    },
-    {
-      "value": "4.57",
-      "how": "Median over arm B of vLLM's own \"Model loading took ... seconds\" figure, computed from data/campaign.jsonl (it coincides with arm B's S5 ready median in docs/post.md)."
-    },
-    {
-      "value": "4.54",
-      "how": "Median over arm C of vLLM's own \"Model loading took ... seconds\" figure, computed from data/campaign.jsonl."
-    },
-    {
       "value": "0.3",
-      "how": "Chart value 0.30 s (S6 cold TTFT, every arm) from docs/post.md, The decomposition; the trace check formats chart values without trailing zeros."
+      "how": "Chart value 0.30 s (S6 first request, every arm) from docs/post.md, The decomposition; the trace check formats chart values without trailing zeros."
     },
     {
       "value": "4.1",
