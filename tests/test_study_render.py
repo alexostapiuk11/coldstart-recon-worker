@@ -359,3 +359,32 @@ def test_interval_stays_narrow_enough_to_read_on_a_phone():
                           right_label="compile cache saves more"), "i6")
     width = float(re.search(r'viewBox="0 0 ([\d.]+)', out).group(1))
     assert 309 / width * 15 >= 11
+
+
+def test_stacked_chart_lists_what_changed_between_the_bars():
+    chart = dict(artifact_unit()["results"][0]["chart"],
+                 deltas=[{"between": "A → C", "text": "Compile <time> nearly vanishes."}])
+    out = chart_html(chart, "r0")
+    tail = out.split("</svg>")[1]
+    assert "What changed between the bars" in tail
+    assert "A → C" in tail and "Compile &lt;time&gt; nearly vanishes." in tail
+    assert "What changed" not in chart_html(artifact_unit()["results"][0]["chart"], "r0")
+
+
+def test_highlight_greys_out_the_other_segments_and_their_legend_chips():
+    chart = dict(artifact_unit()["results"][0]["chart"], highlight=["compile"])
+    out = chart_html(chart, "r0")
+    segs = re.findall(r'<rect class="seg ([^"]+)"', out)
+    assert segs == ["s0 dim", "s1", "s0 dim", "s1"]  # load, compile per bar
+    chips = re.findall(r'<span class="chip ([^"]+)"></span>([^<]+)<', out)
+    assert chips == [("s0 dim", "load"), ("s1", "compile")]
+    texts = re.findall(r'<text class="segtext ([^"]+)"', out)
+    assert all("dim" in t for t in texts if t.startswith("s0"))
+    plain = chart_html(artifact_unit()["results"][0]["chart"], "r0")
+    assert " dim" not in plain
+
+
+def test_brief_lists_deltas():
+    u = artifact_unit()
+    u["results"][0]["chart"]["deltas"] = [{"between": "A → C", "text": "Compile vanishes."}]
+    assert "- Changed A → C: Compile vanishes." in render_brief(u)

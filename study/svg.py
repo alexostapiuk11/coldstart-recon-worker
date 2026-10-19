@@ -8,7 +8,7 @@ unreadable.
 
 from __future__ import annotations
 
-from study.text import esc, wrap
+from study.text import esc, inline, wrap
 
 W, H, GX, GY, PAD = 170, 72, 50, 44, 24
 GAP = 2  # surface gap between stacked segments (dataviz mark spec)
@@ -210,6 +210,11 @@ def chart_html(chart: dict, uid: str) -> str:
     scale = full / max(totals)
     height = len(bars) * pitch + 4
     show_end = not stacked or chart.get("show_totals") is True
+    lit = set(chart.get("highlight") or [])
+
+    def dim(name):
+        return " dim" if lit and name not in lit else ""
+
     # Leave room after the longest bar for the longest end label, so none is clipped.
     tail = (max(len(f"{_num(t)} {chart['unit']}") for t in totals) * CHART_CHAR + 6
             if show_end else 0)
@@ -225,11 +230,11 @@ def chart_html(chart: dict, uid: str) -> str:
             cls = names.index(name) % 8 if stacked else 0
             # A 2 px surface gap separates touching segments; a sliver keeps its width.
             drawn = w - GAP if w > 2 * GAP else w
-            p.append(f'<rect class="seg s{cls}" x="{x:.1f}" y="{y + 20}" width="{drawn:.1f}" '
+            p.append(f'<rect class="seg s{cls}{dim(name)}" x="{x:.1f}" y="{y + 20}" width="{drawn:.1f}" '
                      f'height="24" rx="2"><title>{esc(name)}: {_num(v)} {unit}</title></rect>')
             # A plain bar's value is its total, shown at the tip; label stacked segments only.
             if stacked and drawn >= len(_num(v)) * CHART_CHAR + 8:
-                p.append(f'<text class="segtext s{cls}" x="{x + drawn / 2:.1f}" y="{y + 36}" '
+                p.append(f'<text class="segtext s{cls}{dim(name)}" x="{x + drawn / 2:.1f}" y="{y + 36}" '
                          f'text-anchor="middle">{_num(v)}</text>')
             x += w
         if show_end:
@@ -238,7 +243,12 @@ def chart_html(chart: dict, uid: str) -> str:
     p.append("</svg>")
     legend = ""
     if stacked:
-        chips = "".join(f'<li><span class="chip s{i % 8}"></span>{esc(n)}</li>'
+        chips = "".join(f'<li><span class="chip s{i % 8}{dim(n)}"></span>{esc(n)}</li>'
                         for i, n in enumerate(names))
         legend = f'<ul class="legend">{chips}</ul>'
+    if chart.get("deltas"):
+        items = "".join(f'<li><b>{esc(d["between"])}</b> {inline(d["text"])}</li>'
+                        for d in chart["deltas"])
+        legend += (f'<div class="deltas"><div class="dhead">What changed between the bars</div>'
+                   f'<ul>{items}</ul></div>')
     return "".join(p) + legend

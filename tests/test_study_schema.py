@@ -301,3 +301,29 @@ def test_interval_rows_need_numbers_in_order():
     _fails(u, "shade")
     u["results"][0]["chart"] = dict(_interval(), shade="left")
     validate(u)
+
+
+def test_stacked_chart_deltas_and_highlight_are_checked():
+    u = artifact_unit()
+    ch = u["results"][0]["chart"]
+    ch["deltas"] = [{"between": "A → C", "text": "Compile time nearly vanishes."}]
+    ch["highlight"] = ["compile"]
+    validate(u)
+    ch["deltas"] = [{"between": "A → C", "text": ""}]
+    _fails(u, r"deltas\[0\]\.text is empty")
+    ch["deltas"] = [{"between": "A → C"}]
+    _fails(u, r"deltas\[0\].*'text'")
+    ch["deltas"] = "A to C"
+    _fails(u, r"deltas: expected list")
+    del ch["deltas"]
+    ch["highlight"] = ["warmup"]
+    _fails(u, r"highlight 'warmup' is not a segment name")
+    ch["highlight"] = "compile"
+    _fails(u, r"highlight: expected list")
+
+
+def test_deltas_and_highlight_belong_to_stacked_bars_only():
+    u = artifact_unit()
+    u["results"][0]["chart"] = {"type": "bars", "unit": "s", "highlight": ["a"],
+                                "items": [{"label": "a", "value": 1.5}]}
+    _fails(u, r"highlight.*stacked_bars")

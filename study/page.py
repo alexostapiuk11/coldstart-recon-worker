@@ -87,6 +87,11 @@ stroke-dasharray:4 3}.node.k-store rect{fill:var(--warnsoft);stroke:var(--warn)}
 .segtext.s0{fill:var(--t0)}.segtext.s1{fill:var(--t1)}.segtext.s2{fill:var(--t2)}
 .segtext.s3{fill:var(--t3)}.segtext.s4{fill:var(--t4)}.segtext.s5{fill:var(--t5)}
 .segtext.s6{fill:var(--t6)}.segtext.s7{fill:var(--t7)}
+.seg.dim{fill:var(--line);stroke:var(--muted);stroke-width:.75}.segtext.dim{fill:var(--fg)}
+.chip.dim{background:var(--line);box-shadow:inset 0 0 0 1px var(--muted)}
+.deltas{margin:8px 0 4px;font-size:.9em}.deltas .dhead{color:var(--muted);font-weight:600;
+font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+.deltas ul{margin:4px 0;padding-left:18px}.deltas li{margin:2px 0}.deltas b{margin-right:4px}
 .zero{stroke:var(--fg);stroke-width:1.5;stroke-dasharray:4 3}.axis{stroke:var(--line);stroke-width:1.5}
 .whisker{stroke:var(--c0);stroke-width:2.5;stroke-linecap:round}.est{fill:var(--c0);stroke:var(--card);stroke-width:2}
 .shade{fill:var(--line);opacity:.45}.inum{font-size:12px;fill:var(--muted)}

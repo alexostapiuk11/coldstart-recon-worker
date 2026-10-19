@@ -169,7 +169,9 @@ def _chart(ch, where):
     """Chart dict: type, unit, then by type:
 
     - stacked_bars: bars of named segments, optional bool `show_totals` (default false)
-      that prints each bar's summed total at its end;
+      that prints each bar's summed total at its end, optional `deltas`
+      ([{between, text}], what changed from one bar to another) and `highlight` (segment
+      names drawn in colour; the rest go grey);
     - bars: items, one value each;
     - interval: rows of {label, estimate, low, high} (low <= estimate <= high), optional
       `zero_label`, `left_label`, `right_label` and `shade` ('left' or 'right' of zero).
@@ -180,6 +182,9 @@ def _chart(ch, where):
     _get(ch, "unit", str, where)
     if "show_totals" in ch and not isinstance(ch["show_totals"], bool):
         raise ContentError(f"{where}.show_totals: expected bool")
+    for f in ("deltas", "highlight"):
+        if f in ch and kind != "stacked_bars":
+            raise ContentError(f"{where}.{f}: only stacked_bars charts take {f}")
     if kind == "interval":
         for f in ("zero_label", "left_label", "right_label"):
             _opt_str(ch, f, where)
@@ -192,10 +197,21 @@ def _chart(ch, where):
                 raise ContentError(f"{w} '{row['label']}': needs low <= estimate <= high, got "
                                    f"{low}, {est}, {high}")
     elif kind == "stacked_bars":
+        names = set()
         for i, bar in enumerate(_items(ch, "bars", where, fields=("label",))):
             for j, seg in enumerate(_items(bar, "segments", f"{where}.bars[{i}]",
                                            fields=("name",))):
                 _get(seg, "value", float, f"{where}.bars[{i}].segments[{j}]")
+                names.add(seg["name"])
+        deltas = _get(ch, "deltas", list, where) if "deltas" in ch else []
+        for i, dl in enumerate(deltas):
+            for f in ("between", "text"):
+                if not _get(dl, f, str, f"{where}.deltas[{i}]").strip():
+                    raise ContentError(f"{where}.deltas[{i}].{f} is empty")
+        if "highlight" in ch:
+            for name in _get(ch, "highlight", list, where):
+                if name not in names:
+                    raise ContentError(f"{where}.highlight '{name}' is not a segment name")
     else:
         for i, it in enumerate(_items(ch, "items", where, fields=("label",))):
             _get(it, "value", float, f"{where}.items[{i}]")
