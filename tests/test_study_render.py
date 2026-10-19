@@ -54,9 +54,35 @@ def test_stacked_chart_scales_segments_and_lists_a_legend():
     out = chart_html(chart, "r0")
     assert out.count("<rect") >= 4  # four segments
     assert "load" in out and "compile" in out  # legend
-    assert "59.5" in out  # first bar's total, shown at its end
+    assert "59.5" not in out  # a sum of per-phase medians is not shown unless asked
     widths = [float(w) for w in re.findall(r'class="seg s\d" [^>]*width="([\d.]+)"', out)]
     assert widths[0] > widths[1] > widths[3]  # 40.5 > 19.0 > 0.3, proportional
+
+
+def test_stacked_chart_prints_totals_only_when_asked():
+    chart = dict(artifact_unit()["results"][0]["chart"], show_totals=True)
+    out = chart_html(chart, "r0")
+    assert "59.5 s" in out and "21.6 s" in out
+    view_w = int(re.search(r'viewBox="0 0 (\d+)', out).group(1))
+    bare = chart_html(artifact_unit()["results"][0]["chart"], "r0")
+    assert view_w > int(re.search(r'viewBox="0 0 (\d+)', bare).group(1))
+
+
+def test_chart_numbers_show_up_to_two_decimals_without_trailing_zeros():
+    chart = {"type": "bars", "unit": "s",
+             "items": [{"label": "a", "value": 19.01}, {"label": "b", "value": 15.68},
+                       {"label": "c", "value": 4.00}, {"label": "d", "value": 35792}]}
+    out = chart_html(chart, "r2")
+    for shown in (">19.01 s<", ">15.68 s<", ">4 s<", ">35,792 s<"):
+        assert shown in out
+
+
+def test_stacked_segment_label_prints_only_when_it_fits():
+    chart = {"type": "stacked_bars", "unit": "s", "bars": [{"label": "A", "segments": [
+        {"name": "big", "value": 45.83}, {"name": "tiny", "value": 0.09}]}]}
+    out = chart_html(chart, "r3")
+    assert ">45.83<" in out and ">0.09<" not in out
+    assert "0.09 s" in out  # still readable in the hover title
 
 
 def test_simple_bars_chart():
@@ -193,6 +219,20 @@ def test_derived_numbers_must_be_declared_with_a_how(tmp_path):
     u["sources"] = [{"file": src, "section": "Title"}]
     u["question"] = "About 10.39 s."
     u["derived_numbers"] = [{"value": "10.39", "how": "difference of two medians"}]
+    assert untraced_numbers(u) == []
+
+
+def test_numbers_differing_only_by_trailing_zeros_match(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\nCompile 0.30 s, graph 4.10 s, flat 4.00 s.\n")
+    u = artifact_unit()
+    u["sources"] = [{"file": src, "section": "Title"}]
+    u["question"] = "Is 0.3 and 4.1 and 4.0 and 2.50 real?"
+    u["derived_numbers"] = [{"value": "2.5", "how": "half of five"}]
+    u["results"] = []
+    assert untraced_numbers(u) == []
+    # chart values are floats ("0.3", "4.1"); the source prints "0.30", "4.10"
+    u["results"] = [{"chart": {"type": "bars", "unit": "s", "items": [
+        {"label": "a", "value": 0.3}, {"label": "b", "value": 4.1}, {"label": "c", "value": 4.0}]}}]
     assert untraced_numbers(u) == []
 
 

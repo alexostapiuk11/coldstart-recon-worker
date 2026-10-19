@@ -13,3 +13,15 @@ def inline(s: str) -> str:
     out = esc(s)
     out = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", out)
     return re.sub(r"`(.+?)`", r"<code>\1</code>", out)
+
+
+def wrap(text: str, width: int) -> list[str]:
+    """Greedy word wrap into lines of at most `width` characters (longer words stay whole)."""
+    lines, cur = [], ""
+    for word in text.split():
+        if cur and len(cur) + 1 + len(word) > width:
+            lines.append(cur)
+            cur = word
+        else:
+            cur = f"{cur} {word}".strip()
+    return lines + ([cur] if cur else [])

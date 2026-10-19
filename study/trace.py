@@ -16,11 +16,13 @@ NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
 
 
 def _normalise(token: str) -> str:
-    return token.replace(",", "")
+    """Drop thousands commas and trailing zeros, so "0.30" and 0.3 are the same number."""
+    t = token.replace(",", "")
+    return t.rstrip("0").rstrip(".") if "." in t else t
 
 
 def _significant(token: str) -> bool:
-    t = _normalise(token)
+    t = token.replace(",", "")
     if re.fullmatch(r"(19|20)\d\d", t):
         return False
     return "." in t or len(t) >= 3

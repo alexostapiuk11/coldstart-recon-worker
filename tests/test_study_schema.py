@@ -65,6 +65,22 @@ def test_node_label_and_sub_length_are_bounded():
     _fails(u, "sub")
 
 
+def test_node_sub_must_fit_two_lines():
+    u = artifact_unit()
+    u["views"][0]["nodes"][0]["sub"] = "aaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbb cccccccccccccccccc"
+    _fails(u, "Author.*two lines|two lines.*Author")
+    u["views"][0]["nodes"][0]["sub"] = "aaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbb"
+    validate(u)
+
+
+def test_chart_show_totals_must_be_a_bool_when_present():
+    u = artifact_unit()
+    u["results"][0]["chart"]["show_totals"] = True
+    validate(u)
+    u["results"][0]["chart"]["show_totals"] = "yes"
+    _fails(u, "show_totals")
+
+
 def test_two_nodes_cannot_share_a_cell():
     u = artifact_unit()
     u["views"][0]["nodes"][1].update(col=0, row=0)

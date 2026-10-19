@@ -6,11 +6,15 @@ here, naming the field, instead of producing a broken page.
 
 from __future__ import annotations
 
+from study.text import wrap
+
 ARTIFACT_LEVELS = ("context", "container", "component", "dynamic")
 NODE_KINDS = ("person", "system", "external", "store", "focus")
 CHART_TYPES = ("stacked_bars", "bars")
 MAX_LABEL = 22
 MAX_SUB = 60
+SUB_LINE = 30  # the diagram wraps a node's sub text at this width ...
+SUB_LINES = 2  # ... and has room for two lines
 MAX_COL = 3
 MAX_ROW = 3
 
@@ -43,10 +47,14 @@ def _items(d, key, where, *, at_least=1, at_most=None, fields=()):
 
 
 def _chart(ch, where):
+    """Chart dict: type, unit, bars/items, and for stacked_bars an optional bool
+    `show_totals` (default false) that prints each bar's summed total at its end."""
     kind = _get(ch, "type", str, where)
     if kind not in CHART_TYPES:
         raise ContentError(f"{where}.chart type '{kind}' not in {CHART_TYPES}")
     _get(ch, "unit", str, where)
+    if "show_totals" in ch and not isinstance(ch["show_totals"], bool):
+        raise ContentError(f"{where}.show_totals: expected bool")
     if kind == "stacked_bars":
         for i, bar in enumerate(_items(ch, "bars", where, fields=("label",))):
             for j, seg in enumerate(_items(bar, "segments", f"{where}.bars[{i}]",
@@ -73,6 +81,9 @@ def _view(v, where, allowed):
             raise ContentError(f"{w}.label longer than {MAX_LABEL} characters")
         if len(n.get("sub", "")) > MAX_SUB:
             raise ContentError(f"{w}.sub longer than {MAX_SUB} characters")
+        if len(wrap(n.get("sub", ""), SUB_LINE)) > SUB_LINES:
+            raise ContentError(f"{w} '{n['label']}'.sub needs more than two lines of "
+                               f"{SUB_LINE} characters; shorten it")
         if n.get("kind", "system") not in NODE_KINDS:
             raise ContentError(f"{w}.kind not in {NODE_KINDS}")
         col, row = _get(n, "col", int, w), _get(n, "row", int, w)
