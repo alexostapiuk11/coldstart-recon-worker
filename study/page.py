@@ -104,6 +104,15 @@ font-size:13px;text-transform:uppercase;letter-spacing:.04em}
 .shade{fill:var(--line);opacity:.45}.inum{font-size:12px;fill:var(--muted)}
 .axlabel{font-size:12px;fill:var(--muted)}.iest{font-weight:600}
 .ilabel,.inum,.iest,.axlabel{paint-order:stroke;stroke:var(--card);stroke-width:4px;stroke-linejoin:round}
+.prange{stroke:var(--muted);stroke-width:2.5;stroke-linecap:round}
+.pgap{stroke:var(--muted);stroke-width:1.5;stroke-dasharray:3 4}
+.pgrid{stroke:var(--line);stroke-width:1}.paxis{stroke:var(--muted);stroke-width:1.2}
+.pdot{stroke:var(--card);stroke-width:1.5}
+.pk0{fill:var(--c0)}.pk1{fill:var(--c1)}.pk2{fill:var(--c6)}.pk3{fill:var(--c3)}
+.pmax{fill:var(--card);stroke:var(--fg);stroke-width:2}
+.pnum{font-size:12px;fill:var(--fg)}.pmaxt{fill:var(--muted);font-style:italic}
+.pnum,.ptick{paint-order:stroke;stroke:var(--card);stroke-width:4px;stroke-linejoin:round}
+.cnote{color:var(--muted);font-size:14px;margin:4px 0 6px}
 .legend{list-style:none;padding:0;margin:6px 0;display:flex;gap:14px;flex-wrap:wrap;font-size:13px}
 .chip{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
 .flow{display:flex;gap:8px;flex-wrap:wrap;counter-reset:s}
@@ -142,7 +151,7 @@ h1{font-size:24px}.lead{font-size:16px}
 .row{display:block}.row b{display:block;margin-bottom:1px}
 nav.pills{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 nav.pills::-webkit-scrollbar{display:none}nav.pills a{flex:none}
-.blabel,.btotal,.inum{font-size:15px}.segtext,.axlabel{font-size:14px}}
+.blabel,.btotal,.inum,.pnum{font-size:15px}.segtext,.axlabel{font-size:14px}}
 """
 
 JS = """

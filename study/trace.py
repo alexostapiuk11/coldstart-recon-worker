@@ -49,6 +49,9 @@ def _numbers_in(node):
         ch = r["chart"]
         if ch["type"] == "stacked_bars":
             vals = [s["value"] for b in ch["bars"] for s in b["segments"]]
+        elif ch["type"] == "percentiles":
+            vals = [v["value"] for row in ch["rows"] for v in row["values"]]
+            vals += [row["max_label"]["value"] for row in ch["rows"] if "max_label" in row]
         elif ch["type"] == "interval":
             vals = [abs(row[k]) for row in ch["rows"] for k in ("estimate", "low", "high")]
         else:

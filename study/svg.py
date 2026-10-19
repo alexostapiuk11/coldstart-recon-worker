@@ -8,6 +8,8 @@ unreadable.
 
 from __future__ import annotations
 
+import math
+
 from study.text import esc, inline, wrap
 
 W, H, GX, GY, PAD = 170, 72, 50, 44, 24
@@ -227,6 +229,135 @@ def interval_html(chart: dict) -> str:
     return "".join(p)
 
 
+P_LEFT, P_PLOT, P_RIGHT = 14, 360, 16  # percentile chart margins and plot width
+P_LANE = 17  # vertical step between stacked labels of one row
+SHAPES = 4  # percentile marks cycle through four shapes and colours (--c0, c1, c6, c3)
+
+
+def _ticks(hi: float) -> list[float]:
+    """Round tick values from zero up to hi: steps of 1, 2, 2.5 or 5 times a power of ten,
+    about four of them."""
+    raw = hi / 4
+    mag = 10 ** math.floor(math.log10(raw)) if raw > 0 else 1
+    step = next(m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw)
+    return [k * step for k in range(int(hi / step + 1e-9) + 1)]
+
+
+def _mark(k: int, x: float, y: float) -> str:
+    """Path data for percentile style k: circle, diamond, square, triangle."""
+    shape = k % SHAPES
+    if shape == 0:
+        return f"M{x - 6:.1f} {y:.1f}a6 6 0 1 0 12 0a6 6 0 1 0 -12 0z"
+    if shape == 1:
+        return f"M{x:.1f} {y - 7:.1f}L{x + 7:.1f} {y:.1f}L{x:.1f} {y + 7:.1f}L{x - 7:.1f} {y:.1f}z"
+    if shape == 2:
+        return f"M{x - 5.5:.1f} {y - 5.5:.1f}h11v11h-11z"
+    return f"M{x:.1f} {y - 7:.1f}L{x + 7:.1f} {y + 5:.1f}L{x - 7:.1f} {y + 5:.1f}z"
+
+
+def _lanes(items: list[tuple[float, str]], width: float) -> list[tuple[str, int, float]]:
+    """Place each (x, text) label above or below its mark, in the nearest free lane.
+
+    Labels are tried above in lane 0, then below in lane 0, then above in lane 1, and so
+    on, taking the first spot where the label's estimated extent (kept inside the chart)
+    clears every label already in that lane by 6 px. Returns (side, lane, anchor x)."""
+    taken: dict[tuple[str, int], list[tuple[float, float]]] = {}
+    out = []
+    for x, text in items:
+        ax = _fit(x, text, width)
+        half = len(text) * CHART_CHAR / 2
+        lo, hi = ax - half, ax + half
+        lane = 0
+        while True:
+            spot = next((s for s in ("above", "below")
+                         if all(hi + 6 <= a or lo >= b + 6 for a, b in taken.get((s, lane), []))),
+                        None)
+            if spot:
+                taken.setdefault((spot, lane), []).append((lo, hi))
+                out.append((spot, lane, ax))
+                break
+            lane += 1
+    return out
+
+
+def percentiles_html(chart: dict) -> str:
+    """One row per label on one shared axis from zero: a thin line from the row's lowest
+    to its highest percentile, a mark per percentile (one shape and colour per percentile
+    name) labelled with its name and value, and optionally a hollow marker for the row's
+    largest value (`max_label`), joined by a dashed line, so one outlier can be shown
+    without stretching the percentiles. Labels that would collide move to the other side
+    of the line, then further out."""
+    unit, rows = chart["unit"], chart["rows"]
+    names = list(dict.fromkeys(v["name"] for r in rows for v in r["values"]))
+    top = max(max([v["value"] for v in r["values"]] + [r.get("max_label", {}).get("value", 0)])
+              for r in rows)
+    hi = (top or 1.0) * 1.06
+    width = P_LEFT + P_PLOT + P_RIGHT
+
+    def x(v):
+        return P_LEFT + v / hi * P_PLOT
+
+    body, y = [], 0.0
+    for r in rows:
+        items = [(x(v["value"]), f"{v['name']} {_num(v['value'])}") for v in r["values"]]
+        m = r.get("max_label")
+        if m:
+            items.append((x(m["value"]), f"{m['text']} {_num(m['value'])}"))
+        order = sorted(range(len(items)), key=lambda i: items[i][0])
+        placed = dict(zip(order, _lanes([items[i] for i in order], width)))
+        above = 1 + max([lane for side, lane, _ in placed.values() if side == "above"],
+                        default=-1)
+        below = 1 + max([lane for side, lane, _ in placed.values() if side == "below"],
+                        default=-1)
+        body.append(f'<text class="blabel" x="0" y="{y + 14:.1f}">{esc(r["label"])}</text>')
+        cy = y + 20 + P_LANE * above + 10
+        vals = [v["value"] for v in r["values"]]
+        body.append(f'<line class="prange" x1="{x(min(vals)):.1f}" y1="{cy:.1f}" '
+                    f'x2="{x(max(vals)):.1f}" y2="{cy:.1f}"/>')
+        if m:
+            body.append(f'<line class="pgap" x1="{x(max(vals)):.1f}" y1="{cy:.1f}" '
+                        f'x2="{x(m["value"]):.1f}" y2="{cy:.1f}"/>')
+            body.append(f'<circle class="pmax" cx="{x(m["value"]):.1f}" cy="{cy:.1f}" r="6">'
+                        f'<title>{esc(r["label"])}: {esc(m["text"])} {_num(m["value"])} '
+                        f'{esc(unit)}</title></circle>')
+        for v in r["values"]:
+            k = names.index(v["name"]) % SHAPES
+            body.append(f'<path class="pdot pk{k}" data-x="{x(v["value"]):.1f}" '
+                        f'd="{_mark(k, x(v["value"]), cy)}"><title>{esc(r["label"])}: '
+                        f'{esc(v["name"])} {_num(v["value"])} {esc(unit)}</title></path>')
+        for i, (side, lane, ax) in placed.items():
+            ty = cy - 12 - P_LANE * lane if side == "above" else cy + 24 + P_LANE * lane
+            cls = "pnum pmaxt" if m and i == len(items) - 1 else "pnum"
+            body.append(f'<text class="{cls}" x="{ax:.1f}" y="{ty:.1f}" '
+                        f'text-anchor="middle">{esc(items[i][1])}</text>')
+        y = cy + 10 + P_LANE * below + (10 if below else 4)
+    axis_y = y + 4
+    ticks = _ticks(hi)
+    grid = "".join(f'<line class="pgrid" x1="{x(t):.1f}" y1="0" x2="{x(t):.1f}" '
+                   f'y2="{axis_y:.1f}"/>' for t in ticks)
+    axis = [(f'<line class="paxis" x1="{x(0):.1f}" y1="{axis_y:.1f}" x2="{x(hi):.1f}" '
+             f'y2="{axis_y:.1f}"/>')]
+    for j, t in enumerate(ticks):
+        label = _num(t) + (f" {unit}" if j == len(ticks) - 1 else "")
+        axis.append(f'<line class="paxis" x1="{x(t):.1f}" y1="{axis_y:.1f}" x2="{x(t):.1f}" '
+                    f'y2="{axis_y + 5:.1f}"/>')
+        axis.append(f'<text class="axlabel ptick" x="{_fit(x(t), label, width):.1f}" '
+                    f'y="{axis_y + 21:.1f}" text-anchor="middle">{esc(label)}</text>')
+    height = axis_y + 28
+    summary = "; ".join(
+        f"{r['label']}: " + ", ".join(f"{v['name']} {_num(v['value'])}" for v in r["values"])
+        + (f"; {r['max_label']['text']} {_num(r['max_label']['value'])}"
+           if r.get("max_label") else "") for r in rows)
+    out = (f'<svg class="chart percentiles" viewBox="0 0 {width} {height:.0f}" role="img" '
+           f'aria-label="{esc(f"Percentiles ({unit}). {summary}")}" '
+           f'xmlns="http://www.w3.org/2000/svg">{grid}{"".join(body)}{"".join(axis)}</svg>')
+    return out + _note(chart)
+
+
+def _note(chart: dict) -> str:
+    return f'<p class="cnote">{inline(chart["note"])}</p>' if chart.get("note") else ""
+
+
 def _segment_names(chart: dict) -> list[str]:
     return list(dict.fromkeys(s["name"] for b in chart["bars"] for s in b["segments"]))
 
@@ -261,6 +392,8 @@ def chart_html(chart: dict, uid: str, slots: dict[str, int] | None = None) -> st
     """
     if chart["type"] == "interval":
         return interval_html(chart)
+    if chart["type"] == "percentiles":
+        return percentiles_html(chart)
     unit = esc(chart["unit"])
     stacked = chart["type"] == "stacked_bars"
     if stacked:

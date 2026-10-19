@@ -883,3 +883,104 @@ def test_untraced_cards_render_as_before():
                    "Used by:", 'id="req-'):
         assert marker not in page, marker
     assert '<div class="callout">So: <a href="#d-d0">Decision 0</a></div>' in page
+
+
+# ---- percentile chart ----
+
+def _pct(**extra):
+    return dict({"type": "percentiles", "unit": "s",
+                 "rows": [{"label": "A", "values": [{"name": "p50", "value": 81.1},
+                                                    {"name": "p90", "value": 96.3},
+                                                    {"name": "p95", "value": 96.4}],
+                           "max_label": {"text": "largest run", "value": 148.2}},
+                          {"label": "B", "values": [{"name": "p50", "value": 81.1},
+                                                    {"name": "p90", "value": 90.0}]}]}, **extra)
+
+
+def _marks(out):
+    """(percentile name, row label, x) for every percentile mark."""
+    return [(m.group(3), m.group(2), float(m.group(1))) for m in re.finditer(
+        r'class="pdot pk\d" data-x="([\d.]+)"[^>]*><title>([^:]+): (\w+)', out)]
+
+
+def test_percentiles_share_one_axis_and_scale_by_value():
+    out = chart_html(_pct(), "p0")
+    xs = {(row, name): x for name, row, x in _marks(out)}
+    assert xs[("A", "p50")] < xs[("A", "p90")] < xs[("A", "p95")]
+    assert xs[("A", "p50")] == xs[("B", "p50")]  # same value, same x, on every row
+    # the axis is linear from zero: x is proportional to value past the origin
+    x0 = float(re.search(r'<line class="paxis" x1="([\d.]+)"', out).group(1))
+    ratio = (xs[("A", "p95")] - x0) / (xs[("A", "p50")] - x0)
+    assert abs(ratio - 96.4 / 81.1) < 0.01
+    # one range line per row, from its lowest to its highest percentile
+    lines = re.findall(r'<line class="prange" x1="([\d.]+)" y1="[\d.]+" x2="([\d.]+)"', out)
+    assert [(float(a), float(b)) for a, b in lines] == [
+        (xs[("A", "p50")], xs[("A", "p95")]), (xs[("B", "p50")], xs[("B", "p90")])]
+
+
+def test_percentile_max_label_is_a_hollow_marker_inside_the_axis():
+    out = chart_html(_pct(), "p1")
+    m = re.search(r'<circle class="pmax" cx="([\d.]+)"', out)
+    assert m and float(m.group(1)) > max(x for _, _, x in _marks(out))
+    assert ">largest run 148.2<" in out
+    ax = re.search(r'<line class="paxis" x1="[\d.]+" y1="[\d.]+" x2="([\d.]+)"', out)
+    assert float(ax.group(1)) >= float(m.group(1))
+    assert "pmax" not in chart_html(_pct(rows=[_pct()["rows"][1]]), "p1")
+
+
+def test_percentile_labels_name_each_mark_and_never_collide():
+    out = chart_html(_pct(), "p2")
+    texts = _texts(out)
+    for shown in ("p50 81.1", "p90 96.3", "p95 96.4", "p90 90"):
+        assert shown in [t[4] for t in texts], shown
+    width = float(re.search(r'viewBox="0 0 ([\d.]+) ([\d.]+)"', out).group(1))
+    spans = []
+    for cls, x, y, anchor, txt in texts:
+        w = len(txt) * 8.5
+        left = {"end": x - w, "middle": x - w / 2}.get(anchor, x)
+        assert left >= 0 and left + w <= width + 0.5, txt
+        spans.append((y, left, left + w, txt))
+    for i, a in enumerate(spans):
+        for b in spans[i + 1:]:
+            if abs(a[0] - b[0]) < 14:  # same line of text
+                assert a[2] <= b[1] or b[2] <= a[1], (a[3], b[3])
+
+
+def test_percentile_chart_has_ticks_aria_and_theme_tokens_only():
+    out = chart_html(_pct(), "p3")
+    ticks = [t[4] for t in _texts(out) if "ptick" in t[0]]
+    assert ticks[0] == "0" and ticks[-1].endswith(" s") and len(ticks) >= 3
+    label = re.search(r'aria-label="([^"]+)"', out).group(1)
+    assert "A: p50 81.1, p90 96.3, p95 96.4; largest run 148.2" in label
+    assert not re.search(r'(fill|stroke)="#', out)
+    marks = re.findall(r'class="pdot (pk\d)"', out)
+    assert marks[:3] == ["pk0", "pk1", "pk2"]  # one style per percentile name
+    width = float(re.search(r'viewBox="0 0 ([\d.]+)', out).group(1))
+    assert 309 / width * 14 >= 11  # phone text stays readable
+    from study.page import CSS
+    for k in range(4):
+        assert f".pk{k}{{fill:var(--c" in CSS
+
+
+def test_percentile_note_prints_under_the_chart():
+    out = chart_html(_pct(note="One run was **far** slower."), "p4")
+    assert '<p class="cnote">One run was <strong>far</strong> slower.</p>' in out.split("</svg>")[1]
+
+
+def test_brief_lists_percentile_rows_and_note():
+    u = artifact_unit()
+    u["results"][0]["chart"] = _pct(note="One run was far slower.")
+    brief = render_brief(u)
+    assert "- A: p50 81.1, p90 96.3, p95 96.4 (s); largest run 148.2 s" in brief
+    assert "- B: p50 81.1, p90 90.0 (s)" in brief
+    assert "- Note: One run was far slower." in brief
+
+
+def test_percentile_values_are_traced(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\np50 81.1, p90 96.3, p95 96.4, p90 90.0, max 148.2\n")
+    u = artifact_unit()
+    u["sources"] = [{"file": src, "section": "Title"}]
+    u["results"][0]["chart"] = _pct()
+    assert untraced_numbers(u) == []
+    u["results"][0]["chart"]["rows"][0]["max_label"]["value"] = 150.5
+    assert untraced_numbers(u) == ["150.5"]

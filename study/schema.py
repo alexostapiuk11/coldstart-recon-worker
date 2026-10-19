@@ -10,7 +10,7 @@ from study.text import wrap
 
 ARTIFACT_LEVELS = ("context", "container", "component", "dynamic")
 NODE_KINDS = ("person", "system", "external", "store", "focus")
-CHART_TYPES = ("stacked_bars", "bars", "interval")
+CHART_TYPES = ("stacked_bars", "bars", "interval", "percentiles")
 MAX_LABEL = 22
 MAX_SUB = 60
 SUB_LINE = 30  # the diagram wraps a node's sub text at this width ...
@@ -177,7 +177,9 @@ def _chart(ch, where):
       names drawn in colour; the rest go grey);
     - bars: items, one value each;
     - interval: rows of {label, estimate, low, high} (low <= estimate <= high), optional
-      `zero_label`, `left_label`, `right_label` and `shade` ('left' or 'right' of zero).
+      `zero_label`, `left_label`, `right_label` and `shade` ('left' or 'right' of zero);
+    - percentiles: rows of {label, values: [{name, value}], optional max_label}, on one
+      shared axis from zero, optional `note` (see _percentile_rows).
     """
     kind = _get(ch, "type", str, where)
     if kind not in CHART_TYPES:
@@ -215,9 +217,36 @@ def _chart(ch, where):
             for name in _get(ch, "highlight", list, where):
                 if name not in names:
                     raise ContentError(f"{where}.highlight '{name}' is not a segment name")
+    elif kind == "percentiles":
+        _percentile_rows(ch, where)
     else:
         for i, it in enumerate(_items(ch, "items", where, fields=("label",))):
             _get(it, "value", float, f"{where}.items[{i}]")
+
+
+def _percentile_rows(ch, where):
+    """rows of {label, values: [{name, value}], optional max_label {text, value}}; values
+    are non-negative (the axis starts at zero), names unique in a row, and a max_label
+    lies at or past the row's highest percentile. Optional chart `note`."""
+    _opt_str(ch, "note", where)
+    for i, row in enumerate(_items(ch, "rows", where, fields=("label",))):
+        w = f"{where}.rows[{i}]"
+        names = set()
+        for j, v in enumerate(_items(row, "values", w, fields=("name",))):
+            wv = f"{w}.values[{j}]"
+            if _get(v, "value", float, wv) < 0:
+                raise ContentError(f"{wv}.value is negative; the axis starts at zero")
+            if v["name"] in names:
+                raise ContentError(f"{w}: duplicate percentile '{v['name']}'")
+            names.add(v["name"])
+        if "max_label" in row:
+            m = _get(row, "max_label", dict, w)
+            if not _get(m, "text", str, f"{w}.max_label").strip():
+                raise ContentError(f"{w}.max_label.text is empty")
+            top = max(v["value"] for v in row["values"])
+            if _get(m, "value", float, f"{w}.max_label") < top:
+                raise ContentError(f"{w}.max_label.value {m['value']} is below the row's "
+                                   f"highest percentile {top}")
 
 
 def _view(v, where, allowed):

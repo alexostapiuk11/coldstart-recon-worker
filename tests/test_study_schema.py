@@ -327,3 +327,39 @@ def test_deltas_and_highlight_belong_to_stacked_bars_only():
     u["results"][0]["chart"] = {"type": "bars", "unit": "s", "highlight": ["a"],
                                 "items": [{"label": "a", "value": 1.5}]}
     _fails(u, r"highlight.*stacked_bars")
+
+
+def _percentiles():
+    return {"type": "percentiles", "unit": "s", "note": "One run of 300 was far slower.",
+            "rows": [{"label": "A", "values": [{"name": "p50", "value": 81.1},
+                                               {"name": "p90", "value": 96.3},
+                                               {"name": "p95", "value": 96.4}],
+                      "max_label": {"text": "largest run", "value": 148.2}},
+                     {"label": "B", "values": [{"name": "p50", "value": 70.0},
+                                               {"name": "p90", "value": 80.5}]}]}
+
+
+def test_percentiles_chart_validates():
+    u = artifact_unit()
+    u["results"][0]["chart"] = _percentiles()
+    validate(u)
+
+
+def test_percentiles_chart_fields_are_checked():
+    def bad(change, match):
+        u = artifact_unit()
+        ch = _percentiles()
+        change(ch)
+        u["results"][0]["chart"] = ch
+        _fails(u, match)
+
+    bad(lambda ch: ch["rows"][0].pop("values"), r"rows\[0\].*'values'")
+    bad(lambda ch: ch["rows"][0].update(values=[]), r"rows\[0\]\.values: needs at least 1")
+    bad(lambda ch: ch["rows"][0]["values"][0].update(value="81"), r"values\[0\]\.value: expected float")
+    bad(lambda ch: ch["rows"][0]["values"][0].update(value=-1.0), r"values\[0\]\.value.*negative")
+    bad(lambda ch: ch["rows"][0]["values"][1].update(name="p50"), r"duplicate percentile 'p50'")
+    bad(lambda ch: ch["rows"][0]["max_label"].update(value=90.0), r"max_label.*below")
+    bad(lambda ch: ch["rows"][0]["max_label"].update(text=" "), r"max_label\.text is empty")
+    bad(lambda ch: ch.update(note=3), r"note: expected str")
+    bad(lambda ch: ch.update(rows=[]), "rows")
+    bad(lambda ch: ch.update(highlight=["p50"]), r"highlight.*stacked_bars")

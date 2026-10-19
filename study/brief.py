@@ -128,6 +128,14 @@ def render_brief(c: dict) -> str:
                     out.append(f"- {b['label']}: {parts} ({ch['unit']})")
                 for d in ch.get("deltas", []):
                     out.append(f"- Changed {d['between']}: {d['text']}")
+            elif ch["type"] == "percentiles":
+                for row in ch["rows"]:
+                    vals = ", ".join(f"{v['name']} {v['value']}" for v in row["values"])
+                    m = row.get("max_label")
+                    tail = f"; {m['text']} {m['value']} {ch['unit']}" if m else ""
+                    out.append(f"- {row['label']}: {vals} ({ch['unit']}){tail}")
+                if ch.get("note"):
+                    out.append(f"- Note: {ch['note']}")
             elif ch["type"] == "interval":
                 for row in ch["rows"]:
                     out.append(f"- {row['label']}: {row['estimate']} {ch['unit']} "
