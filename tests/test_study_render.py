@@ -438,7 +438,7 @@ def test_every_link_in_the_content_is_an_edge_and_nothing_else_is():
         for s in d["serves"]:
             expected.add((dom[("req", s["req"])], dom[("dec", d["id"])]))
         for k in d["uses"]:
-            expected.add((dom[("dec", d["id"])], dom[("con", k["concept"])]))
+            expected.add((dom[("con", k["concept"])], dom[("dec", d["id"])]))
     for i, r in enumerate(u["results"]):
         so = r.get("so", [])
         for d in [so] if isinstance(so, str) else so:
@@ -529,12 +529,62 @@ def test_barycentre_order_is_deterministic_and_follows_neighbours():
     assert barycentre_order(["x", "y"], {"x": [1], "y": [1]}) == ["x", "y"]
 
 
-def test_right_column_interleaves_results_and_concepts_by_their_decisions():
+def _column(html, name):
+    return html.split(f'class="mcol mcol-{name}"')[1].split('class="mcol ')[0]
+
+
+def _kinds(html):
+    return re.findall(r'class="mnode (\w+)" id="[\w-]+" data-ref="([^"]*)"', html)
+
+
+def test_lanes_left_requirements_then_concepts_middle_decisions_right_results():
     html = map_section(artifact_unit_with_links())
-    right = html.split('class="mcol mcol-right"')[1]
-    order = re.findall(r'class="mnode (res|con)" id="[\w-]+" data-ref="([^"]*)"', right)
-    # F1 rests on D1,D2 (0.5); arms is used by D1,D4 (1.5); contrast by D3 (2); F2 by none.
-    assert order == [("res", "0"), ("con", "arms"), ("con", "contrast"), ("res", "1")]
+    left, mid, right = (_column(html, n) for n in ("left", "dec", "right"))
+    assert [k for k, _ in _kinds(left)] == ["req"] * 3 + ["con"] * 2
+    heads = [re.sub(r"<[^>]+>", "", h) for h in re.findall(r'<h3 class="mhead[^"]*">(.*?)</h3>', html)]
+    assert heads == ["Requirements (why)", "Key concepts (vocabulary)",
+                     "Decisions (what was decided)", "Results (what came out)"]
+    assert [k for k, _ in _kinds(mid)] == ["dec"] * 4
+    assert _kinds(right) == [("res", "0"), ("res", "1")]
+    # the phone list stacks the columns in DOM order: Requirements, Concepts, Decisions, Results
+    order = [k for k, _ in _kinds(html)]
+    assert order == ["req"] * 3 + ["con"] * 2 + ["dec"] * 4 + ["res"] * 2
+
+
+def test_concepts_follow_barycentre_and_results_keep_content_order():
+    u = artifact_unit_with_links()
+    u["decisions"][2]["uses"] = []
+    u["decisions"][0]["uses"] = [{"concept": "contrast", "because": "x"},
+                                 {"concept": "arms", "because": "x"}]
+    u["decisions"][3]["uses"] = [{"concept": "arms", "because": "x"}]
+    # contrast: D1 only (0); arms: D1 and D4 (1.5)
+    u["results"][0]["so"] = "d3"
+    u["results"][1] = dict(u["results"][1], so="d0")
+    del u["results"][1]["so_none_reason"]
+    html = map_section(u)
+    assert [r for k, r in _kinds(_column(html, "left")) if k == "con"] == ["contrast", "arms"]
+    assert _kinds(_column(html, "right")) == [("res", "0"), ("res", "1")]
+
+
+def test_panels_use_the_card_words_for_each_link_group():
+    html = map_section(artifact_unit_with_links())
+    dom = _dom_ids(html)
+
+    def heads(kind, ref):
+        tpl = html.split(f'<template id="mp-{dom[(kind, ref)]}">')[1].split("</template>")[0]
+        return re.findall(r"<h4>([^<]+)</h4>", tpl)
+
+    assert heads("res", "0") == ["Rests on"]
+    assert heads("req", "R1") == ["Answered by"]
+    assert heads("dec", "d0") == ["Serves", "Uses", "Seen in"]
+    assert heads("con", "arms") == ["Used by"]
+    assert "Decisions it supports" not in html
+
+
+def test_map_has_a_lane_legend():
+    html = map_section(artifact_unit_with_links())
+    assert ("Left: what drove the work and the vocabulary. Middle: what was decided. "
+            "Right: what came out.") in html
 
 
 def test_requirements_are_ordered_by_the_decisions_that_serve_them():
@@ -543,7 +593,7 @@ def test_requirements_are_ordered_by_the_decisions_that_serve_them():
         d["serves"] = [{"req": "R2", "because": "x"}]
     u["decisions"][3]["serves"] = [{"req": "R1", "because": "x"}]
     u["decisions"][0]["serves"] = [{"req": "R2", "because": "x"}]
-    left = map_section(u).split('class="mcol mcol-req"')[1].split('class="mcol mcol-dec"')[0]
+    left = _column(map_section(u), "left")
     assert re.findall(r'data-ref="(R\d)"', left) == ["R2", "R1", "R3"]
 
 

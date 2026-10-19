@@ -1,11 +1,13 @@
 """The relationship map: how requirements, decisions, results and concepts connect.
 
 Rendered only for units whose requirements carry ids (see schema._relationships). Three
-columns, left to right: requirements, decisions, then results and key concepts. Every
-edge touches a decision, so edges only run between adjacent columns. Decisions keep the
-content order (D1, D2, ... match the decision cards); the other two columns are ordered
-by the barycentre of the decisions they link to, which keeps crossings low without any
-hand-written order.
+columns, left to right: what drove the work (requirements, then the key concepts as the
+vocabulary), the decisions, and what came out (results). Every edge touches a decision,
+so edges only run between adjacent columns, always left to right. Decisions and results
+keep the content order (D1.., F1.. match the cards); requirements and concepts are each
+ordered by the barycentre of the decisions they link to, which keeps crossings low
+without any hand-written order. On a phone the columns stack in the same order:
+requirements, concepts, decisions, results.
 
 Each box shows its card's code and heading word for word (see _graph), wrapping to more
 lines as needed rather than truncating.
@@ -23,13 +25,14 @@ from study.schema import so_ids
 from study.text import esc, inline
 
 KIND_NAME = {"req": "Requirement", "dec": "Decision", "res": "Result", "con": "Key concept"}
+# A panel's link groups use the words of the card rows (page.py), in lane order.
 GROUP_HEAD = {
-    "req": {"dec": "Decisions that meet it"},
-    "dec": {"req": "Requirements it serves", "res": "Results resting on it",
-            "con": "Concepts it uses"},
-    "res": {"dec": "Decisions it supports"},
-    "con": {"dec": "Decisions that use it"},
+    "req": {"dec": "Answered by"},
+    "dec": {"req": "Serves", "con": "Uses", "res": "Seen in"},
+    "res": {"dec": "Rests on"},
+    "con": {"dec": "Used by"},
 }
+LANE_ORDER = ("req", "con", "dec", "res")
 
 MAP_CSS = """
 #map .mq{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);
@@ -52,14 +55,15 @@ transition:opacity .15s,stroke-width .15s}
 .medge.on{stroke:var(--fg);stroke-opacity:1;stroke-width:2.6}
 .medges.has-sel .medge:not(.on){opacity:.12}
 .mcol{position:relative;z-index:1;display:flex;flex-direction:column;min-width:0}
-.mcol-req{grid-column:1}.mcol-dec{grid-column:3}.mcol-right{grid-column:5}
+.mcol-left{grid-column:1}.mcol-dec{grid-column:3}.mcol-right{grid-column:5}
 .mhead{font-size:14px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
 margin:0 0 10px;color:var(--kt)}
-.mcol-req .mhead{--k:var(--c0)}.mcol-dec .mhead{--k:var(--c1)}.mcol-right .mhead{--k:var(--muted)}
-.mres-t{--k:var(--c2);color:var(--kt)}.mcon-t{--k:var(--c6);color:var(--kt)}
-.msub{display:block;font-size:14px;font-weight:400;text-transform:none;letter-spacing:0;
-color:var(--muted);margin-top:2px}
+.mhead.req{--k:var(--c0)}.mhead.con{--k:var(--c6);margin-top:22px}.mhead.dec{--k:var(--c1)}
+.mhead.res{--k:var(--c2)}
+.mhead .mpar{font-weight:400;text-transform:none;letter-spacing:0}
 .mstack{display:flex;flex-direction:column;justify-content:space-around;gap:12px;flex:1}
+.mcol-left .mstack{flex:none;justify-content:flex-start}
+.mmapcol{min-width:0}.mlanes{color:var(--muted);font-size:14px;margin:12px 0 0}
 .mnode{position:relative;display:block;width:100%;text-align:left;font:inherit;color:var(--fg);
 background:var(--card);border:1px solid var(--line);border-left:5px solid var(--k);
 border-radius:10px;padding:9px 12px;cursor:pointer;transition:opacity .15s,box-shadow .15s;
@@ -98,7 +102,7 @@ cursor:pointer}
 .mref .mwhy{display:block;font-size:14px;color:var(--muted);margin-top:2px}
 .mpanel .mhint{color:var(--muted);font-size:15px;margin:0}
 .mgo{font-size:14px}
-.mnarrow{display:none}.mtap{display:none}
+.mtap{display:none}
 @media (max-width:1199px) and (min-width:1000px){.mmain{grid-template-columns:minmax(0,1fr) 290px;
 gap:20px}.mgrid{grid-template-columns:minmax(0,1fr) 60px minmax(0,1fr) 60px minmax(0,1fr)}
 .mlab{font-size:15px}}
@@ -109,10 +113,7 @@ gap:20px}.mgrid{grid-template-columns:minmax(0,1fr) 60px minmax(0,1fr) 60px minm
 box-shadow:0 -4px 24px rgba(0,0,0,.25);display:none}
 #map.has-sel .mpanel{display:block}
 .mpanel .mhome{display:none}#map .mtap{display:block;margin:-6px 0 12px;color:var(--muted);font-size:15px}}
-@media (max-width:759px){.mwide{display:none}.mnarrow{display:inline}
-.msub .mnarrow{display:block}
-.mconsub.mnarrow{display:block;order:2;margin:14px 0 2px}
-.mcol-right .mnode.res{order:1}.mcol-right .mnode.con{order:3}
+@media (max-width:759px){.mlanes{display:none}
 .mgrid{display:block}.medges{display:none}.mcol{margin-bottom:20px}.mstack{gap:8px}
 .mlinks{display:block}.mlinks.none{font-style:italic}}
 """
@@ -278,7 +279,7 @@ def _graph(c):
         for s in d.get("serves", []):
             edges.append((req_dom[s["req"]], dec_dom[d["id"]], s["because"]))
         for u in d.get("uses", []):
-            edges.append((dec_dom[d["id"]], con_dom[u["concept"]], u["because"]))
+            edges.append((con_dom[u["concept"]], dec_dom[d["id"]], u["because"]))
     for i, r in enumerate(c.get("results", [])):
         for d in so_ids(r):
             edges.append((dec_dom[d], f"m-f{i}", r.get("takeaway", "")))
@@ -311,7 +312,7 @@ def _panel(n, linked, nodes):
         out.append(f'<p class="mtext">{inline(n["text"])}</p>')
     if n["note"]:
         out.append(f'<p class="mnote">{inline(n["note"])}</p>')
-    for other_kind in ("req", "dec", "res", "con"):
+    for other_kind in LANE_ORDER:
         group = [(o, why) for o, why in linked if nodes[o]["kind"] == other_kind]
         if not group:
             continue
@@ -351,43 +352,40 @@ def map_section(c: dict) -> str:
         return [pos[o] for o, _ in linked[d] if o in pos]
 
     reqs = barycentre_order(by_kind["req"], {d: dec_positions(d) for d in by_kind["req"]})
-    right_items = by_kind["res"] + by_kind["con"]
-    right = barycentre_order(right_items, {d: dec_positions(d) for d in right_items})
+    cons = barycentre_order(by_kind["con"], {d: dec_positions(d) for d in by_kind["con"]})
 
-    def button(d):
-        return _node_button(nodes[d], [nodes[o]["code"] for o, _ in linked[d]])
+    def stack(kind, ids, name, gloss):
+        if not ids:
+            return ""
+        buttons = "".join(_node_button(nodes[d], [nodes[o]["code"] for o, _ in linked[d]])
+                          for d in ids)
+        return (f'<h3 class="mhead {kind}">{name} <span class="mpar">({gloss})</span></h3>'
+                f'<div class="mstack">{buttons}</div>')
 
     paths = "".join(f'<path class="medge" data-from="{a}" data-to="{b}"/>' for a, b, _ in edges)
     templates = "".join(f'<template id="mp-{d}">{_panel(nodes[d], linked[d], nodes)}</template>'
                         for d in nodes)
     legend = "".join(f'<span><span class="msw {k}"></span>{label}</span>' for k, label in (
-        ("req", "Requirement (why)"), ("dec", "Decision (what was chosen)"),
-        ("res", "Result (what came out)"), ("con", "Key concept")))
+        ("req", "Requirement (why)"), ("con", "Key concept (vocabulary)"),
+        ("dec", "Decision (what was chosen)"), ("res", "Result (what came out)")))
     home = ('<p class="mhint mhome">Select any box (click, tap, or Tab then Enter) to see its '
             'one-line explanation, what it connects to, and why. Esc clears.</p>')
-    right_head = (
-        '<h3 class="mhead"><span class="mres-t">Results</span><span class="mwide"> and '
-        '<span class="mcon-t">key concepts</span></span><span class="msub">'
-        '<span class="mwide">results rest on decisions; concepts are the vocabulary they use'
-        '</span><span class="mnarrow">which decisions each result rests on</span></span></h3>')
-    con_sub = ('<h3 class="mhead mconsub mnarrow"><span class="mcon-t">Key concepts</span>'
-               '<span class="msub">the vocabulary decisions use</span></h3>')
     return (
         '<section id="map"><h2>How the pieces connect</h2>'
         f'<p class="mq"><span class="mq-k">The question</span>{inline(c["question"])}</p>'
         f'<div class="mlegend" aria-hidden="true">{legend}</div>'
         '<p class="mhint mtap">Tap a box to see what it connects to, and why.</p>'
-        '<div class="mmain"><div class="mgrid" id="mgrid">'
+        '<div class="mmain"><div class="mmapcol"><div class="mgrid" id="mgrid">'
         f'<svg class="medges" aria-hidden="true">{paths}</svg>'
-        '<div class="mcol mcol-req"><h3 class="mhead">Requirements<span class="msub">'
-        'what the work had to guarantee</span></h3>'
-        f'<div class="mstack">{"".join(button(d) for d in reqs)}</div></div>'
-        '<div class="mcol mcol-dec"><h3 class="mhead">Decisions<span class="msub">'
-        'how each guarantee was met</span></h3>'
-        f'<div class="mstack">{"".join(button(d) for d in by_kind["dec"])}</div></div>'
-        f'<div class="mcol mcol-right">{right_head}'
-        f'<div class="mstack">{con_sub}{"".join(button(d) for d in right)}</div></div>'
-        '</div><aside class="mpanel" id="mpanel" aria-live="polite">'
+        f'<div class="mcol mcol-left">{stack("req", reqs, "Requirements", "why")}'
+        f'{stack("con", cons, "Key concepts", "vocabulary")}</div>'
+        f'<div class="mcol mcol-dec">'
+        f'{stack("dec", by_kind["dec"], "Decisions", "what was decided")}</div>'
+        f'<div class="mcol mcol-right">'
+        f'{stack("res", by_kind["res"], "Results", "what came out")}</div>'
+        '</div><p class="mlanes">Left: what drove the work and the vocabulary. Middle: what '
+        'was decided. Right: what came out.</p></div>'
+        '<aside class="mpanel" id="mpanel" aria-live="polite">'
         '<div class="mpanel-top"><button type="button" class="mclear" disabled>'
         f'Clear selection</button></div><div class="mpanel-body">{home}</div></aside></div>'
         f'{templates}</section>')
