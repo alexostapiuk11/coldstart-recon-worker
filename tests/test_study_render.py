@@ -1301,3 +1301,12 @@ def test_unknown_names_avoid_the_slots_canonical_phases_take_on_the_page():
     from study.svg import segment_slots
     slots = segment_slots([_stacked("Mystery", "Compile"), _stacked("Server launch to model loaded")])
     assert slots == {"Compile": 1, "Server launch to model loaded": 0, "Mystery": 2}
+
+
+def test_urls_in_links_are_not_scanned_for_numbers(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\n")
+    u = artifact_unit()
+    u["results"] = []
+    u["sources"] = [{"file": src, "section": "Title"}]
+    u["links"] = {"p1": "https://claude.ai/artifact/ERS8Z3tRWUkSD4131zgwzY"}
+    assert untraced_numbers(u) == []

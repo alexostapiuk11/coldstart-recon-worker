@@ -33,7 +33,7 @@ def _strings(node):
         yield node
     elif isinstance(node, dict):
         for k, v in node.items():
-            if k not in ("sources", "derived_numbers"):
+            if k not in ("sources", "derived_numbers", "links"):
                 yield from _strings(v)
     elif isinstance(node, list):
         for v in node:

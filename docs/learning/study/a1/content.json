@@ -1367,10 +1367,6 @@
       "how": "43,040 / 35,792 = 1.2025, rounded to three decimals; the post's 20.3 %."
     },
     {
-      "value": "4131",
-      "how": "Not a number: digits inside P1's artifact URL in `links`, which the trace check also scans."
-    },
-    {
       "value": "5.5",
       "how": "The pitch's spoken \"minus 5.5 seconds\": the interval's upper end, -5.54 s in docs/post.md, to one decimal."
     }
