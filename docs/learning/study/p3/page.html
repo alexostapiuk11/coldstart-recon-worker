@@ -1,0 +1,245 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Delivery Guarantees Basics</title><style>
+:root{--bg:#fafaf7;--fg:#1d2330;--muted:#5b6475;--card:#fff;--line:#d9dce3;
+--accent:#2f5fd0;--soft:#e8eefc;--warn:#b4540a;--warnsoft:#fdf0e3;--ok:#1f7a4d;
+--c0:#2a78d6;--c1:#eb6834;--c2:#1baf7a;--c3:#eda100;--c4:#e87ba4;--c5:#008300;
+--c6:#4a3aa7;--c7:#e34948;--t0:#000;--t1:#000;--t2:#000;--t3:#000;--t4:#000;
+--t5:#fff;--t6:#fff;--t7:#000}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#14171f;
+--fg:#e6e8ee;--muted:#9aa3b5;--card:#1c202b;--line:#323849;--accent:#7ea2ff;
+--soft:#222b45;--warn:#f0a15e;--warnsoft:#33261a;--ok:#5fcf9a;--c0:#3987e5;--c1:#d95926;
+--c2:#199e70;--c3:#c98500;--c4:#d55181;--c5:#008300;--c6:#9085e9;--c7:#e66767;
+--t6:#000;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#14171f;--fg:#e6e8ee;--muted:#9aa3b5;--card:#1c202b;
+--line:#323849;--accent:#7ea2ff;--soft:#222b45;--warn:#f0a15e;--warnsoft:#33261a;
+--ok:#5fcf9a;--c0:#3987e5;--c1:#d95926;--c2:#199e70;--c3:#c98500;--c4:#d55181;
+--c5:#008300;--c6:#9085e9;--c7:#e66767;--t6:#000;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans-serif}
+main{max-width:1560px;margin:0 auto;padding:0 clamp(16px,4vw,56px) 64px}
+header.hero{padding:32px 0 8px}
+.kicker{color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.06em}
+h1{font-size:28px;line-height:1.2;margin:6px 0 10px}
+h2{font-size:21px;margin:0 0 12px}
+h3{font-size:16px;margin:0 0 6px}
+.lead{font-size:18px}
+nav.pills{position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);padding:8px 0;display:flex;gap:6px;
+flex-wrap:wrap;z-index:2;border-bottom:1px solid var(--line)}
+nav.pills a{padding:3px 10px;border:1px solid var(--line);border-radius:99px;
+color:var(--fg);text-decoration:none;font-size:13px}
+section{margin-top:36px}
+section,.card[id]{scroll-margin-top:64px}
+a{color:var(--accent)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+padding:14px 16px;margin:10px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr));gap:12px;align-items:start}
+.grid2>.card{margin:0}
+.grid>.card{margin:0}
+.cgrid{grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr))}
+.rgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,max(300px,calc((100% - 24px)/3))),1fr))}
+.dlegend{color:var(--muted);font-size:14px;margin:6px 0 0}
+details.src{background:transparent}details.src summary{font-size:17px}
+details.src ul{margin:8px 0 4px;padding-left:20px}
+.crow{margin:10px 0 0}.crow b{display:block;color:var(--muted);font-weight:600;font-size:13px;
+text-transform:uppercase;letter-spacing:.05em;margin-bottom:1px}
+.why{color:var(--muted);font-size:14px}
+.row{display:grid;grid-template-columns:104px 1fr;gap:10px;margin:6px 0;align-items:baseline}
+.row b{color:var(--muted);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+.opt{display:inline-block;margin:2px 6px 2px 0;padding:2px 10px;border:1px solid var(--line);
+border-radius:99px;font-size:14px}.opt.chosen{background:var(--soft);border-color:var(--accent);
+font-weight:600}
+.cost{color:var(--warn)}
+.tabs{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+.tabs button{font:inherit;font-size:14px;padding:5px 12px;border:1px solid var(--line);
+background:var(--card);color:var(--fg);border-radius:8px;cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--soft);border-color:var(--accent);
+font-weight:600}
+.diagram{width:100%;height:auto;display:block}
+.diagram-text{display:none;font-size:15px}.diagram-text small{color:var(--muted);font-size:13px}
+.diagram-text .kmark{color:var(--accent);font-weight:600;text-transform:uppercase;letter-spacing:.04em;font-size:11px}
+.kmark{white-space:nowrap}
+.edge{stroke:var(--muted);stroke-width:1.5}.arrow{fill:var(--muted)}
+.elabel{font-size:11px;fill:var(--muted);paint-order:stroke;stroke:var(--card);stroke-width:4px}
+.node rect{fill:var(--card);stroke:var(--accent);stroke-width:1.5}
+.node.k-person rect{fill:var(--soft)}.node.k-external rect{stroke:var(--muted);
+stroke-dasharray:4 3}.node.k-store rect{fill:var(--warnsoft);stroke:var(--warn)}
+.node.k-focus rect{fill:var(--soft);stroke-width:2.5}
+.nlabel{font-size:13px;font-weight:600;fill:var(--fg)}.nsub{font-size:11px;fill:var(--muted)}
+.chart{width:100%;max-width:760px;height:auto;display:block}
+.blabel{font-size:12px;fill:var(--fg);font-weight:600}.segtext{font-size:11px}
+.btotal{font-size:12px;fill:var(--fg)}
+.seg.s0,.chip.s0{fill:var(--c0);background:var(--c0)}
+.seg.s1,.chip.s1{fill:var(--c1);background:var(--c1)}
+.seg.s2,.chip.s2{fill:var(--c2);background:var(--c2)}
+.seg.s3,.chip.s3{fill:var(--c3);background:var(--c3)}
+.seg.s4,.chip.s4{fill:var(--c4);background:var(--c4)}
+.seg.s5,.chip.s5{fill:var(--c5);background:var(--c5)}
+.seg.s6,.chip.s6{fill:var(--c6);background:var(--c6)}
+.seg.s7,.chip.s7{fill:var(--c7);background:var(--c7)}
+.segtext.s0{fill:var(--t0)}.segtext.s1{fill:var(--t1)}.segtext.s2{fill:var(--t2)}
+.segtext.s3{fill:var(--t3)}.segtext.s4{fill:var(--t4)}.segtext.s5{fill:var(--t5)}
+.segtext.s6{fill:var(--t6)}.segtext.s7{fill:var(--t7)}
+.seg.dim{fill:var(--line);stroke:var(--muted);stroke-width:.75}.segtext.dim{fill:var(--muted)}
+.chip.dim{background:var(--line);box-shadow:inset 0 0 0 1px var(--muted)}
+.deltas{margin:8px 0 4px;font-size:.9em}.deltas .dhead{color:var(--muted);font-weight:600;
+font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+.deltas ul{margin:4px 0;padding-left:18px}.deltas li{margin:2px 0}.deltas b{margin-right:4px}
+.zero{stroke:var(--fg);stroke-width:1.5;stroke-dasharray:4 3}.axis{stroke:var(--line);stroke-width:1.5}
+.whisker{stroke:var(--c0);stroke-width:2.5;stroke-linecap:round}.est{fill:var(--c0);stroke:var(--card);stroke-width:2}
+.shade{fill:var(--line);opacity:.45}.inum{font-size:12px;fill:var(--muted)}
+.axlabel{font-size:12px;fill:var(--muted)}.iest{font-weight:600}
+.ilabel,.inum,.iest,.axlabel{paint-order:stroke;stroke:var(--card);stroke-width:4px;stroke-linejoin:round}
+.ghost{fill:none;stroke:var(--fg);stroke-width:1.5;stroke-dasharray:5 3}
+.gcap{font-size:12px;fill:var(--fg);font-style:italic;paint-order:stroke;stroke:var(--card);
+stroke-width:4px;stroke-linejoin:round}
+.prange{stroke:var(--muted);stroke-width:2.5;stroke-linecap:round}
+.pgap{stroke:var(--muted);stroke-width:1.5;stroke-dasharray:3 4}
+.pgrid{stroke:var(--line);stroke-width:1}.paxis{stroke:var(--muted);stroke-width:1.2}
+.pdot{stroke:var(--card);stroke-width:1.5}
+.pk0{fill:var(--c0)}.pk1{fill:var(--c1)}.pk2{fill:var(--c6)}.pk3{fill:var(--c3)}
+.pmax{fill:var(--card);stroke:var(--fg);stroke-width:2}
+.pnum{font-size:12px;fill:var(--fg)}.pmaxt{fill:var(--muted);font-style:italic}
+.pnum,.ptick{paint-order:stroke;stroke:var(--card);stroke-width:4px;stroke-linejoin:round}
+.cnote{color:var(--muted);font-size:14px;margin:4px 0 6px}
+.xk0{color:var(--c0)}.xk1{color:var(--c1)}.xk2{color:var(--c6)}.xk3{color:var(--c2)}
+.xk4{color:var(--c3)}.xk5{color:var(--c4)}
+.xyl{fill:none;stroke:currentColor;stroke-width:2;stroke-linejoin:round}.xyl.r{stroke-dasharray:6 4}
+.xym{fill:currentColor;stroke:var(--card);stroke-width:1.5}
+.xym.r{fill:var(--card);stroke:currentColor;stroke-width:2}
+.xyw{stroke:currentColor;stroke-width:1.5}
+.xygrid{stroke:var(--line);stroke-width:1}.xyaxis,.xytick{stroke:var(--muted);stroke-width:1.2}
+.xyref{stroke:var(--fg);stroke-width:1.2;stroke-dasharray:4 4;opacity:.8}
+.xyband{fill:var(--line);opacity:.6}
+.xyv{font-size:12px;font-weight:600;fill:var(--fg)}
+.xyrt,.xybt{font-size:12px;fill:var(--muted);font-style:italic}
+.xylead{stroke:var(--muted);stroke-width:1}
+.xyf{fill:none;stroke:var(--fg);stroke-width:2;stroke-linejoin:round}
+.xyn{font-size:12px;font-weight:700;fill:var(--fg)}.xypl{font-size:12px;fill:var(--fg)}
+.xyfl{font-size:12px;fill:var(--fg);font-style:italic}
+.xyv,.xyrt,.xybt,.xyt,.xyax,.xyn,.xypl,.xyfl{paint-order:stroke;stroke:var(--card);stroke-width:4px;stroke-linejoin:round}
+.xychip{vertical-align:-2px;margin-right:6px;overflow:visible}
+.xyleg{font-size:14px}.xyleg small{font-size:inherit;color:var(--muted)}
+.shswatch{display:inline-block;width:14px;height:10px;margin-right:6px;background:var(--line);
+opacity:.7;border-radius:2px;vertical-align:0}
+.legend{list-style:none;padding:0;margin:6px 0;display:flex;gap:14px;flex-wrap:wrap;font-size:13px}
+.chip{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
+.flow{display:flex;gap:8px;flex-wrap:wrap;counter-reset:s}
+.step{flex:1 1 160px;background:var(--card);border:1px solid var(--line);border-radius:10px;
+padding:10px 12px;position:relative}.step:before{counter-increment:s;content:counter(s);
+position:absolute;top:-10px;left:10px;background:var(--accent);color:var(--bg);width:20px;
+height:20px;border-radius:50%;font-size:12px;text-align:center;line-height:20px}
+.fl-sum{margin:0 0 10px}
+.fl-strip{list-style:none;padding:0;margin:0 0 18px;display:flex;flex-wrap:wrap;gap:8px}
+.fl-strip a{display:flex;flex-direction:column;gap:1px;padding:6px 12px 6px 30px;position:relative;
+border:1.5px solid var(--accent);border-radius:8px;background:var(--card);color:var(--fg);
+text-decoration:none;font-size:14px;line-height:1.35;max-width:100%}
+.fl-strip a:hover{background:var(--soft)}
+.fl-strip a:before{content:"";position:absolute;left:11px;top:50%;width:9px;height:9px;
+margin-top:-5px;background:var(--accent);transform:rotate(45deg)}
+.fl-sdate{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.fl-slabel{font-weight:600}
+.fl-tl{position:relative}
+.fl-tl:before{content:"";position:absolute;left:16.5px;top:12px;bottom:0;width:3px;opacity:.55;
+background:var(--muted)}
+.fl-phase:last-child .fl-step:last-child:after{content:"";position:absolute;left:12px;top:48px;
+bottom:0;width:12px;background:var(--bg)}
+.fl-phase{position:relative}
+.fl-band{position:relative;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px;
+margin:6px 0 10px 48px;padding:6px 0 4px;border-bottom:2px solid var(--fg)}
+.fl-band:before{content:"";position:absolute;left:-37px;top:12px;width:14px;height:14px;
+background:var(--fg);border:3px solid var(--bg);box-sizing:content-box;margin:-3px}
+.fl-band h3{margin:0;font-size:18px}
+.fl-pn{color:var(--muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.fl-pc{color:var(--muted);font-size:13px;margin-left:auto}
+.fl-steps{list-style:none;margin:0;padding:0}
+.fl-step{position:relative;padding:0 0 12px 48px;scroll-margin-top:64px}
+.fl-node{position:absolute;left:4px;top:12px;width:28px;height:28px;border-radius:50%;
+background:var(--card);border:2px solid var(--muted);color:var(--fg);font-size:13px;font-weight:700;
+display:flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums}
+.fl-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+.fl-card h4{margin:0 0 4px;font-size:16px;line-height:1.35}
+.fl-detail{color:var(--muted);font-size:15px}
+.fl-side{margin-top:8px;font-size:14px}
+.fl-side>*+*{margin-top:6px}
+.fl-out b,.fl-ev b{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;
+letter-spacing:.05em;margin-right:4px}
+.fl-when{display:inline-block;color:var(--muted);font-size:12px;border:1px solid var(--line);
+border-radius:99px;padding:0 8px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.fl-dec{display:inline-block;font-size:13px;border:1px solid var(--accent);border-radius:99px;
+padding:1px 10px;text-decoration:none;background:var(--card)}
+.fl-dec:hover{background:var(--soft)}.fl-dec b{font-weight:700}
+.fl-ev{color:var(--muted);font-size:12.5px;overflow-wrap:anywhere}
+.fl-ev code{background:transparent;padding:0;font-size:12px}
+.fl-tag{display:inline-block;background:var(--accent);color:var(--bg);font-size:11px;font-weight:700;
+letter-spacing:.08em;text-transform:uppercase;border-radius:4px;padding:1px 7px;margin-bottom:4px}
+.fl-ms .fl-node{left:0;top:8px;width:36px;height:36px;background:var(--accent);
+border-color:var(--accent);color:var(--bg);font-size:15px;box-shadow:0 0 0 4px var(--soft)}
+.fl-ms .fl-card{border:2px solid var(--accent);border-left-width:6px;background:var(--soft)}
+.fl-ms .fl-card h4{font-size:17px}
+.callout{border-left:4px solid var(--accent);padding:6px 12px;background:var(--soft);
+border-radius:0 8px 8px 0;margin:8px 0}
+.limits{border-left-color:var(--warn);background:var(--warnsoft)}
+details.more{background:transparent;border-style:dashed;margin-top:10px}
+details{background:var(--card);border:1px solid var(--line);border-radius:8px;
+padding:8px 12px;margin:6px 0}summary{cursor:pointer;font-weight:600}
+code{font-size:.92em;background:var(--soft);padding:1px 5px;border-radius:4px}
+.src{font-size:13px;color:var(--muted)}
+.hero .lead,.answer{max-width:1100px}
+.readfirst{display:inline-block;font-size:15px;background:var(--card);border:1px solid var(--line);
+border-left:4px solid var(--warn);border-radius:0 8px 8px 0;padding:5px 12px;margin:0 0 8px}
+.readfirst b{color:var(--muted);font-weight:600;margin-right:4px}
+.answer{border-left:4px solid var(--accent);background:var(--soft);border-radius:0 10px 10px 0;
+padding:10px 14px;margin:10px 0 4px}.answer p{margin:4px 0 8px}
+.akicker{color:var(--muted);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.achips{display:flex;flex-wrap:wrap;gap:6px}
+.achip{padding:3px 10px;border:1px solid var(--accent);border-radius:99px;background:var(--card);
+font-size:14px;text-decoration:none;color:var(--fg)}
+.achip:hover{background:var(--soft)}
+.code{display:inline-block;font-size:12px;font-weight:700;line-height:1.5;color:var(--accent);
+border:1px solid var(--accent);border-radius:5px;padding:0 5px;margin-right:8px;vertical-align:2px;
+font-variant-numeric:tabular-nums}
+.links{font-size:14px;color:var(--muted);margin:8px 0 0;line-height:1.5}
+.links b{font-weight:600;color:var(--muted);margin-right:2px}
+.links a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:2px}
+.links .lc{font-weight:700;font-variant-numeric:tabular-nums}.links .none{font-style:italic}
+.callout.links{font-size:15px;color:var(--fg);margin-top:10px}
+@media (min-width:1100px){body{font-size:18px}h1{font-size:36px}h2{font-size:26px}h3{font-size:18px}
+.lead{font-size:21px}.why{font-size:16px}
+.fl-card{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:4px 32px;padding:12px 18px}
+.fl-side{margin-top:0;padding-left:20px;border-left:1px solid var(--line)}
+.fl-card h4{font-size:18px}.fl-ms .fl-card h4{font-size:19px}.fl-detail{font-size:16px}
+.fl-side{font-size:15px}.fl-band h3{font-size:20px}}
+@media (max-width:600px){.diagram{display:none}.diagram-text{display:block}.dlegend{display:none}
+h1{font-size:24px}.lead{font-size:16px}
+.row{display:block}.row b{display:block;margin-bottom:1px}
+nav.pills{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+--fadeL:#000;--fadeR:transparent;
+-webkit-mask-image:linear-gradient(#000,#000),linear-gradient(to right,var(--fadeL),#000 36px,#000 calc(100% - 36px),var(--fadeR));
+mask-image:linear-gradient(#000,#000),linear-gradient(to right,var(--fadeL),#000 36px,#000 calc(100% - 36px),var(--fadeR));
+-webkit-mask-size:100% 1px,100% 100%;mask-size:100% 1px,100% 100%;
+-webkit-mask-position:0 100%,0 0;mask-position:0 100%,0 0;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat}
+nav.pills[data-more=""]{-webkit-mask-image:none;mask-image:none}
+nav.pills[data-more~="left"]{--fadeL:transparent}nav.pills[data-more="left"]{--fadeR:#000}
+nav.pills::after{content:"";flex:none;width:32px}
+nav.pills::-webkit-scrollbar{display:none}nav.pills a{flex:none}
+.blabel,.btotal,.inum,.pnum,.gcap,.segtext,.axlabel{font-size:15px}
+.xyt,.xyax,.xyv,.xyrt,.xybt,.xyn,.xypl,.xyfl{font-size:15px}}
+</style></head><body><main><header class="hero"><div class="kicker">Study page · about 20 min</div><h1>Delivery guarantees and duplicate payments</h1><p class="why">Used by: a6</p></header><nav class="pills"><a href="#concepts">Concepts</a><a href="#views">Views</a><a href="#recall">Recall</a><a href="#sources">Sources</a></nav><section id="concepts"><h2>The ideas</h2><div class="grid cgrid"><div class="card" id="c-atleast"><h3>At-least-once, and exactly-once effect</h3><div><strong>At-least-once</strong>: a message may repeat, never be lost. Exactly-once <em>delivery</em> over a network that drops acknowledgements is impossible; systems give exactly-once <strong>effect</strong>: repeats made harmless.</div><div class="crow"><b>Like</b><div>A courier who redelivers whenever unsure you signed: you never miss a parcel, sometimes you get two.</div></div><div class="crow"><b>Matters</b><div>Every A6 pipeline is at-least-once underneath. Its stacks, <strong>N</strong> (naive), <strong>K</strong> (Kafka transactions), <strong>I</strong> (key at the sink) and <strong>O+I</strong> (outbox plus key), differ in where repeats are made harmless.</div></div></div><div class="card" id="c-offsets"><h3>Offsets, committed after the work</h3><div>A consumer&#x27;s progress in a partition is an <strong>offset</strong>: the next position to read. A6&#x27;s consumers commit it only after their Postgres commit, so a crash in between restarts them at the old offset and the batch is applied again.</div><div class="crow"><b>Like</b><div>A bookmark moved only after you finish the chapter: fall asleep first and you reread the chapter.</div></div><div class="crow"><b>Matters</b><div>That gap is the <strong>commit window</strong>. Cell F4-con-t kills a consumer exactly there; it is how A6 plants a known duplicate.</div></div></div><div class="card" id="c-idempotence"><h3>Idempotent producer versus transactions</h3><div>An <strong>idempotent producer</strong> lets the broker drop a retried batch it already wrote, within one producer session; a restarted process or a relay re-sending is new to it. A Kafka <strong>transaction</strong> commits Kafka writes and consumer offsets atomically; Postgres is not a participant.</div><div class="crow"><b>Matters</b><div>So K can still apply a batch twice: dying after its Postgres commit and before <code>commitTransaction</code> aborts the transaction and redelivers the batch, but the Postgres commit stands. A6&#x27;s H1 tests this.</div></div></div><div class="card" id="c-groups"><h3>Consumer groups, rebalances, zombies</h3><div>A group splits partitions among live members. One silent past <code>session.timeout.ms</code> loses them and a new <strong>generation</strong> starts; an offset commit from an old generation is rejected: <strong>generation fencing</strong>. A <strong>zombie</strong>, paused and woken with a batch in hand, can still write outside Kafka.</div><div class="crow"><b>Like</b><div>A worker dozes off holding a task; it is reassigned. He wakes and finishes it anyway, and only his timesheet is rejected.</div></div><div class="crow"><b>Matters</b><div>Cell F5 makes one. In reconnaissance on N it wrote its batch to Postgres, then failed its offset commit, in all 17 F5 trials. <strong>Epoch fencing</strong> does not apply: each instance has its own <code>transactional.id</code>.</div></div></div><div class="card" id="c-dualwrite"><h3>The dual write, and the outbox</h3><div>Commit the database, then send to Kafka: two commits in two systems. A crash or send timeout between them leaves a recorded payment never published. The <strong>outbox</strong> writes the payment and an &#x27;event to publish&#x27; row in one transaction; a relay (Debezium, reading the database log) publishes it later, <strong>at least once</strong>.</div><div class="crow"><b>Like</b><div>Diary, then a text to a friend: if the phone dies in between, the friend never hears. The outbox writes the text in the diary; a courier sends it, maybe twice.</div></div><div class="crow"><b>Matters</b><div>N, K and I dual-write; cell F4-svc kills the service right after its source commit. O+I&#x27;s outbox moves duplicates downstream rather than removing them, so it still needs the key.</div></div></div><div class="card" id="c-key"><h3>Idempotency key at the sink</h3><div>A unique <code>payment_id</code>, assigned at the origin, inserted into a <code>processed</code> table in <strong>the same transaction</strong> as the balance update: a repeat conflicts and is skipped. It breaks if the key is made downstream, or check and write are separate transactions.</div><div class="crow"><b>Like</b><div>A ticket barcode printed at purchase and scanned at the gate: a second scan is refused. A barcode printed at the gate would defeat it.</div></div><div class="crow"><b>Matters</b><div>Why not dedupe by Kafka offset? A relay&#x27;s re-send lands at a <strong>new</strong> offset; only a key carried from the origin catches it. I and O+I bet on this key.</div></div></div><div class="card" id="c-history"><h3>Checking a history: ok, fail, info</h3><div>As Jepsen does, record each request as <strong>ok</strong>, <strong>fail</strong> (provably never reached the service) or <strong>info</strong> (a timeout or 5xx: may or may not have happened). With unique IDs and commuting increments, counting each ID in source, topic and apply log is a complete check.</div><div class="crow"><b>Like</b><div>A payment page that timed out: the money may or may not have gone; only the statement says.</div></div><div class="crow"><b>Matters</b><div>A6&#x27;s source database is the authority and resolves every info. The apply log keeps each apply&#x27;s <code>(partition, offset)</code>: same offset means a redelivery, a new offset a re-send.</div></div></div><div class="card" id="c-injector"><h3>Real faults, and checking they landed</h3><div><strong>SIGKILL</strong> ends a process with no cleanup. <strong><code>docker pause</code></strong> freezes it; it wakes unaware time passed. A Toxiproxy <strong>blackhole</strong> keeps a connection open and drops the bytes; disabling a proxy instead resets connections, which fail fast: a different fault. The seed fixes the <strong>schedule</strong>, not the outcome.</div><div class="crow"><b>Matters</b><div>A <strong>manipulation check</strong>, reading only orchestrator, broker and process state, confirms each A6 trial&#x27;s fault took effect. A trial is void if not, and never because of what the checker found.</div></div></div><div class="card" id="c-controls"><h3>Positive and negative controls</h3><div>A zero means something only if the harness can see a nonzero. A <strong>positive control</strong> runs a case that must produce the anomaly; a <strong>negative control</strong>, one that must produce none.</div><div class="crow"><b>Like</b><div>Testing a smoke alarm with test smoke before trusting its silence.</div></div><div class="crow"><b>Matters</b><div>A6&#x27;s detection gate, run before the campaign, planted a duplicate and a loss on N, ran no-fault trials on every stack and tested the checker on synthetic histories. It passed. Its positive controls cover N only, not K.</div></div></div></div></section><section id="views"><h2>System views</h2><div class="card" data-tabs><div class="tabs" role="tablist"><button role="tab" aria-selected="false">Where a duplicate can enter</button><button role="tab" aria-selected="false">One batch, two commits</button></div><div role="tabpanel"><h3>Where a duplicate can enter</h3><p class="why">Three places can send a payment again: (1) the <a href="#c-idempotence">producer</a> retrying, (2) the <a href="#c-dualwrite">outbox relay</a> re-reading after a crash, at a new offset, and (3) <a href="#c-offsets">redelivery</a> to a restarted consumer, at the same offset. The <a href="#c-key">key</a> is checked at the end.</p><svg class="diagram" viewBox="0 0 1112 236" role="img" aria-label="Where a duplicate can enter" xmlns="http://www.w3.org/2000/svg"><defs><marker id="arr-p3-0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrow"/></marker></defs><line class="edge" x1="196.0" y1="60.0" x2="316.0" y2="60.0" marker-end="url(#arr-p3-0)"/><line class="edge" x1="407.0" y1="98.0" x2="407.0" y2="134.0" marker-end="url(#arr-p3-0)"/><line class="edge" x1="494.0" y1="60.0" x2="614.0" y2="60.0" marker-end="url(#arr-p3-0)"/><line class="edge" x1="494.0" y1="176.0" x2="614.0" y2="176.0" marker-end="url(#arr-p3-0)"/><line class="edge" x1="705.0" y1="138.0" x2="705.0" y2="102.0" marker-end="url(#arr-p3-0)"/><line class="edge" x1="792.0" y1="60.0" x2="912.0" y2="60.0" marker-end="url(#arr-p3-0)"/><line class="edge" x1="1003.0" y1="98.0" x2="1003.0" y2="134.0" marker-end="url(#arr-p3-0)"/><g class="node k-person"><rect x="24.0" y="24.0" width="170" height="72" rx="8"/><text class="nlabel" x="109.0" y="49.0" text-anchor="middle">Client</text><text class="nsub" x="109.0" y="66.0" text-anchor="middle">assigns payment_id at the</text><text class="nsub" x="109.0" y="80.0" text-anchor="middle">origin</text></g><g class="node k-system"><rect x="322.0" y="24.0" width="170" height="72" rx="8"/><text class="nlabel" x="407.0" y="49.0" text-anchor="middle">payment-service</text><text class="nsub" x="407.0" y="66.0" text-anchor="middle">commits the source; sends in</text><text class="nsub" x="407.0" y="80.0" text-anchor="middle">N, K, I</text></g><g class="node k-system"><rect x="620.0" y="24.0" width="170" height="72" rx="8"/><text class="nlabel" x="705.0" y="56.0" text-anchor="middle">Kafka</text><text class="nsub" x="705.0" y="73.0" text-anchor="middle">payments topic</text></g><g class="node k-focus"><rect x="918.0" y="24.0" width="170" height="72" rx="8"/><text class="nlabel" x="1003.0" y="49.0" text-anchor="middle">Ledger consumer</text><text class="nsub" x="1003.0" y="66.0" text-anchor="middle">applies, commits Postgres,</text><text class="nsub" x="1003.0" y="80.0" text-anchor="middle">then its offset</text></g><g class="node k-store"><rect x="322.0" y="140.0" width="170" height="72" rx="8"/><text class="nlabel" x="407.0" y="165.0" text-anchor="middle">source-db</text><text class="nsub" x="407.0" y="182.0" text-anchor="middle">the payment&#x27;s record: the</text><text class="nsub" x="407.0" y="196.0" text-anchor="middle">authority</text></g><g class="node k-system"><rect x="620.0" y="140.0" width="170" height="72" rx="8"/><text class="nlabel" x="705.0" y="172.0" text-anchor="middle">Outbox relay</text><text class="nsub" x="705.0" y="189.0" text-anchor="middle">O+I only: Debezium</text></g><g class="node k-store"><rect x="918.0" y="140.0" width="170" height="72" rx="8"/><text class="nlabel" x="1003.0" y="165.0" text-anchor="middle">ledger-db</text><text class="nsub" x="1003.0" y="182.0" text-anchor="middle">balances, apply log; key in I,</text><text class="nsub" x="1003.0" y="196.0" text-anchor="middle">O+I</text></g><text class="elabel" x="256.0" y="52.0" text-anchor="middle">HTTP</text><text class="elabel" x="415.0" y="120.0" text-anchor="start">commit</text><text class="elabel" x="554.0" y="52.0" text-anchor="middle">send: retry 1</text><text class="elabel" x="554.0" y="168.0" text-anchor="middle">outbox rows</text><text class="elabel" x="713.0" y="124.0" text-anchor="start">re-send: retry 2</text><text class="elabel" x="852.0" y="52.0" text-anchor="middle">redeliver: retry 3</text><text class="elabel" x="1011.0" y="120.0" text-anchor="start">apply, COMMIT</text></svg><div class="diagram-text"><ul><li>Client — assigns payment_id at the origin</li><li>payment-service — commits the source; sends in N, K, I</li><li>Kafka — payments topic</li><li><strong>Ledger consumer</strong> <small class="kmark">key step</small> — applies, commits Postgres, then its offset</li><li>source-db — the payment&#x27;s record: the authority</li><li>Outbox relay — O+I only: Debezium</li><li>ledger-db — balances, apply log; key in I, O+I</li></ul><ol><li>Client → payment-service: HTTP</li><li>payment-service → source-db: commit</li><li>payment-service → Kafka: send: retry 1</li><li>source-db → Outbox relay: outbox rows</li><li>Outbox relay → Kafka: re-send: retry 2</li><li>Kafka → Ledger consumer: redeliver: retry 3</li><li>Ledger consumer → ledger-db: apply, COMMIT</li></ol></div></div><div role="tabpanel"><h3>One batch, two commits</h3><p class="why">Every A6 consumer commits Postgres first, then Kafka&#x27;s record of progress. A crash in between is the <a href="#c-offsets">commit window</a>: the ledger has the batch, the offset does not.</p><svg class="diagram" viewBox="0 0 980 236" role="img" aria-label="One batch, two commits" xmlns="http://www.w3.org/2000/svg"><defs><marker id="arr-p3-1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrow"/></marker></defs><line class="edge" x1="196.0" y1="60.0" x2="272.0" y2="60.0" marker-end="url(#arr-p3-1)"/><line class="edge" x1="450.0" y1="60.0" x2="526.0" y2="60.0" marker-end="url(#arr-p3-1)"/><line class="edge" x1="704.0" y1="60.0" x2="780.0" y2="60.0" marker-end="url(#arr-p3-1)"/><line class="edge" x1="617.0" y1="98.0" x2="617.0" y2="134.0" marker-end="url(#arr-p3-1)"/><line class="edge" x1="530.0" y1="176.0" x2="454.0" y2="176.0" marker-end="url(#arr-p3-1)"/><line class="edge" x1="276.0" y1="176.0" x2="200.0" y2="176.0" marker-end="url(#arr-p3-1)"/><g class="node k-system"><rect x="24.0" y="24.0" width="170" height="72" rx="8"/><text class="nlabel" x="109.0" y="49.0" text-anchor="middle">Poll a batch</text><text class="nsub" x="109.0" y="66.0" text-anchor="middle">records with (partition,</text><text class="nsub" x="109.0" y="80.0" text-anchor="middle">offset)</text></g><g class="node k-system"><rect x="278.0" y="24.0" width="170" height="72" rx="8"/><text class="nlabel" x="363.0" y="49.0" text-anchor="middle">Apply in Postgres</text><text class="nsub" x="363.0" y="66.0" text-anchor="middle">balances, apply log; key check</text><text class="nsub" x="363.0" y="80.0" text-anchor="middle">in I, O+I</text></g><g class="node k-store"><rect x="532.0" y="24.0" width="170" height="72" rx="8"/><text class="nlabel" x="617.0" y="56.0" text-anchor="middle">Postgres COMMIT</text><text class="nsub" x="617.0" y="73.0" text-anchor="middle">the ledger now has the batch</text></g><g class="node k-system"><rect x="786.0" y="24.0" width="170" height="72" rx="8"/><text class="nlabel" x="871.0" y="49.0" text-anchor="middle">Commit offset</text><text class="nsub" x="871.0" y="66.0" text-anchor="middle">N, I: commitSync; K:</text><text class="nsub" x="871.0" y="80.0" text-anchor="middle">commitTransaction</text></g><g class="node k-focus"><rect x="532.0" y="140.0" width="170" height="72" rx="8"/><text class="nlabel" x="617.0" y="172.0" text-anchor="middle">Crash in between</text><text class="nsub" x="617.0" y="189.0" text-anchor="middle">ledger committed, offset not</text></g><g class="node k-system"><rect x="278.0" y="140.0" width="170" height="72" rx="8"/><text class="nlabel" x="363.0" y="165.0" text-anchor="middle">Restart</text><text class="nsub" x="363.0" y="182.0" text-anchor="middle">resumes at the last committed</text><text class="nsub" x="363.0" y="196.0" text-anchor="middle">offset</text></g><g class="node k-focus"><rect x="24.0" y="140.0" width="170" height="72" rx="8"/><text class="nlabel" x="109.0" y="165.0" text-anchor="middle">Same batch again</text><text class="nsub" x="109.0" y="182.0" text-anchor="middle">applied twice unless the key</text><text class="nsub" x="109.0" y="196.0" text-anchor="middle">skips it</text></g><text class="elabel" x="742.0" y="52.0" text-anchor="middle">then</text><text class="elabel" x="625.0" y="120.0" text-anchor="start">SIGKILL</text><text class="elabel" x="238.0" y="168.0" text-anchor="middle">redelivered</text></svg><div class="diagram-text"><ul><li>Poll a batch — records with (partition, offset)</li><li>Apply in Postgres — balances, apply log; key check in I, O+I</li><li>Postgres COMMIT — the ledger now has the batch</li><li>Commit offset — N, I: commitSync; K: commitTransaction</li><li><strong>Crash in between</strong> <small class="kmark">key step</small> — ledger committed, offset not</li><li>Restart — resumes at the last committed offset</li><li><strong>Same batch again</strong> <small class="kmark">key step</small> — applied twice unless the key skips it</li></ul><ol><li>Poll a batch → Apply in Postgres</li><li>Apply in Postgres → Postgres COMMIT</li><li>Postgres COMMIT → Commit offset: then</li><li>Postgres COMMIT → Crash in between: SIGKILL</li><li>Crash in between → Restart</li><li>Restart → Same batch again: redelivered</li></ol></div></div></div></section><section id="recall"><h2>Recall check</h2><p class="why">Answer out loud first, then open.</p><details><summary>A consumer is killed after its Postgres commit but before its offset commit. What happens on restart?</summary><p>It resumes from the last committed offset, so the batch is redelivered and applied again: an extra apply at the same (partition, offset), unless the sink checks a key.</p></details><details><summary>Why is a Kafka offset a bad idempotency key under an outbox relay?</summary><p>After a crash the relay re-reads and re-sends, and the copy lands at a new offset: to an offset key it is a new message. A key assigned at the origin is the same on every copy.</p></details><details><summary>K commits its offsets inside a Kafka transaction. How can it still apply a payment twice?</summary><p>Its Postgres commit is outside the transaction. Die after it and before <code>commitTransaction</code>: the transaction aborts on restart, the batch is redelivered, the Postgres commit stands.</p></details><details><summary>A zombie consumer wakes with a batch in hand. Which fencing stops it, and does that stop the duplicate?</summary><p>Generation fencing, at its offset commit. Its Postgres write is another system&#x27;s commit and has already happened, so fencing stops the Kafka commit, not the ledger write.</p></details><details><summary>Why is a timed-out request recorded as info, not fail?</summary><p>It may have reached the service and been recorded. Calling it fail would turn real deliveries into false anomalies; in A6 the source database resolves it, which a real client cannot do.</p></details><details><summary>A cell shows zero duplicates. What must hold before that zero means anything?</summary><p>The checker must be able to see a duplicate (a positive control that produced one), and the fault must have taken effect in each trial (its manipulation check).</p></details></section><section id="sources"><details class="src"><summary>Sources, 22 files and sections</summary><ul><li><code>~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md</code>: ### Module 1: delivery semantics</li><li><code>~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md</code>: ### Module 3: Kafka&#x27;s idempotent producer and transactions</li><li><code>~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md</code>: ### Module 4: the boundary</li><li><code>~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md</code>: ### Module 5: the dual write, the outbox and CDC</li><li><code>~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md</code>: ### Module 6: consumer groups and rebalances</li><li><code>~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md</code>: ### Module 7: idempotency keys</li><li><code>~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md</code>: ### Module 8: fault injection</li><li><code>~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md</code>: ### Module 9: checking histories</li><li><code>~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md</code>: ### Explanations the post must give</li><li><code>~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md</code>: ### What counts as a payment</li><li><code>~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md</code>: **Attribution rule: where an anomaly was born.**</li><li><code>~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md</code>: **ledger-consumer (Java).**</li><li><code>~/projects/ledger-faults/docs/experiment.md</code>: ### The four stacks</li><li><code>~/projects/ledger-faults/docs/experiment.md</code>: ### The fault matrix</li><li><code>~/projects/ledger-faults/docs/experiment.md</code>: ### Detection gate: controls before the campaign</li><li><code>~/projects/ledger-faults/docs/experiment.md</code>: ### Manipulation checks and void rules, fixed in advance</li><li><code>~/projects/ledger-faults/docs/experiment.md</code>: **C-F3: the F3 and F6 toxic drops bytes, 2026-10-08 (wording).**</li><li><code>~/projects/ledger-faults/docs/gate.md</code>: Gate passed 2026-10-12</li><li><code>~/projects/ledger-faults/docs/recon-part-b.md</code>: The zombie was seen in all 17 F5 trials of part B</li><li><code>~/projects/ledger-faults/consumer/src/main/java/lf/consumer/ConsumerLoop.java</code>: // ledger committed, Kafka progress not</li><li><code>~/projects/ledger-faults/consumer/src/main/java/lf/consumer/Ledger.java</code>: ON CONFLICT DO NOTHING RETURNING payment_id</li><li><code>~/projects/ledger-faults/service/src/main/java/lf/service/PaymentHandler.java</code>: // row committed; nothing sent, no reply yet</li></ul></details></section></main><script>
+for (const n of document.querySelectorAll('nav.pills')) {
+  // Which edges hide pills: the phone CSS fades those edges, and none once all fit.
+  const mark = () => { const more = [];
+    if (n.scrollLeft > 2) more.push('left');
+    if (n.scrollLeft + n.clientWidth < n.scrollWidth - 2) more.push('right');
+    n.dataset.more = more.join(' '); };
+  n.addEventListener('scroll', mark, {passive: true});
+  addEventListener('resize', mark);
+  mark();
+}
+for (const g of document.querySelectorAll('[data-tabs]')) {
+  const tabs = g.querySelectorAll('[role=tab]'), panels = g.querySelectorAll('[role=tabpanel]');
+  const show = i => { tabs.forEach((t, j) => t.setAttribute('aria-selected', j === i));
+    panels.forEach((p, j) => { p.hidden = j !== i; }); };
+  tabs.forEach((t, i) => t.addEventListener('click', () => show(i)));
+  show(0);
+}
+</script></body></html>
