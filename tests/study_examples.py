@@ -46,7 +46,9 @@ def artifact_unit() -> dict:
                 "options": ["Option one", "Option two"],
                 "chosen": "Option one",
                 "why": "A reason.",
+                "why_short": "A short reason.",
                 "cost": "A cost.",
+                "cost_short": "A short cost.",
             }
             for i in range(4)
         ],

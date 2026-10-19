@@ -96,6 +96,7 @@ height:20px;border-radius:50%;font-size:12px;text-align:center;line-height:20px}
 .callout{border-left:4px solid var(--accent);padding:6px 12px;background:var(--soft);
 border-radius:0 8px 8px 0;margin:8px 0}
 .limits{border-left-color:var(--warn);background:var(--warnsoft)}
+details.more{background:transparent;border-style:dashed;margin-top:10px}
 details{background:var(--card);border:1px solid var(--line);border-radius:8px;
 padding:8px 12px;margin:6px 0}summary{cursor:pointer;font-weight:600}
 code{font-size:.92em;background:var(--soft);padding:1px 5px;border-radius:4px}
@@ -160,8 +161,11 @@ def _decisions(c):
             f'<div class="row"><b>Problem</b>{inline(d["problem"])}</div>'
             f'<div class="row"><b>Options</b>{opts}</div>'
             f'<div class="row"><b>Chose</b>{inline(d["chosen"])}</div>'
+            f'<div class="row"><b>Because</b>{inline(d["why_short"])}</div>'
+            f'<div class="row cost"><b>Cost</b>{inline(d["cost_short"])}</div>'
+            '<details class="more"><summary>Full reasoning and cost</summary>'
             f'<div class="row"><b>Because</b>{inline(d["why"])}</div>'
-            f'<div class="row cost"><b>Cost</b>{inline(d["cost"])}</div></div>')
+            f'<div class="row cost"><b>Cost</b>{inline(d["cost"])}</div></details></div>')
     return (f'<section id="decisions"><h2>Core decisions</h2>'
             f'<div class="grid2">{"".join(cards)}</div></section>')
 

@@ -17,6 +17,7 @@ SUB_LINE = 30  # the diagram wraps a node's sub text at this width ...
 SUB_LINES = 2  # ... and has room for two lines
 MAX_COL = 3
 MAX_ROW = 3
+MAX_ONE_LINE = 160
 
 
 class ContentError(ValueError):
@@ -128,6 +129,10 @@ def validate(c: dict) -> None:
     for i, d in enumerate(c.get("decisions", [])):
         for f in ("id", "title", "problem", "chosen", "why", "cost"):
             _get(d, f, str, f"{where}.decisions[{i}]")
+        for f in ("why_short", "cost_short"):
+            if len(_get(d, f, str, f"{where}.decisions[{i}]")) > MAX_ONE_LINE:
+                raise ContentError(
+                    f"{where}.decisions[{i}].{f} longer than {MAX_ONE_LINE} characters")
         _items(d, "options", f"{where}.decisions[{i}]", at_least=2)
         if d["id"] in decision_ids:
             raise ContentError(f"{where}.decisions[{i}]: duplicate id '{d['id']}'")

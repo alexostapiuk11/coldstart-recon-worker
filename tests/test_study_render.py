@@ -241,3 +241,14 @@ def test_missing_section_is_reported(tmp_path):
     u = artifact_unit()
     u["sources"] = [{"file": src, "section": "Title"}, {"file": src, "section": "Nowhere"}]
     assert missing_sections(u) == [f"{src}: Nowhere"]
+
+
+def test_decision_shows_one_line_and_hides_the_full_reasoning_behind_a_click():
+    u = artifact_unit()
+    u["decisions"][0]["why"] = "The long full reasoning."
+    u["decisions"][0]["why_short"] = "The short reason."
+    page = render_page(u)
+    card = page.split('id="d-d0"')[1].split('id="d-d1"')[0]
+    assert "The short reason." in card.split("<details")[0]
+    assert "The long full reasoning." in card.split("<details")[1]
+    assert "<summary>Full reasoning and cost</summary>" in card

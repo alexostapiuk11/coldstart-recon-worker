@@ -124,3 +124,13 @@ def test_derived_number_needs_a_how():
     u = artifact_unit()
     u["derived_numbers"] = [{"value": "1.5"}]
     _fails(u, "how")
+
+
+def test_decision_needs_one_line_reason_and_cost():
+    for key in ("why_short", "cost_short"):
+        u = artifact_unit()
+        del u["decisions"][0][key]
+        _fails(u, key)
+        u = artifact_unit()
+        u["decisions"][0][key] = "x" * 161
+        _fails(u, key)
