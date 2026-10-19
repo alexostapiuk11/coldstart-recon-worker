@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from study.matrix import cell_text, cell_words, words
 from study.schema import flow_phases, merged_segments, phased, so_ids
 from study.seq import numbered, step_line
 from study.text import plural, resolve_links
@@ -188,6 +189,29 @@ def _sequence_lines(v):
     return out + [""]
 
 
+def _matrix_lines(ch):
+    """A blank line, the matrix as a markdown table (each cell: text [status, tone],
+    then its note), a blank line, and the note."""
+    status, tone = words(ch)
+
+    def cell(text):
+        return text.replace("|", "\\|")
+
+    def head(h):
+        return cell(h["label"] + (f" ({h['sub']})" if h.get("sub") else ""))
+
+    out = ["", "| " + " | ".join([cell(ch["unit"])] + [head(c) for c in ch["cols"]]) + " |",
+           "|" + "---|" * (len(ch["cols"]) + 1)]
+    for r, cells in zip(ch["rows"], ch["cells"]):
+        parts = [cell(f"{cell_text(x)} [{cell_words(x, status, tone)}]"
+                      + (f" ({x['note']})" if x.get("note") else "")) for x in cells]
+        out.append("| " + " | ".join([head(r)] + parts) + " |")
+    out.append("")
+    if ch.get("note"):
+        out.append(f"- Note: {ch['note']}")
+    return out
+
+
 def _bullets(items):
     return "\n".join(f"- {i}" for i in items)
 
@@ -281,6 +305,8 @@ def render_brief(c: dict) -> str:
                 out += _xy_lines(ch)
             elif ch["type"] == "scatter":
                 out += _scatter_lines(ch)
+            elif ch["type"] == "matrix":
+                out += _matrix_lines(ch)
             elif ch["type"] == "interval":
                 for row in ch["rows"]:
                     out.append(f"- {row['label']}: {row['estimate']} {ch['unit']} "

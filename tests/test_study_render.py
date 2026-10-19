@@ -2394,3 +2394,106 @@ def test_sequence_labels_are_traced_like_other_text(tmp_path):
     u["sources"] = [{"file": src, "section": "Title"}]
     u["views"][3] = sequence_view()
     assert sorted(untraced_numbers(u)) == sorted(["00004001", "647", "4.4", "1899467"])
+
+
+from tests.study_examples import matrix_chart
+
+
+def _mx_cells(out):
+    """(classes, data-col, inner html) for every body cell."""
+    return re.findall(r'<td class="([^"]*)" data-col="([^"]*)"[^>]*>(.*?)</td>', out)
+
+
+def test_matrix_is_a_real_table_with_scoped_headers():
+    c = matrix_chart()
+    out = chart_html(c, "m0")
+    assert out.count("<table") == 1 and "<svg" not in out
+    heads = re.findall(r'<th scope="col"[^>]*>(.*?)</th>', out)
+    assert len(heads) == 4 and "trials" in heads[0]
+    assert heads[2].startswith("F4-con-t") and "<small>hook</small>" in heads[2]
+    rows = re.findall(r'<th scope="row">(.*?)</th>', out)
+    assert [re.sub(r"<small>.*", "", r) for r in rows] == ["N", "K", "I", "O+I"]
+    cells = _mx_cells(out)
+    assert len(cells) == 12
+    assert [col for _, col, _ in cells[:3]] == ["F1", "F4-con-t", "F5"]
+    assert "&gt;= 8/10 dup (H1)" in cells[4][2]
+    assert re.search(r'<table class="mx" aria-label="Matrix \(trials\): 4 rows by 3 columns', out)
+
+
+def test_matrix_status_is_a_pattern_and_a_word_never_colour_alone():
+    out = chart_html(matrix_chart(), "m1")
+    cells = _mx_cells(out)
+    assert "st-observed" in cells[0][0] and "t-bad" in cells[0][0]
+    assert "st-predicted" in cells[1][0] and "st-none" in cells[2][0]
+    assert "st-na" in cells[11][0] and "st-pending" in cells[5][0]
+    # every cell carries its status (and its tone) in words for screen readers and phones
+    assert '<span class="mxs">pre-registered prediction, anomaly expected</span>' in cells[1][2]
+    assert '<span class="mxs">observed, good</span>' in cells[7][2]
+    # a tone also has a glyph, so good and bad differ without colour
+    assert '<span class="mxg" aria-hidden="true">✕</span>' in cells[0][2]
+    assert '<span class="mxg" aria-hidden="true">✓</span>' in cells[6][2]
+    assert "mxg" not in cells[10][2]  # neutral: no glyph
+    from study.page import MATRIX_CSS
+    rule = {k: MATRIX_CSS.split(f".mx .st-{k}{{")[1].split("}")[0]
+            for k in ("predicted", "pending", "observed")}
+    assert "repeating-linear-gradient" in rule["predicted"]
+    assert "dotted" in rule["pending"] and "repeating" not in rule["observed"]
+    assert "#" not in MATRIX_CSS  # theme tokens only
+
+
+def test_matrix_blank_cells_say_so_and_notes_show():
+    cells = _mx_cells(chart_html(matrix_chart(), "m2"))
+    assert ">—<" in cells[2][2] and ">n/a<" in cells[11][2]
+    assert '<small class="mxnote">output once, ledger twice</small>' in cells[4][2]
+
+
+def test_matrix_legend_lists_the_statuses_and_tones_used_with_their_labels():
+    out = chart_html(matrix_chart(), "m3")
+    legend = out.split('<ul class="legend mxleg">')[1].split("</ul>")[0]
+    items = [re.sub(r"<[^>]+>", "", i).strip() for i in re.findall(r"<li>(.*?)</li>", legend)]
+    assert items == ["observed", "pre-registered prediction", "pending", "no entry",
+                     "not applicable", "✕anomaly expected", "!watch", "✓good"]
+    assert '<span class="mxsw st-predicted">' in legend
+    assert out.endswith('<p class="cnote">Pre-registered 2026-10-12; results pending.</p>')
+
+
+def test_matrix_turns_into_cards_on_phones_and_its_css_ships_only_with_it():
+    from study.page import MATRIX_CSS
+    phone = _media(MATRIX_CSS, "max-width:600px")
+    assert ".mx td::before{content:attr(data-col)" in phone
+    assert "display:block" in phone and ".mx thead" in phone
+    for m in re.finditer(r"font-size:(\d+)px", MATRIX_CSS):
+        assert int(m.group(1)) >= 12
+    u = artifact_unit()
+    assert ".mx td" not in render_page(u)
+    u["results"][0]["chart"] = matrix_chart()
+    page = render_page(u)
+    assert ".mx td" in page and '<table class="mx"' in page
+
+
+def test_brief_lists_a_matrix_as_a_markdown_table():
+    u = artifact_unit()
+    u["results"][0]["chart"] = matrix_chart()
+    brief = render_brief(u)
+    rows = [ln for ln in brief.splitlines() if ln.startswith("|")]
+    assert rows[0] == "| trials | F1 (broker kill) | F4-con-t (hook) | F5 (zombie) |"
+    assert rows[1] == "|---|---|---|---|"
+    assert rows[2] == ("| N (no defense) | 10 of 10 duplicated [observed, anomaly expected] | "
+                       "dup in 8 of 10 [pre-registered prediction, anomaly expected] | "
+                       "— [no entry] |")
+    assert "output once, ledger twice" in rows[3] and rows[5].endswith("n/a [not applicable] |")
+    assert "- Note: Pre-registered 2026-10-12; results pending." in brief
+    i = brief.index(rows[0])
+    assert brief[i - 2:i] == "\n\n"  # a blank line before the table
+
+
+def test_matrix_text_is_traced(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\nnothing\n")
+    u = artifact_unit()
+    u["sources"] = [{"file": src, "section": "Title"}]
+    c = matrix_chart(note="none")
+    c["cells"][0][0]["text"] = "dup in 123 trials"
+    c["rows"][1]["sub"] = "4.5 s"
+    c["cols"][0]["label"] = "F 760"
+    u["results"][0]["chart"] = c
+    assert sorted(untraced_numbers(u)) == ["123", "4.5", "760"]

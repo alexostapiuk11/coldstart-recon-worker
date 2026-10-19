@@ -92,6 +92,7 @@ CHART_NUMBERS = {
     "percentiles": _percentiles,
     "xy": _xy,
     "scatter": _scatter,
+    "matrix": lambda ch: [],  # all text: its labels, subs and cells are scanned as strings
 }
 
 

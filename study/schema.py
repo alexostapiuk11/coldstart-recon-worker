@@ -13,7 +13,7 @@ from study.text import SENTINELS, known_units, unknown_link_units, wrap
 
 ARTIFACT_LEVELS = ("context", "container", "component", "dynamic")
 NODE_KINDS = ("person", "system", "external", "store", "focus")
-CHART_TYPES = ("stacked_bars", "bars", "interval", "percentiles", "xy", "scatter")
+CHART_TYPES = ("stacked_bars", "bars", "interval", "percentiles", "xy", "scatter", "matrix")
 SERIES_STYLES = ("line", "points", "step")
 MAX_SERIES = 6  # xy series and scatter groups: one colour and one marker shape each
 # Marker shapes, in the order series and groups take them (study.xy draws them).
@@ -51,6 +51,12 @@ MAX_SEQ_LABEL = 48
 MAX_SEQ_SUB = 30  # one line under a participant's name
 MAX_SEQ_TEXT = 60
 MAX_BADGE = 16
+# Matrix charts (see _matrix): statuses in legend order, and tones.
+MATRIX_STATUSES = ("observed", "predicted", "pending", "none", "n/a")
+MATRIX_TONES = ("bad", "warn", "ok", "neutral")
+MATRIX_MAX = 12  # rows, and columns
+MAX_CELL = 40
+MAX_CELL_NOTE = 80
 
 
 class ContentError(ValueError):
@@ -289,7 +295,8 @@ def _chart(ch, where):
     - percentiles: rows of {label, values: [{name, value}], optional max_label}, on one
       shared axis from zero, optional `note` (see _percentile_rows);
     - xy: line, point or step series on two numeric axes (see _xy);
-    - scatter: groups of points on two numeric axes, an optional frontier (see _scatter).
+    - scatter: groups of points on two numeric axes, an optional frontier (see _scatter);
+    - matrix: a grid of short text cells, each with a status and a tone (see _matrix).
     """
     kind = _get(ch, "type", str, where)
     if kind not in CHART_TYPES:
@@ -338,6 +345,8 @@ def _chart(ch, where):
         _xy(ch, where)
     elif kind == "scatter":
         _scatter(ch, where)
+    elif kind == "matrix":
+        _matrix(ch, where)
     else:
         for i, it in enumerate(_items(ch, "items", where, fields=("label",))):
             _get(it, "value", float, f"{where}.items[{i}]")
@@ -645,6 +654,54 @@ def _sequence(v, where):
             if "mark" not in s:
                 raise ContentError(f"{w}.badge needs a mark")
             _opt_str(s, "badge", w, MAX_BADGE)
+
+
+def _matrix(ch, where):
+    """rows and cols: 1 to 12 of {label (<= 22 characters), optional sub (<= 30)}; cells:
+    one list per row of one cell per column, {text (<= 40, blank only for status 'none'
+    or 'n/a'), status (MATRIX_STATUSES), optional tone (MATRIX_TONES), optional note
+    (<= 80)}; optional `note`, and optional `legend` [{status or tone, label}] naming
+    what a status or tone means on this chart."""
+    _opt_str(ch, "note", where)
+    for axis in ("rows", "cols"):
+        for i, h in enumerate(_items(ch, axis, where, at_most=MATRIX_MAX, fields=("label",))):
+            w = f"{where}.{axis}[{i}]"
+            _label(h, "label", w)
+            if len(h["label"]) > MAX_LABEL:
+                raise ContentError(f"{w}.label longer than {MAX_LABEL} characters")
+            _opt_str(h, "sub", w, MAX_SEQ_SUB)
+    rows = _get(ch, "cells", list, where)
+    if len(rows) != len(ch["rows"]):
+        raise ContentError(f"{where}.cells: needs one row of cells per row "
+                           f"({len(ch['rows'])}), has {len(rows)}")
+    for i, row in enumerate(rows):
+        if not isinstance(row, list) or len(row) != len(ch["cols"]):
+            n = len(row) if isinstance(row, list) else "no list"
+            raise ContentError(f"{where}.cells[{i}]: needs one cell per column "
+                               f"({len(ch['cols'])}), has {n}")
+        for j, cell in enumerate(row):
+            w = f"{where}.cells[{i}][{j}]"
+            text = _get(cell, "text", str, w)
+            status = _get(cell, "status", str, w)
+            if status not in MATRIX_STATUSES:
+                raise ContentError(f"{w}.status '{status}' not in {MATRIX_STATUSES}")
+            if len(text) > MAX_CELL:
+                raise ContentError(f"{w}.text longer than {MAX_CELL} characters")
+            if not text.strip() and status not in ("none", "n/a"):
+                raise ContentError(f"{w}.text is empty; only a 'none' or 'n/a' cell may be "
+                                   "blank")
+            if "tone" in cell and _get(cell, "tone", str, w) not in MATRIX_TONES:
+                raise ContentError(f"{w}.tone '{cell['tone']}' not in {MATRIX_TONES}")
+            _opt_str(cell, "note", w, MAX_CELL_NOTE)
+    for i, e in enumerate(_get(ch, "legend", list, where) if "legend" in ch else []):
+        w = f"{where}.legend[{i}]"
+        keys = [k for k in ("status", "tone") if isinstance(e, dict) and k in e]
+        if len(keys) != 1:
+            raise ContentError(f"{w}: needs exactly one of 'status' or 'tone'")
+        known = MATRIX_STATUSES if keys[0] == "status" else MATRIX_TONES
+        if _get(e, keys[0], str, w) not in known:
+            raise ContentError(f"{w}.{keys[0]} '{e[keys[0]]}' not in {known}")
+        _label(e, "label", w)
 
 
 def _view(v, where, allowed):

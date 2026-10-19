@@ -302,6 +302,49 @@ stroke-linejoin:round}.sqnotet{stroke:none}
 """
 
 
+# Matrix charts (study.matrix); shipped only on a page that has one. A tone mixes a theme
+# token into the card colour; a status is a texture: hatched (predicted), solid
+# (observed), a dotted outline (pending).
+MATRIX_CSS = """
+.mxwrap{overflow-x:auto;margin:4px 0}
+.mx{border-collapse:separate;border-spacing:3px;width:100%;font-size:14px;line-height:1.35}
+.mx th{font-weight:600;text-align:left;vertical-align:bottom;padding:4px 6px;color:var(--fg)}
+.mx th small,.mx td small{display:block;font-weight:400;color:var(--muted);font-size:12px}
+.mx tbody th{vertical-align:middle;white-space:nowrap}
+.mxunit{color:var(--muted);font-weight:400;font-size:12px}
+.mx td{padding:6px 8px;border-radius:5px;border:1px solid var(--line);vertical-align:middle;
+background-color:var(--card)}
+.mx .t-bad{background-color:color-mix(in srgb,var(--c7) 17%,var(--card))}
+.mx .t-warn{background-color:color-mix(in srgb,var(--c3) 22%,var(--card))}
+.mx .t-ok{background-color:color-mix(in srgb,var(--c2) 18%,var(--card))}
+.mx .st-observed{border-color:var(--muted)}
+.mx .st-predicted{background-image:repeating-linear-gradient(135deg,transparent 0 5px,
+color-mix(in srgb,var(--fg) 16%,transparent) 5px 6.5px)}
+.mx .st-pending{border:2px dotted var(--muted)}
+.mx .st-none,.mx .st-na{background-color:transparent;color:var(--muted)}
+.mx .st-na{font-style:italic}
+.mxg{font-weight:700;margin-right:4px}
+.mxs{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.mxleg{font-size:13px}
+.mxsw{display:inline-block;width:20px;height:14px;border-radius:3px;margin-right:6px;
+vertical-align:-2px;border:1px solid var(--muted);background-color:var(--soft)}
+.mxsw.st-none,.mxsw.st-na{background-color:transparent;border-color:var(--line)}
+.mxsw.st-pending{border:2px dotted var(--muted)}
+.mxsw.st-predicted{background-image:repeating-linear-gradient(135deg,transparent 0 4px,
+color-mix(in srgb,var(--fg) 30%,transparent) 4px 5.5px)}
+.mxswt{width:auto;height:auto;border:0;background:none;font-weight:700;margin-right:4px}
+@media (max-width:600px){.mx,.mx tbody,.mx tr,.mx th,.mx td{display:block;width:auto}
+.mx{border-spacing:0;font-size:15px}
+.mx thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.mx tr{border:1px solid var(--line);border-radius:8px;padding:6px;margin:0 0 8px}
+.mx tbody th{white-space:normal;padding:2px 2px 6px}
+.mx td{margin:4px 0}
+.mx td::before{content:attr(data-col) ": ";font-weight:600;color:var(--fg)}
+.mx td .mxs{position:static;width:auto;height:auto;clip:auto;display:block;color:var(--muted);
+font-size:13px;white-space:normal}}
+"""
+
+
 def seq_css(diagrams: list[tuple[str, float]]) -> str:
     """SEQ_CSS, then for each (uid, width) a container query that swaps the diagram for
     its text list below that width (study.seq.list_below)."""
@@ -613,6 +656,8 @@ def render_page(c: dict) -> str:
     css, js = (CSS + MAP_CSS, JS + MAP_JS) if has_map(c) else (CSS, JS)
     if _sequences(c):
         css += seq_css(_sequences(c))
+    if any(r["chart"]["type"] == "matrix" for r in c.get("results", [])):
+        css += MATRIX_CSS
     if art:
         lead = f'<p class="lead">{inline(c["question"])}</p>{_answer_first(c)}'
     else:

@@ -269,3 +269,31 @@ def sequence_view(level: str = "dynamic") -> dict:
              "label": "same (partition, offset) twice: consumer side"},
         ],
     })
+
+
+def matrix_chart(**extra) -> dict:
+    """A `matrix` chart: four stacks by three fault cells, mixing every status and tone;
+    one cell has a note, one is empty (status none) and one not applicable."""
+    def cell(text, status, tone=None, **more):
+        return dict({"text": text, "status": status}, **({"tone": tone} if tone else {}), **more)
+    return copy.deepcopy(dict({
+        "type": "matrix", "unit": "trials",
+        "rows": [{"label": "N", "sub": "no defense"}, {"label": "K", "sub": "Kafka txns"},
+                 {"label": "I", "sub": "key at the sink"}, {"label": "O+I"}],
+        "cols": [{"label": "F1", "sub": "broker kill"}, {"label": "F4-con-t", "sub": "hook"},
+                 {"label": "F5", "sub": "zombie"}],
+        "cells": [
+            [cell("10 of 10 duplicated", "observed", "bad"), cell("dup in 8 of 10", "predicted", "bad"),
+             cell("", "none")],
+            [cell("more dup than N", "predicted", "warn"),
+             cell(">= 8/10 dup (H1)", "predicted", "bad", note="output once, ledger twice"),
+             cell("dup >= 8/10", "pending", "bad")],
+            [cell("0 dup", "predicted", "ok"), cell("0 dup", "observed", "ok"),
+             cell("0 dup", "pending", "ok")],
+            [cell("no loss", "predicted", "ok"), cell("0 dup", "pending", "neutral"),
+             cell("", "n/a")],
+        ],
+        "legend": [{"status": "predicted", "label": "pre-registered prediction"},
+                   {"tone": "bad", "label": "anomaly expected"}],
+        "note": "Pre-registered 2026-10-12; results pending.",
+    }, **extra))

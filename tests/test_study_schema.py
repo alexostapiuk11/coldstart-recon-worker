@@ -871,3 +871,57 @@ def test_sequence_step_text_is_bounded_and_marks_are_known():
     v = sequence_view()
     v["steps"][11]["badge"] = "x" * 17
     _fails(_with_sequence(v), r"steps\[11\]\.badge longer than 16 characters")
+
+
+from tests.study_examples import matrix_chart
+
+
+def test_matrix_chart_validates():
+    validate(_with(matrix_chart()))
+    validate(_with(matrix_chart(unit="")))
+
+
+def test_matrix_cells_match_rows_and_cols():
+    c = matrix_chart()
+    c["cells"] = c["cells"][:3]
+    _fails(_with(c), r"results\[0\]\.cells: needs one row of cells per row \(4\), has 3")
+    c = matrix_chart()
+    c["cells"][2] = c["cells"][2][:2]
+    _fails(_with(c), r"results\[0\]\.cells\[2\]: needs one cell per column \(3\), has 2")
+    c = matrix_chart()
+    c["rows"] = []
+    _fails(_with(c), r"results\[0\]\.rows: needs 1 to 12 items, has 0")
+    c = matrix_chart()
+    c["cols"][1]["label"] = "x" * 23
+    _fails(_with(c), r"results\[0\]\.cols\[1\]\.label longer than 22 characters")
+    c = matrix_chart()
+    c["rows"][0]["sub"] = "x" * 31
+    _fails(_with(c), r"results\[0\]\.rows\[0\]\.sub longer than 30 characters")
+
+
+def test_matrix_cell_text_status_tone_and_note_are_checked():
+    c = matrix_chart()
+    c["cells"][0][0]["text"] = "x" * 41
+    _fails(_with(c), r"results\[0\]\.cells\[0\]\[0\]\.text longer than 40 characters")
+    c = matrix_chart()
+    c["cells"][0][0]["status"] = "guessed"
+    _fails(_with(c), r"results\[0\]\.cells\[0\]\[0\]\.status 'guessed' not in")
+    c = matrix_chart()
+    c["cells"][0][1]["tone"] = "purple"
+    _fails(_with(c), r"results\[0\]\.cells\[0\]\[1\]\.tone 'purple' not in")
+    c = matrix_chart()
+    c["cells"][0][0]["text"] = ""
+    _fails(_with(c), r"results\[0\]\.cells\[0\]\[0\]\.text is empty; only a 'none' or 'n/a' cell "
+                     r"may be blank")
+    c = matrix_chart()
+    c["cells"][1][1]["note"] = "x" * 81
+    _fails(_with(c), r"results\[0\]\.cells\[1\]\[1\]\.note longer than 80 characters")
+
+
+def test_matrix_legend_names_a_known_status_or_tone():
+    c = matrix_chart(legend=[{"status": "guessed", "label": "x"}])
+    _fails(_with(c), r"results\[0\]\.legend\[0\]\.status 'guessed' not in")
+    c = matrix_chart(legend=[{"label": "x"}])
+    _fails(_with(c), r"results\[0\]\.legend\[0\]: needs exactly one of 'status' or 'tone'")
+    c = matrix_chart(legend=[{"tone": "ok", "label": ""}])
+    _fails(_with(c), r"results\[0\]\.legend\[0\]\.label is empty")
