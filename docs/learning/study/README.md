@@ -28,7 +28,7 @@ page (`page.html`) and a pasteable chat brief (`brief.md`). Design:
 | a6 | Which duplicate-payment defense holds (results pending) | 45 | `a6/page.html`, `a6/brief.md` |
 | a7 | The anatomy of a matching engine's tail | 45 | `a7/page.html`, `a7/brief.md` |
 
-All nine units are built. A3 shows the design, the grader's offline controls and five predictions only: no campaign has run, and the pre-registration is not yet committed. Units a1 to a7 (except a3's flow) have a "How it works" step-through walkthrough: one mechanism, state changing step by step. A6 shows requirements, design, predictions and controls only: its
+All nine units are built. A3 shows the design, the grader's offline controls and five predictions only: no campaign has run, and the pre-registration is not yet committed. Each artifact unit (a1 to a7) has a "How it works" step-through walkthrough: one mechanism, state changing step by step. A6 shows requirements, design, predictions and controls only: its
 campaign is running and its results are sealed (`~/projects/ledger-faults`, `docs/experiment.md`
 D40). When results exist, update `a6/content.json` (the predictions grid, results and limits) and
 rebuild.
