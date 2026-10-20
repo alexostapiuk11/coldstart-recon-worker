@@ -30,7 +30,7 @@ Read first: LLM serving on a GPU (P1), How these experiments earn trust (P2).
 
 ## How it works
 
-One replayed run: queue-depth policy (up 4, down 1), arm C step spike, repetition 0 of the committed sweep. Simulated by a model that failed its gate twice, not measured.
+One replayed run: queue depth (up 4, down 1), arm C step spike, repetition 0. Re-run from committed code and seed (the sweep keeps only cost and p99) in a model that failed its gate twice: simulated, not measured.
 
 | Step | What happens | Time (s) | Serving replicas | Starting (billed) | Queue per serving | Controller action |
 |---|---|---|---|---|---|---|
@@ -42,11 +42,11 @@ One replayed run: queue-depth policy (up 4, down 1), arm C step spike, repetitio
 | 6 | t = 95: queue still 0, cooldown over: DOWN to one replica, with the spike still on at 253.4 req/s. A queue of 0 means enough capacity, and this rule removes the replica that made it enough. | **95** | **1** | 0 | 0 | **DOWN: remove replica 2** |
 | 7 | The backlog rebuilds: t = 125, queue 1,274, UP; t = 155, queue 2,546, UP. The first serves at about 164 s, some 69 s after the scale-down: a second cold start under overload. | **155** | 1 | **2** | **2,546** | **UP at 125 and at 155** |
 | 8 | t = 185: queue 0, so DOWN removes replica 5, still starting. t = 215, spike over (it ended at 190 s): queue 0, DOWN to one replica. | **215** | 1 | **0** | **0** | **DOWN at 185 and at 215** |
-| 9 | Cost: 400 for replica 1 plus 90 + 30 + 90 + 30 = 240 for the four launched: 640 replica-seconds; p99 11.73 s. Of 19 × 30 = 570 replayed queue-depth runs, 410 make these exact moves; all scale down before 190 s. (Decision: One controller, a grid per signal, frontiers) | **400** | 1 | 0 | 0 | **end of window** |
+| 9 | Cost: 400 for replica 1 plus 90 + 30 + 90 + 30 = 240 for the four launched: 640 replica-seconds; p99 11.73 s. Of 570 replayed runs, 410 make the same eight moves at the same times; all scale down before 190 s. (Decision: One controller, a grid per signal, frontiers) | **400** | 1 | 0 | 0 | **end of window** |
 
 Bold cells changed in that step.
 
-**Takeaway:** In this simulator a queue of 0 means enough capacity, so queue depth scales down mid-spike and pays a second cold start: cheap at 640, slower at 11.15 s against 7.20 s. Real autoscalers were not tested.
+**Takeaway:** In all 570 simulated runs the first scale-down comes before 190 s; the replayed run then pays a second cold start. Median p99 11.15 s against 7.20 s for utilisation. Real autoscalers were not tested.
 
 ## System views (C4)
 
@@ -410,7 +410,7 @@ Milestones: 1. Specify a gated simulator, then re-base on artifact 1 (2026-08-17
 ### UNVALIDATED: what each policy spent and reached (arm C, step)
 
 - Axis: Simulated, not measured, by a model that failed its gate twice. Each dot is one policy (signal and thresholds): its median over 30 simulated step spikes with arm C's cold starts.
-- Read it as: All 19 queue-depth policies spent 640 replica-seconds and all 19 utilisation policies sat at the cap, 3,095; within each, only p99 differs. The budget line constrains no one, so H3's 3.96 s "gap" is queue depth spending 640 against 2,320–3,095. Queue depth is cheap because it scales down once the backlog clears (see the walkthrough); a rerun with scale-down off (exploratory, not committed) brought its p99 close to the others', so the gap mostly reflects the scale-down rule.
+- Read it as: All 19 queue-depth policies spent 640 replica-seconds and all 19 utilisation policies sat at the cap, 3,095; within each, only p99 differs. The budget line constrains no one, so H3's 3.96 s "gap" is queue depth spending 640 against 2,320–3,095. Queue depth is cheap because it scales down once the backlog clears (see the walkthrough); a rerun with scale-down off (exploratory, not committed) brought its p99 close to the others', which suggests the scale-down rule is part of the gap.
 - How it is computed: Gap = worst reached p99 − best at the budget: 11.15 − 7.20 = 3.95 s on rounded values (post: 3.96, 95% interval 3.52–4.56). Arm A's step: 0.082 s, so H3's halving fails.
 - Axes: x is replica-seconds per spike (median of 30); y is per-run p99 latency, median of 30 (s)
 - queue depth (19): 640: 11.2, 640: 11.3, 640: 11.4 ×2, 640: 11.5 ×7, 640: 11.6 ×3, 640: 11.7 ×2, 640: 11.8, 640: 11.9, 640: 12.0

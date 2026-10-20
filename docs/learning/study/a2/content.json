@@ -84,7 +84,7 @@
   ],
   "walkthrough": {
     "title": "One spike through the queue-depth control loop",
-    "lead": "One replayed run: queue-depth policy (up 4, down 1), arm C step spike, repetition 0 of the committed sweep. Simulated by a model that failed its gate twice, not measured.",
+    "lead": "One replayed run: queue depth (up 4, down 1), arm C step spike, repetition 0. Re-run from committed code and seed (the sweep keeps only cost and p99) in a model that failed its gate twice: simulated, not measured.",
     "registers": [
       {
         "id": "t",
@@ -185,7 +185,7 @@
         }
       },
       {
-        "say": "Cost: 400 for replica 1 plus 90 + 30 + 90 + 30 = 240 for the four launched: 640 replica-seconds; p99 11.73 s. Of 19 × 30 = 570 replayed queue-depth runs, 410 make these exact moves; all scale down before 190 s.",
+        "say": "Cost: 400 for replica 1 plus 90 + 30 + 90 + 30 = 240 for the four launched: 640 replica-seconds; p99 11.73 s. Of 570 replayed runs, 410 make the same eight moves at the same times; all scale down before 190 s.",
         "values": {
           "t": "400",
           "action": "end of window"
@@ -193,7 +193,7 @@
         "decision": "frontiers"
       }
     ],
-    "takeaway": "In this simulator a queue of 0 means enough capacity, so queue depth scales down mid-spike and pays a second cold start: cheap at 640, slower at 11.15 s against 7.20 s. Real autoscalers were not tested."
+    "takeaway": "In all 570 simulated runs the first scale-down comes before 190 s; the replayed run then pays a second cold start. Median p99 11.15 s against 7.20 s for utilisation. Real autoscalers were not tested."
   },
   "views": [
     {
@@ -1946,7 +1946,7 @@
         "note": "SIMULATED, FAILED VALIDATION. The p99 axis starts near 7 s. Each signal's own frontier is one point: its cheapest policy is also its fastest. Pairs whose down threshold is not below the up threshold are skipped (3 of 20 for in flight, 1 for each other signal), hence 17, 19 and 19 policies."
       },
       "axis": "Simulated, not measured, by a model that failed its gate twice. Each dot is one policy (signal and thresholds): its median over 30 simulated step spikes with arm C's cold starts.",
-      "read_as": "All 19 queue-depth policies spent 640 replica-seconds and all 19 utilisation policies sat at the cap, 3,095; within each, only p99 differs. The budget line constrains no one, so H3's 3.96 s \"gap\" is queue depth spending 640 against 2,320–3,095. Queue depth is cheap because it scales down once the backlog clears (see the walkthrough); a rerun with scale-down off (exploratory, not committed) brought its p99 close to the others', so the gap mostly reflects the scale-down rule.",
+      "read_as": "All 19 queue-depth policies spent 640 replica-seconds and all 19 utilisation policies sat at the cap, 3,095; within each, only p99 differs. The budget line constrains no one, so H3's 3.96 s \"gap\" is queue depth spending 640 against 2,320–3,095. Queue depth is cheap because it scales down once the backlog clears (see the walkthrough); a rerun with scale-down off (exploratory, not committed) brought its p99 close to the others', which suggests the scale-down rule is part of the gap.",
       "so": "frontiers",
       "takeaway": "Even as the simulator's answer, the comparison is mostly one of spend: the budget never binds and each frontier is one point.",
       "arithmetic": "Gap = worst reached p99 − best at the budget: 11.15 − 7.20 = 3.95 s on rounded values (post: 3.96, 95% interval 3.52–4.56). Arm A's step: 0.082 s, so H3's halving fails."
@@ -2252,6 +2252,18 @@
     }
   ],
   "derived_numbers": [
+    {
+      "value": "69",
+      "how": "Replay of the committed code with the sweep's seed (arm C, step spike, queue depth 4/1, repetition 0): the second scale-up is ready at 164.3 s and the scale-down was at 95 s, so 164.3 - 95 = 69.3 s."
+    },
+    {
+      "value": "39.4",
+      "how": "The cold-start draws in that replay are 39.42, 39.35, 39.32 and 39.44 s, close to arm C's median of 39.37 s in docs/post-a2.md."
+    },
+    {
+      "value": "400",
+      "how": "Replica 1 runs the whole 400 s window, so it bills 400 replica-seconds; the four launched replicas bill 90 + 30 + 90 + 30 = 240 (replay)."
+    },
     {
       "value": "204.4",
       "how": "data/a2/service-curve.json levels, concurrency 128, request_throughput 204.42, to one decimal."
