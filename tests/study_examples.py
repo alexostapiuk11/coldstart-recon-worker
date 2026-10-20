@@ -336,3 +336,133 @@ def artifact_unit_with_walkthrough() -> dict:
     u = artifact_unit()
     u["walkthrough"] = walkthrough_block()
     return u
+
+
+def walkthrough_block_b() -> dict:
+    """A second walkthrough for the same unit: two registers, three steps, no values after
+    step 1 in step 3. Step 2 names decision d2 (and step 4 of the first one names d1)."""
+    return copy.deepcopy({
+        "title": "A cancel empties the book",
+        "lead": "Watch one resting order leave, and the best bid fall back to the next one.",
+        "registers": [
+            {"id": "bid", "label": "Best bid"},
+            {"id": "queue", "label": "Orders at that bid"},
+        ],
+        "steps": [
+            {"say": "Two buys rest at 99, one at 98.",
+             "values": {"bid": "99", "queue": "2"}},
+            {"say": "The older buy at 99 is cancelled; the newer one stays best.",
+             "values": {"queue": "1"}, "decision": "d2"},
+            {"say": "The last buy at 99 is cancelled; 98 becomes the best bid.",
+             "values": {"bid": "98", "queue": "1"}},
+        ],
+        "takeaway": "A cancel changes the book without any fill.",
+    })
+
+
+def walkthrough_block_c() -> dict:
+    wt = walkthrough_block_b()
+    wt["title"] = "A modify keeps its place"
+    return wt
+
+
+def artifact_unit_with_walkthroughs(n: int = 2) -> dict:
+    """artifact_unit() with `walkthrough` a list of n (1 to 3) walkthroughs."""
+    u = artifact_unit()
+    u["walkthrough"] = [walkthrough_block(), walkthrough_block_b(), walkthrough_block_c()][:n]
+    return u
+
+
+def practice_block() -> dict:
+    """A throwaway valid practice.json for artifact_unit_with_links() (unit id 'x1', concept
+    ids 'arms' and 'contrast'). The facts are invented. The only numbers of three or more
+    digits or with a decimal point are declared in assumed_numbers or derived_numbers (the
+    calculator's own numbers are parameters and are not scanned)."""
+    return copy.deepcopy({
+        "unit": "x1",
+        "title": "Practice: reading a cold start",
+        "minutes": 30,
+        "objectives": [
+            "Say where the time of one cold start goes, in order.",
+            "Estimate how many servers a load needs, out loud, in two minutes.",
+            "Defend the one-change-at-a-time rule against a sceptical reviewer.",
+        ],
+        "prereq_check": [
+            {"q": "What is an arm?", "a": "One set-up under test.", "review": "arms"},
+            {"q": "What is a contrast?", "a": "The difference between two arms.",
+             "review": "contrast"},
+            {"q": "Why a unit?", "a": "A unit is the thing that varies.", "review": "p1:units"},
+        ],
+        "drills": [
+            {"q": f"Drill question {i}?", "a": f"Model answer {i}, with the reason.",
+             "red_flag": f"The tempting wrong answer {i}."} for i in range(1, 9)
+        ],
+        "estimation": [
+            {"title": "Servers for a steady load",
+             "problem": "A service gets 250 requests a second and each takes 0.8 s of work. "
+                        "How many servers hold 8 requests each at 70% utilisation?",
+             "steps": ["Requests in flight: 250 x 0.8 = 200.",
+                       "One server carries 8 x 0.7 = 5.6.",
+                       "200 / 5.6 = 35.7, so 36 servers."],
+             "answer": "About 36 servers."},
+        ],
+        "scenario": {
+            "prompt": "Design the harness that runs one cold start many times without bias.",
+            "outline": ["Name the arms and the single change between them.",
+                        "Interleave the runs; never batch an arm.",
+                        "Store every run, failures included."],
+            "pitfalls": ["Retrying a failed run.", "Warming one arm and not the other."],
+        },
+        "lab": {
+            "goal": "Reproduce the phase split of one cold start on a laptop.",
+            "setup": ["The repo's Python environment.", "The saved engine logs."],
+            "steps": ["Parse the log into phases.", "Print each phase's share."],
+            "metrics": ["Seconds per phase", "Share of the total"],
+            "expected": "Loading weights is the largest phase.",
+            "demonstrates": "The split can be re-derived with no GPU.",
+            "cost": "local",
+            "note": "Nothing here calls a paid API.",
+        },
+        "cards": [
+            {"tag": "phases", "front": "Name the phases of a cold start.",
+             "back": "Load, compile, warm up, serve."},
+            {"tag": "draw", "front": "Sketch the three arms on one timeline.",
+             "back": "Three bars, one change each.", "draw": True},
+            {"tag": "rules", "front": "Why never retry?", "back": "A retry hides bad luck."},
+        ],
+        "schedule": [
+            {"when": "Same day", "test": "Drills 1 to 4 and the cards."},
+            {"when": "After 2 days", "test": "The estimation drill from memory."},
+            {"when": "After 1 week", "test": "The scenario, out loud, in five minutes."},
+        ],
+        "calculator": {
+            "title": "How many servers?",
+            "note": "Change the load and watch the count move.",
+            "inputs": [
+                {"id": "rps", "label": "Requests per second", "value": 250, "min": 10,
+                 "max": 2000, "step": 10, "unit": "req/s"},
+                {"id": "seconds", "label": "Seconds of work per request", "value": 0.8,
+                 "min": 0.1, "max": 5, "step": 0.1, "unit": "s"},
+                {"id": "slots", "label": "Requests per server", "value": 8, "min": 1,
+                 "max": 64, "step": 1},
+                {"id": "target", "label": "Target utilisation", "value": 0.7, "min": 0.3,
+                 "max": 0.95, "step": 0.05},
+            ],
+            "outputs": [
+                {"label": "Requests in flight", "expr": "rps * seconds", "digits": 0},
+                {"label": "Servers needed",
+                 "expr": "ceil(rps * seconds / (slots * target))", "digits": 0},
+                {"label": "Real utilisation",
+                 "expr": "rps * seconds / (ceil(rps * seconds / (slots * target)) * slots)"
+                         " * 100", "digits": 1, "unit": "%"},
+            ],
+        },
+        "assumed_numbers": [
+            {"value": "250", "why": "A round request rate chosen for the example."},
+            {"value": "0.8", "why": "A round service time chosen for the example."},
+            {"value": "0.7", "why": "A round target utilisation chosen for the example."},
+            {"value": "200", "why": "250 x 0.8, worked from the two assumed numbers above."},
+            {"value": "35.7", "why": "200 / 5.6, worked from the numbers above."},
+        ],
+        "derived_numbers": [{"value": "5.6", "how": "8 requests x 0.7 utilisation"}],
+    })

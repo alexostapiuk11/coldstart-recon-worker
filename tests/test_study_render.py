@@ -2752,6 +2752,111 @@ def test_walkthrough_numbers_are_traced_like_other_text(tmp_path):
     assert "4.5" not in untraced_numbers(u)
 
 
+# ---- more than one walkthrough ----
+
+from tests.study_examples import (
+    artifact_unit_with_walkthroughs,
+    walkthrough_block_b,
+    walkthrough_block_c,
+)
+
+
+def _wt_sections(page):
+    """{section id: inner html} for every walkthrough section, in page order."""
+    return {m.group(1): m.group(2) for m in re.finditer(
+        r'<section id="(walkthrough[\w-]*)">(.*?)</section>', page, re.DOTALL)}
+
+
+def test_a_list_of_one_renders_exactly_like_the_single_object():
+    one = artifact_unit_with_walkthrough()
+    as_list = artifact_unit_with_walkthrough()
+    as_list["walkthrough"] = [as_list["walkthrough"]]
+    assert render_page(as_list) == render_page(one)
+    assert render_brief(as_list) == render_brief(one)
+
+
+def test_each_walkthrough_in_a_list_is_its_own_section_after_the_concepts_in_order():
+    page = render_page(artifact_unit_with_walkthroughs(3))
+    ids = re.findall(r'<section id="([\w-]+)"', page)
+    assert ids == ["concepts", "walkthrough", "walkthrough-2", "walkthrough-3", "why", "views",
+                   "decisions", "flow", "results", "interview", "recall", "sources"]
+    secs = _wt_sections(page)
+    titles = [walkthrough_block()["title"], walkthrough_block_b()["title"],
+              walkthrough_block_c()["title"]]
+    for (sid, html_), title, n in zip(secs.items(), titles, (1, 2, 3)):
+        assert f"<h2>How it works ({n} of 3)</h2>" in html_, sid
+        assert f"<h3>{title}</h3>" in html_
+    u = artifact_unit_with_walkthroughs(2)
+    del u["concepts"]
+    assert re.findall(r'<section id="([\w-]+)"', render_page(u))[:2] == [
+        "walkthrough", "walkthrough-2"]
+
+
+def test_a_list_gets_one_numbered_pill_per_walkthrough():
+    nav = render_page(artifact_unit_with_walkthroughs(2)).split('<nav class="pills">')[1].split(
+        "</nav>")[0]
+    assert ('<a href="#walkthrough">How it works 1</a><a href="#walkthrough-2">How it works 2'
+            "</a>") in nav
+    assert "How it works</a>" not in nav
+
+
+def test_every_walkthrough_has_its_own_stepper_and_steps():
+    page = render_page(artifact_unit_with_walkthroughs(2))
+    assert page.count("data-wt>") == 2 and page.count('class="wt-bar" hidden') == 2
+    secs = _wt_sections(page)
+    steps1 = re.findall(r'<li class="wt-step"[^>]*>(.*?)</li>', secs["walkthrough"], re.DOTALL)
+    steps2 = re.findall(r'<li class="wt-step"[^>]*>(.*?)</li>', secs["walkthrough-2"],
+                        re.DOTALL)
+    assert len(steps1) == 5 and len(steps2) == 3
+    assert '<span class="wt-count">Step 1 of 5</span>' in secs["walkthrough"]
+    assert '<span class="wt-count">Step 1 of 3</span>' in secs["walkthrough-2"]
+    assert _wt_cells(steps2[2]) == [("Best bid", "98", True), ("Orders at that bid", "1", False)]
+
+
+def test_dom_ids_stay_unique_with_several_walkthroughs():
+    ids = re.findall(r' id="([^"]+)"', render_page(artifact_unit_with_walkthroughs(3)))
+    assert len(ids) == len(set(ids))
+
+
+def test_css_and_script_ship_once_for_a_list():
+    page = render_page(artifact_unit_with_walkthroughs(3))
+    assert page.count(".wt-bar{display:flex") == 1 and page.count("querySelectorAll('[data-wt]')") == 1
+
+
+def test_a_step_decision_chip_links_to_its_card_in_either_walkthrough():
+    secs = _wt_sections(render_page(artifact_unit_with_walkthroughs(2)))
+    assert 'href="#d-d1"' in secs["walkthrough"] and 'href="#d-d2"' not in secs["walkthrough"]
+    assert 'href="#d-d2"' in secs["walkthrough-2"] and "Decision D3</b> Decision 2" in secs[
+        "walkthrough-2"]
+
+
+def test_decisions_named_by_any_walkthrough_are_core():
+    cards = _dec_cards(render_page(artifact_unit_with_walkthroughs(2)))  # d1 and d2
+    assert [k for k, v in cards.items() if "minor" not in v.split(">")[0]] == ["d1", "d2"]
+
+
+def test_the_brief_has_one_titled_section_per_walkthrough():
+    brief = render_brief(artifact_unit_with_walkthroughs(2))
+    heads = re.findall(r"^## (.+)$", brief, re.MULTILINE)
+    a, b = walkthrough_block()["title"], walkthrough_block_b()["title"]
+    assert heads[heads.index("Need to know first") + 1:][:2] == [
+        f"How it works 1 of 2: {a}", f"How it works 2 of 2: {b}"]
+    sec = brief.split(f"## How it works 2 of 2: {b}")[1].split("\n## ")[0]
+    rows = [ln for ln in sec.splitlines() if ln.startswith("|")]
+    assert rows[0] == "| Step | What happens | Best bid | Orders at that bid |"
+    assert len(rows) == 2 + 3 and "(Decision: Decision 2)" in rows[3]
+    assert f"**Takeaway:** {walkthrough_block_b()['takeaway']}" in sec
+
+
+def test_numbers_in_a_later_walkthrough_are_traced(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\nprice 101 and 100 and 99.5\n")
+    u = artifact_unit_with_walkthroughs(2)
+    u["results"] = []
+    u["sources"] = [{"file": src, "section": "Title"}]
+    u["walkthrough"][1]["steps"][1]["say"] = "A cancel of 4321 lots."
+    assert untraced_numbers(u) == ["4321"]
+
+
 # ---- core and collapsed decision cards ----
 
 def _dec_cards(page):

@@ -5,7 +5,9 @@ from tests.study_examples import (
     artifact_unit,
     artifact_unit_with_links,
     artifact_unit_with_walkthrough,
+    artifact_unit_with_walkthroughs,
     prereq_unit,
+    walkthrough_block,
 )
 
 
@@ -1070,7 +1072,62 @@ def test_walkthrough_inline_links_are_checked_like_other_text():
     _fails(u, r"x1\.walkthrough\.lead: link to unknown unit 'nowhere'")
 
 
-def test_walkthrough_must_be_an_object():
+def test_walkthrough_must_be_an_object_or_a_list_of_them():
     u = _wt()
+    u["walkthrough"] = "steps"
+    _fails(u, r"x1\.walkthrough: expected dict or list of dicts")
+    u["walkthrough"] = 3
+    _fails(u, r"x1\.walkthrough: expected dict or list of dicts")
+
+
+# ---- more than one walkthrough ----
+
+def test_walkthrough_may_be_a_list_of_one_to_three():
+    for n in (1, 2, 3):
+        validate(artifact_unit_with_walkthroughs(n))
+    u = artifact_unit_with_walkthroughs(2)
     u["walkthrough"] = []
-    _fails(u, r"x1\.walkthrough: expected dict")
+    _fails(u, r"x1\.walkthrough: needs 1 to 3 items, has 0")
+    u["walkthrough"] = [walkthrough_block()] * 4
+    _fails(u, r"x1\.walkthrough: needs 1 to 3 items, has 4")
+
+
+def test_every_walkthrough_in_a_list_is_checked_with_its_own_location():
+    u = artifact_unit_with_walkthroughs(3)
+    u["walkthrough"][1]["steps"][1]["say"] = "x" * 221
+    _fails(u, r"x1\.walkthrough\[1\]\.steps\[1\]\.say longer than 220 characters")
+    u = artifact_unit_with_walkthroughs(3)
+    del u["walkthrough"][2]["takeaway"]
+    _fails(u, r"x1\.walkthrough\[2\]: missing 'takeaway'")
+    u = artifact_unit_with_walkthroughs(3)
+    u["walkthrough"][0]["registers"][0]["id"] = "links"
+    _fails(u, r"x1\.walkthrough\[0\]\.registers\[0\]\.id 'links' is reserved")
+    u = artifact_unit_with_walkthroughs(3)
+    u["walkthrough"][1]["steps"][1]["decision"] = "nope"
+    _fails(u, r"x1\.walkthrough\[1\]\.steps\[1\]\.decision 'nope' is not a decision id")
+    u = artifact_unit_with_walkthroughs(2)
+    u["walkthrough"][1]["steps"][2]["values"]["spread"] = "2"
+    _fails(u, r"x1\.walkthrough\[1\]\.steps\[2\]\.values: 'spread' is not a register id")
+
+
+def test_a_list_item_must_be_an_object():
+    u = artifact_unit_with_walkthroughs(2)
+    u["walkthrough"][1] = "steps"
+    _fails(u, r"x1\.walkthrough\[1\]: expected dict")
+
+
+def test_walkthrough_titles_in_a_list_are_distinct():
+    u = artifact_unit_with_walkthroughs(2)
+    u["walkthrough"][1]["title"] = u["walkthrough"][0]["title"]
+    _fails(u, r"x1\.walkthrough\[1\]\.title duplicates walkthrough\[0\]")
+
+
+def test_register_ids_may_repeat_across_walkthroughs():
+    u = artifact_unit_with_walkthroughs(2)  # both have a 'bid' register
+    validate(u)
+
+
+def test_links_in_a_later_walkthrough_are_checked():
+    u = artifact_unit_with_walkthroughs(2)
+    u["walkthrough"][1]["lead"] = "See [it](nowhere:term)."
+    _fails(u, r"x1\.walkthrough\[1\]\.lead: link to unknown unit 'nowhere'")
