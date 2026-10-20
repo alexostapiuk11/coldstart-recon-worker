@@ -33,7 +33,7 @@
     {
       "id": "R5",
       "short": "Rules before data; dated amendments",
-      "text": "Hypotheses, grids, control parameters, the traffic rule and the pass rule are committed before the data they govern; later changes are dated [amendments](p2:amendment) saying what had been seen.",
+      "text": "Hypotheses, grids, control parameters, the traffic rule and the pass rule are committed before the sweep or validation they govern, except H1, H2 and H4, which were defined after the frontiers were seen; later changes are dated [amendments](p2:amendment) saying what had been seen.",
       "why": "Otherwise the traffic could be tuned until a signal wins, or the tolerance until the model passes."
     },
     {
@@ -79,7 +79,7 @@
       "id": "hostspeed",
       "short": "Host speed",
       "term": "Host speed",
-      "plain": "Rented GPUs of one model are not equally fast, and RunPod picks the host. Every other host measured had 4 to 18% lower latency than the curve's, about the size of the gate's misses."
+      "plain": "Rented GPUs of one model are not equally fast, and RunPod picks the host. Every other host measured had 4 to 18% lower latency than the curve's, more at high load: about the size of the gate's misses (14% and 13%). A measured cause, not shown to be the whole one."
     }
   ],
   "views": [
@@ -533,14 +533,14 @@
       "problem": "The question needs dozens of policies run thirty times each through real spikes: out of budget on rented GPUs.",
       "options": [
         "Run the policies live on real replicas",
-        "An analytic queueing formula for the engine",
+        "A model of vLLM's scheduler in place of the measured curve",
         "A simulator trusted without a test",
         "A simulator fed only measured inputs, gated first"
       ],
       "chosen": "A simulator fed only measured inputs, gated first",
-      "why": "A queueing formula would assume what [continuous batching](p1:batching) does to latency; the curve measures it, and only the control loop is code. Discrete events need no tick size, and a seed makes runs reproducible. A new replica is absent until a lag resampled from artifact 1's runs, then fully serving.",
+      "why": "Modelling the scheduler would replace a measurement with an assumption about what [continuous batching](p1:batching) does to latency; the curve measures it, and only the control loop is code. Discrete events need no tick size, and a seed makes runs reproducible. A new replica is absent until a lag resampled from artifact 1's runs, then fully serving.",
       "cost": "If the gate fails there is no answer, and it failed twice. The design's second gate, one real closed-loop autoscaling run, was never built.",
-      "why_short": "Live tests cost too much and a formula would assume what the curve measures, so measured inputs feed a gated simulator.",
+      "why_short": "Live tests cost too much and modelling the scheduler would assume what the curve measures, so measured inputs feed a gated simulator.",
       "cost_short": "No answer if the gate fails; it failed twice.",
       "short": "Simulate, but gate it",
       "serves": [
@@ -570,7 +570,7 @@
         "One controller, a grid per signal in its own units; compare frontiers"
       ],
       "chosen": "One controller, a grid per signal in its own units; compare frontiers",
-      "why": "A shared 2 to 16 grid puts every threshold above utilisation's maximum of 1, so it never scales and H2 \"wins\" by a units mismatch (checked: 0 scale-ups at 2.0). Fixed for every policy: a 30 s cooldown (a pause after each action, as real autoscalers have), a 5 s evaluation, a 12-replica cap, 30 repetitions.",
+      "why": "A shared 2 to 16 grid puts every threshold above utilisation's maximum of 1, so it never scales and H2 \"wins\" by a units mismatch (checked: 0 scale-ups at 2.0). Fixed for every policy: a 30 s cooldown (one pause after any action, up or down), a 5 s evaluation, a 12-replica cap, 30 repetitions.",
       "cost": "Grids were fixed on 2026-09-05 against a placeholder curve that stopped at 64 in flight, and not revisited. On the measured curve each signal's step frontier is one point, and the iso-cost budget, 3,095 replica-seconds, is utilisation's floor: it never constrains the other two.",
       "why_short": "Published thresholds decide the winner, so each signal is swept over a grid in its own units.",
       "cost_short": "Grids fixed on a placeholder curve; on the measured one each frontier is a point and the budget never binds.",
@@ -604,7 +604,7 @@
         "Three repeats of the exact trace; at most half the 10 s bins may miss"
       ],
       "chosen": "Three repeats of the exact trace; at most half the 10 s bins may miss",
-      "why": "A model cannot be required to be more reproducible than the system it models, so three real repeats set the tolerance, on the exact trace so traffic randomness cannot pose as model error. A perfect model still misses up to a quarter of bins, so \"every bin\" would often fail it; a biased one misses about three in four. Exactly three repeats: a min–max range only widens with more.",
+      "why": "A model cannot be required to be more reproducible than the system it models, so three real repeats set the tolerance, on the exact trace so traffic randomness cannot pose as model error. A perfect model still misses up to a quarter of bins, so \"every bin\" would often fail it; a model biased beyond the system's own spread misses most bins (the pre-registration's example, three bins in four, fails 92% of the time at 10 bins). Exactly three repeats: a min–max range only widens with more.",
       "cost": "Correlated bins make a perfect model fail more often than the stated 2% at 10 bins (2.5% simulated, near 5% with host effects). p50 suited bins of a few hundred requests; the replay's held over a thousand. Two attempts at most.",
       "why_short": "A model cannot be more reproducible than the system, so three real repeats set the tolerance.",
       "cost_short": "Correlated bins make a perfect model fail more often than stated; two attempts at most.",
@@ -676,7 +676,7 @@
       ],
       "chosen": "One replica, judged on what its engine received; an unanswered 502 retried once",
       "why": "The queue API allows 1,000 requests per 10 s, far below the replay's planned peak of about 400 req/s. The load balancer fills one worker before the next, so two replicas would score its routing against the simulator's even split; it holds and releases bursts, so send times would score its stalls as model misses. Retrying until success hides failures.",
-      "cost": "The prediction can no longer be written before the run, and the bursts become model input: the engine went past its 128 cap, up to 512 in flight. Even splitting across replicas stays untested.",
+      "cost": "The prediction can no longer be written before the run, and the bursts become model input: the engine held more than its 128 running cap, up to 512 counting requests queued inside it. Even splitting across replicas stays untested.",
       "why_short": "The load balancer fills one worker first and stalls, so the gate judges what the engine received.",
       "cost_short": "No prediction before the run; even splitting across replicas never tested.",
       "short": "Validate the engine only",
@@ -712,7 +712,7 @@
         "One disclosed fix, declared the last attempt; then publish the failure"
       ],
       "chosen": "One disclosed fix, declared the last attempt; then publish the failure",
-      "why": "Tuning until it agrees is what R4 forbids. The fix was two numbers per repeat, latency ratios at 64 and 128 in flight measured on the same worker before its replay, on traffic the gate never judges. It failed the other way by about as much (14% fast, then 13% slow).",
+      "why": "Tuning until it agrees is what R4 forbids. The fix was two numbers per repeat, latency ratios at 64 and 128 in flight measured on the same worker before its replay, on traffic the gate never judges. It failed the other way by about as much (the engine 14% faster than predicted, then 13% slower).",
       "cost": "No measured answer. Why the calibration over-corrected is an untested hypothesis (closed-loop calibration, open-loop bursty replay; one host). H1, H2 and H4 were defined only after the frontiers were seen, and are labelled so.",
       "why_short": "Tuning until it agrees is fabrication: one disclosed fix, declared the last, then the failure is the result.",
       "cost_short": "No measured answer; the over-correction is unexplained; H1, H2, H4 were defined after seeing frontiers.",
@@ -900,8 +900,8 @@
     },
     {
       "phase": "Validate on RunPod",
-      "label": "Attempt one fails; host speed found",
-      "detail": "34 of 37 judged bins missed, the engine faster than predicted. One void repeat (a worker restarted on the old image) was re-run. A re-measurement afterwards: the host, not the engine flag, explains it.",
+      "label": "Attempt one fails; host speed implicated",
+      "detail": "34 of 37 judged bins missed, the engine faster than predicted. One void repeat (a worker restarted on the old image) was re-run. A re-measurement afterwards ruled out the engine flag and found hosts differ by about the size of the miss. Host speed is a measured cause, not shown to be the whole one: attempt one's own host had about 7% lower latency at ~100 in flight, while the quiet bins missed by 14%.",
       "output": "validation-engine/verdict.json: failed; host-speed finding",
       "milestone": true,
       "when": "2026-10-05",
@@ -1100,10 +1100,10 @@
         "note": "GPU utilisation (nvidia-smi) read 1.0 at every level from 1 to 128, and 0 when idle, so it is not drawn: it would be a flat line at the top."
       },
       "axis": "Measured: requests one replica completes per second at each fixed number in flight. Dashed: traffic levels set from it, as multiples of saturation (211.2 req/s).",
-      "read_as": "The validation replay peaked at 0.95× saturation (200.6 req/s); the sweep's spike went 20% past it and stayed, a regime the gate never tested.",
+      "read_as": "The validation replay peaked at 0.95× saturation (200.6 req/s), which is 0.98× of the 204.4 measured at 128 in flight; the sweep's spike peaked at 1.20× saturation (253.4 req/s) and stayed there, a regime the gate never tested.",
       "so": "traffic",
       "takeaway": "Every rate is a fraction of one replica's capacity: the gate checked the model below it, the sweep ran above it.",
-      "arithmetic": "Saturation by Little's Law: 128 / 0.606 s = 211.2 req/s (measured at 128: 204.4). Baseline 0.70 × 211.2 = 147.8; peaks add 0.25 or 0.5 × 211.2: 200.6 and 253.4 req/s."
+      "arithmetic": "Saturation by Little's Law: 128 / 0.606 s = 211.2 req/s (measured at 128: 204.4). Baseline 0.70 × 211.2 = 147.8; peaks add 0.25 or 0.5 × 211.2: 200.6 and 253.4 req/s. 200.6 / 204.4 = 0.98 of measured throughput."
     },
     {
       "title": "The test, twice: which side the engine landed on",
@@ -1442,7 +1442,7 @@
         "tolerance",
         "onefix"
       ],
-      "takeaway": "Uncalibrated, the model was too slow (34 of 37 bins miss); calibrated, too fast (37 of 37). The sign flipped and the size stayed: about what a host changes.",
+      "takeaway": "Uncalibrated, the model predicted latency too high (engine 14% faster; 34 of 37 bins miss); calibrated, too low (13% slower; 37 of 37). The size held: about what a host changes.",
       "arithmetic": "Median over the 37 judged bins: 0.856 (14% below) and 1.127 (13% above); per bin, 0.11 to 0.955 and 1.116 to 1.16. Recomputed from the repeat records."
     },
     {
@@ -1478,7 +1478,7 @@
       "axis": "Measured: server latency on each RunPod host relative to the curve's host (ozhetwnhompob9), at high load. Bars: lowest to highest of three runs; ku80i8usxw3st5 has one reading.",
       "read_as": "Every other host measured had 7 to 18% lower latency than the curve's at high load: the size of the gate's misses. RunPod picks the host; the simulator knows one. Three hosts show a spread, not a distribution.",
       "so": "onefix",
-      "takeaway": "The miss is about one host's worth of speed, which a one-host curve cannot predict.",
+      "takeaway": "Hosts differ by about the size of the miss, and a one-host curve cannot predict which one RunPod picks: part of the miss, not shown to be all of it.",
       "arithmetic": "Latency ÷ the curve's: 0.90 at 128 (0.897–0.907); 0.494 / 0.533 = 0.927 at ~100; 0.834 at 128 (0.822–0.841). Percent = (ratio − 1) × 100."
     },
     {
@@ -1559,7 +1559,7 @@
       "read_as": "At RunPod's default scaler value of 4 the path delivered about 17 req/s whatever was offered, while the engine's p50 stayed at 0.31 s: requests waited in the load balancer, which caps each worker at that many in flight.",
       "so": "engine",
       "takeaway": "A setting RunPod documents only for autoscaling capped two GPUs at 17 req/s: $36.02 against $2.05 per million requests.",
-      "arithmetic": "At the billed $1.11/h for 2 workers: $36.02 per million at 17.1 req/s, $2.05 at 300.7; 300.7 / 17.1 = 17.6, the post's 18×."
+      "arithmetic": "At the billed $1.1085/h ($1.11 rounded) for 2 workers: $36.02 per million at 17.1 req/s, $2.05 at 300.7; 300.7 / 17.1 = 17.6, the post's 18×."
     },
     {
       "title": "UNVALIDATED: what each policy spent and reached (arm C, step)",
@@ -1830,18 +1830,18 @@
             "label": "iso-cost budget"
           }
         ],
-        "note": "SIMULATED, FAILED VALIDATION. The p99 axis starts near 7 s. Each signal's own frontier is one point: its cheapest policy is also its fastest."
+        "note": "SIMULATED, FAILED VALIDATION. The p99 axis starts near 7 s. Each signal's own frontier is one point: its cheapest policy is also its fastest. Pairs whose down threshold is not below the up threshold are skipped (3 of 20 for in flight, 1 for each other signal), hence 17, 19 and 19 policies."
       },
       "axis": "Simulated, not measured, by a model that failed its gate twice. Each dot is one policy (signal and thresholds): its median over 30 simulated step spikes with arm C's cold starts.",
-      "read_as": "All 19 queue-depth policies spent 640 replica-seconds and all 19 utilisation policies sat at the cap, 3,095; within each, only p99 differs. The budget line constrains no one, so H3's 3.96 s \"gap\" is queue depth spending 640 against 2,320–3,095.",
+      "read_as": "All 19 queue-depth policies spent 640 replica-seconds and all 19 utilisation policies sat at the cap, 3,095; within each, only p99 differs. The budget line constrains no one, so H3's 3.96 s \"gap\" is queue depth spending 640 against 2,320–3,095. Queue depth is cheap because the simulated controller scales back down once the backlog clears; a read-only rerun with scale-down switched off (exploratory, not committed) brought its p99 close to the others', so the gap mostly reflects the scale-down rule, not the scale-up signal.",
       "so": "frontiers",
       "takeaway": "Even as the simulator's answer, the comparison is mostly one of spend: the budget never binds and each frontier is one point.",
       "arithmetic": "Gap = worst reached p99 − best at the budget: 11.15 − 7.20 = 3.95 s on rounded values (post: 3.96, 95% interval 3.52–4.56). Arm A's step: 0.082 s, so H3's halving fails."
     }
   ],
   "interview": {
-    "pitch30": "I tried to find which autoscaling signal, queue depth, requests in flight or GPU utilisation, gives the best cost and tail-latency trade-off for an LLM server whose new replicas take tens of seconds to over a minute to start. Live tests were too expensive, so I built a simulator from measured inputs with a pre-registered test it had to pass. It failed twice: too slow, traced to host speed, then, calibrated to the host, too fast, for a reason I could not settle. So I published the failure, and two measured findings: GPU utilisation reads 100% from one request, and RunPod's load balancer caps each worker at 4 requests in flight by default.",
-    "pitch120": "A new LLM replica takes a median 39 to 81 seconds to start, so the signal an autoscaler watches has to see trouble early. I compared queue depth, requests in flight and GPU utilisation by their whole cost-versus-p99 frontiers, and asked whether a faster cold start shrinks the difference. Dozens of policies run thirty times each was out of budget on real GPUs, so I built a simulator where every input is measured and only the control loop is code, and committed a pass rule before any real run: replay a real spike three times; a 10-second bin misses if all three runs land on one side of the prediction; more than half missing fails. It failed with the engine 14% faster than predicted. I traced that to host speed, made one disclosed fix, declared it the last attempt, and it failed 13% the other way. So I published the failure instead of the frontiers. Two findings are measured: nvidia-smi utilisation reads 1.0 from one request, and RunPod's load balancer caps requests per worker at a setting documented only for autoscaling, which made each request 18 times dearer. The paid part cost $6.07.",
+    "pitch30": "I tried to find which autoscaling signal, queue depth, requests in flight or GPU utilisation, gives the best cost and tail-latency trade-off for an LLM server whose new replicas take tens of seconds to over a minute to start. Live tests were too expensive, so I built a simulator from measured inputs with a pre-registered test it had to pass. It failed twice: it first predicted latency too high, which I traced partly to host speed, then, calibrated to the host, too low, for a reason I could not settle. So I published the failure, and two measured findings: GPU utilisation reads 100% from one request, and RunPod's load balancer caps each worker at 4 requests in flight by default.",
+    "pitch120": "A new LLM replica takes a median 39 to 81 seconds to start, so the signal an autoscaler watches has to see trouble early. I compared queue depth, requests in flight and GPU utilisation by their whole cost-versus-p99 frontiers, and asked whether a faster cold start shrinks the difference. Dozens of policies run thirty times each was out of budget on real GPUs, so I built a simulator where every input is measured and only the control loop is code, and committed a pass rule before any real run: replay a real spike three times; a 10-second bin misses if all three runs land on one side of the prediction; more than half missing fails. It failed with the engine 14% faster than predicted. A re-measurement ruled out the engine flag and showed hosts differ by about that much, so host speed is part of the cause. I made one disclosed fix, declared it the last attempt, and it failed 13% the other way. So I published the failure instead of the frontiers. Two findings are measured: nvidia-smi utilisation reads 1.0 from one request, and RunPod's load balancer caps requests per worker at a setting documented only for autoscaling, which made each request 18 times dearer. The paid part cost $6.07.",
     "followups": [
       {
         "q": "So which signal should I use?",
@@ -1868,7 +1868,7 @@
         "a": "Measure host speed per run from the start; settle the load balancer before the gate; validate in the sweep's overload; build the closed-loop gate. And revisit the grids: in-flight's tops out at 16, while one replica holds over 64 in flight at baseline alone (139.5 req/s at 64, under the 147.8 baseline). My untested reading: every in-flight threshold is crossed at once, so its grid only sets where scaling stops; up-2 and up-4 hit the cap."
       }
     ],
-    "limits": "No measured answer: every frontier, H1–H4 verdict, gap and per-signal dollar figure is from a simulator that failed validation twice, and H1, H2, H4 were defined after the frontiers were seen. The control loop was never compared with a real autoscaler. The gate tested 0.95× capacity, the sweep ran at 1.20×. Even load splitting is assumed; RunPod fills one worker first. One provider, GPU, model, engine version (vLLM 0.27.1) and request shape; replicas absent or serving; 6 hosts seen, 3 timed. Load-balancer findings: five unregistered probes on 2026-10-05."
+    "limits": "No measured answer: every frontier, H1–H4 verdict, gap and per-signal dollar figure is from a simulator that failed validation twice, and H1, H2, H4 were defined after the frontiers were seen. The control loop was never compared with a real autoscaler. The gate tested 0.95× saturation (0.98× of measured throughput), the sweep ran at 1.20×. Even load splitting is assumed; RunPod fills one worker first. One provider, GPU, model, engine version (vLLM 0.27.1) and request shape; replicas absent or serving; 6 hosts seen, 3 timed. Load-balancer findings: five unregistered probes on 2026-10-05."
   },
   "recall": [
     {
@@ -1881,7 +1881,7 @@
     },
     {
       "q": "Attempt one missed with the engine faster, attempt two, calibrated, with it slower. What does the pair let you conclude?",
-      "a": "The model's error is about a host's effect (14% against 13%), so a one-host curve cannot predict hosts RunPod picks. Not which way a given host goes."
+      "a": "The model's error is about the size of a host's effect (14% against 13%), so a one-host curve cannot predict the hosts RunPod picks. Host speed is a measured cause, not shown to be the whole one, and the pair does not say which way a given host goes."
     },
     {
       "q": "Why do two failures mean the answer is not in this study, rather than \"try a third fix\"?",
@@ -2358,6 +2358,14 @@
     {
       "value": "2555",
       "how": "An in-flight policy's median cost (replica-seconds) on arm C's step, from data/a2/frontier-sweep.json sources['arm C'] (median of the 30 cost samples)."
+    },
+    {
+      "value": "0.98",
+      "how": "200.6 / 204.4 = 0.981: the validation replay's peak rate over the measured completion rate at 128 in flight (both in docs/post-a2.md and data/a2/service-curve.json)."
+    },
+    {
+      "value": "1.1085",
+      "how": "data/a2/post-analysis.json money.gpu_hourly_rate, 1.1085 (the billed rate; the post rounds it to $1.11)."
     }
   ],
   "links": {
