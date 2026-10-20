@@ -88,6 +88,107 @@
       "plain": "**Excess**: a tail message's latency minus the fork's median. **Busy period**: back to when the in-flight count last rose above its median. A cause is credited if it covers **at least 50% of the excess**: durability wait and matcher path from the message's own stamps; safepoints and **sentinel gaps** (idle polls over 5 µs apart) by time in the busy period, checked against a **null** of 200 circular shifts. Credits are non-exclusive; uncredited is **residual**."
     }
   ],
+  "walkthrough": {
+    "title": "What a D2 message waits for: the sync already running",
+    "lead": "One order, m, arrives while the journaler is mid-sync at D2 (ring + busy-spin). The path is from the code; each timing is a stage percentile (median over forks) from the 20,000/s cell, not a trace of m.",
+    "registers": [
+      {
+        "id": "jr",
+        "label": "Journaler (core 4)"
+      },
+      {
+        "id": "m",
+        "label": "Order m"
+      },
+      {
+        "id": "ds",
+        "label": "durableSeq vs m"
+      },
+      {
+        "id": "out",
+        "label": "Output (core 5)"
+      },
+      {
+        "id": "ms",
+        "label": "Measured at 20,000/s"
+      }
+    ],
+    "steps": [
+      {
+        "say": "Gateway decodes m, gives it a seq and fans it out. The journaler is already inside `fdatasync` for batch A, which began before m arrived. This is the case to follow: m lands mid-sync.",
+        "values": {
+          "jr": "fdatasync of batch A",
+          "m": "sequenced, fanned out",
+          "ds": "below m",
+          "out": "waiting for m",
+          "ms": "no number: the setup"
+        },
+        "decision": "topo"
+      },
+      {
+        "say": "The match branch is quick: `match_service` median is 80 ns. Output takes m from the matcher, then spins re-reading `durableSeq` until it reaches m's seq. It is below, so m is matched but held.",
+        "values": {
+          "m": "matched, held by Output",
+          "out": "spinning: durableSeq < m",
+          "ms": "match_service p50: 80 ns"
+        }
+      },
+      {
+        "say": "On the journal side m sits in its channel: the journaler is one thread, inside the sync, so it cannot drain. `journal_wait` p99 is 38.2 µs here, 0.27 µs at D1. That fits this wait; the data does not isolate it.",
+        "values": {
+          "m": "queued, journaler busy",
+          "ms": "journal_wait p99: 38.2 µs"
+        }
+      },
+      {
+        "say": "Sync A returns and the journaler stores `durableSeq` = A's last seq: still below m, so Output keeps spinning. The journaler drains everything queued in one snapshot, up to 4,096: batch B, m among it.",
+        "values": {
+          "jr": "draining batch B (m inside)",
+          "m": "in batch B",
+          "ds": "A's last: still below m",
+          "ms": "batch cap: 4,096 (the code)"
+        }
+      },
+      {
+        "say": "One `write()` puts all of B in the page cache. Written is not durable: a page-cache write survives a killed JVM, not power loss. `journal_write` median is 0.55 µs.",
+        "values": {
+          "jr": "write() of batch B",
+          "m": "in the page cache",
+          "ms": "journal_write p50: 0.55 µs"
+        }
+      },
+      {
+        "say": "Then one `fdatasync` for the whole batch. m waits all of it, and every message in B shares this sync's end as its durable time. Per sync, not per message: median 23.5 µs, p99.99 48.4 µs.",
+        "values": {
+          "jr": "fdatasync of batch B",
+          "m": "waiting on B's sync",
+          "ms": "sync p50 23.5, p99.99 48.4 µs"
+        },
+        "decision": "e2"
+      },
+      {
+        "say": "The sync returns and the journaler stores `durableSeq` = B's last seq, after the stamps. Output now reads a value at least m's seq, stamps RELEASED and m leaves. m paid the rest of A's sync, a write and B's sync.",
+        "values": {
+          "jr": "back to channel ②",
+          "m": "released",
+          "ds": "B's last: at least m",
+          "out": "released m",
+          "ms": "e2e p99.99, D2: 72.1 µs"
+        }
+      },
+      {
+        "say": "At D1 Output never spins on `durableSeq`, so the journal side stops mattering to the response. The journal still writes beside the matcher, but nothing waits for it: end-to-end p99.99 is 1.39 µs.",
+        "values": {
+          "jr": "write() only, nobody waits",
+          "m": "released when matched",
+          "ds": "not read at D1",
+          "out": "releases at once",
+          "ms": "e2e p99.99, D1: 1.39 µs"
+        }
+      }
+    ],
+    "takeaway": "A D2 message pays its own batch's sync, plus the rest of the one in flight if it arrives mid-sync: one to two syncs. D2's 72.1 µs p99.99 is about 1.5 times the 48.4 µs p99.99 sync (arithmetic, not a breakdown)."
+  },
   "views": [
     {
       "level": "container",
@@ -1537,7 +1638,7 @@
     },
     {
       "q": "Why is \"group commit costs 52×\" not a property of group commit?",
-      "a": "It is this setup at 20,000/s: a tiny ungated tail (1.39 µs) against 72.1 µs. fio measured an isolated sync at about 15 µs on drives with no volatile cache, but inside the pipeline the median sync took 23.5 µs, and a D2 message can wait for the sync in flight and then for its own batch's. The direction transfers; the size does not."
+      "a": "It is this setup at 20,000/s: a tiny ungated tail (1.39 µs) against 72.1 µs. fio measured an isolated sync at about 15 µs on drives with no volatile cache, but inside the pipeline the median sync took 23.5 µs, and a D2 message waits one to two of them (see How it works). The direction transfers; the size does not."
     },
     {
       "q": "Why did D3 saturate at 100,000/s, and why was that never a hypothesis?",
@@ -1962,6 +2063,30 @@
     {
       "value": "5.6",
       "how": "The H4 ratio range's low end, 5.64 (h1, docs/post.md 'Which unit is independent'), to one decimal, in the result's short label."
+    },
+    {
+      "value": "38.2",
+      "how": "docs/results-a7.md §6, E2-RING_SPIN-D2-20000, journal_wait p99 38175 ns, in µs to one decimal."
+    },
+    {
+      "value": "0.27",
+      "how": "docs/results-a7.md §6, E2-RING_SPIN-D1-20000, journal_wait p99 271 ns, in µs to two decimals."
+    },
+    {
+      "value": "0.55",
+      "how": "docs/results-a7.md §6, E2-RING_SPIN-D2-20000, journal_write p50 551 ns, in µs to two decimals."
+    },
+    {
+      "value": "41.6",
+      "how": "docs/results-a7.md §6, E2-RING_SPIN-D2-20000, fsync p99 41599 ns, in µs to one decimal."
+    },
+    {
+      "value": "48.4",
+      "how": "docs/results-a7.md §6, E2-RING_SPIN-D2-20000, fsync p99.99 48367 ns, in µs to one decimal."
+    },
+    {
+      "value": "1.5",
+      "how": "72.1 / 48.4 = 1.49: the D2 end-to-end p99.99 (docs/post.md, 'What durability costs in the tail') over the p99.99 of the pipeline's own fdatasync calls (docs/results-a7.md §6), to one decimal."
     }
   ],
   "links": {
