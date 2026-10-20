@@ -147,7 +147,7 @@ Steps 1 to 7 are paid, on RunPod; 8 to 10 are free, on the laptop, after all thr
 
 **Chosen:** A simulator fed only measured inputs, gated first
 
-**Why:** Modelling the scheduler would replace a measurement with an assumption about what continuous batching (P1: batching) does to latency; the curve measures it, and only the control loop is code. Discrete events need no tick size, and a seed makes runs reproducible. A new replica is absent until a lag resampled from artifact 1's runs, then fully serving.
+**Why:** Modelling the scheduler would replace a measurement with an assumption about what continuous batching (P1: batching) does to latency; the curve measures it, and only the control loop is code. Discrete events need no tick size, and a seed makes runs reproducible.
 
 **Cost:** If the gate fails there is no answer, and it failed twice. The design's second gate, one real closed-loop autoscaling run, was never built.
 
@@ -163,7 +163,7 @@ Steps 1 to 7 are paid, on RunPod; 8 to 10 are free, on the laptop, after all thr
 
 **Chosen:** One controller, a grid per signal in its own units; compare frontiers
 
-**Why:** A shared 2 to 16 grid puts every threshold above utilisation's maximum of 1, so it never scales and H2 "wins" by a units mismatch (checked: 0 scale-ups at 2.0). Fixed for every policy: a 30 s cooldown (one pause after any action, up or down), a 5 s evaluation, a 12-replica cap, 30 repetitions.
+**Why:** A shared 2 to 16 grid puts every threshold above utilisation's maximum of 1, so it never scales and H2 "wins" by a units mismatch (checked: 0 scale-ups at 2.0). Fixed for every policy: a 30 s cooldown, a 5 s evaluation, a 12-replica cap, 30 repetitions.
 
 **Cost:** Grids were fixed on 2026-09-05 against a placeholder curve that stopped at 64 in flight, and not revisited. On the measured curve each signal's step frontier is one point, and the iso-cost budget, 3,095 replica-seconds, is utilisation's floor: it never constrains the other two.
 
@@ -410,7 +410,7 @@ Milestones: 1. Specify a gated simulator, then re-base on artifact 1 (2026-08-17
 ### UNVALIDATED: what each policy spent and reached (arm C, step)
 
 - Axis: Simulated, not measured, by a model that failed its gate twice. Each dot is one policy (signal and thresholds): its median over 30 simulated step spikes with arm C's cold starts.
-- Read it as: All 19 queue-depth policies spent 640 replica-seconds and all 19 utilisation policies sat at the cap, 3,095; within each, only p99 differs. The budget line constrains no one, so H3's 3.96 s "gap" is queue depth spending 640 against 2,320–3,095. Queue depth is cheap because it scales down once the backlog clears (see the walkthrough); a rerun with scale-down off (exploratory, not committed) brought its p99 close to the others', which suggests the scale-down rule is part of the gap.
+- Read it as: All 19 queue-depth policies spent 640 replica-seconds and all 19 utilisation policies sat at the cap, 3,095; within each, only p99 differs. The budget line constrains no one, so H3's 3.96 s "gap" is queue depth spending 640 against 2,320–3,095. Queue depth is cheap because of its scale-down rule (see How it works); a rerun with scale-down off (exploratory, not committed) brought its p99 close to the others', which suggests the scale-down rule is part of the gap.
 - How it is computed: Gap = worst reached p99 − best at the budget: 11.15 − 7.20 = 3.95 s on rounded values (post: 3.96, 95% interval 3.52–4.56). Arm A's step: 0.082 s, so H3's halving fails.
 - Axes: x is replica-seconds per spike (median of 30); y is per-run p99 latency, median of 30 (s)
 - queue depth (19): 640: 11.2, 640: 11.3, 640: 11.4 ×2, 640: 11.5 ×7, 640: 11.6 ×3, 640: 11.7 ×2, 640: 11.8, 640: 11.9, 640: 12.0
