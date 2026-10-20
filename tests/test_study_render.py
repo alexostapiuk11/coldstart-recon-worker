@@ -2537,3 +2537,53 @@ def test_scatter_log_x_labels_every_data_x_on_a_1_2_5_grid():
     del c["frontier"]
     out = chart_html(c, "t4")
     assert _x_tick_labels(out) == ["5,000", "20,000"] and _x_tick_marks(out) == 3
+
+
+# ---- decision_prefix ----
+
+from study.links import link_index
+
+
+def test_decision_codes_are_d_by_default_and_follow_decision_prefix():
+    u = artifact_unit_with_links()
+    assert link_index(u)["dec_code"] == {"d0": "D1", "d1": "D2", "d2": "D3", "d3": "D4"}
+    u["decision_prefix"] = "K"
+    assert link_index(u)["dec_code"] == {"d0": "K1", "d1": "K2", "d2": "K3", "d3": "K4"}
+
+
+def test_decision_prefix_reaches_cards_links_flow_chips_and_the_map():
+    u = artifact_unit_with_flow()
+    u["decision_prefix"] = "K"
+    page = render_page(u)
+    assert '<span class="code">K2</span>' in _card(page, "d-d1")
+    assert "Decision K2</b>" in page and "Decision K3</b>" in page  # flow chips
+    assert '<span class="mcode">K2</span>' in page.split('id="map"')[1]
+    # no decision code is left over with the default letter (requirements are R, results F)
+    assert not re.search(r">D\d<|Decision D\d|mcode\">D\d", page)
+    # results still link back with the new letter
+    f1 = _card(page, "r-0")
+    assert "K1</span>" in f1 and "D1</span>" not in f1
+    default = render_page(artifact_unit_with_flow())
+    assert '<span class="code">D2</span>' in _card(default, "d-d1")
+
+
+# ---- C4 tab numbers ----
+
+def _tab_names(page):
+    return re.findall(r'<button role="tab" aria-selected="false">([^<]*)</button>', page)
+
+
+def test_c4_tab_numbers_follow_the_tab_position_not_the_level():
+    u = artifact_unit()
+    assert _tab_names(render_page(u)) == ["1 Context", "2 Containers", "3 Components",
+                                          "4 One run"]
+    u["views"] = u["views"][1:] + u["views"][:1]  # context last, as in A7's order
+    assert _tab_names(render_page(u)) == ["1 Containers", "2 Components", "3 One run",
+                                          "4 Context"]
+
+
+# ---- long source paths wrap ----
+
+def test_long_source_paths_may_wrap_anywhere():
+    css = render_page(artifact_unit()).split("<style>")[1].split("</style>")[0]
+    assert re.search(r"details\.src code\{[^}]*overflow-wrap:anywhere", css)

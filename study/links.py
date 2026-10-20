@@ -1,13 +1,14 @@
 """The links between requirements, decisions, results and concepts, and their codes.
 
 The cards and the map show the same links under the same codes: a requirement keeps its
-own id, decisions are D1, D2, ... and results F1, F2, ... in content order, and concepts
+own id, decisions are D1, D2, ... (or K1, K2, ... when the unit sets `decision_prefix`; see
+study.schema) and results F1, F2, ... in content order, and concepts
 that have an id are C1, C2, ... in content order.
 """
 
 from __future__ import annotations
 
-from study.schema import so_ids
+from study.schema import DEFAULT_DECISION_PREFIX, so_ids
 
 
 def traced(c: dict) -> bool:
@@ -19,8 +20,9 @@ def link_index(c: dict) -> dict:
     decisions = c.get("decisions", [])
     results = c.get("results", [])
     concepts = [t for t in c.get("concepts", []) if "id" in t]
+    prefix = c.get("decision_prefix", DEFAULT_DECISION_PREFIX)
     idx = {
-        "dec_code": {d["id"]: f"D{i + 1}" for i, d in enumerate(decisions)},
+        "dec_code": {d["id"]: f"{prefix}{i + 1}" for i, d in enumerate(decisions)},
         "res_code": [f"F{i + 1}" for i in range(len(results))],
         "con_code": {t["id"]: f"C{i + 1}" for i, t in enumerate(concepts)},
         "req": {r["id"]: r for r in c.get("requirements", []) if "id" in r},

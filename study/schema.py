@@ -57,6 +57,10 @@ MATRIX_TONES = ("bad", "warn", "ok", "neutral")
 MATRIX_MAX = 12  # rows, and columns
 MAX_CELL = 40
 MAX_CELL_NOTE = 80
+# Decision codes read "<prefix><number>" (D1, D2, ...). The prefix is one or two letters, "D"
+# unless the unit sets `decision_prefix`; results and concepts keep F and C.
+DEFAULT_DECISION_PREFIX = "D"
+TAKEN_PREFIXES = {"F": "results", "C": "concepts"}
 
 
 class ContentError(ValueError):
@@ -743,6 +747,19 @@ def _view(v, where, allowed):
                 raise ContentError(f"{where}.edges[{i}]: edge {end} is not a node id")
 
 
+def _decision_prefix(c, where):
+    """Optional `decision_prefix`: one or two ASCII letters, not the F or C that result and
+    concept codes use."""
+    p = _opt_str(c, "decision_prefix", where)
+    if p is None:
+        return
+    if not re.fullmatch(r"[A-Za-z]{1,2}", p):
+        raise ContentError(f"{where}.decision_prefix '{p}' must be one or two letters")
+    if p.upper() in TAKEN_PREFIXES:
+        raise ContentError(f"{where}.decision_prefix '{p}' is taken: "
+                           f"{TAKEN_PREFIXES[p.upper()]} use {p.upper()}")
+
+
 def _cross_page(c, where):
     """Optional `links` {unit: https URL} and `prereqs` [{unit, label}], and every
     [text](unit:concept) link in the content's strings naming a known unit."""
@@ -838,6 +855,7 @@ def validate(c: dict) -> None:
             _get(t, "analogy", str, f"{where}.concepts[{i}]")
             _get(t, "why", str, f"{where}.concepts[{i}]")
         _items(c, "used_by", where, at_least=1)
+    _decision_prefix(c, where)
     _flow(c, where)
     _relationships(c, where)
     _cross_page(c, where)

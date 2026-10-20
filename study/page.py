@@ -59,7 +59,7 @@ padding:14px 16px;margin:10px 0}
 .rgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,max(300px,calc((100% - 24px)/3))),1fr))}
 .dlegend{color:var(--muted);font-size:14px;margin:6px 0 0}
 details.src{background:transparent}details.src summary{font-size:17px}
-details.src ul{margin:8px 0 4px;padding-left:20px}
+details.src ul{margin:8px 0 4px;padding-left:20px}details.src code{overflow-wrap:anywhere}
 .crow{margin:10px 0 0}.crow b{display:block;color:var(--muted);font-weight:600;font-size:13px;
 text-transform:uppercase;letter-spacing:.05em;margin-bottom:1px}
 .why{color:var(--muted);font-size:14px}
@@ -361,8 +361,10 @@ def _sequences(c):
             if v.get("style") == "sequence"]
 
 
-LEVEL_NAMES = {"context": "1 Context", "container": "2 Containers",
-               "component": "3 Components", "dynamic": "4 One run"}
+# A C4 tab is named for its level and numbered by its place among the tabs (a unit may order
+# its views as it likes); any other view is named by its title, unnumbered.
+LEVEL_NAMES = {"context": "Context", "container": "Containers", "component": "Components",
+               "dynamic": "One run"}
 
 
 def _link(anchor, code, label):
@@ -437,7 +439,7 @@ def _views(c):
               else "")
     tabs, panels = [], []
     for i, v in enumerate(c["views"]):
-        name = LEVEL_NAMES.get(v["level"], v["title"])
+        name = f"{i + 1} {LEVEL_NAMES[v['level']]}" if v["level"] in LEVEL_NAMES else v["title"]
         tabs.append(f'<button role="tab" aria-selected="false">{esc(name)}</button>')
         uid = f"{c['id']}-{i}"
         drawn = (sequence_html(v, uid) if v.get("style") == "sequence"

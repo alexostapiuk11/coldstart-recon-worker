@@ -925,3 +925,27 @@ def test_matrix_legend_names_a_known_status_or_tone():
     _fails(_with(c), r"results\[0\]\.legend\[0\]: needs exactly one of 'status' or 'tone'")
     c = matrix_chart(legend=[{"tone": "ok", "label": ""}])
     _fails(_with(c), r"results\[0\]\.legend\[0\]\.label is empty")
+
+
+# ---- decision_prefix ----
+
+def test_decision_prefix_is_one_or_two_letters_and_optional():
+    validate(artifact_unit())
+    for ok in ("K", "DX", "d"):
+        u = artifact_unit()
+        u["decision_prefix"] = ok
+        validate(u)
+
+
+def test_decision_prefix_is_checked():
+    for bad, match in (("", r"x1\.decision_prefix is empty"),
+                       ("ABC", r"x1\.decision_prefix 'ABC' must be one or two letters"),
+                       ("K1", r"x1\.decision_prefix 'K1' must be one or two letters"),
+                       ("F", r"x1\.decision_prefix 'F' is taken: results use F"),
+                       ("C", r"x1\.decision_prefix 'C' is taken: concepts use C")):
+        u = artifact_unit()
+        u["decision_prefix"] = bad
+        _fails(u, match)
+    u = artifact_unit()
+    u["decision_prefix"] = 3
+    _fails(u, r"x1\.decision_prefix: expected str")

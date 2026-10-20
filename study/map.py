@@ -4,7 +4,7 @@ Rendered only for units whose requirements carry ids (see schema._relationships)
 columns, left to right: what drove the work (requirements, then the key concepts as the
 vocabulary), the decisions, and what came out (results). Every edge touches a decision,
 so edges only run between adjacent columns, always left to right. Decisions and results
-keep the content order (D1.., F1.. match the cards); requirements and concepts are each
+keep the content order (D1.., F1.. match the cards; "D" is the unit's decision_prefix); requirements and concepts are each
 ordered by the barycentre of the decisions they link to, which keeps crossings low
 without any hand-written order. On a phone the columns stack in the same order:
 requirements, concepts, decisions, results.
