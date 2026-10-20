@@ -28,6 +28,25 @@ Read first: LLM serving on a GPU (P1), How these experiments earn trust (P2).
 - **The five hypotheses**: **H1**: weight handling is over half of worker-clock time through the first request in arm A. **H2**: volume weights cut it materially. **H3**: compiling is a non-trivial part of engine start, and a warm cache cuts it. **H4**: host differences drive how far p95 sits above the median. **H5**: a warm compile cache leaves more KV cache (P1: kvcache). H1 holds only by its definition: weight handling is a median 0.58 of worker-clock time in arm A, above half in all 100 runs, but that phase is mostly server start-up; vLLM's own loading time is 17.40 s of 79.09 s, about 22%.
 - **Pre-registration**: Hypotheses, contrasts, which runs to throw out, when to stop and how to pick the headline, committed in `docs/experiment.md` before any priming or campaign run (after three paid reconnaissance captures), four days before the first retained run; later changes are dated amendments (P2: amendment) in git.
 
+## How it works
+
+Follow vLLM's memory budget through one start, from 21.64 GiB planned to tokens of KV cache, after a cold compile and then a warm one.
+
+| Step | What happens | Memory budget | Weights, non‑torch | Peak activation | KV cache | Tokens that fit |
+|---|---|---|---|---|---|---|
+| 1 | The card reports 23.52 GiB of GPU memory (P1: hbm). vLLM plans with 0.92 of it, a 21.64 GiB budget, and the KV cache (P1: kvcache) gets whatever the other items leave. | 21.64 GiB | not loaded yet | not measured yet | not sized yet | unknown |
+| 2 | Loading the weights (P1: weights) takes 15.27 GiB. Counting vLLM's "non-torch" memory too, the log says 15.54 GiB used. That is the same in all 300 runs, whatever the arm. | 21.64 GiB | **15.54 GiB** | not measured yet | not sized yet | unknown |
+| 3 | On a cold compile cache the engine now runs torch.compile (P1: compile), a median 18.79 s in arm B. Compile comes before the memory measurement, and no memory number moves yet. | 21.64 GiB | 15.54 GiB | not measured yet | not sized yet | unknown |
+| 4 | Then vLLM runs one profiling pass and records how high the activations peak. After a cold compile the log reports 1.18 GiB. | 21.64 GiB | 15.54 GiB | **1.18 GiB (cold)** | not sized yet | unknown |
+| 5 | The KV cache is sized once, from what is left: 21.64 − 15.54 − 1.18 = 4.92 GiB. At 144 KB per token the log counts 35,792 tokens. That size is fixed for the replica's life. | 21.64 GiB | 15.54 GiB | 1.18 GiB (cold) | **4.92 GiB** | **35,792 (4 requests)** |
+| 6 | Arm C changes one thing from B: the compile cache is warm, so compile takes 0.33 s. The same profiling pass now reports 0.19 GiB of peak activation instead of 1.18. (Decision: Three arms, one variable) | 21.64 GiB | 15.54 GiB | **0.19 GiB (warm)** | 4.92 GiB | 35,792 (4 requests) |
+| 7 | Same subtraction, bigger remainder: 21.64 − 15.54 − 0.19 = 5.91 GiB. The log counts 43,040 tokens, room for 5 full-length requests. Every other term is unchanged. | 21.64 GiB | 15.54 GiB | 0.19 GiB (warm) | **5.91 GiB** | **43,040 (5 requests)** |
+| 8 | The 0.99 GiB gained is exactly the 0.99 GiB the peak dropped. The log shows the drop, not its cause; H5 registered the compiler's memory still being resident during profiling. | 21.64 GiB | 15.54 GiB | **0.19 GiB (−0.99)** | **5.91 GiB (+0.99)** | **43,040 (+7,248)** |
+
+Bold cells changed in that step.
+
+**Takeaway:** A warm compile cache saves seconds, and it lowers the peak the profiler measures. That leaves 0.99 GiB, or 7,248 tokens, more KV cache for as long as the replica lives.
+
 ## System views (C4)
 
 ### Who and what the study touches (context)
@@ -363,7 +382,7 @@ Milestones: 4. Build against the captures; test it end to end (2026-08-28); 5. P
 ### KV cache left for serving, by arm
 
 - Axis: KV cache tokens vLLM allocated at startup, same card and flags in every arm.
-- Read it as: C keeps 20.3 % more KV cache: one more full-length (8192-token) request served at once, 5 instead of 4. By the mechanism registered as H5, the compiler's working set is resident on a cold arm while vLLM measures free memory, so the cache is sized smaller; the engine log's peak-activation line (1.18 GiB cold, 0.19 GiB warm) fits that. Registered ahead as H5, though reconnaissance had logged both values once.
+- Read it as: C keeps 20.3 % more KV cache: one more full-length (8192-token) request served at once, 5 instead of 4. The engine log's peak activation (1.18 GiB cold, 0.19 GiB warm) accounts for it: see How it works. Registered ahead as H5, though reconnaissance had logged both values once.
 - How it is computed: 43,040 / 8,192 = 5.25 and 35,792 / 8,192 = 4.37 full-length requests; the code keeps whole requests (rounds down), so 5 against 4. 43,040 / 35,792 = 1.203, so 20.3 % more.
 - A: 35792 tokens
 - B: 35792 tokens
@@ -412,7 +431,7 @@ Milestones: 4. Build against the captures; test it end to end (2026-08-28); 5. P
 - Q: Why is a failed run never retried in place?
   A: A retry quietly swaps slow or unlucky runs for faster ones, flattering the distribution. Failures are their own rows, counted per arm.
 - Q: Why does the warm compile cache leave more KV cache?
-  A: vLLM sizes the KV cache from free memory measured during a profiling pass. By the mechanism registered as H5, on a cold arm the compiler's working set is resident during that pass, so less memory looks free, and the smaller cache stays for the replica's life.
+  A: The KV cache is sized from what is left after the weights and the profiling pass's peak. A cold compile gives a higher peak (1.18 vs 0.19 GiB), so less is left, for the replica's whole life. The registered cause (H5): the compiler's memory is still resident during profiling.
 
 Sources: see the page
 

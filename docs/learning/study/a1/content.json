@@ -82,6 +82,89 @@
       "plain": "Hypotheses, contrasts, which runs to throw out, when to stop and how to pick the headline, committed in `docs/experiment.md` before any priming or campaign run (after three paid reconnaissance captures), four days before the first retained run; later changes are dated [amendments](p2:amendment) in git."
     }
   ],
+  "walkthrough": {
+    "title": "Where GPU memory goes, and what a warm compile cache buys",
+    "lead": "Follow vLLM's memory budget through one start, from 21.64 GiB planned to tokens of KV cache, after a cold compile and then a warm one.",
+    "registers": [
+      {
+        "id": "budget",
+        "label": "Memory budget"
+      },
+      {
+        "id": "weights",
+        "label": "Weights, non‑torch"
+      },
+      {
+        "id": "peak",
+        "label": "Peak activation"
+      },
+      {
+        "id": "kv",
+        "label": "KV cache"
+      },
+      {
+        "id": "tokens",
+        "label": "Tokens that fit"
+      }
+    ],
+    "steps": [
+      {
+        "say": "The card reports 23.52 GiB of [GPU memory](p1:hbm). vLLM plans with 0.92 of it, a 21.64 GiB budget, and the [KV cache](p1:kvcache) gets whatever the other items leave.",
+        "values": {
+          "budget": "21.64 GiB",
+          "weights": "not loaded yet",
+          "peak": "not measured yet",
+          "kv": "not sized yet",
+          "tokens": "unknown"
+        }
+      },
+      {
+        "say": "Loading the [weights](p1:weights) takes 15.27 GiB. Counting vLLM's \"non-torch\" memory too, the log says 15.54 GiB used. That is the same in all 300 runs, whatever the arm.",
+        "values": {
+          "weights": "15.54 GiB"
+        }
+      },
+      {
+        "say": "On a cold compile cache the engine now runs [torch.compile](p1:compile), a median 18.79 s in arm B. Compile comes before the memory measurement, and no memory number moves yet."
+      },
+      {
+        "say": "Then vLLM runs one profiling pass and records how high the activations peak. After a cold compile the log reports 1.18 GiB.",
+        "values": {
+          "peak": "1.18 GiB (cold)"
+        }
+      },
+      {
+        "say": "The KV cache is sized once, from what is left: 21.64 − 15.54 − 1.18 = 4.92 GiB. At 144 KB per token the log counts 35,792 tokens. That size is fixed for the replica's life.",
+        "values": {
+          "kv": "4.92 GiB",
+          "tokens": "35,792 (4 requests)"
+        }
+      },
+      {
+        "say": "Arm C changes one thing from B: the compile cache is warm, so compile takes 0.33 s. The same profiling pass now reports 0.19 GiB of peak activation instead of 1.18.",
+        "values": {
+          "peak": "0.19 GiB (warm)"
+        },
+        "decision": "arms"
+      },
+      {
+        "say": "Same subtraction, bigger remainder: 21.64 − 15.54 − 0.19 = 5.91 GiB. The log counts 43,040 tokens, room for 5 full-length requests. Every other term is unchanged.",
+        "values": {
+          "kv": "5.91 GiB",
+          "tokens": "43,040 (5 requests)"
+        }
+      },
+      {
+        "say": "The 0.99 GiB gained is exactly the 0.99 GiB the peak dropped. The log shows the drop, not its cause; [H5](a1:hypotheses) registered the compiler's memory still being resident during profiling.",
+        "values": {
+          "peak": "0.19 GiB (−0.99)",
+          "kv": "5.91 GiB (+0.99)",
+          "tokens": "43,040 (+7,248)"
+        }
+      }
+    ],
+    "takeaway": "A warm compile cache saves seconds, and it lowers the peak the profiler measures. That leaves 0.99 GiB, or 7,248 tokens, more KV cache for as long as the replica lives."
+  },
   "views": [
     {
       "level": "context",
@@ -1238,7 +1321,7 @@
         ]
       },
       "axis": "KV cache tokens vLLM allocated at startup, same card and flags in every arm.",
-      "read_as": "C keeps 20.3 % more KV cache: one more full-length (8192-token) request served at once, 5 instead of 4. By the mechanism registered as H5, the compiler's working set is resident on a cold arm while vLLM measures free memory, so the cache is sized smaller; the engine log's peak-activation line (1.18 GiB cold, 0.19 GiB warm) fits that. Registered ahead as H5, though reconnaissance had logged both values once.",
+      "read_as": "C keeps 20.3 % more KV cache: one more full-length (8192-token) request served at once, 5 instead of 4. The engine log's peak activation (1.18 GiB cold, 0.19 GiB warm) accounts for it: see How it works. Registered ahead as H5, though reconnaissance had logged both values once.",
       "short": "KV cache left for serving",
       "so": "arms",
       "takeaway": "B and C differ only in the compile cache, yet C gets 20.3 % more KV cache: one more full-length request at a time, for the replica's whole life.",
@@ -1311,7 +1394,7 @@
     },
     {
       "q": "Why does the warm compile cache leave more KV cache?",
-      "a": "vLLM sizes the KV cache from free memory measured during a profiling pass. By the mechanism registered as H5, on a cold arm the compiler's working set is resident during that pass, so less memory looks free, and the smaller cache stays for the replica's life."
+      "a": "The KV cache is sized from what is left after the weights and the profiling pass's peak. A cold compile gives a higher peak (1.18 vs 0.19 GiB), so less is left, for the replica's whole life. The registered cause (H5): the compiler's memory is still resident during profiling."
     }
   ],
   "sources": [
@@ -1588,6 +1671,34 @@
     {
       "value": "79.09",
       "how": "Arm A's median t_process (worker-clock time through the first request) from derive on data/campaign.jsonl: 79.09 s; 17.40 / 79.09 = 22%."
+    },
+    {
+      "value": "23.52",
+      "how": "GPU memory in vLLM's engine log line 'Free memory on device (22.64/23.52 GiB) on startup', identical in all 300 runs of data/campaign.jsonl (checked by regex over each run's stored log)."
+    },
+    {
+      "value": "0.92",
+      "how": "'Desired GPU memory utilization is (0.92, 21.64 GiB)' in the same log line, identical in all 300 runs. docs/experiment.md and the design spec say 'the 0.9 default'; the log says 0.92."
+    },
+    {
+      "value": "21.64",
+      "how": "0.92 x 23.52 = 21.6384 GiB, printed as 21.64 in the same log line (all 300 runs)."
+    },
+    {
+      "value": "15.54",
+      "how": "'Actual usage is 15.54 GiB for consumed memory (weights + non-torch)' in the same log line, identical in all 300 runs; the weights alone are 'Model loading took 15.27 GiB'."
+    },
+    {
+      "value": "5.91",
+      "how": "Log line 'Available KV cache memory: 5.91 GiB' in all 100 arm C runs (arms A and B: 4.92 GiB); equals 21.64 - 15.54 - 0.19 = 5.91."
+    },
+    {
+      "value": "0.99",
+      "how": "5.91 - 4.92 = 0.99 GiB of extra KV cache, and 1.18 - 0.19 = 0.99 GiB less peak activation (both in data/campaign.jsonl engine logs and docs/experiment.md)."
+    },
+    {
+      "value": "7,248",
+      "how": "43,040 - 35,792 = 7,248 tokens of extra KV cache (docs/post.md 'KV capacity')."
     }
   ],
   "links": {
