@@ -55,13 +55,13 @@
       "id": "slots",
       "short": "Registered = a GPU slot",
       "term": "Registered versus active, and the slot cap",
-      "plain": "**Registered**: loaded into one of `max_loras` GPU slots; each slot's weight buffers take [GPU memory](p1:hbm) whether used or not. **Active**: the distinct adapters among requests batched together right now. In vLLM 0.27.1 `max_loras` is also the cap on distinct adapters per batch, so the two are one knob. Here `max_cpu_loras` = `max_loras` = N: every adapter resident, none swapped in."
+      "plain": "**Registered**: loaded into one of `max_loras` GPU slots; each slot's weight buffers take [GPU memory](p1:hbm) whether used or not. **Active**: the distinct adapters among requests batched together right now. In vLLM 0.27.1 `max_loras` is also the cap on distinct adapters per batch, so the two are one knob."
     },
     {
       "id": "twocosts",
       "short": "Two costs, one subtraction each",
       "term": "Heterogeneity cost and registered-slot cost",
-      "plain": "**Concentrated** regime: all load on one adapter. **Spread**: round-robin over all N. **Heterogeneity cost** at N = spread minus concentrated, in the same start. **Registered-slot cost** = concentrated at N minus concentrated at 1 slot, across starts: what slots cost when one adapter still carries all the load. At 64 slots: concentrated 3,127 and spread 1,835 tokens/s, so the heterogeneity cost is about −1,290 (the median of the paired gaps); concentrated 3,127 against 3,577 at 1 slot, so the registered-slot cost is −450."
+      "plain": "**Concentrated** regime: all load on one adapter. **Spread**: round-robin over all N. **Heterogeneity cost** at N = spread minus concentrated, in the same start. **Registered-slot cost** = concentrated at N minus concentrated at 1 slot, across starts: what slots cost when one adapter still carries all the load. At 64 slots: −1,290 (median of the paired gaps) and −450 (3,127 against 3,577 at 1 slot)."
     },
     {
       "id": "knee",
@@ -82,6 +82,95 @@
       "plain": "Per start: (synthetic − real) / real for TTFT p50 and throughput. **Pass**: the median's 90% interval lies inside ±5% for both. **Resolution check**: the second real phase against the first must also fit ±5%; if not, the gate cannot resolve its own ±5% margin, so the verdict is **inconclusive**, not pass. Resolved but not inside: **fail**."
     }
   ],
+  "walkthrough": {
+    "title": "What holding and mixing adapters each cost",
+    "lead": "Follow one RTX 4090 server start: slots are registered, then used, then the sweep climbs. Watch what moves when slots are only held, and what moves when they are all in the batch.",
+    "registers": [
+      {
+        "id": "slots",
+        "label": "GPU slots held"
+      },
+      {
+        "id": "batch",
+        "label": "Adapters in the batch"
+      },
+      {
+        "id": "slices",
+        "label": "LoRA slices launched"
+      },
+      {
+        "id": "kv",
+        "label": "KV tokens: room/used"
+      },
+      {
+        "id": "tps",
+        "label": "Throughput, tokens/s"
+      }
+    ],
+    "steps": [
+      {
+        "say": "One slot, one adapter, 64 requests in flight: the baseline. Every adapter here sits resident in a GPU slot; none is swapped in from CPU memory (`max_cpu_loras` = `max_loras` = N).",
+        "values": {
+          "slots": "1",
+          "batch": "1",
+          "slices": "2 (1 working)",
+          "kv": "78,208 / ~2,048",
+          "tps": "3,577"
+        }
+      },
+      {
+        "say": "Register 64 [slots](a5:slots) but keep sending all traffic to one adapter. Buffers eat KV room, yet 64 requests use only ~2,048 tokens of it. The kernels launch 65 slices (vLLM 0.27.1 source, may differ).",
+        "values": {
+          "slots": "64",
+          "slices": "65 (1 working)",
+          "kv": "42,864 / ~2,048",
+          "tps": "3,127"
+        },
+        "decision": "memory"
+      },
+      {
+        "say": "Now spread: each request uses its own adapter. The base multiply stays one shared pass, but each adapter's weights are read for one row: 64 small multiplications, not one larger. [Mixing](a5:twocosts) costs about 1,290.",
+        "values": {
+          "batch": "64",
+          "slices": "65 (64 working)",
+          "tps": "1,835"
+        },
+        "decision": "regimes"
+      },
+      {
+        "say": "Back to the sweep, every registered adapter active. At 8 slots the loss against 4 slots is 5.3%, under the 10% threshold.",
+        "values": {
+          "slots": "8",
+          "batch": "8",
+          "slices": "9 (8 working)",
+          "kv": "74,288 / ~2,048",
+          "tps": "3,260"
+        }
+      },
+      {
+        "say": "At 16 slots the loss against 8 is 1 − 2,911 / 3,260 = 10.7%: the first doubling past 10%. Its interval, 9.2% to 11.5%, does not clear 10%, so [the knee](a5:knee) is unresolved.",
+        "values": {
+          "slots": "16",
+          "batch": "16",
+          "slices": "17 (16 working)",
+          "kv": "69,968 / ~2,048",
+          "tps": "2,911"
+        },
+        "decision": "knee"
+      },
+      {
+        "say": "The knee lies between 8 and 16, so the slot bound is 8, the last size under the threshold. It is a floor, with every adapter resident, not a customer count. Memory would allow 250 tenants; throughput, 1,784.",
+        "values": {
+          "slots": "8",
+          "batch": "8",
+          "slices": "9 (8 working)",
+          "kv": "74,288 / ~2,048",
+          "tps": "3,260"
+        }
+      }
+    ],
+    "takeaway": "Holding 64 slots costs 450 tokens/s; mixing 64 adapters in one batch costs about 1,290, 2.87 times more. Splitting the batch by adapter fits that cost, but only its size was measured, not its breakdown."
+  },
   "views": [
     {
       "level": "context",
@@ -568,7 +657,7 @@
         "Three parts: heterogeneity cost, registered-slot cost, and memory as a capacity ceiling"
       ],
       "chosen": "Three parts: heterogeneity cost, registered-slot cost, and memory as a capacity ceiling",
-      "why": "64 requests in flight need about 2,048 tokens of KV against at least 42,864, so the scheduler never waits for memory and its effect on latency is zero by construction. The LoRA kernels launch `max_loras + 1` slices whatever the batch holds (65 at 64 slots, 2 at 1; read from the vLLM 0.27.1 source, may differ in other versions), so the one-adapter slope is named the registered-slot cost, never memory. Memory becomes tenants instead, through Little's law.",
+      "why": "64 requests need about 2,048 tokens of KV against at least 42,864, so memory never delays the scheduler. The LoRA kernels launch `max_loras + 1` slices whatever the batch holds (vLLM 0.27.1 source, may differ in other versions), so the one-adapter slope is the registered-slot cost, never memory. Memory becomes tenants instead, through Little's law.",
       "cost": "The diagnostic ran out of GPU memory during CUDA-graph capture at 64 slots, at budgets 0.85 and 0.80: it asked for 4.5 times as many graphs. It was cut before the first measured run and H4 withdrawn, so −450 tokens/s stays unsplit between the launch grid, host-side bookkeeping or anything else that scales with slots.",
       "why_short": "KV never fills at this request shape, and the slot cost is kernel overhead, so calling either one memory would mislabel it.",
       "cost_short": "The diagnostic that would split the slot cost ran out of memory and was cut; −450 tokens/s stays unsplit.",
@@ -1104,7 +1193,7 @@
         "note": "Whiskers: 95% bootstrap interval of the ratio of medians. A crossing is resolved when the whole whisker clears the line: at 32 and 64, not at 16."
       },
       "axis": "Measured: m(N) = 1 − T(N) / T(N/2), with T the spread regime's median throughput (every registered adapter active).",
-      "read_as": "The first point above the line is 16, so the knee lies between 8 and 16 and the slot bound is 8. The point at 16 crosses; its whisker, 9.2 to 11.5, does not clear 10%.",
+      "read_as": "The first point above the line is 16: the knee lies between 8 and 16, slot bound 8. Its whisker, 9.2 to 11.5, does not clear 10%.",
       "so": "knee",
       "takeaway": "Past about 8 co-active adapters each doubling costs more than a tenth of the GPU's throughput, by a rule fixed before the first measured run; the first crossing is not resolved.",
       "arithmetic": "At 16: 1 − 2,911 / 3,260 = 10.7%. Rounded to one decimal, the 2-slot whisker's low end is 0.0 (0.03%)."
@@ -1323,7 +1412,7 @@
       },
       {
         "q": "If memory isn't the cost, why does KV capacity fall 45%?",
-        "a": "Each slot's weight buffers take memory the KV cache would use: 78,208 tokens at 1 slot, 42,864 at 64. But a request here holds 29 tokens, two 16-token blocks, so 64 in flight use about 2,048; the scheduler never waits for KV. Memory matters as capacity: at an 8,192-token context the cache holds 9 requests at 8 slots, a bound of 250 tenants, and for long contexts it would bind before throughput. That bound is generous: it uses the 29-token requests' time in system."
+        "a": "Each slot's weight buffers take memory the KV cache would use (78,208 tokens at 1 slot, 42,864 at 64). But 64 requests of 29 tokens use about 2,048; the scheduler never waits for KV. Memory matters as capacity: at an 8,192-token context the cache holds 9 requests at 8 slots, a bound of 250 tenants, and for long contexts it would bind before throughput. That bound is generous: it uses the 29-token requests' time in system."
       },
       {
         "q": "What would you do differently?",
@@ -1339,11 +1428,11 @@
     },
     {
       "q": "Why does a batch spanning 64 adapters cost more than one sharing an adapter?",
-      "a": "Each row needs its own adapter's pair of matrices: the kernel splits the batch, reads 64 sets of weights per projection per step instead of one, and does 64 small multiplications instead of one larger one, at every layer of every decode step. That is how the kernels are organised; the campaign measured the cost's size, not its breakdown."
+      "a": "The kernel splits the batch by adapter: 64 sets of weights read per projection per step instead of one, and 64 small multiplications instead of one larger (see How it works). The campaign measured the cost's size, not its breakdown."
     },
     {
       "q": "Why does the one-adapter regime slow down too as slots grow, and why is that not memory?",
-      "a": "One known slot-proportional cost: the LoRA kernels launch `max_loras + 1` slices whatever the batch holds; empty slots' slices exit early but are launched (65 at 64 slots, 2 at 1), as read from the vLLM 0.27.1 source; other versions may differ. KV never binds at 29-token requests, so memory cannot be it. How much the launch grid explains is unmeasured: the diagnostic was cut."
+      "a": "The LoRA kernels launch `max_loras + 1` slices whatever the batch holds; empty slots' slices exit early but are launched (65 at 64 slots, 2 at 1; vLLM 0.27.1 source, may differ). KV never binds at 29-token requests. How much the launch grid explains is unmeasured: the diagnostic was cut."
     },
     {
       "q": "Why is the heterogeneity cost paired within a start, and the registered-slot cost not?",
