@@ -716,7 +716,7 @@
       ],
       "chosen": "Postgres first in every mode; `before_kafka_commit` placed per mode, for K after `sendOffsetsToTransaction`",
       "why": "Postgres first is the common order; the reverse trades duplicates for losses, which the post states by reasoning and does not measure. At the first draft's hook K had no broker-side transaction, so K and N ran the same code path; the review moved it. Now every stack is hit with the ledger committed and Kafka's progress not.",
-      "cost": "Results hold for this commit order only: a reader whose Postgres commits after Kafka is outside what is measured. K's commit step also carries Kafka's default ~100 ms `CONCURRENT_TRANSACTIONS` retry in about two-thirds of transactions (reconnaissance); it is left as is, named, and lengthens the window H5 measures.",
+      "cost": "Results hold for this commit order only: a reader whose Postgres commits after Kafka is outside what is measured. K's commit step also carries Kafka's default ~100 ms `CONCURRENT_TRANSACTIONS` retry (reconnaissance; rates in How it works); it is left as is, named, and lengthens the window H5 measures.",
       "why_short": "The common order, and one state for every stack at the hook: ledger committed, Kafka progress not; for K, a real open transaction.",
       "cost_short": "Kafka-first consumers are outside what is measured; K keeps Kafka's default ~100 ms commit retry.",
       "short": "Postgres first, one state at the hook",
@@ -1865,11 +1865,11 @@
     "followups": [
       {
         "q": "Do your consumers commit the database before or after Kafka, and what does that do to your duplicate rate under crashes?",
-        "a": "Postgres first, then Kafka's progress, in every stack. A crash between the two leaves the ledger committed and the offset not, so the batch is redelivered and applied again unless the sink checks a key; the gate showed it on N, the record at (1, 646) applied again 10.1 s later. Kafka first trades duplicates for losses; that I state by reasoning, not measurement. How often a random crash lands in the window depends on the time spent there: H5 predicts K spends more, and reconnaissance saw about two-thirds of K's offset commits retried after ~100 ms. The campaign will measure the rates."
+        "a": "Postgres first, then Kafka's progress, in every stack. A crash between the two leaves the ledger committed and the offset not, so the batch is redelivered and applied again unless the sink checks a key; the gate showed it on N, the record at (1, 646) applied again 10.1 s later. Kafka first trades duplicates for losses; that I state by reasoning, not measurement. How often a random crash lands in the window depends on the time spent there: H5 predicts K spends more, because of the ~100 ms commit retry reconnaissance saw (How it works, step 3). The campaign will measure the rates."
       },
       {
         "q": "Kafka has exactly-once. Why doesn't K solve it?",
-        "a": "A Kafka transaction commits Kafka partitions and consumer offsets atomically; Postgres is not a participant, and KIP-939, two-phase commit with external participants, had not shipped as of October 2026 (its code was reverted for Kafka 4.2). By the documented semantics, killing K after its Postgres commit and before `commitTransaction` makes `initTransactions` abort the transaction on restart and redeliver the batch; the Postgres commit stands. H1 predicts duplicates in at least 8 of 10 such trials, and in the zombie cell; the campaign will say."
+        "a": "A Kafka transaction commits Kafka partitions and consumer offsets atomically; Postgres is not a participant, and KIP-939, two-phase commit with external participants, had not shipped as of October 2026 (its code was reverted for Kafka 4.2). By the documented semantics, a kill after K's Postgres commit and before `commitTransaction` ends in an abort, a redelivery and a second Postgres commit (How it works). H1 predicts duplicates in at least 8 of 10 such trials, and in the zombie cell; the campaign will say."
       },
       {
         "q": "Why not store offsets in Postgres in the same transaction?",
@@ -1897,7 +1897,7 @@
     },
     {
       "q": "Where does the commit-window hook sit for K, and why not before the Kafka work?",
-      "a": "After the Postgres commit, the payments-applied sends and `sendOffsetsToTransaction`, before `commitTransaction`. `beginTransaction()` is client-local, so earlier the broker has no transaction and K would run N's code path."
+      "a": "After the Postgres commit, the payments-applied sends and `sendOffsetsToTransaction`, before `commitTransaction`. Earlier the broker has no transaction yet (How it works, step 1), so K would run N's code path."
     },
     {
       "q": "In `gate_cons_1`, what tells the checker the duplicate was born on the consumer side?",

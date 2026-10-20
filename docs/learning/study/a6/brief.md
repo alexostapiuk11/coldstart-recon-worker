@@ -176,7 +176,7 @@ Trial `gate_cons_1`, a positive control on N in cell F4-con-t, as `docs/gate.md`
 
 **Why:** Postgres first is the common order; the reverse trades duplicates for losses, which the post states by reasoning and does not measure. At the first draft's hook K had no broker-side transaction, so K and N ran the same code path; the review moved it. Now every stack is hit with the ledger committed and Kafka's progress not.
 
-**Cost:** Results hold for this commit order only: a reader whose Postgres commits after Kafka is outside what is measured. K's commit step also carries Kafka's default ~100 ms `CONCURRENT_TRANSACTIONS` retry in about two-thirds of transactions (reconnaissance); it is left as is, named, and lengthens the window H5 measures.
+**Cost:** Results hold for this commit order only: a reader whose Postgres commits after Kafka is outside what is measured. K's commit step also carries Kafka's default ~100 ms `CONCURRENT_TRANSACTIONS` retry (reconnaissance; rates in How it works); it is left as is, named, and lengthens the window H5 measures.
 
 ### One failure policy for every mode: crash-only
 
@@ -451,9 +451,9 @@ Milestones: 4. Reconnaissance A: rate, VM, K's commit step (2026-10-08 to 10-10 
 **Hard follow-ups:**
 
 - Q: Do your consumers commit the database before or after Kafka, and what does that do to your duplicate rate under crashes?
-  A: Postgres first, then Kafka's progress, in every stack. A crash between the two leaves the ledger committed and the offset not, so the batch is redelivered and applied again unless the sink checks a key; the gate showed it on N, the record at (1, 646) applied again 10.1 s later. Kafka first trades duplicates for losses; that I state by reasoning, not measurement. How often a random crash lands in the window depends on the time spent there: H5 predicts K spends more, and reconnaissance saw about two-thirds of K's offset commits retried after ~100 ms. The campaign will measure the rates.
+  A: Postgres first, then Kafka's progress, in every stack. A crash between the two leaves the ledger committed and the offset not, so the batch is redelivered and applied again unless the sink checks a key; the gate showed it on N, the record at (1, 646) applied again 10.1 s later. Kafka first trades duplicates for losses; that I state by reasoning, not measurement. How often a random crash lands in the window depends on the time spent there: H5 predicts K spends more, because of the ~100 ms commit retry reconnaissance saw (How it works, step 3). The campaign will measure the rates.
 - Q: Kafka has exactly-once. Why doesn't K solve it?
-  A: A Kafka transaction commits Kafka partitions and consumer offsets atomically; Postgres is not a participant, and KIP-939, two-phase commit with external participants, had not shipped as of October 2026 (its code was reverted for Kafka 4.2). By the documented semantics, killing K after its Postgres commit and before `commitTransaction` makes `initTransactions` abort the transaction on restart and redeliver the batch; the Postgres commit stands. H1 predicts duplicates in at least 8 of 10 such trials, and in the zombie cell; the campaign will say.
+  A: A Kafka transaction commits Kafka partitions and consumer offsets atomically; Postgres is not a participant, and KIP-939, two-phase commit with external participants, had not shipped as of October 2026 (its code was reverted for Kafka 4.2). By the documented semantics, a kill after K's Postgres commit and before `commitTransaction` ends in an abort, a redelivery and a second Postgres commit (How it works). H1 predicts duplicates in at least 8 of 10 such trials, and in the zombie cell; the campaign will say.
 - Q: Why not store offsets in Postgres in the same transaction?
   A: It is correct, Kafka's docs recommend it, and it guards the consumer side as I does; as a fifth arm it would break the one-change contrasts. It deduplicates by (partition, offset), though, and an outbox relay's re-send lands at a new offset, so it would not catch O+I's relay duplicates. Only a key carried from the origin catches those.
 - Q: How do you know a zero isn't a blind checker, or a fault that never happened?
@@ -470,7 +470,7 @@ Milestones: 4. Reconnaissance A: rate, VM, K's commit step (2026-10-08 to 10-10 
 - Q: Under F4-svc, how does a dual-write stack lose a payment, and why should O+I not?
   A: The service commits the source row, is killed before sending, and the payment never reaches the topic: a loss with a topic gap, born on the producer side. O+I writes the outbox row in the same commit, and the relay publishes it later.
 - Q: Where does the commit-window hook sit for K, and why not before the Kafka work?
-  A: After the Postgres commit, the payments-applied sends and `sendOffsetsToTransaction`, before `commitTransaction`. `beginTransaction()` is client-local, so earlier the broker has no transaction and K would run N's code path.
+  A: After the Postgres commit, the payments-applied sends and `sendOffsetsToTransaction`, before `commitTransaction`. Earlier the broker has no transaction yet (How it works, step 1), so K would run N's code path.
 - Q: In `gate_cons_1`, what tells the checker the duplicate was born on the consumer side?
   A: The extra apply has the same (partition, offset), (1, 646), as the first: a redelivery. A different offset for the same payment would mean a re-send, born on the producer side.
 - Q: Why pair random-time cells with targeted cells?
