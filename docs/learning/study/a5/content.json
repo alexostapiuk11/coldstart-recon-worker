@@ -84,7 +84,7 @@
   ],
   "walkthrough": {
     "title": "What holding and mixing adapters each cost",
-    "lead": "Follow one RTX 4090 server start: slots are registered, then used, then the sweep climbs. Watch what moves when slots are only held, and what moves when they are all in the batch.",
+    "lead": "Numbers from several server starts on one RTX 4090 (each slot count is its own start). Watch what moves when slots are only held, and what moves when they are all in the batch.",
     "registers": [
       {
         "id": "slots",
@@ -96,7 +96,7 @@
       },
       {
         "id": "slices",
-        "label": "LoRA slices launched"
+        "label": "LoRA slices (0.27.1)"
       },
       {
         "id": "kv",
@@ -129,7 +129,7 @@
         "decision": "memory"
       },
       {
-        "say": "Now spread: each request uses its own adapter. The base multiply stays one shared pass, but each adapter's weights are read for one row: 64 small multiplications, not one larger. [Mixing](a5:twocosts) costs about 1,290.",
+        "say": "Now spread: each request uses its own adapter. With the kernels organised by adapter (consistent with the data, not measured), that is 64 small multiplications, not one larger. [Mixing](a5:twocosts) costs about 1,290.",
         "values": {
           "batch": "64",
           "slices": "65 (64 working)",
@@ -138,7 +138,7 @@
         "decision": "regimes"
       },
       {
-        "say": "Back to the sweep, every registered adapter active. At 8 slots the loss against 4 slots is 5.3%, under the 10% threshold.",
+        "say": "Back to the sweep, spread regime, every registered adapter active. At 8 slots the loss against 4 slots is 5.3%, under the 10% threshold.",
         "values": {
           "slots": "8",
           "batch": "8",
@@ -148,7 +148,7 @@
         }
       },
       {
-        "say": "At 16 slots the loss against 8 is 1 − 2,911 / 3,260 = 10.7%: the first doubling past 10%. Its interval, 9.2% to 11.5%, does not clear 10%, so [the knee](a5:knee) is unresolved.",
+        "say": "At 16 slots the loss against 8 is 1 − 2,911 / 3,260 = 10.7%: the first doubling past 10%. Its interval, 9.2% to 11.5%, does not clear 10%, so the crossing is unresolved; [the knee](a5:knee) rule uses the point estimate.",
         "values": {
           "slots": "16",
           "batch": "16",
@@ -159,7 +159,7 @@
         "decision": "knee"
       },
       {
-        "say": "The knee lies between 8 and 16, so the slot bound is 8, the last size under the threshold. It is a floor, with every adapter resident, not a customer count. Memory would allow 250 tenants; throughput, 1,784.",
+        "say": "The knee lies between 8 and 16, so the bound is 8. A floor: 8 adapters active in one batch at 64 in flight, all resident; CPU swapping not measured. Not a customer count.",
         "values": {
           "slots": "8",
           "batch": "8",
@@ -657,7 +657,7 @@
         "Three parts: heterogeneity cost, registered-slot cost, and memory as a capacity ceiling"
       ],
       "chosen": "Three parts: heterogeneity cost, registered-slot cost, and memory as a capacity ceiling",
-      "why": "64 requests need about 2,048 tokens of KV against at least 42,864, so memory never delays the scheduler. The LoRA kernels launch `max_loras + 1` slices whatever the batch holds (vLLM 0.27.1 source, may differ in other versions), so the one-adapter slope is the registered-slot cost, never memory. Memory becomes tenants instead, through Little's law.",
+      "why": "64 requests (29 tokens each, in two 16-token blocks) need about 2,048 tokens of KV against at least 42,864, so memory never delays the scheduler. The LoRA kernels launch `max_loras + 1` slices whatever the batch holds (vLLM 0.27.1 source, may differ in other versions), so the one-adapter slope is the registered-slot cost, never KV capacity. Memory becomes tenants instead, through Little's law.",
       "cost": "The diagnostic ran out of GPU memory during CUDA-graph capture at 64 slots, at budgets 0.85 and 0.80: it asked for 4.5 times as many graphs. It was cut before the first measured run and H4 withdrawn, so −450 tokens/s stays unsplit between the launch grid, host-side bookkeeping or anything else that scales with slots.",
       "why_short": "KV never fills at this request shape, and the slot cost is kernel overhead, so calling either one memory would mislabel it.",
       "cost_short": "The diagnostic that would split the slot cost ran out of memory and was cut; −450 tokens/s stays unsplit.",
@@ -1412,7 +1412,7 @@
       },
       {
         "q": "If memory isn't the cost, why does KV capacity fall 45%?",
-        "a": "Each slot's weight buffers take memory the KV cache would use (78,208 tokens at 1 slot, 42,864 at 64). But 64 requests of 29 tokens use about 2,048; the scheduler never waits for KV. Memory matters as capacity: at an 8,192-token context the cache holds 9 requests at 8 slots, a bound of 250 tenants, and for long contexts it would bind before throughput. That bound is generous: it uses the 29-token requests' time in system."
+        "a": "Each slot's weight buffers take memory the KV cache would use (78,208 tokens at 1 slot, 42,864 at 64). But 64 requests of 29 tokens use about 2,048 (two 16-token blocks each); the scheduler never waits for KV. Memory matters as capacity: at an 8,192-token context the cache holds 9 requests at 8 slots, a bound of 250 tenants, and for long contexts it would bind before throughput. That bound is generous: it uses the 29-token requests' time in system."
       },
       {
         "q": "What would you do differently?",
@@ -1428,7 +1428,7 @@
     },
     {
       "q": "Why does a batch spanning 64 adapters cost more than one sharing an adapter?",
-      "a": "The kernel splits the batch by adapter: 64 sets of weights read per projection per step instead of one, and 64 small multiplications instead of one larger (see How it works). The campaign measured the cost's size, not its breakdown."
+      "a": "If the kernels split the batch by adapter (vLLM 0.27.1 source, not measured here), that is 64 sets of weights read per projection per step instead of one, and 64 small multiplications instead of one larger (see How it works). The campaign measured the cost's size, not its breakdown."
     },
     {
       "q": "Why does the one-adapter regime slow down too as slots grow, and why is that not memory?",

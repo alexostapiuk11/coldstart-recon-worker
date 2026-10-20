@@ -30,16 +30,16 @@ Read first: LLM serving on a GPU (P1), How these experiments earn trust (P2).
 
 ## How it works
 
-Follow one RTX 4090 server start: slots are registered, then used, then the sweep climbs. Watch what moves when slots are only held, and what moves when they are all in the batch.
+Numbers from several server starts on one RTX 4090 (each slot count is its own start). Watch what moves when slots are only held, and what moves when they are all in the batch.
 
-| Step | What happens | GPU slots held | Adapters in the batch | LoRA slices launched | KV tokens: room/used | Throughput, tokens/s |
+| Step | What happens | GPU slots held | Adapters in the batch | LoRA slices (0.27.1) | KV tokens: room/used | Throughput, tokens/s |
 |---|---|---|---|---|---|---|
 | 1 | One slot, one adapter, 64 requests in flight: the baseline. Every adapter here sits resident in a GPU slot; none is swapped in from CPU memory (`max_cpu_loras` = `max_loras` = N). | 1 | 1 | 2 (1 working) | 78,208 / ~2,048 | 3,577 |
 | 2 | Register 64 slots but keep sending all traffic to one adapter. Buffers eat KV room, yet 64 requests use only ~2,048 tokens of it. The kernels launch 65 slices (vLLM 0.27.1 source, may differ). (Decision: Report memory as capacity; name the slot cost) | **64** | 1 | **65 (1 working)** | **42,864 / ~2,048** | **3,127** |
-| 3 | Now spread: each request uses its own adapter. The base multiply stays one shared pass, but each adapter's weights are read for one row: 64 small multiplications, not one larger. Mixing costs about 1,290. (Decision: Separate the two counts by traffic, inside one start) | 64 | **64** | **65 (64 working)** | 42,864 / ~2,048 | **1,835** |
-| 4 | Back to the sweep, every registered adapter active. At 8 slots the loss against 4 slots is 5.3%, under the 10% threshold. | **8** | **8** | **9 (8 working)** | **74,288 / ~2,048** | **3,260** |
-| 5 | At 16 slots the loss against 8 is 1 − 2,911 / 3,260 = 10.7%: the first doubling past 10%. Its interval, 9.2% to 11.5%, does not clear 10%, so the knee is unresolved. (Decision: A knee rule that errs toward fewer tenants) | **16** | **16** | **17 (16 working)** | **69,968 / ~2,048** | **2,911** |
-| 6 | The knee lies between 8 and 16, so the slot bound is 8, the last size under the threshold. It is a floor, with every adapter resident, not a customer count. Memory would allow 250 tenants; throughput, 1,784. | **8** | **8** | **9 (8 working)** | **74,288 / ~2,048** | **3,260** |
+| 3 | Now spread: each request uses its own adapter. With the kernels organised by adapter (consistent with the data, not measured), that is 64 small multiplications, not one larger. Mixing costs about 1,290. (Decision: Separate the two counts by traffic, inside one start) | 64 | **64** | **65 (64 working)** | 42,864 / ~2,048 | **1,835** |
+| 4 | Back to the sweep, spread regime, every registered adapter active. At 8 slots the loss against 4 slots is 5.3%, under the 10% threshold. | **8** | **8** | **9 (8 working)** | **74,288 / ~2,048** | **3,260** |
+| 5 | At 16 slots the loss against 8 is 1 − 2,911 / 3,260 = 10.7%: the first doubling past 10%. Its interval, 9.2% to 11.5%, does not clear 10%, so the crossing is unresolved; the knee rule uses the point estimate. (Decision: A knee rule that errs toward fewer tenants) | **16** | **16** | **17 (16 working)** | **69,968 / ~2,048** | **2,911** |
+| 6 | The knee lies between 8 and 16, so the bound is 8. A floor: 8 adapters active in one batch at 64 in flight, all resident; CPU swapping not measured. Not a customer count. | **8** | **8** | **9 (8 working)** | **74,288 / ~2,048** | **3,260** |
 
 Bold cells changed in that step.
 
@@ -159,7 +159,7 @@ Steps 1 and 8 run on the laptop, 2 to 7 in the rented container. The regimes dif
 
 **Chosen:** Three parts: heterogeneity cost, registered-slot cost, and memory as a capacity ceiling
 
-**Why:** 64 requests need about 2,048 tokens of KV against at least 42,864, so memory never delays the scheduler. The LoRA kernels launch `max_loras + 1` slices whatever the batch holds (vLLM 0.27.1 source, may differ in other versions), so the one-adapter slope is the registered-slot cost, never memory. Memory becomes tenants instead, through Little's law.
+**Why:** 64 requests (29 tokens each, in two 16-token blocks) need about 2,048 tokens of KV against at least 42,864, so memory never delays the scheduler. The LoRA kernels launch `max_loras + 1` slices whatever the batch holds (vLLM 0.27.1 source, may differ in other versions), so the one-adapter slope is the registered-slot cost, never KV capacity. Memory becomes tenants instead, through Little's law.
 
 **Cost:** The diagnostic ran out of GPU memory during CUDA-graph capture at 64 slots, at budgets 0.85 and 0.80: it asked for 4.5 times as many graphs. It was cut before the first measured run and H4 withdrawn, so −450 tokens/s stays unsplit between the launch grid, host-side bookkeeping or anything else that scales with slots.
 
@@ -431,7 +431,7 @@ Milestones: 4. Pre-register the rules (2026-10-05 00:29 (−07:00)); 5. Prime th
 - Q: Can I say one GPU serves 8 customers?
   A: Not as a capacity claim, and the post says so next to the headline. The 8 counts adapters active in the same batch at 64 in flight, all resident, so it is a floor on tenants; real counts depend on how often customers overlap, which wasn't measured. Even as a floor it is not firm: the 8-to-16 doubling loses 10.7%, interval 9.2% to 11.5%, so the point crosses 10% and the interval does not clear it. If that is noise the bound is 16 and the cost per tenant halves; the rule was registered to err toward fewer. And only all-resident adapters were run, while vLLM can hold more in CPU memory and swap them into slots.
 - Q: If memory isn't the cost, why does KV capacity fall 45%?
-  A: Each slot's weight buffers take memory the KV cache would use (78,208 tokens at 1 slot, 42,864 at 64). But 64 requests of 29 tokens use about 2,048; the scheduler never waits for KV. Memory matters as capacity: at an 8,192-token context the cache holds 9 requests at 8 slots, a bound of 250 tenants, and for long contexts it would bind before throughput. That bound is generous: it uses the 29-token requests' time in system.
+  A: Each slot's weight buffers take memory the KV cache would use (78,208 tokens at 1 slot, 42,864 at 64). But 64 requests of 29 tokens use about 2,048 (two 16-token blocks each); the scheduler never waits for KV. Memory matters as capacity: at an 8,192-token context the cache holds 9 requests at 8 slots, a bound of 250 tenants, and for long contexts it would bind before throughput. That bound is generous: it uses the 29-token requests' time in system.
 - Q: What would you do differently?
   A: Build the failure-streak stop before the first paid run: without it, one bad host consumed 52 gate starts. Size the gate for its resolution check, not only its main interval: an earlier 72-start sizing left the check out, and the pilot's 24 could not resolve ±5% through phase-to-phase TTFT noise. Then the sequels the post names: rank as a variable, and resident versus swapped adapters, which turns the lower bound on tenants into a measurement.
 
@@ -442,7 +442,7 @@ Milestones: 4. Pre-register the rules (2026-10-05 00:29 (−07:00)); 5. Prime th
 - Q: In vLLM 0.27.1, what two things does `max_loras` set, and why does that force two traffic regimes?
   A: The number of GPU slots and the cap on distinct adapters per batch. With `max_cpu_loras` = `max_loras` = N, configuration cannot change the active count while holding the registered count, so traffic does: one adapter or all N, in the same start.
 - Q: Why does a batch spanning 64 adapters cost more than one sharing an adapter?
-  A: The kernel splits the batch by adapter: 64 sets of weights read per projection per step instead of one, and 64 small multiplications instead of one larger (see How it works). The campaign measured the cost's size, not its breakdown.
+  A: If the kernels split the batch by adapter (vLLM 0.27.1 source, not measured here), that is 64 sets of weights read per projection per step instead of one, and 64 small multiplications instead of one larger (see How it works). The campaign measured the cost's size, not its breakdown.
 - Q: Why does the one-adapter regime slow down too as slots grow, and why is that not memory?
   A: The LoRA kernels launch `max_loras + 1` slices whatever the batch holds; empty slots' slices exit early but are launched (65 at 64 slots, 2 at 1; vLLM 0.27.1 source, may differ). KV never binds at 29-token requests. How much the launch grid explains is unmeasured: the diagnostic was cut.
 - Q: Why is the heterogeneity cost paired within a start, and the registered-slot cost not?
