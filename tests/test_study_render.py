@@ -2750,3 +2750,145 @@ def test_walkthrough_numbers_are_traced_like_other_text(tmp_path):
         ["1234", "22.75", "5678", "4.5", "9001", "77.7"])
     u["derived_numbers"] = [{"value": "4.5", "how": "invented"}]
     assert "4.5" not in untraced_numbers(u)
+
+
+# ---- core and collapsed decision cards ----
+
+def _dec_cards(page):
+    """{decision id: card html} for the Core decisions section."""
+    sec = page.split('<section id="decisions">')[1].split("</section>")[0]
+    parts = re.split(r'(?=<div class="card[^"]*" id="d-)', sec)[1:]
+    return {re.search(r'id="d-([^"]+)"', p).group(1): p for p in parts}
+
+
+def _all_core_unit():
+    u = artifact_unit_with_walkthrough()
+    for step, d in zip(u["walkthrough"]["steps"], ["d0", "d1", "d2", "d3"]):
+        step["decision"] = d
+    return u
+
+
+def _legacy_card(d):
+    """The decision card exactly as it was rendered before cards could collapse."""
+    return (
+        f'<div class="card" id="d-{d["id"]}"><h3>{d["title"]}</h3>'
+        f'<div class="row"><b>Problem</b><div>{d["problem"]}</div></div>'
+        f'<div class="row"><b>Options</b><div>'
+        + "".join(f'<span class="opt{" chosen" if o == d["chosen"] else ""}">{o}</span>'
+                  for o in d["options"]) + '</div></div>'
+        f'<div class="row"><b>Because</b><div>{d["why_short"]}</div></div>'
+        f'<div class="row cost"><b>Cost</b><div>{d["cost_short"]}</div></div>'
+        '<details class="more"><summary>Full reasoning and cost</summary>'
+        f'<div class="row"><b>Because</b><div>{d["why"]}</div></div>'
+        f'<div class="row cost"><b>Cost</b><div>{d["cost"]}</div></div></details></div>')
+
+
+def test_without_a_walkthrough_the_first_three_decisions_are_core():
+    cards = _dec_cards(render_page(artifact_unit()))
+    assert list(cards) == ["d0", "d1", "d2", "d3"]
+    for k in ("d0", "d1", "d2"):
+        assert 'class="card minor"' not in cards[k] and "Problem, options" not in cards[k]
+    assert 'class="card minor"' in cards["d3"]
+
+
+def test_a_walkthrough_with_no_decision_step_falls_back_to_the_first_three():
+    u = artifact_unit_with_walkthrough()
+    for s in u["walkthrough"]["steps"]:
+        s.pop("decision", None)
+    cards = _dec_cards(render_page(u))
+    assert [k for k, v in cards.items() if "minor" in v.split(">")[0]] == ["d3"]
+
+
+def test_decisions_named_by_walkthrough_steps_are_the_core_ones():
+    cards = _dec_cards(render_page(artifact_unit_with_walkthrough()))  # step 4 names d1
+    assert [k for k, v in cards.items() if "minor" not in v.split(">")[0]] == ["d1"]
+    u = artifact_unit_with_walkthrough()
+    u["walkthrough"]["steps"][0]["decision"] = "d3"
+    cards = _dec_cards(render_page(u))
+    assert [k for k, v in cards.items() if "minor" not in v.split(">")[0]] == ["d1", "d3"]
+
+
+def test_core_card_is_byte_identical_to_the_old_card_and_an_all_core_section_is_unchanged():
+    u = _all_core_unit()
+    page = render_page(u)
+    assert 'class="card minor"' not in page and "Problem, options, cost and links" not in page
+    sec = page.split('<section id="decisions">')[1].split("</section>")[0]
+    assert sec == ('<h2>Core decisions</h2><div class="grid2">'
+                   + "".join(_legacy_card(d) for d in u["decisions"]) + "</div>")
+
+
+def test_collapsed_card_shows_badge_title_chosen_option_and_short_because_only():
+    u = artifact_unit_with_links()
+    u["decisions"][3]["chosen"] = "Option two"
+    u["decisions"][3]["why_short"] = "Short because."
+    page = render_page(u)
+    card = _dec_cards(page)["d3"]
+    assert card.startswith('<div class="card minor" id="d-d3"><h3><span class="code">D4</span>'
+                           'Decision 3</h3>')
+    shown = card.split("<details")[0]
+    assert '<span class="opt chosen">Option two</span>' in shown
+    assert "Option one" not in shown and "Short because." in shown
+    for hidden in ("Serves:", "Seen in:", "<b>Problem</b>", "<b>Options</b>", "<b>Cost</b>"):
+        assert hidden not in shown, hidden
+    assert shown.count('class="opt') == 1
+
+
+def test_collapsed_card_keeps_everything_else_in_one_details():
+    u = artifact_unit_with_links()
+    u["decisions"][3]["problem"] = "Unique problem."
+    u["decisions"][3]["cost_short"] = "Unique short cost."
+    u["decisions"][3]["why"] = "Unique long why."
+    u["decisions"][3]["cost"] = "Unique long cost."
+    card = _dec_cards(render_page(u))["d3"]
+    assert card.count("<details") == 1
+    body = card.split('<details class="more">')[1]
+    assert body.startswith("<summary>Problem, options, cost and links</summary>")
+    for part in ("Serves:", "Unique problem.", "Option one", "Option two", "Unique short cost.",
+                 "Unique long why.", "Unique long cost."):
+        assert part in body, part
+    assert "Full reasoning and cost" not in card  # one details, none nested
+    assert 'href="#req-R1"' in body  # the serves link is inside, not on show
+    assert "</details></div>" in body[-40:]
+
+
+def test_every_collapsed_card_keeps_its_anchor_id_and_code():
+    page = render_page(artifact_unit_with_links())
+    ids = re.findall(r' id="(d-[^"]+)"', page)
+    assert ids == ["d-d0", "d-d1", "d-d2", "d-d3"]
+    for i, k in enumerate(["d0", "d1", "d2", "d3"], 1):
+        assert f'<span class="code">D{i}</span>' in _dec_cards(page)[k]
+
+
+def test_hash_opening_script_ships_only_when_a_card_is_collapsed():
+    page = render_page(artifact_unit())
+    js = page.split("<script>")[1]
+    assert "card.minor" in js and "hashchange" in js and "location.hash" in js
+    assert "details" in js
+    assert "hashchange" not in render_page(_all_core_unit())
+    assert "minor" not in render_page(_all_core_unit())
+    assert ".card.minor" not in render_page(_all_core_unit()).split("<style>")[1].split("</style>")[0]
+
+
+def test_hash_opening_covers_clicks_load_and_hashchange_and_never_opens_core_reasoning():
+    js = render_page(artifact_unit()).split("<script>")[1]
+    assert "addEventListener('click'" in js and "closest('a[href^=\"#\"]')" in js
+    assert "addEventListener('hashchange'" in js
+    assert "decodeURIComponent" in js
+    assert ".minor" in js  # only a collapsed card's details is opened
+
+
+def test_collapsed_card_has_a_style_for_its_visible_part():
+    css = render_page(artifact_unit()).split("<style>")[1].split("</style>")[0]
+    assert ".card.minor" in css
+    # a long chosen option wraps, so its pill must not be fully round (it clipped the text)
+    assert ".card.minor .pick .opt{border-radius:14px" in css
+
+
+def test_collapsing_leaves_the_brief_unchanged():
+    assert render_brief(_all_core_unit()).count("**Chosen:**") == 4
+    u = artifact_unit_with_walkthrough()
+    # the brief names every decision in full whether or not the page collapses it
+    brief = render_brief(u)
+    for d in u["decisions"]:
+        assert d["title"] in brief and d["why"] in brief and d["cost"] in brief
+    assert "minor" not in brief and "Problem, options" not in brief

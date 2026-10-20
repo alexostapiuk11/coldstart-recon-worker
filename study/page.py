@@ -550,23 +550,75 @@ def _decision_links(c, ix, d):
             _links_row("Serves:", serves) + _links_row("Seen in:", seen))
 
 
+def _core_decisions(c):
+    """Ids of the decisions shown in full: those a walkthrough step names, else the first
+    three. The rest collapse (see _decisions)."""
+    named = {s["decision"] for s in c.get("walkthrough", {}).get("steps", [])
+             if s.get("decision")}
+    decisions = c.get("decisions", [])
+    if named:
+        return [d["id"] for d in decisions if d["id"] in named]
+    return [d["id"] for d in decisions[:3]]
+
+
+# Shipped only on a page that has a collapsed decision card: a link (or the address) that
+# targets one opens its details. With JS off the details simply stay closed.
+MINOR_CSS = """
+.card.minor .pick{margin:6px 0 2px}
+.card.minor .pick .opt{border-radius:14px;padding:4px 12px;margin:0}
+.card.minor .row{margin:4px 0}
+.card.minor details.more{margin-top:8px}
+"""
+
+MINOR_JS = """
+(() => {
+  const open = id => {
+    let el = null;
+    try { el = id ? document.getElementById(decodeURIComponent(id)) : null; } catch (e) {}
+    const d = el && el.matches('.card.minor') ? el.querySelector(':scope > details.more') : null;
+    if (d) d.open = true;
+  };
+  document.addEventListener('click', e => {
+    const a = e.target.closest && e.target.closest('a[href^="#"]');
+    if (a) open(a.getAttribute('href').slice(1));
+  });
+  addEventListener('hashchange', () => open(location.hash.slice(1)));
+  open(location.hash.slice(1));
+})();
+"""
+
+
 def _decisions(c):
     ix = link_index(c) if traced(c) else None
+    core = set(_core_decisions(c))
     cards = []
     for d in c["decisions"]:
         opts = "".join(
             f'<span class="opt{" chosen" if o == d["chosen"] else ""}">{inline(o)}</span>'
             for o in d["options"])
         code, rows = _decision_links(c, ix, d)
+        problem = f'<div class="row"><b>Problem</b><div>{inline(d["problem"])}</div></div>'
+        options = f'<div class="row"><b>Options</b><div>{opts}</div></div>'
+        because = f'<div class="row"><b>Because</b><div>{inline(d["why_short"])}</div></div>'
+        cost = f'<div class="row cost"><b>Cost</b><div>{inline(d["cost_short"])}</div></div>'
+        if d["id"] in core:
+            cards.append(
+                f'<div class="card" id="d-{esc(d["id"])}"><h3>{code}{esc(d["title"])}</h3>{rows}'
+                f'{problem}{options}{because}{cost}'
+                '<details class="more"><summary>Full reasoning and cost</summary>'
+                f'<div class="row"><b>Because</b><div>{inline(d["why"])}</div></div>'
+                f'<div class="row cost"><b>Cost</b><div>{inline(d["cost"])}</div></div>'
+                '</details></div>')
+            continue
+        chosen = f'<span class="opt chosen">{inline(d["chosen"])}</span>'
         cards.append(
-            f'<div class="card" id="d-{esc(d["id"])}"><h3>{code}{esc(d["title"])}</h3>{rows}'
-            f'<div class="row"><b>Problem</b><div>{inline(d["problem"])}</div></div>'
-            f'<div class="row"><b>Options</b><div>{opts}</div></div>'
-            f'<div class="row"><b>Because</b><div>{inline(d["why_short"])}</div></div>'
-            f'<div class="row cost"><b>Cost</b><div>{inline(d["cost_short"])}</div></div>'
-            '<details class="more"><summary>Full reasoning and cost</summary>'
-            f'<div class="row"><b>Because</b><div>{inline(d["why"])}</div></div>'
-            f'<div class="row cost"><b>Cost</b><div>{inline(d["cost"])}</div></div></details></div>')
+            f'<div class="card minor" id="d-{esc(d["id"])}"><h3>{code}{esc(d["title"])}</h3>'
+            f'<div class="pick">{chosen}</div>{because}'
+            '<details class="more"><summary>Problem, options, cost and links</summary>'
+            f'{rows}{problem}{options}{cost}'
+            f'<div class="row"><b>Because (full)</b><div>{inline(d["why"])}</div></div>'
+            f'<div class="row cost"><b>Cost (full)</b><div>{inline(d["cost"])}</div></div>'
+            '</details></div>')
     return (f'<section id="decisions"><h2>Core decisions</h2>'
             f'<div class="grid2">{"".join(cards)}</div></section>')
 
@@ -749,6 +801,8 @@ def render_page(c: dict) -> str:
         css += seq_css(_sequences(c))
     if c.get("walkthrough"):
         css, js = css + WT_CSS, js + WT_JS
+    if len(_core_decisions(c)) < len(c.get("decisions", [])):
+        css, js = css + MINOR_CSS, js + MINOR_JS
     if any(r["chart"]["type"] == "matrix" for r in c.get("results", [])):
         css += MATRIX_CSS
     if art:
