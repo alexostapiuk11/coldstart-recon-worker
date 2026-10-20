@@ -21,9 +21,10 @@ Read first: LLM serving on a GPU (P1), How these experiments earn trust (P2).
 
 ## Need to know first
 
+- **The control loop**: **A feedback loop with a long dead time.** A signal summarises the serving replicas' load, and every 5 s a controller may add or remove one replica. A new replica is billed at once but serves only after the cold start, so a spike builds a backlog until it arrives.
 - **The service curve**: One replica's latency, throughput and GPU utilisation at fixed numbers of requests in flight, 1 to 128, three runs each; 256 ran out of GPU memory. The simulator reads service times from it instead of modelling continuous batching (P1: batching).
 - **Little's Law**: **In flight = arrival rate × time each request spends.** At 128 in flight and 0.606 s each, one replica completes 128 / 0.606 = 211.2 req/s: the "saturation" every traffic rate here is a fraction of.
-- **Why GPU utilisation is blind here**: nvidia-smi reads 1.0 from one request upward and 0 only when idle. A utilisation autoscaler sees "fully busy" whenever a replica serves anything, so it adds replicas at every chance up to its cap: busy and drowning look the same.
+- **Why GPU utilisation is blind here**: nvidia-smi reads 1.0 from one request upward and 0 only when idle, so a utilisation autoscaler adds replicas at every chance up to its cap.
 - **Frontier, dominance and the iso-cost slice**: A **policy** is a signal plus its up and down thresholds; over 30 simulated spikes it gives a median cost (**replica-seconds**, billed from each launch) and a median per-run p99. It is **dominated** if another costs no more, has no worse p99 and is better on one; the rest are the **frontier**. The **iso-cost budget** is the cheapest spend at which every signal has a policy; the **gap** is the worst signal's p99 there minus the best's. H3: the gap at least halves from arm A to arm C, on step and ramp.
 - **The miss rule**: Per 10 s bin, each real repeat's residual is its p50 minus its own prediction. A bin **misses** when all three residuals sit on one side by more than 1 ms. With no bias each repeat is a coin flip, so a perfect model misses at most 2 × (1/2)³ = 1/4 of bins. **Pass:** at least 10 judged bins, at most half missing.
 - **Host speed**: Rented GPUs of one model are not equally fast, and RunPod picks the host. Every other host measured had 4 to 18% lower latency than the curve's, more at high load: about the size of the gate's misses (14% and 13%). A measured cause, not shown to be the whole one.
@@ -42,7 +43,7 @@ One replayed run: queue depth (up 4, down 1), arm C step spike, repetition 0. Re
 | 6 | t = 95: queue still 0, cooldown over: DOWN to one replica, with the spike still on at 253.4 req/s. A queue of 0 means enough capacity, and this rule removes the replica that made it enough. | **95** | **1** | 0 | 0 | **DOWN: remove replica 2** |
 | 7 | The backlog rebuilds: t = 125, queue 1,274, UP; t = 155, queue 2,546, UP. The first serves at about 164 s, some 69 s after the scale-down: a second cold start under overload. | **155** | 1 | **2** | **2,546** | **UP at 125 and at 155** |
 | 8 | t = 185: queue 0, so DOWN removes replica 5, still starting. t = 215, spike over (it ended at 190 s): queue 0, DOWN to one replica. | **215** | 1 | **0** | **0** | **DOWN at 185 and at 215** |
-| 9 | Cost: 400 for replica 1 plus 90 + 30 + 90 + 30 = 240 for the four launched: 640 replica-seconds; p99 11.73 s. Of 570 replayed runs, 410 make the same eight moves at the same times; all scale down before 190 s. (Decision: One controller, a grid per signal, frontiers) | **400** | 1 | 0 | 0 | **end of window** |
+| 9 | Cost: 400 for replica 1 plus 90 + 30 + 90 + 30 = 240 for the four launched: 640 replica-seconds; p99 11.73 s. Of 570 replayed runs, 410 make the same eight moves at the same times. (Decision: One controller, a grid per signal, frontiers) | **400** | 1 | 0 | 0 | **end of window** |
 
 Bold cells changed in that step.
 
@@ -52,7 +53,7 @@ Bold cells changed in that step.
 
 ### Who and what the study touches (context)
 
-RunPod is rented two ways: queue endpoints for the curve sweep, recon and host re-measurement, and a load-balancing endpoint for the probes and the validation replays; its billing API gives the spend. The cold-start lags are artifact 1's. Output: a post that leads with the failed test.
+RunPod is rented two ways, a queue endpoint and a load-balancing endpoint; its billing API gives the spend. Output: a post that leads with the failed test.
 
 - **Author**: designs, runs, publishes the failure
 - **Autoscaling study**: simulator, its gate, and RunPod probes
@@ -68,7 +69,7 @@ RunPod is rented two ways: queue endpoints for the curve sweep, recon and host r
 
 ### The runnable parts (container)
 
-Laptop drivers run every paid step and write committed evidence. The simulator is CPU-only: it reads the measured curve, the replayed arrivals and artifact 1's lags. The analysis reads only committed files.
+Laptop drivers run every paid step and write committed evidence. The analysis reads only committed files.
 
 - **Laptop drivers**: curve sweep, LB probe, validation replay
 - **Sweep worker**: one replica, 1 to 128 in flight
@@ -87,7 +88,7 @@ Laptop drivers run every paid step and write committed evidence. The simulator i
 
 ### Inside the gate: a model that must pass (component)
 
-Each real repeat is replayed into the fixed-capacity simulator at the times its engine received the requests; both sides are then binned by 10 s. In attempt two the curve is first scaled by the host's measured speed. Only the engine stamps run on the GPU worker; the rest is laptop code. Nothing is fitted to the trace.
+Each repeat is replayed into the fixed-capacity simulator at the times its engine received the requests. Only the engine stamps run on the GPU worker; the rest is laptop code. Nothing is fitted to the trace.
 
 - **Schedule builder**: one step spike, 64,784 requests
 - **Open-loop sender**: sends on the clock, whatever the server does
@@ -110,27 +111,24 @@ Each real repeat is replayed into the fixed-capacity simulator at the times its 
 
 ### One calibrated validation repeat, in order (dynamic)
 
-Steps 1 to 7 are paid, on RunPod; 8 to 10 are free, on the laptop, after all three repeats. Step 3 is attempt two's fix. The load balancer (step 5) is why the gate judges engine arrivals, not send times.
+Step 3 is attempt two's fix. The load balancer (step 5) is why the gate judges engine arrivals, not send times.
 
-- **1 Pin one worker**: workersMin 1; owner set workersMax 1
-- **2 Warm up**: 20 req/s until 30 s clean
-- **3 Calibrate the host**: hold 64, then 128 in flight
-- **4 Replay the schedule**: 64,784 requests, open loop
-- **5 LB holds, releases**: bursts reach the engine late
-- **6 Engine stamps**: arrival time, server latency
-- **7 Release, record**: workersMin back to 0; one record
-- **8 Predict this repeat**: simulate its own engine arrivals
-- **9 Bin and compare**: p50 per 10 s bin; residual per repeat
-- **10 Verdict on three**: pass: 10+ judged bins, at most half miss
-- 1 Pin one worker → 2 Warm up: worker up
-- 2 Warm up → 3 Calibrate the host: clean 30 s
-- 3 Calibrate the host → 4 Replay the schedule: two ratios
-- 4 Replay the schedule → 5 LB holds, releases: HTTP
-- 5 LB holds, releases → 6 Engine stamps: arrivals
-- 6 Engine stamps → 7 Release, record: headers
-- 7 Release, record → 8 Predict this repeat: record
-- 8 Predict this repeat → 9 Bin and compare: prediction
-- 9 Bin and compare → 10 Verdict on three: after 3 repeats
+- **Driver**: laptop
+- **Load balancer**: RunPod
+- **Engine**: vLLM, 128 running at most
+- **Simulator**: laptop
+
+1. Driver -> Load balancer: Pin one worker (workersMin 1; owner set workersMax 1)
+2. Driver -> Load balancer: Warm up (20 req/s until 30 s clean)
+3. Driver -> Load balancer: Calibrate the host (hold 64, then 128 in flight)
+4. Driver -> Load balancer: Replay the schedule (64,784 requests, open loop)
+5. Load balancer -> Engine: Holds, then releases bursts
+6. Engine -> Driver: Stamps each response (arrival time, server latency) [reply]
+7. Driver -> Load balancer: Release, record (workersMin back to 0; one record)
+   (gap: above: paid, on RunPod; below: free, laptop)
+8. Driver -> Simulator: Predict this repeat (after 3 repeats: its own engine arrivals)
+9. Note over Simulator: Bin and compare (p50 per 10 s bin; residual per repeat)
+10. Simulator -> Driver: Verdict on three (pass: 10+ judged bins, at most half miss) [reply]
 
 ## Core decisions
 
@@ -276,7 +274,7 @@ Steps 1 to 7 are paid, on RunPod; 8 to 10 are free, on the laptop, after all thr
 **Results and the decisions they support:**
 
 - The service curve: latency as load rises → `simulate` Answer in a simulator, held to a gate
-- Throughput, and the traffic set from it → `traffic` Choose the traffic by a ranking-blind rule
+- Throughput, traffic, and what each signal sees → `traffic` Choose the traffic by a ranking-blind rule
 - The test, twice: which side the engine landed on → `tolerance` Tolerance from reality's own repeatability, `onefix` One disclosed fix, then publish the failure
 - Host speed: one GPU model, different latency → `onefix` One disclosed fix, then publish the failure
 - The load balancer's default cap: offered against delivered → `engine` Validate the engine, not the platform
@@ -316,7 +314,7 @@ Milestones: 1. Specify a gated simulator, then re-base on artifact 1 (2026-08-17
    - When: 2026-10-03
    - Decision: `tolerance` Tolerance from reality's own repeatability
    - Evidence: 8c3b4c7894 (gate arithmetic); 74ba3c8883 (pass rule pre-registered)
-5. **Measure the curve; re-choose traffic, criteria first**: The curve, 1 to 128 in flight (256 ran out of memory); recon: pinning holds capacity, a driven scale-up is a real cold start. The old traffic starved queue depth; search criteria were committed, then the search run.
+5. **Measure the curve; re-choose traffic, criteria first**: The curve, 1 to 128 in flight; recon: pinning holds capacity, a driven scale-up is a real cold start. The old traffic starved queue depth; search criteria were committed, then the search run.
    - Output: service-curve.json; amendments 2026-10-04 and (second): peak 1.20×
    - When: 2026-10-04
    - Decision: `traffic` Choose the traffic by a ranking-blind rule
@@ -324,7 +322,7 @@ Milestones: 1. Specify a gated simulator, then re-base on artifact 1 (2026-08-17
 
 ### Phase 4 of 5: Validate on RunPod (3 steps)
 
-6. **Probe the load balancer; amend the gate three times**: At RunPod's default scaler value 4 the first probe delivered about 17 req/s; later probes found fill-first routing, stalls and unanswered 502s. Amendments: retry such a 502 once; one replica; judge engine arrivals.
+6. **Probe the load balancer; amend the gate three times**: Probes found a default cap near 17 req/s, fill-first routing, stalls and unanswered 502s. Amendments: retry such a 502 once; one replica; judge engine arrivals.
    - Output: five probes; three amendments; three early repeats kept unjudged
    - When: 2026-10-04 to 10-05 (−07:00)
    - Decision: `engine` Validate the engine, not the platform
@@ -360,16 +358,20 @@ Milestones: 1. Specify a gated simulator, then re-base on artifact 1 (2026-08-17
 - Note: Whiskers: lowest and highest of the three runs. At 256 in flight the engine died (out of GPU memory) in 3 of 3 runs, so the curve stops at 128.
 - So: see decision `simulate`
 
-### Throughput, and the traffic set from it
+### Throughput, traffic, and what each signal sees
 
-- Axis: Measured: requests one replica completes per second at each fixed number in flight. Dashed: traffic levels set from it, as multiples of saturation (211.2 req/s).
-- Read it as: The validation replay peaked at 0.95× saturation (200.6 req/s), which is 0.98× of the 204.4 measured at 128 in flight; the sweep's spike peaked at 1.20× saturation (253.4 req/s) and stayed there, a regime the gate never tested.
+- Axis: Measured: throughput and GPU utilisation at each fixed number in flight. Dashed: traffic levels (multiples of the 211.2 req/s saturation). Waiting is arithmetic.
+- Read it as: The sweep's spike stayed at 1.20× saturation (253.4 req/s), a regime the gate never tested. GPU utilisation reads 1.0 from the first point, 3.5 req/s or 1.7% of 204.4. In flight rises across the range, but its 2 to 16 grid is crossed by 45.5 req/s while the baseline sits near 66. Queue depth stays 0 until the replica is full.
 - How it is computed: Saturation by Little's Law: 128 / 0.606 s = 211.2 req/s (measured at 128: 204.4). Baseline 0.70 × 211.2 = 147.8; peaks add 0.25 or 0.5 × 211.2: 200.6 and 253.4 req/s. 200.6 / 204.4 = 0.98 of measured throughput.
-- Axes: x is requests in flight on one replica (log scale); y is requests completed per second (req/s)
-- measured, median of 3 runs: 1: 3.5, 2: 6.5, 4: 12.9, 8: 24.3, 16: 45.5, 32: 82.6, 64: 139.5, 128: 204.4
-- Reference: policy sweep's peak, 1.20× at y = 253.4 req/s
-- Reference: baseline, 0.70× at y = 147.8 req/s
-- Note: GPU utilisation (nvidia-smi) read 1.0 at every level from 1 to 128, and 0 when idle, so it is not drawn: it would be a flat line at the top.
+- Axes: x is load on one replica (req/s); y is requests per replica; right y is GPU utilisation ()
+- in flight, at its measured load: 3.5: 1, 6.5: 2, 12.9: 4, 24.3: 8, 45.5: 16, 82.6: 32, 139.5: 64, 204.4: 128
+- waiting added per second, arithmetic: 0: 0, 204.4: 0, 253.4: 49
+- GPU utilisation, measured (points, right axis, ): 0: 0, 3.5: 1, 6.5: 1, 12.9: 1, 24.3: 1, 45.5: 1, 82.6: 1, 139.5: 1, 204.4: 1
+- Band: grid 2–16, 2 to 16
+- Reference: baseline 0.70× at x = 147.8
+- Reference: gate peak 0.95× at x = 200.6
+- Reference: sweep peak 1.20× at x = 253.4
+- Note: Waiting is arithmetic; bursty arrivals queue a little below 204.4.
 - So: see decision `traffic`
 
 ### The test, twice: which side the engine landed on
@@ -388,7 +390,7 @@ Milestones: 1. Specify a gated simulator, then re-base on artifact 1 (2026-08-17
 ### Host speed: one GPU model, different latency
 
 - Axis: Measured: server latency on each RunPod host relative to the curve's host (ozhetwnhompob9), at high load. Bars: lowest to highest of three runs; ku80i8usxw3st5 has one reading.
-- Read it as: Every other host measured had 7 to 18% lower latency than the curve's at high load: the size of the gate's misses. RunPod picks the host; the simulator knows one. Three hosts show a spread, not a distribution.
+- Read it as: At high load every other host measured had 7 to 18% lower latency, the size of the gate's misses; the simulator knows one host. Three hosts show a spread, not a distribution.
 - How it is computed: Latency ÷ the curve's: 0.90 at 128 (0.897–0.907); 0.494 / 0.533 = 0.927 at ~100; 0.834 at 128 (0.822–0.841). Percent = (ratio − 1) × 100.
 - daps3haubwrzbn, re-measured, 128 in flight: -10.0 % (interval -10.3 to -9.3)
 - ku80i8usxw3st5, attempt 1, ~100 in flight: -7.3 % (interval -7.3 to -7.3)
@@ -410,8 +412,8 @@ Milestones: 1. Specify a gated simulator, then re-base on artifact 1 (2026-08-17
 ### UNVALIDATED: what each policy spent and reached (arm C, step)
 
 - Axis: Simulated, not measured, by a model that failed its gate twice. Each dot is one policy (signal and thresholds): its median over 30 simulated step spikes with arm C's cold starts.
-- Read it as: All 19 queue-depth policies spent 640 replica-seconds and all 19 utilisation policies sat at the cap, 3,095; within each, only p99 differs. The budget line constrains no one, so H3's 3.96 s "gap" is queue depth spending 640 against 2,320–3,095. Queue depth is cheap because of its scale-down rule (see How it works); a rerun with scale-down off (exploratory, not committed) brought its p99 close to the others', which suggests the scale-down rule is part of the gap.
-- How it is computed: Gap = worst reached p99 − best at the budget: 11.15 − 7.20 = 3.95 s on rounded values (post: 3.96, 95% interval 3.52–4.56). Arm A's step: 0.082 s, so H3's halving fails.
+- Read it as: Utilisation sat at the cap, 3,095: 400 for replica 1 plus 11 launches, at 5 s and every 30 s to 12 replicas. In flight pays for fewer launches as its threshold rises, from 3,095 at up 2 and 4 to 2,320 at up 16. Queue depth spent 640 in all 19 policies because its signal reads 0 or hundreds, so thresholds rarely change what it does. The budget line constrains no one, so H3's 3.96 s "gap" is queue depth spending 640 against 2,320–3,095. A rerun with scale-down off (exploratory, not committed) brought its p99 close to the others', which suggests the scale-down rule (see How it works) is part of the gap.
+- How it is computed: Gap = worst reached p99 − best at the budget: 11.15 − 7.20 = 3.95 s on rounded values (post: 3.96, 95% interval 3.52–4.56). Arm A's step: 0.082 s, so H3's halving fails. Cap cost: 400 + 11 × 395 − 30 × 55 = 3,095.
 - Axes: x is replica-seconds per spike (median of 30); y is per-run p99 latency, median of 30 (s)
 - queue depth (19): 640: 11.2, 640: 11.3, 640: 11.4 ×2, 640: 11.5 ×7, 640: 11.6 ×3, 640: 11.7 ×2, 640: 11.8, 640: 11.9, 640: 12.0
 - in flight (17): 2320: 7.2 ×2, 2320: 7.4, 2422.5: 7.4, 2535: 7.2, 2535: 7.4, 2535: 7.5 ×2, 2535: 7.6, 2540: 7.6, 2550: 7.4, 2555: 7.6, 3095: 7.5 ×2, 3095: 7.6 ×2, 3095: 7.7
@@ -439,8 +441,14 @@ Milestones: 1. Specify a gated simulator, then re-base on artifact 1 (2026-08-17
   A: The registered spike gave every policy one p99: no question to answer. Both re-choices used measures that cannot prefer a signal, and the second search's criteria were committed before its code. I concede that per-policy p99s had been seen (the amendment says so), and the gate never tested the overload the sweep ran in.
 - Q: What would a careful reviewer flag in your own write-up?
   A: The gap's interval is called paired, but the code pairs only queue depth with in-flight at shared thresholds; utilisation runs on other traces. H3's wording says "p99-damage spread", the spec's integral over an SLO, but the analysis uses each run's p99 and no SLO exists. And the post omits the request shape (random 13-token prompts, 16 output tokens) and the absent-or-serving replica model.
+- Q: How would you autoscale vLLM on Kubernetes, given what you found?
+  A: What the data supports: do not scale on nvidia-smi utilisation (measured: 1.0 from one request). Scale up on requests in flight per replica with a target well above the registered 2 to 16, since one replica holds about 66 at the 147.8 req/s baseline. Keep warm capacity for one cold start: a step past what the replicas complete (204.4 req/s each) builds a backlog until the first new one serves, whatever the signal (simulated, unvalidated). Scale down slowly: the simulated queue-depth thrash came from removing a replica as soon as the queue read 0. Not tested: any real autoscaler, so I would check how Kubernetes autoscalers handle scale-down windows in their current docs, and validate closed loop, which I did not.
+- Q: Which metric would you scale on in production?
+  A: Requests in flight per replica, the one graded signal here: it rises from 1 to 128 across the range, while queue depth is 0 until a replica is full and utilisation is 1.0 from the first request. I would add waiting requests as a fast overload trigger, not as the scale-down signal. Measured: the curve and the utilisation reading. Not measured: where in-flight's threshold should sit, or how a real autoscaler behaves.
+- Q: How many replicas for 1,000 req/s?
+  A: Capacity first: one replica completes 204.4 req/s at 128 in flight, so 1,000 / 204.4 = 4.9, at least 5 with no headroom. At the 147.8 req/s baseline, near 66 in flight, 1,000 / 147.8 = 6.8, so 7. A burst needs warm capacity for the cold start (39.37 s or 81.07 s), because a replica launched into the burst is not there in time. Caveat: an even split is assumed (RunPod fills one worker first) and the request shape is a toy (13-token prompts, 16 output tokens); measure your own curve.
 - Q: What would you do differently?
-  A: Measure host speed per run from the start; settle the load balancer before the gate; validate in the sweep's overload; build the closed-loop gate. And revisit the grids: in-flight's tops out at 16, while one replica holds over 64 in flight at baseline alone (139.5 req/s at 64, under the 147.8 baseline). My untested reading: every in-flight threshold is crossed at once, so its grid only sets where scaling stops; up-2 and up-4 hit the cap.
+  A: Measure host speed per run from the start; settle the load balancer before the gate; validate in the sweep's overload; build the closed-loop gate. And revisit the grids: in-flight's tops out at 16, while one replica holds over 64 in flight at baseline alone (139.5 req/s at 64, under the 147.8 baseline). Checked: in replays of in-flight policies from up 2 to up 16 the signal reads 128 per serving replica at the first evaluation, above every threshold in the grid, so all of them scale up at once and the grid only sets where scaling stops. Sweep medians, arm C step: up 2 and 4 reach the cap (3,095), up 8 and 12 stop at 2,535 to 2,555, up 16 at 2,320 to 2,422.5 (simulated).
 
 **Limits (what I must not claim):** No measured answer: every frontier, H1–H4 verdict, gap and per-signal dollar figure is from a simulator that failed validation twice, and H1, H2, H4 were defined after the frontiers were seen. The control loop was never compared with a real autoscaler. The gate tested 0.95× saturation (0.98× of measured throughput), the sweep ran at 1.20×. Even load splitting is assumed; RunPod fills one worker first. One provider, GPU, model, engine version (vLLM 0.27.1) and request shape; replicas absent or serving; 6 hosts seen, 3 timed. Load-balancer findings: five unregistered probes on 2026-10-05.
 

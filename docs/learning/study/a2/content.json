@@ -46,6 +46,12 @@
   ],
   "concepts": [
     {
+      "id": "loop",
+      "short": "The control loop",
+      "term": "The control loop",
+      "plain": "**A feedback loop with a long dead time.** A signal summarises the serving replicas' load, and every 5 s a controller may add or remove one replica. A new replica is billed at once but serves only after the cold start, so a spike builds a backlog until it arrives."
+    },
+    {
       "id": "curve",
       "short": "The service curve",
       "term": "The service curve",
@@ -61,7 +67,7 @@
       "id": "utilblind",
       "short": "Why GPU utilisation is blind",
       "term": "Why GPU utilisation is blind here",
-      "plain": "nvidia-smi reads 1.0 from one request upward and 0 only when idle. A utilisation autoscaler sees \"fully busy\" whenever a replica serves anything, so it adds replicas at every chance up to its cap: busy and drowning look the same."
+      "plain": "nvidia-smi reads 1.0 from one request upward and 0 only when idle, so a utilisation autoscaler adds replicas at every chance up to its cap."
     },
     {
       "id": "frontier",
@@ -185,7 +191,7 @@
         }
       },
       {
-        "say": "Cost: 400 for replica 1 plus 90 + 30 + 90 + 30 = 240 for the four launched: 640 replica-seconds; p99 11.73 s. Of 570 replayed runs, 410 make the same eight moves at the same times; all scale down before 190 s.",
+        "say": "Cost: 400 for replica 1 plus 90 + 30 + 90 + 30 = 240 for the four launched: 640 replica-seconds; p99 11.73 s. Of 570 replayed runs, 410 make the same eight moves at the same times.",
         "values": {
           "t": "400",
           "action": "end of window"
@@ -199,7 +205,7 @@
     {
       "level": "context",
       "title": "Who and what the study touches",
-      "caption": "RunPod is rented two ways: queue endpoints for the curve sweep, recon and host re-measurement, and a load-balancing endpoint for the probes and the validation replays; its billing API gives the spend. The cold-start lags are artifact 1's. Output: a post that leads with the failed test.",
+      "caption": "RunPod is rented two ways, a queue endpoint and a load-balancing endpoint; its billing API gives the spend. Output: a post that leads with the failed test.",
       "nodes": [
         {
           "id": "author",
@@ -281,7 +287,7 @@
     {
       "level": "container",
       "title": "The runnable parts",
-      "caption": "Laptop drivers run every paid step and write committed evidence. The simulator is CPU-only: it reads the measured curve, the replayed arrivals and artifact 1's lags. The analysis reads only committed files.",
+      "caption": "Laptop drivers run every paid step and write committed evidence. The analysis reads only committed files.",
       "nodes": [
         {
           "id": "drivers",
@@ -381,7 +387,7 @@
     {
       "level": "component",
       "title": "Inside the gate: a model that must pass",
-      "caption": "Each real repeat is replayed into the fixed-capacity simulator at the times its engine received the requests; both sides are then binned by 10 s. In attempt two the curve is first scaled by the host's measured speed. Only the engine stamps run on the GPU worker; the rest is laptop code. Nothing is fitted to the trace.",
+      "caption": "Each repeat is replayed into the fixed-capacity simulator at the times its engine received the requests. Only the engine stamps run on the GPU worker; the rest is laptop code. Nothing is fitted to the trace.",
       "nodes": [
         {
           "id": "sched",
@@ -507,134 +513,99 @@
     {
       "level": "dynamic",
       "title": "One calibrated validation repeat, in order",
-      "caption": "Steps 1 to 7 are paid, on RunPod; 8 to 10 are free, on the laptop, after all three repeats. Step 3 is attempt two's fix. The load balancer (step 5) is why the gate judges engine arrivals, not send times.",
-      "nodes": [
+      "caption": "Step 3 is attempt two's fix. The load balancer (step 5) is why the gate judges engine arrivals, not send times.",
+      "style": "sequence",
+      "participants": [
         {
-          "id": "s1",
-          "label": "1 Pin one worker",
-          "sub": "workersMin 1; owner set workersMax 1",
-          "kind": "system",
-          "col": 0,
-          "row": 0
+          "id": "drv",
+          "label": "Driver",
+          "sub": "laptop",
+          "kind": "system"
         },
         {
-          "id": "s2",
-          "label": "2 Warm up",
-          "sub": "20 req/s until 30 s clean",
-          "kind": "system",
-          "col": 1,
-          "row": 0
+          "id": "lb",
+          "label": "Load balancer",
+          "sub": "RunPod",
+          "kind": "external"
         },
         {
-          "id": "s3",
-          "label": "3 Calibrate the host",
-          "sub": "hold 64, then 128 in flight",
-          "kind": "focus",
-          "col": 2,
-          "row": 0
+          "id": "eng",
+          "label": "Engine",
+          "sub": "vLLM, 128 running at most",
+          "kind": "system"
         },
         {
-          "id": "s4",
-          "label": "4 Replay the schedule",
-          "sub": "64,784 requests, open loop",
-          "kind": "system",
-          "col": 3,
-          "row": 0
-        },
-        {
-          "id": "s5",
-          "label": "5 LB holds, releases",
-          "sub": "bursts reach the engine late",
-          "kind": "external",
-          "col": 3,
-          "row": 1
-        },
-        {
-          "id": "s6",
-          "label": "6 Engine stamps",
-          "sub": "arrival time, server latency",
-          "kind": "system",
-          "col": 2,
-          "row": 1
-        },
-        {
-          "id": "s7",
-          "label": "7 Release, record",
-          "sub": "workersMin back to 0; one record",
-          "kind": "store",
-          "col": 1,
-          "row": 1
-        },
-        {
-          "id": "s8",
-          "label": "8 Predict this repeat",
-          "sub": "simulate its own engine arrivals",
-          "kind": "focus",
-          "col": 0,
-          "row": 1
-        },
-        {
-          "id": "s9",
-          "label": "9 Bin and compare",
-          "sub": "p50 per 10 s bin; residual per repeat",
-          "kind": "system",
-          "col": 0,
-          "row": 2
-        },
-        {
-          "id": "s10",
-          "label": "10 Verdict on three",
-          "sub": "pass: 10+ judged bins, at most half miss",
-          "kind": "focus",
-          "col": 1,
-          "row": 2
+          "id": "sim",
+          "label": "Simulator",
+          "sub": "laptop",
+          "kind": "focus"
         }
       ],
-      "edges": [
+      "steps": [
         {
-          "from": "s1",
-          "to": "s2",
-          "label": "worker up"
+          "from": "drv",
+          "to": "lb",
+          "label": "Pin one worker",
+          "text": "workersMin 1; owner set workersMax 1"
         },
         {
-          "from": "s2",
-          "to": "s3",
-          "label": "clean 30 s"
+          "from": "drv",
+          "to": "lb",
+          "label": "Warm up",
+          "text": "20 req/s until 30 s clean"
         },
         {
-          "from": "s3",
-          "to": "s4",
-          "label": "two ratios"
+          "from": "drv",
+          "to": "lb",
+          "label": "Calibrate the host",
+          "text": "hold 64, then 128 in flight"
         },
         {
-          "from": "s4",
-          "to": "s5",
-          "label": "HTTP"
+          "from": "drv",
+          "to": "lb",
+          "label": "Replay the schedule",
+          "text": "64,784 requests, open loop"
         },
         {
-          "from": "s5",
-          "to": "s6",
-          "label": "arrivals"
+          "from": "lb",
+          "to": "eng",
+          "label": "Holds, then releases bursts"
         },
         {
-          "from": "s6",
-          "to": "s7",
-          "label": "headers"
+          "from": "eng",
+          "to": "drv",
+          "kind": "reply",
+          "label": "Stamps each response",
+          "text": "arrival time, server latency"
         },
         {
-          "from": "s7",
-          "to": "s8",
-          "label": "record"
+          "from": "drv",
+          "to": "lb",
+          "label": "Release, record",
+          "text": "workersMin back to 0; one record"
         },
         {
-          "from": "s8",
-          "to": "s9",
-          "label": "prediction"
+          "kind": "gap",
+          "label": "above: paid, on RunPod; below: free, laptop"
         },
         {
-          "from": "s9",
-          "to": "s10",
-          "label": "after 3 repeats"
+          "from": "drv",
+          "to": "sim",
+          "label": "Predict this repeat",
+          "text": "after 3 repeats: its own engine arrivals"
+        },
+        {
+          "from": "sim",
+          "kind": "note",
+          "label": "Bin and compare",
+          "text": "p50 per 10 s bin; residual per repeat"
+        },
+        {
+          "from": "sim",
+          "to": "drv",
+          "kind": "reply",
+          "label": "Verdict on three",
+          "text": "pass: 10+ judged bins, at most half miss"
         }
       ]
     }
@@ -954,7 +925,7 @@
     {
       "phase": "Measure the inputs",
       "label": "Measure the curve; re-choose traffic, criteria first",
-      "detail": "The curve, 1 to 128 in flight (256 ran out of memory); recon: pinning holds capacity, a driven scale-up is a real cold start. The old traffic starved queue depth; search criteria were committed, then the search run.",
+      "detail": "The curve, 1 to 128 in flight; recon: pinning holds capacity, a driven scale-up is a real cold start. The old traffic starved queue depth; search criteria were committed, then the search run.",
       "output": "service-curve.json; amendments 2026-10-04 and (second): peak 1.20×",
       "when": "2026-10-04",
       "evidence": [
@@ -984,7 +955,7 @@
     {
       "phase": "Validate on RunPod",
       "label": "Probe the load balancer; amend the gate three times",
-      "detail": "At RunPod's default scaler value 4 the first probe delivered about 17 req/s; later probes found fill-first routing, stalls and unanswered 502s. Amendments: retry such a 502 once; one replica; judge engine arrivals.",
+      "detail": "Probes found a default cap near 17 req/s, fill-first routing, stalls and unanswered 502s. Amendments: retry such a 502 once; one replica; judge engine arrivals.",
       "output": "five probes; three amendments; three early repeats kept unjudged",
       "when": "2026-10-04 to 10-05 (−07:00)",
       "evidence": [
@@ -1152,68 +1123,142 @@
       "arithmetic": "Each point is the median of three runs' medians; 0.606 / 0.284 = 2.1."
     },
     {
-      "title": "Throughput, and the traffic set from it",
+      "title": "Throughput, traffic, and what each signal sees",
       "short": "Capacity and the two regimes",
       "chart": {
         "type": "xy",
-        "unit": "req/s",
-        "x_label": "requests in flight on one replica",
-        "y_label": "requests completed per second",
-        "x_log": true,
+        "unit": "",
+        "x_label": "load on one replica (req/s)",
+        "y_label": "requests per replica",
+        "y_axes": "dual",
+        "y2_label": "GPU utilisation",
         "y_from_zero": true,
         "series": [
           {
-            "name": "measured, median of 3 runs",
+            "name": "in flight, at its measured load",
+            "style": "line",
             "points": [
               {
-                "x": 1,
-                "y": 3.5
+                "x": 3.5,
+                "y": 1
               },
               {
-                "x": 2,
-                "y": 6.5
+                "x": 6.5,
+                "y": 2
               },
               {
-                "x": 4,
-                "y": 12.9
+                "x": 12.9,
+                "y": 4
               },
               {
-                "x": 8,
-                "y": 24.3
+                "x": 24.3,
+                "y": 8
               },
               {
-                "x": 16,
-                "y": 45.5
+                "x": 45.5,
+                "y": 16
               },
               {
-                "x": 32,
-                "y": 82.6
+                "x": 82.6,
+                "y": 32
               },
               {
-                "x": 64,
-                "y": 139.5
+                "x": 139.5,
+                "y": 64
               },
               {
-                "x": 128,
-                "y": 204.4
+                "x": 204.4,
+                "y": 128
+              }
+            ]
+          },
+          {
+            "name": "waiting added per second, arithmetic",
+            "style": "line",
+            "points": [
+              {
+                "x": 0,
+                "y": 0
+              },
+              {
+                "x": 204.4,
+                "y": 0
+              },
+              {
+                "x": 253.4,
+                "y": 49
+              }
+            ]
+          },
+          {
+            "name": "GPU utilisation, measured",
+            "style": "points",
+            "axis": "right",
+            "points": [
+              {
+                "x": 0,
+                "y": 0
+              },
+              {
+                "x": 3.5,
+                "y": 1
+              },
+              {
+                "x": 6.5,
+                "y": 1
+              },
+              {
+                "x": 12.9,
+                "y": 1
+              },
+              {
+                "x": 24.3,
+                "y": 1
+              },
+              {
+                "x": 45.5,
+                "y": 1
+              },
+              {
+                "x": 82.6,
+                "y": 1
+              },
+              {
+                "x": 139.5,
+                "y": 1
+              },
+              {
+                "x": 204.4,
+                "y": 1
               }
             ]
           }
         ],
-        "refs": [
+        "bands": [
           {
-            "y": 253.4,
-            "label": "policy sweep's peak, 1.20×"
-          },
-          {
-            "y": 147.8,
-            "label": "baseline, 0.70×"
+            "y_lo": 2,
+            "y_hi": 16,
+            "label": "grid 2–16"
           }
         ],
-        "note": "GPU utilisation (nvidia-smi) read 1.0 at every level from 1 to 128, and 0 when idle, so it is not drawn: it would be a flat line at the top."
+        "refs": [
+          {
+            "x": 147.8,
+            "label": "baseline 0.70×"
+          },
+          {
+            "x": 200.6,
+            "label": "gate peak 0.95×"
+          },
+          {
+            "x": 253.4,
+            "label": "sweep peak 1.20×"
+          }
+        ],
+        "note": "Waiting is arithmetic; bursty arrivals queue a little below 204.4."
       },
-      "axis": "Measured: requests one replica completes per second at each fixed number in flight. Dashed: traffic levels set from it, as multiples of saturation (211.2 req/s).",
-      "read_as": "The validation replay peaked at 0.95× saturation (200.6 req/s), which is 0.98× of the 204.4 measured at 128 in flight; the sweep's spike peaked at 1.20× saturation (253.4 req/s) and stayed there, a regime the gate never tested.",
+      "axis": "Measured: throughput and GPU utilisation at each fixed number in flight. Dashed: traffic levels (multiples of the 211.2 req/s saturation). Waiting is arithmetic.",
+      "read_as": "The sweep's spike stayed at 1.20× saturation (253.4 req/s), a regime the gate never tested. GPU utilisation reads 1.0 from the first point, 3.5 req/s or 1.7% of 204.4. In flight rises across the range, but its 2 to 16 grid is crossed by 45.5 req/s while the baseline sits near 66. Queue depth stays 0 until the replica is full.",
       "so": "traffic",
       "takeaway": "Every rate is a fraction of one replica's capacity: the gate checked the model below it, the sweep ran above it.",
       "arithmetic": "Saturation by Little's Law: 128 / 0.606 s = 211.2 req/s (measured at 128: 204.4). Baseline 0.70 × 211.2 = 147.8; peaks add 0.25 or 0.5 × 211.2: 200.6 and 253.4 req/s. 200.6 / 204.4 = 0.98 of measured throughput."
@@ -1589,7 +1634,7 @@
         "right_label": "higher"
       },
       "axis": "Measured: server latency on each RunPod host relative to the curve's host (ozhetwnhompob9), at high load. Bars: lowest to highest of three runs; ku80i8usxw3st5 has one reading.",
-      "read_as": "Every other host measured had 7 to 18% lower latency than the curve's at high load: the size of the gate's misses. RunPod picks the host; the simulator knows one. Three hosts show a spread, not a distribution.",
+      "read_as": "At high load every other host measured had 7 to 18% lower latency, the size of the gate's misses; the simulator knows one host. Three hosts show a spread, not a distribution.",
       "so": "onefix",
       "takeaway": "Hosts differ by about the size of the miss, and a one-host curve cannot predict which one RunPod picks: part of the miss, not shown to be all of it.",
       "arithmetic": "Latency ÷ the curve's: 0.90 at 128 (0.897–0.907); 0.494 / 0.533 = 0.927 at ~100; 0.834 at 128 (0.822–0.841). Percent = (ratio − 1) × 100."
@@ -1946,10 +1991,10 @@
         "note": "SIMULATED, FAILED VALIDATION. The p99 axis starts near 7 s. Each signal's own frontier is one point: its cheapest policy is also its fastest. Pairs whose down threshold is not below the up threshold are skipped (3 of 20 for in flight, 1 for each other signal), hence 17, 19 and 19 policies."
       },
       "axis": "Simulated, not measured, by a model that failed its gate twice. Each dot is one policy (signal and thresholds): its median over 30 simulated step spikes with arm C's cold starts.",
-      "read_as": "All 19 queue-depth policies spent 640 replica-seconds and all 19 utilisation policies sat at the cap, 3,095; within each, only p99 differs. The budget line constrains no one, so H3's 3.96 s \"gap\" is queue depth spending 640 against 2,320–3,095. Queue depth is cheap because of its scale-down rule (see How it works); a rerun with scale-down off (exploratory, not committed) brought its p99 close to the others', which suggests the scale-down rule is part of the gap.",
+      "read_as": "Utilisation sat at the cap, 3,095: 400 for replica 1 plus 11 launches, at 5 s and every 30 s to 12 replicas. In flight pays for fewer launches as its threshold rises, from 3,095 at up 2 and 4 to 2,320 at up 16. Queue depth spent 640 in all 19 policies because its signal reads 0 or hundreds, so thresholds rarely change what it does. The budget line constrains no one, so H3's 3.96 s \"gap\" is queue depth spending 640 against 2,320–3,095. A rerun with scale-down off (exploratory, not committed) brought its p99 close to the others', which suggests the scale-down rule (see How it works) is part of the gap.",
       "so": "frontiers",
       "takeaway": "Even as the simulator's answer, the comparison is mostly one of spend: the budget never binds and each frontier is one point.",
-      "arithmetic": "Gap = worst reached p99 − best at the budget: 11.15 − 7.20 = 3.95 s on rounded values (post: 3.96, 95% interval 3.52–4.56). Arm A's step: 0.082 s, so H3's halving fails."
+      "arithmetic": "Gap = worst reached p99 − best at the budget: 11.15 − 7.20 = 3.95 s on rounded values (post: 3.96, 95% interval 3.52–4.56). Arm A's step: 0.082 s, so H3's halving fails. Cap cost: 400 + 11 × 395 − 30 × 55 = 3,095."
     }
   ],
   "interview": {
@@ -1977,8 +2022,20 @@
         "a": "The gap's interval is called paired, but the code pairs only queue depth with in-flight at shared thresholds; utilisation runs on other traces. H3's wording says \"p99-damage spread\", the spec's integral over an SLO, but the analysis uses each run's p99 and no SLO exists. And the post omits the request shape (random 13-token prompts, 16 output tokens) and the absent-or-serving replica model."
       },
       {
+        "q": "How would you autoscale vLLM on Kubernetes, given what you found?",
+        "a": "What the data supports: do not scale on nvidia-smi utilisation (measured: 1.0 from one request). Scale up on requests in flight per replica with a target well above the registered 2 to 16, since one replica holds about 66 at the 147.8 req/s baseline. Keep warm capacity for one cold start: a step past what the replicas complete (204.4 req/s each) builds a backlog until the first new one serves, whatever the signal (simulated, unvalidated). Scale down slowly: the simulated queue-depth thrash came from removing a replica as soon as the queue read 0. Not tested: any real autoscaler, so I would check how Kubernetes autoscalers handle scale-down windows in their current docs, and validate closed loop, which I did not."
+      },
+      {
+        "q": "Which metric would you scale on in production?",
+        "a": "Requests in flight per replica, the one graded signal here: it rises from 1 to 128 across the range, while queue depth is 0 until a replica is full and utilisation is 1.0 from the first request. I would add waiting requests as a fast overload trigger, not as the scale-down signal. Measured: the curve and the utilisation reading. Not measured: where in-flight's threshold should sit, or how a real autoscaler behaves."
+      },
+      {
+        "q": "How many replicas for 1,000 req/s?",
+        "a": "Capacity first: one replica completes 204.4 req/s at 128 in flight, so 1,000 / 204.4 = 4.9, at least 5 with no headroom. At the 147.8 req/s baseline, near 66 in flight, 1,000 / 147.8 = 6.8, so 7. A burst needs warm capacity for the cold start (39.37 s or 81.07 s), because a replica launched into the burst is not there in time. Caveat: an even split is assumed (RunPod fills one worker first) and the request shape is a toy (13-token prompts, 16 output tokens); measure your own curve."
+      },
+      {
         "q": "What would you do differently?",
-        "a": "Measure host speed per run from the start; settle the load balancer before the gate; validate in the sweep's overload; build the closed-loop gate. And revisit the grids: in-flight's tops out at 16, while one replica holds over 64 in flight at baseline alone (139.5 req/s at 64, under the 147.8 baseline). My untested reading: every in-flight threshold is crossed at once, so its grid only sets where scaling stops; up-2 and up-4 hit the cap."
+        "a": "Measure host speed per run from the start; settle the load balancer before the gate; validate in the sweep's overload; build the closed-loop gate. And revisit the grids: in-flight's tops out at 16, while one replica holds over 64 in flight at baseline alone (139.5 req/s at 64, under the 147.8 baseline). Checked: in replays of in-flight policies from up 2 to up 16 the signal reads 128 per serving replica at the first evaluation, above every threshold in the grid, so all of them scale up at once and the grid only sets where scaling stops. Sweep medians, arm C step: up 2 and 4 reach the cap (3,095), up 8 and 12 stop at 2,535 to 2,555, up 16 at 2,320 to 2,422.5 (simulated)."
       }
     ],
     "limits": "No measured answer: every frontier, H1–H4 verdict, gap and per-signal dollar figure is from a simulator that failed validation twice, and H1, H2, H4 were defined after the frontiers were seen. The control loop was never compared with a real autoscaler. The gate tested 0.95× saturation (0.98× of measured throughput), the sweep ran at 1.20×. Even load splitting is assumed; RunPod fills one worker first. One provider, GPU, model, engine version (vLLM 0.27.1) and request shape; replicas absent or serving; 6 hosts seen, 3 timed. Load-balancer findings: five unregistered probes on 2026-10-05."
@@ -2563,6 +2620,34 @@
     {
       "value": "215",
       "how": "Read-only replay of autoscale.sim.run_with_policy for queue_depth (up 4, down 1), arm C step, repetition 0, seed autoscale.sweep._derive_seed(17, 4.0, 1.0, 0); it reproduces the first sample of that policy in data/a2/frontier-sweep.json (640 replica-seconds, p99 11.728826...). Time of the decision: DOWN at the t = 215 s evaluation. A replay, not a measurement."
+    },
+    {
+      "value": "395",
+      "how": "A launch at t = 5 s is billed to the end of the 400 s window: 400 - 5 = 395. Utilisation's 11 launches (5, 35, ..., 305 s) bill 11 x 395 - 30 x (0 + 1 + ... + 10) = 4,345 - 1,650 = 2,695, plus 400 for replica 1 = 3,095; this is the cap cost scripts/a2_post_analysis.py computes (_cap_cost) and data/a2/post-analysis.json records as cap_cost_replica_s."
+    },
+    {
+      "value": "4.9",
+      "how": "1,000 / 204.4 = 4.89 replicas at the measured maximum completion rate."
+    },
+    {
+      "value": "6.8",
+      "how": "1,000 / 147.8 = 6.77 replicas at the 0.70x baseline rate."
+    },
+    {
+      "value": "1.7",
+      "how": "3.517 / 204.42 = 0.0172: the one-in-flight completion rate over the 128-in-flight rate (data/a2/service-curve.json), as a percent."
+    },
+    {
+      "value": "66",
+      "how": "Little's Law on the measured curve: 147.8 req/s with latency interpolated between 0.439 s at 64 in flight and 0.606 s at 128 gives N = 147.8 x W(N) = 65.5, about 66."
+    },
+    {
+      "value": "49",
+      "how": "253.4 - 204.4 = 49.0 req/s: how fast the backlog grows per replica when 253.4 req/s arrive and 204.4 complete (fluid arithmetic, not measured)."
+    },
+    {
+      "value": "128",
+      "how": "Read-only replay of autoscale.sim.run_with_policy for in_flight_concurrency, arm C step, repetition 0, seed autoscale.sweep._derive_seed(17, up, down, 0) for (up, down) in (2, 0.5), (4, 1), (8, 1), (12, 1), (16, 1) and (16, 4): the signal at the t = 5 s evaluation is 128.0 per serving replica in every one. For (16, 4): launches at 5, 35, ..., 155 s, cost 2,320, p99 7.99 s. A replay, not a measurement."
     }
   ],
   "links": {
