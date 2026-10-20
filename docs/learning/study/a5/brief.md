@@ -21,25 +21,26 @@ Read first: LLM serving on a GPU (P1), How these experiments earn trust (P2).
 
 ## Need to know first
 
-- **LoRA adapter and its rank**: A fine-tune stored as two small matrices added beside each of seven projections in every layer, instead of a whole new model: each slot's buffers took 79 MiB here (measured), against 7.63 GiB for the loaded model at 1 slot, so one base model can host many. **Rank** (16 here) is the matrices' width. vLLM computes every adapter at the slot's buffer rank, so the work is set by shape, not by the numbers inside.
-- **Registered versus active, and the slot cap**: **Registered**: loaded into one of `max_loras` GPU slots; each slot's weight buffers take GPU memory (P1: hbm) whether used or not. **Active**: the distinct adapters among requests batched together right now. In vLLM 0.27.1 `max_loras` is also the cap on distinct adapters per batch, so the two are one knob.
-- **Heterogeneity cost and registered-slot cost**: **Concentrated** regime: all load on one adapter. **Spread**: round-robin over all N. **Heterogeneity cost** at N = spread minus concentrated, in the same start. **Registered-slot cost** = concentrated at N minus concentrated at 1 slot, across starts: what slots cost when one adapter still carries all the load. At 64 slots: −1,290 (median of the paired gaps) and −450.
-- **The knee**: Loss per doubling: m(N) = 1 − T(N) / T(N/2), with T the spread regime's throughput. The **knee** is the first N whose point estimate exceeds τ = 10%, fixed in advance; it lies between N/2 and N, because the sweep only doubles. Slots below it set the slot bound on tenants.
+- **LoRA adapter and its rank**: A fine-tune leaves each base matrix W frozen and adds a low-rank detour: `y = W·x + (α/r)·B·(A·x)`, A shaped r × in, B shaped out × r. **Rank** r is 16 here: 33,030,144 numbers across seven projections in 36 layers (the repo's Qwen3-4B shapes), 63 MiB at 2 bytes, against 7.63 GiB for the loaded model at 1 slot. Each slot's buffers took 79 MiB (measured; the extra 16 is unexplained). vLLM computes every adapter at the slot's buffer rank, so the work is set by shape, not by the numbers inside.
+- **Registered versus active, and the slot cap**: **Registered**: loaded into one of `max_loras` GPU slots, each a buffer preallocated at `max_lora_rank` that takes GPU memory (P1: hbm) used or not. **Active**: the distinct adapters among requests batched together right now. In vLLM 0.27.1 `max_loras` is also the cap on distinct adapters per batch, so the two are one knob. `max_cpu_loras` is a host-memory tier behind the slots; here it equals N, so nothing swaps.
+- **Shared versus mixed batch**: Each decode step reads the base weights once for all requests in the batch, so batching is nearly free throughput until compute or KV runs out (general GPU behaviour, not measured here). Each distinct adapter is not shared: it needs its own small multiply over only its requests (63 MiB of weights at rank 16, 3.9 GiB for 64). Consistent with the data, not measured; vLLM 0.27.1 source, may differ.
+- **Heterogeneity cost and registered-slot cost**: **Concentrated** regime: all load on one adapter. **Spread**: round-robin over all N. **Heterogeneity cost** at N = spread minus concentrated, in the same start (median of paired gaps; −1,290 at 64 slots). **Registered-slot cost** = concentrated at N minus concentrated at 1 slot, across starts: what slots cost with one adapter carrying all the load (−450 at 64).
+- **The knee**: Loss per doubling: m(N) = 1 − T(N) / T(N/2), with T the spread regime's throughput. The **knee** is the first N whose point estimate exceeds τ = 10%, fixed in advance, so it lies between N/2 and N (the sweep only doubles). Slots below it set the slot bound on tenants.
 - **Little's law, as used here**: **Requests in the system = arrival rate × time each spends there.** At 8 slots, 64 in flight and about 204 completed a second means about 0.31 s each. One tenant at peak, 0.114 requests a second, keeps about 0.036 requests in the system; KV room for 9 long (8,192-token) requests then fits 250 tenants. A real long request would stay longer than 0.31 s, so that bound is generous.
-- **Equivalence gate: pass, fail, inconclusive**: Per start: (synthetic − real) / real for TTFT p50 and throughput. **Pass**: the median's 90% interval lies inside ±5% for both. **Resolution check**: the second real phase against the first must also fit ±5%; if not, the gate cannot resolve its own ±5% margin, so the verdict is **inconclusive**, not pass. Resolved but not inside: **fail**.
+- **Equivalence gate: pass, fail, inconclusive**: Per start: (synthetic − real) / real for TTFT p50 and throughput. **Pass**: the median's 90% interval lies inside ±5% for both. **Resolution check**: the second real phase against the first must also fit ±5%; if not, the gate cannot resolve its own margin and the verdict is **inconclusive**, not pass. Resolved but not inside: **fail**.
 
 ## How it works
 
 Numbers from several server starts on one RTX 4090 (each slot count is its own start). Watch what moves when slots are only held, and what moves when they are all in the batch.
 
-| Step | What happens | GPU slots held | Adapters in the batch | LoRA slices (0.27.1) | KV tokens: room/used | Throughput, tokens/s |
-|---|---|---|---|---|---|---|
-| 1 | One slot, one adapter, 64 requests in flight: the baseline. Every adapter here sits resident in a GPU slot; none is swapped in from CPU memory (`max_cpu_loras` = `max_loras` = N). | 1 | 1 | 2 (1 working) | 78,208 / ~2,048 | 3,577 |
-| 2 | Register 64 slots but keep sending all traffic to one adapter. Buffers eat KV room, yet 64 requests use only ~2,048 tokens of it. The kernels launch 65 slices (vLLM 0.27.1 source, may differ). (Decision: Report memory as capacity; name the slot cost) | **64** | 1 | **65 (1 working)** | **42,864 / ~2,048** | **3,127** |
-| 3 | Now spread: each request uses its own adapter. With the kernels organised by adapter (consistent with the data, not measured), that is 64 small multiplications, not one larger. Mixing costs about 1,290. (Decision: Separate the two counts by traffic, inside one start) | 64 | **64** | **65 (64 working)** | 42,864 / ~2,048 | **1,835** |
-| 4 | Back to the sweep, spread regime, every registered adapter active. At 8 slots the loss against 4 slots is 5.3%, under the 10% threshold. | **8** | **8** | **9 (8 working)** | **74,288 / ~2,048** | **3,260** |
-| 5 | At 16 slots the loss against 8 is 1 − 2,911 / 3,260 = 10.7%: the first doubling past 10%. Its interval, 9.2% to 11.5%, does not clear 10%, so the crossing is unresolved; the knee rule uses the point estimate. (Decision: A knee rule that errs toward fewer tenants) | **16** | **16** | **17 (16 working)** | **69,968 / ~2,048** | **2,911** |
-| 6 | The knee lies between 8 and 16, so the bound is 8. A floor: 8 adapters active in one batch at 64 in flight, all resident; CPU swapping not measured. Not a customer count. | **8** | **8** | **9 (8 working)** | **74,288 / ~2,048** | **3,260** |
+| Step | What happens | GPU slots held | Adapters in the batch | LoRA slices (0.27.1) | KV tokens: room/used | Throughput, tokens/s | In flight ÷ adapters |
+|---|---|---|---|---|---|---|---|
+| 1 | One slot, one adapter, 64 requests in flight: the baseline. Every adapter here sits resident in a GPU slot; none is swapped in from CPU memory (`max_cpu_loras` = `max_loras` = N). | 1 | 1 | 2 (1 working) | 78,208 / ~2,048 | 3,577 | 64 |
+| 2 | Register 64 slots but keep sending all traffic to one adapter. Buffers eat KV room, yet 64 requests use only ~2,048 tokens of it. The kernels launch 65 slices (vLLM 0.27.1 source, may differ). (Decision: Memory as capacity; name the slot cost) | **64** | 1 | **65 (1 working)** | **42,864 / ~2,048** | **3,127** | 64 |
+| 3 | Now spread: each request uses its own adapter, so 64 small multiplications, not one larger (why; consistent with the data, not measured). Mixing costs about 1,290. (Decision: Separate the counts by traffic) | 64 | **64** | **65 (64 working)** | 42,864 / ~2,048 | **1,835** | **1** |
+| 4 | Back to the sweep, spread regime, every registered adapter active. At 8 slots the loss against 4 slots is 5.3%, under the 10% threshold. | **8** | **8** | **9 (8 working)** | **74,288 / ~2,048** | **3,260** | **8** |
+| 5 | At 16 slots the loss against 8 is 1 − 2,911 / 3,260 = 10.7%: the first doubling past 10%. Its interval, 9.2% to 11.5%, does not clear 10%, so the crossing is unresolved; the knee rule uses the point estimate. (Decision: A knee rule erring toward fewer tenants) | **16** | **16** | **17 (16 working)** | **69,968 / ~2,048** | **2,911** | **4** |
+| 6 | The knee lies between 8 and 16, so the bound is 8. A floor: 8 adapters active in one batch at 64 in flight, all resident; CPU swapping not measured. Not a customer count. | **8** | **8** | **9 (8 working)** | **74,288 / ~2,048** | **3,260** | **8** |
 
 Bold cells changed in that step.
 
@@ -49,7 +50,7 @@ Bold cells changed in that step.
 
 ### Who and what the study touches (context)
 
-RunPod rents the GPU one server start at a time. The worker fetches the model (cached on the network volume) and the four real adapters from the Hub; compile caches live on the volume. Artifact 4's committed cost file supplies the dedicated and swapped costs. Output: a post and the raw data.
+RunPod rents the GPU one server start at a time; artifact 4's committed cost file supplies the dedicated and swapped costs; output is a post and the raw data.
 
 - **Author**: designs, runs, publishes
 - **LoRA capacity study**: 1 to 64 adapters on one base model
@@ -67,7 +68,7 @@ RunPod rents the GPU one server start at a time. The worker fetches the model (c
 
 ### The runnable parts (container)
 
-The laptop runner submits one job per server start and appends each result to a store; it runs the gate first and refuses the campaign until the gate passes. Inside the worker, vLLM's server and its load generator share one container. Analysis runs on the laptop only.
+The laptop runner runs the gate first, refuses the campaign until it passes, submits one job per server start and appends each result to a store. Analysis runs on the laptop only.
 
 - **Laptop runner**: gate first; campaign only after a pass
 - **RunPod endpoint**: pinned; later CUDA 13.0 hosts only
@@ -110,7 +111,7 @@ Every gate start registers the same 8 adapters and runs four spread phases. Two 
 
 ### One sweep server start, in order (dynamic)
 
-Steps 1 and 8 run on the laptop, 2 to 7 in the rented container. The regimes differ only in step 6, inside one start: which adapters the load generator lists. KV capacity and the warm/cold reading come from the startup log the container returns, parsed on the laptop in step 8; KV is never measured under load.
+Steps 1 and 8 run on the laptop, 2 to 7 in the rented container. The regimes differ only in step 6: which adapters the load generator lists. KV capacity and the warm/cold reading come from the startup log, parsed in step 8; KV is never measured under load.
 
 - **1 Runner picks a start**: slot count N, run index, phase order
 - **2 Write adapters**: N synthetic, seeded: rank 16, 7 projections
@@ -130,7 +131,7 @@ Steps 1 and 8 run on the laptop, 2 to 7 in the rented container. The regimes dif
 
 ## Core decisions
 
-### Separate the two counts by traffic, inside one start
+### Separate the counts by traffic
 
 **Problem:** In vLLM 0.27.1 one setting, `max_loras`, is both the number of GPU slots and the cap on distinct adapters per batch, so configuration cannot hold registered fixed while active changes.
 
@@ -143,11 +144,11 @@ Steps 1 and 8 run on the laptop, 2 to 7 in the rented container. The regimes dif
 
 **Chosen:** Run both regimes in every start: one adapter, then all N round-robin, in a shuffled order
 
-**Why:** Same slots, memory and start; only how many adapters the batch mixes differs, so spread minus concentrated is a difference inside one start, and start-to-start variation cancels out of it. Swapping is the resident-versus-swapped mode the design put out of scope. Random assignment of 64 requests over 64 adapters reaches about 40.6 distinct on average; round-robin keeps up to min(N, 64) in flight.
+**Why:** Same slots, memory and start; only how many adapters the batch mixes differs, so start-to-start variation cancels out of spread minus concentrated. Swapping is the mode the design put out of scope. Random assignment of 64 requests over 64 adapters reaches about 40.6 distinct on average; round-robin keeps up to min(N, 64) in flight.
 
-**Cost:** The registered-slot cost compares different starts, against 1 slot. The check that the regimes differed reads vLLM's running-adapters gauge once a second: a sample of scheduler state, not a count per batch. By vLLM 0.27.1's source the gauge may add cost to the spread regime; 24 control starts with it off put gauge-on minus gauge-off at +17 tokens/s [−19, +57]: no cost detected. A gauge cost would show as negative, so it is at most about 19 tokens/s (the post quotes the symmetric bound, 57).
+**Cost:** The registered-slot cost compares different starts, against 1 slot. The check that the regimes differed reads vLLM's running-adapters gauge once a second: a sample of scheduler state, not a count per batch. By vLLM 0.27.1's source the gauge may add cost to the spread regime; 24 control starts with it off put gauge-on minus gauge-off at +17 tokens/s [−19, +57]: no cost detected. Its bound is in the mixing-versus-holding result.
 
-### Report memory as capacity; name the slot cost
+### Memory as capacity; name the slot cost
 
 **Problem:** The design claimed the cost was "dominated by batch heterogeneity, not by memory". Reading vLLM's source showed two flaws: at 29-token requests the KV cache can never fill, and the one-adapter regime also pays a kernel cost that grows with slots.
 
@@ -163,7 +164,7 @@ Steps 1 and 8 run on the laptop, 2 to 7 in the rented container. The regimes dif
 
 **Cost:** The diagnostic ran out of GPU memory during CUDA-graph capture at 64 slots, at budgets 0.85 and 0.80: it asked for 4.5 times as many graphs. It was cut before the first measured run and H4 withdrawn, so −450 tokens/s stays unsplit between the launch grid, host-side bookkeeping or anything else that scales with slots.
 
-### License synthetic adapters with an equivalence gate
+### License synthetic adapters by a gate
 
 **Problem:** Public adapters for Qwen3-4B vary in rank, modules and base; the sweep needs 64 of one shape. Weight values should not change serving cost, but saying so invites "those aren't real adapters".
 
@@ -198,7 +199,7 @@ Steps 1 and 8 run on the laptop, 2 to 7 in the rented container. The regimes dif
 
 **Cost:** Both amendments were written after a verdict, in response to it. Amendment 1 had said an inconclusive larger gate meant the August fallback, with no third run under it; Amendment 3 extended the second run instead, decided after seeing the 88-start result. The final TTFT resolution check passes by 0.05 points and sits above zero: the second real phase's TTFT p50 ran about 2% higher than the first's, an order effect not investigated.
 
-### A knee rule that errs toward fewer tenants
+### A knee rule erring toward fewer tenants
 
 **Problem:** "How many adapters fit" has no answer until a rule says what counts as capacity, and the design named a threshold but neither the curve nor the rule.
 
@@ -212,11 +213,11 @@ Steps 1 and 8 run on the laptop, 2 to 7 in the rented container. The regimes dif
 
 **Why:** A loss per doubling is a ratio, so it does not depend on absolute throughput. Requiring the interval to clear 10% would miss a real but noisy drop and push the knee, and tenants, upward; the point-estimate rule errs toward fewer. Tenants = min(slots below the knee, measured throughput ÷ one tenant's peak rate, KV ceiling through Little's law), each input fixed in advance.
 
-**Cost:** The first crossing is unresolved (the 8-to-16 point is 10.7%, its interval does not clear 10%; see How it works). If that is noise, the slot bound is 16 and cost per tenant halves. And 8 is a lower bound in any case: only the all-resident case was measured.
+**Cost:** The first crossing, 10.7%, is unresolved (see How it works). If that is noise, the slot bound is 16 and cost per tenant halves. And 8 is a lower bound in any case: only the all-resident case was measured.
 
 ### Price adapters beside whole models, labelled
 
-**Problem:** The business answer compares cost per tenant three ways, and the August design made a shared base model with artifact 4 a hard dependency. But artifact 4's dedicated and swapped costs come from its simulator, and artifact 4 moved to Qwen3-1.7B after its Qwen3-4B pair failed a memory check.
+**Problem:** The business answer compares cost per tenant three ways, and the August design made a shared base model with artifact 4 a hard dependency. But artifact 4's costs come from its simulator, and it moved to Qwen3-1.7B after its Qwen3-4B pair failed a memory check.
 
 **Options considered:**
 
@@ -235,43 +236,45 @@ Steps 1 and 8 run on the laptop, 2 to 7 in the rented container. The regimes dif
 **Requirements and the decisions that meet them:**
 
 - R1: Split what adapters cost into what registering them costs and what serving many of them in one batch costs, inside the same server start.
-  - `regimes` Separate the two counts by traffic, inside one start: Concentrated and spread differ only in how many adapters are active, so their gap is the cost of mixing, and the concentrated slope is the cost of slots.
-  - `memory` Report memory as capacity; name the slot cost: Each part of the change is named for what causes it, so the split does not credit kernel overhead to memory.
+  - `regimes` Separate the counts by traffic: Their gap is the cost of mixing; the concentrated slope is the cost of slots.
+  - `memory` Memory as capacity; name the slot cost: Each part is named for its cause, so kernel overhead is not called memory.
 - R2: Sweep with synthetic adapters only after a pre-registered check shows they serve like real ones.
-  - `gate` License synthetic adapters with an equivalence gate: The sweep's synthetic adapters are used only once real ones serve within ±5% of them.
-  - `amend` Inconclusive twice: enlarge, then replace, both disclosed: The synthetic adapters were licensed by a gate that finally could resolve ±5%, not waved through.
+  - `gate` License synthetic adapters by a gate: Synthetic adapters are used only once real ones serve within ±5% of them.
+  - `amend` Inconclusive twice: enlarge, then replace, both disclosed: The gate finally could resolve ±5%, so synthetic adapters were not waved through.
 - R3: Fix the knee threshold, the gate's margin and verdict rule, the SLO and the tenant assumptions before the first measured run; later changes are dated amendments (P2: amendment).
-  - `gate` License synthetic adapters with an equivalence gate: Margin, interval, metrics and verdict rule were committed in the pre-registration, and the runner refuses the campaign until the gate passes.
-  - `amend` Inconclusive twice: enlarge, then replace, both disclosed: Each change is an appended amendment saying what had been seen; nothing above it was edited, and the margin and rule never moved.
-  - `knee` A knee rule that errs toward fewer tenants: The curve and rule (harness amendment) and τ (pre-registration, after reconnaissance) were committed before the first measured run, so the rule was not chosen after seeing the sweep.
+  - `gate` License synthetic adapters by a gate: Margin, interval and verdict rule were pre-registered; the runner refuses the campaign until the gate passes.
+  - `amend` Inconclusive twice: enlarge, then replace, both disclosed: Each change is an appended amendment; the margin and rule never moved.
+  - `knee` A knee rule erring toward fewer tenants: The curve, rule and τ were committed before the first measured run.
 - R4: Convert the knee into tenants per GPU and cost per tenant per month, beside artifact 4's cost of dedicated and swapped whole models, with every assumption published.
-  - `knee` A knee rule that errs toward fewer tenants: The knee sets the slot bound, which here sets tenants per GPU and so the price.
-  - `cost` Price adapters beside whole models, labelled: Tenants become dollars beside the whole-model alternatives, with the rate and every assumption stated.
+  - `knee` A knee rule erring toward fewer tenants: The slot bound sets tenants per GPU, so the price.
+  - `cost` Price adapters beside whole models, labelled: Tenants become dollars beside whole-model alternatives, assumptions stated.
 - R5: Hold image, model, GPU, rank, target modules, request shape and memory budget fixed; prime the compile cache (P1: compile) per slot count and exclude any start that compiled cold.
-  - `regimes` Separate the two counts by traffic, inside one start: Both regimes share one start's slots, memory and compile state, so only the active count (and the gauge's small, bounded cost) changes between them.
+  - `regimes` Separate the counts by traffic: Both regimes share one start's slots, memory and compile state.
 - R6: Report medians across server starts with bootstrap intervals (P2: interval), never means, and re-derive every published number from committed data with no GPU.
   - No decision: Met by process: "Analyse, price, publish" re-runs the analysis byte-identically from data/a5 and artifact 4's committed cost file, with no GPU.
 
 **Decisions and the concepts they use:**
 
-- `regimes` Separate the two counts by traffic, inside one start uses Registered versus active, and the slot cap: Because the slot count and the in-batch cap are one knob, the split has to come from traffic.
-- `regimes` Separate the two counts by traffic, inside one start uses Heterogeneity cost and registered-slot cost: The two regimes yield the two subtractions.
-- `memory` Report memory as capacity; name the slot cost uses Heterogeneity cost and registered-slot cost: The concentrated slope becomes the registered-slot cost, a kernel cost, not a memory one.
-- `memory` Report memory as capacity; name the slot cost uses Little's law, as used here: KV capacity enters the answer as a bound on tenants, through Little's law.
-- `gate` License synthetic adapters with an equivalence gate uses LoRA adapter and its rank: Rank and target modules set the work, which is why random weights can stand in.
-- `gate` License synthetic adapters with an equivalence gate uses Equivalence gate: pass, fail, inconclusive: The resolution check is what makes "no difference found" mean something.
-- `amend` Inconclusive twice: enlarge, then replace, both disclosed uses Equivalence gate: pass, fail, inconclusive: Both misses were inconclusive verdicts: the resolution check, not the synthetic-vs-real difference, fell outside ±5%.
-- `knee` A knee rule that errs toward fewer tenants uses The knee: The rule is the knee's definition.
-- `knee` A knee rule that errs toward fewer tenants uses Little's law, as used here: The memory bound on tenants comes from Little's law.
-- `cost` Price adapters beside whole models, labelled uses The knee: The adapter bar is the GPU's monthly cost divided by the slot bound the knee sets.
+- `regimes` Separate the counts by traffic uses Registered versus active, and the slot cap: One knob sets slots and the in-batch cap, so traffic has to split them.
+- `regimes` Separate the counts by traffic uses Heterogeneity cost and registered-slot cost: The two regimes yield the two subtractions.
+- `regimes` Separate the counts by traffic uses Shared versus mixed batch: Spread traffic is the mixed case.
+- `memory` Memory as capacity; name the slot cost uses Heterogeneity cost and registered-slot cost: The concentrated slope is a kernel cost, not memory.
+- `memory` Memory as capacity; name the slot cost uses Little's law, as used here: KV capacity bounds tenants through Little's law.
+- `gate` License synthetic adapters by a gate uses LoRA adapter and its rank: Rank and modules set the work, so random weights can stand in.
+- `gate` License synthetic adapters by a gate uses Equivalence gate: pass, fail, inconclusive: The resolution check makes "no difference found" mean something.
+- `amend` Inconclusive twice: enlarge, then replace, both disclosed uses Equivalence gate: pass, fail, inconclusive: Both misses were resolution checks outside ±5%, not synthetic-vs-real differences.
+- `knee` A knee rule erring toward fewer tenants uses The knee: The rule is the knee's definition.
+- `knee` A knee rule erring toward fewer tenants uses Little's law, as used here: Little's law gives the memory bound on tenants.
+- `cost` Price adapters beside whole models, labelled uses The knee: The adapter bar is the GPU's monthly cost over the knee's slot bound.
 
 **Results and the decisions they support:**
 
-- Throughput as adapters are added: one active, or all → `regimes` Separate the two counts by traffic, inside one start
-- The knee: throughput lost per doubling of active adapters → `knee` A knee rule that errs toward fewer tenants
-- At 64 adapters: mixing versus merely holding them → `regimes` Separate the two counts by traffic, inside one start, `memory` Report memory as capacity; name the slot cost
-- The equivalence gate, three times: could it resolve 5%? → `gate` License synthetic adapters with an equivalence gate, `amend` Inconclusive twice: enlarge, then replace, both disclosed
-- KV capacity falls with slots, and never binds here → `memory` Report memory as capacity; name the slot cost, `knee` A knee rule that errs toward fewer tenants
+- Throughput by adapters added: one active, or all → `regimes` Separate the counts by traffic
+- The knee: throughput lost per doubling of active adapters → `knee` A knee rule erring toward fewer tenants
+- Mixing versus holding, at 64 adapters → `regimes` Separate the counts by traffic, `memory` Memory as capacity; name the slot cost
+- The equivalence gate, three times: could it resolve 5%? → `gate` License synthetic adapters by a gate, `amend` Inconclusive twice: enlarge, then replace, both disclosed
+- Where the card's 23.52 GiB goes → `memory` Memory as capacity; name the slot cost
+- KV capacity falls with slots, never binds → `memory` Memory as capacity; name the slot cost, `knee` A knee rule erring toward fewer tenants
 - UNVALIDATED NEIGHBOURS: cost per tenant per month → `cost` Price adapters beside whole models, labelled
 
 ## Implementation flow
@@ -285,7 +288,7 @@ Milestones: 4. Pre-register the rules (2026-10-05 00:29 (−07:00)); 5. Prime th
 1. **Ask the question, then correct it against vLLM's source**: August: a sweep, two regimes, a gate, a knee. The harness amendment (signed 09-26, committed 10-04): registered means a GPU slot, memory cannot move latency at this shape, and the knee and gate get exact rules.
    - Output: the design spec, the harness amendment and three plans
    - When: 2026-08-18 to 10-04
-   - Decision: `memory` Report memory as capacity; name the slot cost
+   - Decision: `memory` Memory as capacity; name the slot cost
    - Evidence: 6af0e1df94 (design spec); 4f8b7e8288 (harness amendment and plans)
 
 ### Phase 2 of 5: Build offline (1 step)
@@ -293,7 +296,7 @@ Milestones: 4. Pre-register the rules (2026-10-05 00:29 (−07:00)); 5. Prime th
 2. **Build the GPU-free core**: Phase orders per start, seeded synthetic adapters, the knee and gate rules, estimands and figures, run end to end against a stub worker.
    - Output: multilora/: tested with no GPU, never importing artifact 1 or 2
    - When: 2026-10-04
-   - Decision: `regimes` Separate the two counts by traffic, inside one start
+   - Decision: `regimes` Separate the counts by traffic
    - Evidence: f63a28c3ab (per-start phase order); 53553313534e (synthetic adapters); a7e57f2080 (knee and gate rules); c456873a63 (stub end to end)
 
 ### Phase 3 of 5: Reconnoitre and pre-register (2 steps)
@@ -301,12 +304,12 @@ Milestones: 4. Pre-register the rules (2026-10-05 00:29 (−07:00)); 5. Prime th
 3. **Find real adapters; capture the engine**: 7 of 261 Hub adapters qualified. Paid captures: vLLM's default memory budget ran out of memory; at 0.85 and then 0.80 the diagnostic did too, so it was cut and 0.80 kept.
    - Output: docs/recon-a5.md and fixtures/a5/: budget 0.80, sweep top 64, diagnostic cut
    - When: 2026-10-04 to 10-05
-   - Decision: `memory` Report memory as capacity; name the slot cost
+   - Decision: `memory` Memory as capacity; name the slot cost
    - Evidence: 1fe2de4855 (strict real-adapter rule); 096298c8df (memory budget fixed); 89f8b7fb65 (captures); 6b034ee179 (answers and rules applied)
 4. **Pre-register the rules** [MILESTONE]: After the reconnaissance captures, before priming and the gate: hypotheses, τ = 10%, the gate's margin, SLO and tenant assumptions, a $1.00 placeholder rate; H4 withdrawn.
    - Output: docs/experiment-a5.md, changed afterwards only by appended amendments
    - When: 2026-10-05 00:29 (−07:00)
-   - Decision: `knee` A knee rule that errs toward fewer tenants
+   - Decision: `knee` A knee rule erring toward fewer tenants
    - Evidence: 93789512a8
 
 ### Phase 4 of 5: Equivalence gate (4 steps)
@@ -314,7 +317,7 @@ Milestones: 4. Pre-register the rules (2026-10-05 00:29 (−07:00)); 5. Prime th
 5. **Prime the caches; 24-start gate: inconclusive** [MILESTONE]: One cold compile excluded, 23 usable. TTFT resolution check +8.9% [−6.4%, +11.7%], outside ±5%; throughput passed.
    - Output: the pilot, kept as data/a5/gate-pilot.jsonl and never pooled
    - When: 2026-10-05
-   - Decision: `gate` License synthetic adapters with an equivalence gate
+   - Decision: `gate` License synthetic adapters by a gate
    - Evidence: 476b2df2fe (priming runs); 4b31c3f702 (pilot gate)
 6. **Amendments 1 and 2: a larger gate; rate and model**: Amendment 1 (post-hoc): 144 starts in a fresh store, nothing else changed. Amendment 2, mid-run: artifact 4's $1.1095 rate, the base-model mismatch, the CUDA 13.0 host restriction.
    - Output: gate_instances 144; gpu_hourly_rate 1.1095
@@ -337,7 +340,7 @@ Milestones: 4. Pre-register the rules (2026-10-05 00:29 (−07:00)); 5. Prime th
 9. **Run the 192-start campaign** [MILESTONE]: Seven slot counts plus the gauge control, 24 starts each, in randomized blocks. One start failed client-side and was not retried; no cold compiles, no top-up.
    - Output: data/a5/campaign.jsonl: 191 ok, all on one host
    - When: 2026-10-06 to 10-07 (−07:00)
-   - Decision: `regimes` Separate the two counts by traffic, inside one start
+   - Decision: `regimes` Separate the counts by traffic
    - Evidence: e270ee61ed
 10. **Analyse, price, publish** [MILESTONE]: Analysis from the two stores and artifact 4's file, then figures and the post; artifact 4's failed validation added to the cost bars; a KV count corrected that night.
    - Output: data/a5/analysis.json (re-runs byte-identical), four figures, docs/post-a5.md
@@ -347,7 +350,7 @@ Milestones: 4. Pre-register the rules (2026-10-05 00:29 (−07:00)); 5. Prime th
 
 ## Results as meaning
 
-### Throughput as adapters are added: one active, or all
+### Throughput by adapters added: one active, or all
 
 - Axis: Measured: Qwen3-4B on one RTX 4090, 64 requests in flight, 13 prompt and 16 output tokens. Each point is a median over server starts; both lines come from the same starts.
 - Read it as: The gap between the lines at each N is the heterogeneity cost; the top line's own fall is the registered-slot cost. Spread TTFT p95 rose from 108 to 141 ms, far inside the 1 s SLO: all 64 served.
@@ -360,7 +363,7 @@ Milestones: 4. Pre-register the rules (2026-10-05 00:29 (−07:00)); 5. Prime th
 
 ### The knee: throughput lost per doubling of active adapters
 
-- Axis: Measured: m(N) = 1 − T(N) / T(N/2), with T the spread regime's median throughput (every registered adapter active).
+- Axis: Measured: loss per doubling, 1 − T(N) / T(N/2), with T the spread regime's median throughput.
 - Read it as: The first point above the line is 16, so the knee lies between 8 and 16 (see How it works).
 - How it is computed: At 16: 1 − 2,911 / 3,260 = 10.7%. Rounded to one decimal, the 2-slot whisker's low end is 0.0 (0.03%).
 - Axes: x is adapters registered and active (N) (log scale); y is spread throughput lost vs N/2 (%)
@@ -369,7 +372,7 @@ Milestones: 4. Pre-register the rules (2026-10-05 00:29 (−07:00)); 5. Prime th
 - Note: Whiskers: 95% bootstrap interval of the ratio of medians. A crossing is resolved when the whole whisker clears the line: at 32 and 64, not at 16.
 - So: see decision `knee`
 
-### At 64 adapters: mixing versus merely holding them
+### Mixing versus holding, at 64 adapters
 
 - Axis: Measured, 95% bootstrap intervals of the median. Heterogeneity: paired within each of 24 starts. Registered-slot: concentrated at 64 slots against at 1 slot, across starts. Gauge: the heterogeneity cost with the gauge on minus 24 control starts with stats logging off.
 - Read it as: The two costs' intervals are far apart, so H2 holds: the batch's mix costs more than the slots. The gauge's interval straddles zero; a gauge cost would show as negative, so at most about 19 tokens/s (the post quotes the symmetric bound, 57), against the 1,290.
@@ -381,7 +384,7 @@ Milestones: 4. Pre-register the rules (2026-10-05 00:29 (−07:00)); 5. Prime th
 
 ### The equivalence gate, three times: could it resolve 5%?
 
-- Axis: Measured: TTFT p50 relative difference per start, median across usable starts, with the 90% bootstrap interval the rule requires. Synthetic vs real: (synthetic − real) / real. Real vs real, the resolution check: (2nd real phase − 1st) / 1st. 23: the pilot; 88: the 144-start rerun after 52 host failures; 137: after Amendment 3.
+- Axis: Measured: TTFT p50 relative difference per start, median across usable starts, with the 90% bootstrap interval the rule requires. Synthetic vs real, and real vs real (the resolution check), as in the verdicts concept. 23: the pilot; 88: the 144-start rerun after 52 host failures; 137: after Amendment 3.
 - Read it as: The top row is not data: it is the margin. A pass needs both intervals of a run inside it. Synthetic vs real is inside from 88 on. Real vs real reaches +11.7% at 23 and +5.81% at 88 (inconclusive both times), then +4.95% at 137: a pass by 0.05 points, sitting above zero. Throughput passed all three runs.
 - How it is computed: 196 scheduled − 55 failed − 4 cold compiles = 137 usable. Margin = τ / 2 = 0.05. Final resolution check: 5 − 4.95 = 0.05 points to spare.
 - Reference: the ±5% margin: 0 % (interval -5 to 5)
@@ -393,9 +396,19 @@ Milestones: 4. Pre-register the rules (2026-10-05 00:29 (−07:00)); 5. Prime th
 - 137 starts: real vs real: 2.29 % (interval 0.99 to 4.95)
 - So: see decisions `gate`, `amend`
 
-### KV capacity falls with slots, and never binds here
+### Where the card's 23.52 GiB goes
 
-- Axis: Measured: the KV cache size vLLM logs at startup, memory budget 0.80 of the 24 GB card. Each slot's weight buffers take memory the cache would otherwise hold.
+- Axis: Measured from the startup log (docs/recon-a5.md), budget 0.80 of 23.52 GiB; 'derived' segments are subtractions.
+- Read it as: Each slot's 79 MiB comes out of the KV cache. CUDA graphs (1.28 GiB) sit outside the budget, which fits the 0.92 default running out of memory.
+- How it is computed: KV = 18.81 − 7.55 − 0.44 − N × 0.0771. Left over = 23.52 − 18.81 − 1.28 = 3.43.
+- 1 slot: Base weights (derived) 7.55, Adapter slots 0.08, Runtime + activation (derived) 0.44, KV cache 10.74, CUDA graphs (outside budget) 1.28, Left over (derived) 3.43 (GiB)
+- 8 slots: Base weights (derived) 7.55, Adapter slots 0.62, Runtime + activation (derived) 0.44, KV cache 10.2, CUDA graphs (outside budget) 1.28, Left over (derived) 3.43 (GiB)
+- 64 slots: Base weights (derived) 7.55, Adapter slots 4.94, Runtime + activation (derived) 0.44, KV cache 5.89, CUDA graphs (outside budget) 1.28, Left over (derived) 3.42 (GiB)
+- So: see decision `memory`
+
+### KV capacity falls with slots, never binds
+
+- Axis: Measured: the KV cache size vLLM logs at startup, budget 0.80 of the 24 GB card.
 - Read it as: About 45% of the cache goes by 64 slots, yet it still holds 1,339 of these short requests against the 64 in flight: memory cannot slow this load. At an 8,192-token context it holds 9 at 8 slots, which gives the memory bound. The fall is a straight line, about 561 tokens per slot (79 MiB), not an accelerating cliff.
 - How it is computed: 42,864 / 32 (two 16-token blocks per 29-token request) = 1,339; analysis.json's own field still divides by 29 (1,478). Memory bound = unfloored throughput bound × 9 / 64 = 1,784.6 × 9 / 64 = 250.96, rounded down: 250.
 - Axes: x is adapters registered (GPU slots); y is KV cache capacity (tokens)

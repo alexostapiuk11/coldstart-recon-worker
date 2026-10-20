@@ -1,0 +1,513 @@
+{
+  "unit": "a5",
+  "title": "Practice: how many LoRA adapters fit on one GPU",
+  "minutes": 35,
+  "objectives": [
+    "Write y = Wx + (α/r)B(Ax), give A and B's shapes for one projection, and size a rank-16 adapter within 10% (about 63 MiB).",
+    "Draw the 24 GB card at 1, 8 and 64 slots and compute the KV tokens left at 64 slots from the budget (5.89 GiB, 42,864 tokens).",
+    "Explain in 60 seconds why a batch spanning 64 adapters costs more than one sharing an adapter, and say which parts are measured.",
+    "Quote the two costs at 64 slots (−1,290 and −450 tokens/s), say which is paired within a start, and why.",
+    "Apply the knee rule to the doubling table, then turn a KV ceiling into a tenant bound with Little's law (250 at 8,192 tokens).",
+    "State what \"8 tenants per GPU\" does and does not mean, and name what would have to be measured to say more."
+  ],
+  "prereq_check": [
+    {
+      "q": "A 24 GB GPU serves an 8B model in bf16. Roughly how much memory is left for the KV cache, and how does vLLM decide its size?",
+      "a": "The weights take about 16 GB (8B numbers at 2 bytes), so at most about 8 GB is left before runtime memory. vLLM profiles a forward pass and gives what remains of its memory budget to the KV cache.",
+      "review": "p1:kvcache"
+    },
+    {
+      "q": "Why does decoding 64 requests together take only a little longer per step than decoding one?",
+      "a": "A decode step reads every weight from GPU memory once, whatever the batch size, so a bigger batch is nearly free throughput until compute or KV memory runs out. That is the batching the adapters then break up.",
+      "review": "p1:batching"
+    },
+    {
+      "q": "A 90% bootstrap interval for a median difference is [−1.87%, +0.95%] and the margin is ±5%. Is that equivalent, and what else makes \"no difference found\" trustworthy?",
+      "a": "Yes, it lies inside the margin. You also need evidence the method can resolve ±5%: a real-versus-real check whose interval also fits inside ±5%. Without it the verdict is inconclusive, not a pass.",
+      "review": "p2:gate"
+    }
+  ],
+  "drills": [
+    {
+      "q": "What does rank mean in LoRA, and how big is a rank-16 adapter on Qwen3-4B?",
+      "a": "W stays frozen and the output is y = Wx + (α/r)·B(Ax), with A shaped r × in and B shaped out × r. Rank r is the inner width. Parameters are r × (in + out) per projection: 917,504 a layer and 33,030,144 over seven projections and 36 layers, which is 63 MiB at 2 bytes (computed from the repo's Qwen3-4B shape constants). The measured slot took 79 MiB; the sources do not explain the 16 MiB gap.",
+      "red_flag": "\"Rank is the number of layers adapted\", \"an adapter is a few KB\", or quoting 63 MiB as a measurement, or inventing a cause for the 16 MiB."
+    },
+    {
+      "q": "What do `max_loras`, `max_cpu_loras` and `max_lora_rank` set in vLLM 0.27.1, and what were they here?",
+      "a": "`max_loras`: the number of GPU slot buffers (each sized to `max_lora_rank`, allocated used or not) and the cap on distinct adapters per batch. `max_cpu_loras`: adapters held in host memory (at least `max_loras`), copied into a slot on demand. `max_lora_rank`: the width every slot is padded to. Here `max_loras` = `max_cpu_loras` = N (1 to 64) and rank 16, so nothing swaps. This is the harness amendment's reading of 0.27.1; other versions may differ.",
+      "red_flag": "\"`max_loras` is the total number of adapters the server can serve.\""
+    },
+    {
+      "q": "Why does KV capacity fall as slots are added, and is the fall linear?",
+      "a": "vLLM sizes the KV cache from what is left of its memory budget after weights, slot buffers and runtime memory, so each slot's 79 MiB buffer removes about 561 tokens. Measured: 78,208 tokens at 1 slot and 42,864 at 64, 45% fewer; (78,208 − 42,864) / 63 = 561. The fall is a straight line. It only looks like a cliff on a log slot axis.",
+      "red_flag": "\"It accelerates past 16 slots.\""
+    },
+    {
+      "q": "Why can KV capacity not slow this benchmark, even at 64 slots, and when would it?",
+      "a": "A 29-token request takes two 16-token blocks, so 64 in flight use about 2,048 tokens of 42,864 (the engine logged 4.7% KV use); the scheduler never waits for blocks. It would bind with long contexts: at 8,192 tokens the cache holds 9 requests at 8 slots and 5 at 64.",
+      "red_flag": "\"Less KV means preemption, so it is part of the slowdown.\""
+    },
+    {
+      "q": "Why does a batch spanning 64 adapters cost more than one sharing an adapter, and how sure are you?",
+      "a": "Mechanism, consistent with the data and not measured (vLLM 0.27.1 source reading): the base weights are read once for every request, while each distinct adapter needs its own small multiply over only its requests, with its own weights read (about 63 MiB each, 3.9 GiB for 64, in theory). Measured: spread costs 1,290 tokens/s more than concentrated at 64, in the same starts. How that splits between extra bytes, tiny multiplies and launches was not measured.",
+      "red_flag": "\"Adapters are swapped in and out\" (nothing swaps here), \"it is memory\", or stating the kernel mechanism as a measurement."
+    },
+    {
+      "q": "Why does the one-adapter regime also slow down, by 450 tokens/s at 64 slots, and why is that not memory?",
+      "a": "By the repo's reading of the 0.27.1 source the LoRA kernels launch `max_loras + 1` slices whatever the batch holds (65 at 64 slots, 2 at 1); empty ones exit early but are still launched. KV never binds at this shape. How much of the 450 that explains is unmeasured: the `--specialize-active-lora` diagnostic ran out of GPU memory in graph capture (4.5 times as many graphs) and was cut, so host-side bookkeeping could also contribute.",
+      "red_flag": "\"KV capacity fell 45%, so it is memory\", or claiming the launch grid explains the 450."
+    },
+    {
+      "q": "Why run both regimes inside every server start rather than sweeping configurations?",
+      "a": "Slot count and in-batch cap are one knob, so configuration cannot hold registered fixed while active changes; traffic can. Pairing inside a start cancels start-to-start variation (host, compile, allocator), so the heterogeneity interval is tight ([−1,309, −1,274]). The slot cost compares different starts and is wider ([−486, −425]).",
+      "red_flag": "\"Set `max_loras` to 1 and register 64 adapters.\" With a larger `max_cpu_loras` that is the swapped mode, a different experiment."
+    },
+    {
+      "q": "How do you turn a KV ceiling into a tenant bound?",
+      "a": "Little's law: requests in the system = rate × time. At 8 slots 64 in flight at about 204 completed a second means about 0.31 s each. A tenant at peak (0.114 requests a second) keeps about 0.036 in the system. KV room for 9 requests of 8,192 tokens divided by 0.036 gives 250 tenants. It is generous: a real long request stays longer than 0.31 s.",
+      "red_flag": "\"KV tokens divided by tokens per request is the tenant count\" (forgets time in the system)."
+    },
+    {
+      "q": "Is \"8 tenants per GPU\" the product's capacity?",
+      "a": "No. It is the slot bound: the largest N below the knee, with every adapter resident, 64 requests in flight and one short request shape. It is a floor on tenants. How many customers fit depends on how often they overlap and on swapping adapters from host memory; neither was measured. $101.24 a month is an upper bound on cost per tenant; if the first crossing is noise the bound is 16 and the cost halves.",
+      "red_flag": "\"Yes, so a 4090 serves 8 customers at $101 each.\""
+    },
+    {
+      "q": "Why license synthetic adapters with an equivalence gate, and what does a pass not license?",
+      "a": "Serving cost is set by shape (rank, modules, base), and a dense multiply does the same work for any values. The one known path from values to cost, what the model generates, is closed by ignore-EOS and prefix caching off. The gate checked it at 8 slots with a 90% interval inside ±5% plus a real-versus-real resolution check. A pass licenses nothing about quality, other ranks or other bases.",
+      "red_flag": "\"Random weights are fine because LoRA weights do not matter.\""
+    },
+    {
+      "q": "The 8-to-16 loss is 10.7% with interval [9.2%, 11.5%]. Defend the knee rule.",
+      "a": "The rule was fixed before the data: the first doubling whose point estimate exceeds τ = 10%. Requiring the interval to clear τ would move the knee to 16 to 32 and double tenants on a noisy drop; the point rule errs toward fewer tenants, the cautious side for capacity. Report both: if the crossing is noise the slot bound is 16 and cost per tenant is $50.62.",
+      "red_flag": "\"10.7 is above 10, so it is proven.\""
+    },
+    {
+      "q": "You must serve tenants with ranks from 8 to 64 on 4090s. What breaks first, and what do you measure?",
+      "a": "Slots are padded to `max_lora_rank`, so one rank-64 tenant makes every slot rank-64 and slot memory grows with rank; the amendment estimates 64 slots at rank 64 at about 15.8 GiB, which does not fit beside the weights. Pooling GPUs by rank is one option (my suggestion, untested here). Measure: co-active adapters per step, swap rate and latency if you use host memory, TTFT p95 per tenant, and throughput against active adapters at your real concurrency and request shape. None of this was measured here.",
+      "red_flag": "\"Just set `max_loras` to the number of tenants.\""
+    }
+  ],
+  "estimation": [
+    {
+      "title": "How many adapter slots fit beside one 8,192-token request?",
+      "problem": "RTX 4090 (23.52 GiB), Qwen3-4B, memory budget 0.80. The server must hold at least one 8,192-token request in its KV cache. Use the measured 79 MiB per slot at rank 16. How many slots fit at rank 16, and what would rank 64 give if slot memory scales with rank?",
+      "steps": [
+        "Budget = 0.80 × 23.52 = 18.81 GiB (the logged figure).",
+        "Fixed memory: base weights 7.55 GiB plus runtime and activation 0.44 GiB, both derived, = 7.99 GiB. Left for slots plus KV: 18.81 − 7.99 = 10.82 GiB.",
+        "One 8,192-token context at 144 KiB a token = 8,192 × 144 / 1,048,576 = 1.125 GiB. Slots may use 10.82 − 1.125 = 9.70 GiB.",
+        "Rank 16: 9.70 / 0.0771 GiB per slot = 125.8, so 125 slots.",
+        "Rank 64 (assumption: slot memory scales linearly with rank; the 1.254 overhead factor is measured at rank 16 only): 4 × 79 = 316 MiB = 0.31 GiB per slot, 9.70 / 0.31 = 31 slots. Theory alone (4 × 63 = 252 MiB) gives 39.",
+        "Sanity check: 64 slots at rank 64 would need about 19.7 GiB (4 × 4.94), more than the 10.82 GiB available; the harness amendment's theory figure is 15.8 GiB. Either way they do not fit."
+      ],
+      "answer": "125 slots at rank 16 (measured per-slot cost). About 31 at rank 64, an assumption: rank scaling of the overhead was not measured."
+    },
+    {
+      "title": "The memory bound if requests are 2,048 tokens, not 8,192",
+      "problem": "At 8 slots the engine logged 74,288 KV tokens; 64 requests were in flight at 203.72 completed requests a second; a tenant peaks at 0.11416 requests a second (100,000 a month, peak three times average). Using the pre-registered formula, what is the memory bound on tenants for a 2,048-token context, and does it change which bound binds?",
+      "steps": [
+        "Requests that fit: 74,288 / 2,048 = 36.27, so 36 (at 8,192 tokens it is 9.07, so 9).",
+        "Memory bound = fitting requests × request rate / (in flight × one tenant's peak rate) = 36 × 203.72 / (64 × 0.11416).",
+        "Denominator 64 × 0.11416 = 7.306; numerator 36 × 203.72 = 7,333.9; ratio 1,003.8, floored to 1,003.",
+        "Compare: throughput bound 1,784, memory bound 1,003 (at 8,192 tokens: 250), slot bound 8. The slot bound still binds.",
+        "Caveat: 2,048 tokens is a chosen what-if. The 0.31 s time in the system was measured on 29-token requests and a real long request would stay longer, so the bound is generous."
+      ],
+      "answer": "About 1,003 tenants by memory at a 2,048-token context, against 250 at 8,192; the 8-slot bound still binds."
+    }
+  ],
+  "scenario": {
+    "prompt": "You run a fine-tuning product: 2,000 customers, each with a rank-16 LoRA adapter on Qwen3-4B, 100,000 requests a month each, peak three times average, TTFT p95 under 1 s. Design the serving tier on RTX 4090s: how many GPUs, how adapters are placed, and what you measure before you trust the plan.",
+    "outline": [
+      "Demand: 2,000 × 0.114 = 228 requests/s if every customer peaked together (pessimistic). Measured: 203.72 requests/s at 8 adapters in a batch, 64 in flight, 13-token prompts and 16-token outputs. That is a different shape, so re-measure; at least two GPUs on that bound.",
+      "Co-active adapters in a batch, not registered adapters, drive cost. The knee (8 to 16) was measured with every adapter resident. Route a customer's traffic to a bounded set of GPUs (affinity) so a batch holds few distinct adapters. A design suggestion, not tested here.",
+      "More customers than slots needs `max_cpu_loras` above `max_loras` and swapping adapters into slots on demand. Not measured: treat swap-in rate and its latency as the main risk until you measure it.",
+      "Memory: at rank 16, 16 slots take 16 × 79 MiB = 1.2 GiB of KV, small. Long contexts bind earlier through Little's law. Slots are padded to `max_lora_rank`, so keep ranks uniform per server.",
+      "Failure modes: thrash when co-active customers exceed slots (swap latency lands in TTFT), noisy neighbours (each added co-active adapter slows everyone), cold adapter fetches, a hot customer better served by a dedicated model.",
+      "Measure first, pre-registered: co-active adapters per step on real traffic; swap rate and p95 swap latency; throughput against active adapters at real concurrency and request shape; TTFT p95 per customer; KV use at real contexts.",
+      "Cost: GPUs × $1.1095 × 730 hours / customers. State which bound applies and that the whole-model neighbours came from a simulator that failed validation."
+    ],
+    "pitfalls": [
+      "Quoting 8 tenants per GPU as capacity.",
+      "Reusing 203.72 requests/s for production request lengths.",
+      "Assuming swapping is free: only the all-resident case was measured.",
+      "Mixing ranks on one server, so every slot pays the largest.",
+      "Treating artifact 4's neighbouring bars as findings."
+    ]
+  },
+  "lab": {
+    "goal": "Re-derive the published knee, tenants and cost from the raw data with no GPU, then change the rule (τ, context length) and watch the answer move.",
+    "setup": [
+      "The repo's own environment: .venv/bin/python, never `uv run` (it re-syncs the venv and has broken figure byte tests).",
+      "Inputs already committed: data/a5/campaign.jsonl, data/a5/gate.jsonl, data/a4/cost_per_tenant.json. Write outputs to a scratch folder, not over data/a5."
+    ],
+    "steps": [
+      ".venv/bin/python scripts/a5_analyse.py --require-a4 --out scratch/a5-analysis.json, then cmp scratch/a5-analysis.json data/a5/analysis.json.",
+      "In a Python session read the campaign store as multilora/analysis.py does and call multilora.knee.knee on the spread throughput per N at tau = 0.08, 0.10 and 0.12.",
+      "For each tau note the knee interval, the slots below it, and whether the crossing is resolved (the doubling's `resolved` flag); also apply the rule that needs the interval to clear tau.",
+      "Call multilora.economics.tenants_per_gpu with max_concurrency 36 (a 2,048-token context) instead of 9, and read the three bounds.",
+      "Plot the seven KV sizes against slots on a linear and a log axis, side by side."
+    ],
+    "metrics": [
+      "Knee interval and slot bound at each tau",
+      "Whether each crossing is resolved, and the first resolved crossing",
+      "Memory bound at 2,048 and at 8,192 tokens",
+      "Cost per tenant at each slot bound"
+    ],
+    "expected": "cmp prints nothing. Tau 0.10: knee 8 to 16, slot bound 8, the 16 crossing unresolved; the interval rule gives 16 to 32. Tau 0.08: knee 8 to 16, and the 16 crossing is resolved. Tau 0.12: knee 16 to 32, slot bound 16, $50.62. At 2,048 tokens the memory bound is 1,003, still above the slot bound. KV is a straight line on linear axes.",
+    "demonstrates": "The headline is a function of a rule fixed in advance; every published number re-derives from committed data; slot memory is linear in slots.",
+    "cost": "local",
+    "note": "No GPU or paid call. A GPU follow-up (about one GPU-hour) could vary concurrency at 64 slots; it is only described here, not run, and its predicted result is untested."
+  },
+  "cards": [
+    {
+      "tag": "adapter",
+      "front": "LoRA forward pass for one projection?",
+      "back": "y = W·x + (α/r)·B·(A·x). W is frozen and shared; A is r × in, B is out × r."
+    },
+    {
+      "tag": "adapter",
+      "front": "Size of a rank-16 adapter on all seven Qwen3-4B projections?",
+      "back": "917,504 numbers a layer, 33,030,144 in all: 63 MiB at 2 bytes (computed). The measured slot took 79 MiB; the 16 MiB gap is unexplained."
+    },
+    {
+      "tag": "slots",
+      "front": "What does max_loras set in vLLM 0.27.1?",
+      "back": "The number of GPU slot buffers (allocated used or not) and the cap on distinct adapters per batch."
+    },
+    {
+      "tag": "slots",
+      "front": "What do max_cpu_loras and max_lora_rank add?",
+      "back": "max_cpu_loras: a host-memory tier of adapters copied into a slot on demand (here equal to N, nothing swaps). max_lora_rank: the width every slot is padded to (16)."
+    },
+    {
+      "tag": "memory",
+      "front": "KV tokens lost per slot, and in MiB?",
+      "back": "About 561 tokens, 79 MiB; linear in the slot count."
+    },
+    {
+      "tag": "memory",
+      "front": "KV capacity at 1 slot and at 64 slots?",
+      "back": "78,208 and 42,864 tokens, 45% fewer."
+    },
+    {
+      "tag": "memory",
+      "front": "What sits outside the 0.80 budget, and what happened at the 0.92 default?",
+      "back": "CUDA graphs, 1.28 GiB, captured after KV is sized. At 0.92 both probes ran out of memory (one in sampler warm-up, one in graph capture)."
+    },
+    {
+      "tag": "memory",
+      "front": "Why can KV not slow this benchmark?",
+      "back": "64 requests use about 2,048 tokens of 42,864 (4.8%); the scheduler never waits for blocks."
+    },
+    {
+      "tag": "mixed",
+      "front": "Why does mixing adapters slow decode?",
+      "back": "Base weights are read once for all requests; each distinct adapter is its own small multiply with its own weights. Consistent with the data, not measured (0.27.1 source reading)."
+    },
+    {
+      "tag": "mixed",
+      "front": "How much of the 1,290 is extra bytes, and how much tiny multiplies?",
+      "back": "Not measured. Only the size of the cost was."
+    },
+    {
+      "tag": "mixed",
+      "front": "Why do idle slots cost throughput?",
+      "back": "The kernels launch max_loras + 1 slices (65 at 64 slots, 2 at 1) and empty ones still launch (0.27.1 source reading). How much that explains is unmeasured."
+    },
+    {
+      "tag": "costs",
+      "front": "Heterogeneity cost against registered-slot cost at 64 slots?",
+      "back": "−1,290 against −450 tokens/s, 2.87 times."
+    },
+    {
+      "tag": "costs",
+      "front": "Which cost is paired inside a start, and why does it matter?",
+      "back": "Heterogeneity: both regimes run in every start, so start-to-start variation cancels. The slot cost compares different starts."
+    },
+    {
+      "tag": "knee",
+      "front": "The knee rule?",
+      "back": "The first doubling whose point-estimate loss 1 − T(N)/T(N/2) exceeds τ = 10%, fixed in advance."
+    },
+    {
+      "tag": "knee",
+      "front": "m(16) and is it resolved?",
+      "back": "10.7% [9.2%, 11.5%]: unresolved. 32 and 64 are resolved."
+    },
+    {
+      "tag": "tenants",
+      "front": "The three tenant bounds at 8 slots?",
+      "back": "8 by slots, 250 by memory, 1,784 by throughput; slots bind."
+    },
+    {
+      "tag": "tenants",
+      "front": "Little's-law numbers behind the memory bound?",
+      "back": "64 / 203.72 = 0.31 s; 0.114 × 0.31 = 0.036; 9 / 0.036 = 250."
+    },
+    {
+      "tag": "tenants",
+      "front": "What does \"8 tenants\" count?",
+      "back": "Adapters active in one batch at 64 in flight, all resident: a floor, not customers."
+    },
+    {
+      "tag": "gate",
+      "front": "Gate pass condition?",
+      "back": "90% interval of the median (synthetic − real)/real inside ±5% for TTFT p50 and throughput, and the real-versus-real check inside ±5% too."
+    },
+    {
+      "tag": "gate",
+      "front": "Resolved but outside ±5%, or unresolved: verdicts?",
+      "back": "Resolved but outside: fail (a finding). Unresolved: inconclusive, never a pass."
+    },
+    {
+      "tag": "memory layout",
+      "front": "Draw the 24 GB card at 1, 8 and 64 slots.",
+      "back": "Stacked bars of 23.52 GiB: weights 7.55 (derived), slots 0.08 / 0.62 / 4.94, runtime 0.44 (derived), KV 10.74 / 10.20 / 5.89, graphs 1.28 outside the budget, left over 3.43.",
+      "draw": true
+    },
+    {
+      "tag": "decode step",
+      "front": "Draw one decode step for 64 requests: one adapter against 64 adapters.",
+      "back": "One shared base multiply for all rows. Adapter multiplies grouped by adapter: 1 working slice with 64 requests, or 64 with 1 each; 65 slices launched. Mechanism hedged: consistent with the data, not measured.",
+      "draw": true
+    },
+    {
+      "tag": "throughput",
+      "front": "Sketch the throughput chart: tokens/s against slots.",
+      "back": "Log slot axis. Concentrated falls gently, 3,577 to 3,127; spread falls from 3,568 to 1,835. The gap is the heterogeneity cost, the top line's fall the slot cost.",
+      "draw": true
+    },
+    {
+      "tag": "two dials",
+      "front": "Draw the two-dial model.",
+      "back": "Slots: KV capacity (a tenant bound by Little's law) and launch grid (the slot cost). Adapters in a batch: heterogeneity cost, then the knee. Tenants = the smallest of three bounds.",
+      "draw": true
+    }
+  ],
+  "schedule": [
+    {
+      "when": "Day 1 (after study)",
+      "test": "Cards 1 to 12. Draw the memory layout and the decode step on paper. Give the 60-second explanation aloud."
+    },
+    {
+      "when": "Day 3",
+      "test": "Cards 13 to 20. Drills 1 to 6 without notes. Redo the slot estimate from a blank page."
+    },
+    {
+      "when": "Day 7",
+      "test": "Drills 7 to 12 aloud. Redo the 2,048-token estimate. Draw the two-dial model and attach every number."
+    },
+    {
+      "when": "Day 21",
+      "test": "The design scenario in 20 minutes on a whiteboard, then compare with the outline. Run the lab if not done. All draw cards."
+    }
+  ],
+  "calculator": {
+    "title": "Slot capacity: rank, slots, budget, context",
+    "note": "Constants: 57,344 = in + out over seven projections, 36 layers, 23.52 GiB card, 144 KiB per KV token. At rank 16, 8 slots it is within 0.1% of the logged 74,288 tokens. Other ranks and the 1.254 factor (measured at rank 16 only) are assumptions. Negative KV means no fit. No throughput is predicted.",
+    "inputs": [
+      {
+        "id": "r",
+        "label": "LoRA rank",
+        "value": 16,
+        "min": 8,
+        "max": 64,
+        "step": 8
+      },
+      {
+        "id": "n",
+        "label": "Slots (max_loras)",
+        "value": 8,
+        "min": 1,
+        "max": 128,
+        "step": 1
+      },
+      {
+        "id": "u",
+        "label": "Memory budget (gpu_memory_utilization)",
+        "value": 0.8,
+        "min": 0.7,
+        "max": 0.92,
+        "step": 0.01
+      },
+      {
+        "id": "ctx",
+        "label": "Context to hold",
+        "value": 8192,
+        "min": 1024,
+        "max": 32768,
+        "step": 1024,
+        "unit": "tokens"
+      },
+      {
+        "id": "calib",
+        "label": "Overhead factor (assumption)",
+        "value": 1.254,
+        "min": 1,
+        "max": 1.6,
+        "step": 0.002
+      },
+      {
+        "id": "fixed",
+        "label": "Weights + runtime (derived)",
+        "value": 7.99,
+        "min": 7,
+        "max": 9,
+        "step": 0.01,
+        "unit": "GiB"
+      }
+    ],
+    "outputs": [
+      {
+        "label": "Numbers per adapter",
+        "expr": "r * 57344 * 36 / 1000000",
+        "digits": 2,
+        "unit": "million"
+      },
+      {
+        "label": "Slot buffer",
+        "expr": "r * 57344 * 36 * 2 / 1048576 * calib",
+        "digits": 1,
+        "unit": "MiB"
+      },
+      {
+        "label": "KV cache left",
+        "expr": "u * 23.52 - fixed - n * r * 57344 * 36 * 2 / 1048576 * calib / 1024",
+        "digits": 2,
+        "unit": "GiB"
+      },
+      {
+        "label": "KV tokens",
+        "expr": "(u * 23.52 - fixed - n * r * 57344 * 36 * 2 / 1048576 * calib / 1024) * 1048576 / 144",
+        "digits": 0
+      },
+      {
+        "label": "Requests of that context that fit",
+        "expr": "floor((u * 23.52 - fixed - n * r * 57344 * 36 * 2 / 1048576 * calib / 1024) * 1048576 / 144 / ctx)",
+        "digits": 0
+      },
+      {
+        "label": "Most slots that leave room for one",
+        "expr": "floor((u * 23.52 - fixed - ctx * 144 / 1048576) / (r * 57344 * 36 * 2 / 1048576 * calib / 1024))",
+        "digits": 0
+      }
+    ]
+  },
+  "assumed_numbers": [
+    {
+      "value": "2,000",
+      "why": "Customers in the design scenario: a round number chosen for the exercise."
+    },
+    {
+      "value": "2,048",
+      "why": "A shorter context chosen for the what-if estimate and the lab; the measured request shape is 29 tokens."
+    },
+    {
+      "value": "316 MiB, 0.31 GiB",
+      "why": "4 × 79 MiB for rank 64, assuming slot memory scales linearly with rank. The 1.254 factor was measured at rank 16 only."
+    },
+    {
+      "value": "252 MiB, 39 slots",
+      "why": "Theory only: 4 × 63 MiB, and 9.70 GiB / 0.246 GiB."
+    },
+    {
+      "value": "19.7 GiB",
+      "why": "64 × 316 MiB for rank 64 at 64 slots, under the same scaling assumption."
+    }
+  ],
+  "derived_numbers": [
+    {
+      "value": "7.99",
+      "how": "7.55 + 0.44: base weights plus runtime and activation, both derived in the unit's derived_numbers."
+    },
+    {
+      "value": "10.82",
+      "how": "18.81 − 7.99."
+    },
+    {
+      "value": "1.125",
+      "how": "8,192 × 144 / 1,048,576 GiB: one 8,192-token context at 144 KiB a token."
+    },
+    {
+      "value": "9.70",
+      "how": "10.82 − 1.125 = 9.695."
+    },
+    {
+      "value": "125.8",
+      "how": "9.695 / 0.0771 = 125.7, floored to 125 slots."
+    },
+    {
+      "value": "1.254",
+      "how": "79.0 / 63.0: measured slot size over theory, at rank 16 only."
+    },
+    {
+      "value": "36.27",
+      "how": "74,288 / 2,048 = 36.27; floored to 36."
+    },
+    {
+      "value": "7.306",
+      "how": "64 × 0.11416."
+    },
+    {
+      "value": "7333.9",
+      "how": "36 × 203.72 = 7,333.92."
+    },
+    {
+      "value": "1003.8",
+      "how": "7,333.92 / 7.306 = 1,003.8; economics.py floors the product to 1,003."
+    },
+    {
+      "value": "0.11416",
+      "how": "100,000 requests a month × 3 / (730 h × 3,600 s) = 0.11416 requests a second."
+    },
+    {
+      "value": "50.62",
+      "how": "1.1095 × 730 / 16 = 50.62 dollars a month per tenant at 16 tenants."
+    },
+    {
+      "value": "917504",
+      "how": "16 × 57,344 numbers a layer (in + out summed over the seven projections is 57,344)."
+    },
+    {
+      "value": "57344",
+      "how": "6,656 + 3,584 + 3,584 + 6,656 + 3 × 12,288, from the Qwen3-4B shape constants in the unit's cited plan."
+    },
+    {
+      "value": "1048576",
+      "how": "1,024 × 1,024 bytes in a MiB; the conversion between MiB, GiB and tokens."
+    },
+    {
+      "value": "125",
+      "how": "floor(125.7): whole slots only."
+    },
+    {
+      "value": "203.72",
+      "how": "median per-start spread request rate at 8 slots, 203.72 requests/s, as in the unit's derived 1784.6 entry."
+    },
+    {
+      "value": "1003",
+      "how": "floor(1,003.8), as multilora/economics.py floors."
+    },
+    {
+      "value": "1.2",
+      "how": "16 × 79 MiB = 1,264 MiB = 1.23 GiB."
+    },
+    {
+      "value": "228",
+      "how": "2,000 × 0.114 = 228 requests a second."
+    },
+    {
+      "value": "9.07",
+      "how": "74,288 / 8,192 = 9.07."
+    },
+    {
+      "value": "4.8",
+      "how": "2,048 / 42,864 = 4.8%."
+    },
+    {
+      "value": "0.246",
+      "how": "252 MiB / 1,024 = 0.246 GiB."
+    }
+  ]
+}

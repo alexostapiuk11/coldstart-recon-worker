@@ -42,7 +42,7 @@
     {
       "id": "batching",
       "term": "Continuous batching",
-      "plain": "One copy of the model serving many users' requests at once. A fresh replica takes work as soon as it is ready.",
+      "plain": "One copy of the model serving many users' requests at once. A fresh replica takes work as soon as it is ready. Decode reads every weight once per step whatever the batch size, so a bigger batch is nearly free throughput until compute or KV memory runs out.",
       "analogy": "One kitchen cooking many orders at once: more dishes per hour, each a little slower.",
       "why": "In artifact 2, as requests in flight rose to 128, one replica's throughput rose and bent while latency rose gently."
     },
