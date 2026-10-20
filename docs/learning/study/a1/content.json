@@ -125,7 +125,7 @@
         }
       },
       {
-        "say": "On a cold compile cache the engine now runs [torch.compile](p1:compile), a median 18.79 s in arm B. Compile comes before the memory measurement, and no memory number moves yet."
+        "say": "On a cold compile cache the engine now runs [torch.compile](p1:compile), a median 18.79 s in arm B. The compile finishes before the profiling pass logs its numbers."
       },
       {
         "say": "Then vLLM runs one profiling pass and records how high the activations peak. After a cold compile the log reports 1.18 GiB.",
@@ -134,7 +134,7 @@
         }
       },
       {
-        "say": "The KV cache is sized once, from what is left: 21.64 − 15.54 − 1.18 = 4.92 GiB. At 144 KB per token the log counts 35,792 tokens. That size is fixed for the replica's life.",
+        "say": "The KV cache is sized once, from what is left: 21.64 − 15.54 − 1.18 = 4.92 GiB. At 144 KiB per token the log counts 35,792 tokens. That size is fixed for the replica's life.",
         "values": {
           "kv": "4.92 GiB",
           "tokens": "35,792 (4 requests)"
@@ -1321,7 +1321,7 @@
         ]
       },
       "axis": "KV cache tokens vLLM allocated at startup, same card and flags in every arm.",
-      "read_as": "C keeps 20.3 % more KV cache: one more full-length (8192-token) request served at once, 5 instead of 4. The engine log's peak activation (1.18 GiB cold, 0.19 GiB warm) accounts for it: see How it works. Registered ahead as H5, though reconnaissance had logged both values once.",
+      "read_as": "C keeps 20.3 % more KV cache: one more full-length (8192-token) request served at once, 5 instead of 4. The engine log's peak activation (1.18 GiB cold, 0.19 GiB warm) is where the difference shows up: see How it works. Registered ahead as H5, though reconnaissance had logged both values once.",
       "short": "KV cache left for serving",
       "so": "arms",
       "takeaway": "B and C differ only in the compile cache, yet C gets 20.3 % more KV cache: one more full-length request at a time, for the replica's whole life.",
@@ -1678,7 +1678,7 @@
     },
     {
       "value": "0.92",
-      "how": "'Desired GPU memory utilization is (0.92, 21.64 GiB)' in the same log line, identical in all 300 runs. docs/experiment.md and the design spec say 'the 0.9 default'; the log says 0.92."
+      "how": "'Desired GPU memory utilization is (0.92, 21.64 GiB)' in the same log line, identical in all 300 runs. docs/experiment.md and the design spec say 'the 0.9 default'; the log says 0.92, and fixtures/README.md already corrects that. The harness did not set it (the logged non-default args are only the revision and max_model_len), so 0.92 is vLLM's default in this run; read from logs, not confirmed in vLLM source."
     },
     {
       "value": "21.64",
