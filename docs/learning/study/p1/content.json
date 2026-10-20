@@ -13,7 +13,7 @@
   "concepts": [
     {
       "id": "hbm",
-      "term": "GPU memory (HBM)",
+      "term": "GPU memory (VRAM)",
       "plain": "The GPU's own fast memory, fixed in size. **Weights**, **scratch space** and the **KV cache** share it.",
       "analogy": "A kitchen counter of fixed size: the recipe book takes most of it, a prep area stays clear, order notes fill the rest.",
       "why": "The KV cache gets whatever weights and scratch leave, so free memory decides how many users you can serve."
