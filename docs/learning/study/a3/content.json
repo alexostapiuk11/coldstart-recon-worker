@@ -32,7 +32,7 @@
     },
     {
       "id": "R5",
-      "short": "Rules and spend fixed before data",
+      "short": "Rules and spend to be fixed before data",
       "text": "Hypotheses, band, grading and floors are committed before the pilot; the scenario count, repetitions, included scenarios and approved spend before any campaign call. No paid call runs without a stated call count and cost.",
       "why": "N depends on what the pilot measures, git timestamps must show the order, and the portfolio's spend rule is made mechanical by a guard."
     },
@@ -56,7 +56,7 @@
       "id": "cells",
       "short": "Eight cells",
       "term": "The eight cells",
-      "plain": "Count: the scenario's own 2 to 4 tools, or exactly 20 (those, 4 to 6 look-alikes written for the scenario, and filler from its own domain first, then others). Richness: terse one-liners or rich descriptions. Strictness: loose types (only the first required parameter in `required`) or strict enums, patterns and every required key. Baseline: low, terse, loose. Rich text may state a constraint in words that a strict schema states in structure, so richness and strictness overlap.",
+      "plain": "Count: the scenario's own 2 to 4 tools, or exactly 20 (those, 4 to 6 look-alikes written for the scenario (the current suite has 4 or 5), and filler from its own domain first, then others). Richness: terse one-liners or rich descriptions. Strictness: loose types (only the first required parameter in `required`) or strict enums, patterns and every required key. Baseline: low, terse, loose. Rich text may state a constraint in words that a strict schema states in structure, so richness and strictness overlap.",
       "analogy": "A configuration matrix in which each axis changes one thing and the system prompt is one fixed text in every cell, like a deploy matrix that differs only in the flag under test."
     },
     {
@@ -98,14 +98,14 @@
       "id": "costsuccess",
       "short": "Cost per successful call",
       "term": "Cost per successful call, and the retry walk",
-      "plain": "All spend, failed attempts included, divided by correct calls. A retry policy of up to three attempts is costed by walking each scenario's recorded reruns in order, not with c / (1 − f), which assumes each retry is an independent draw. If a failing scenario fails again, the formula understates the cost: in a worked example with f = 0.3 and a cap of 3, the formula and independent failures give 1.43 calls per success, and 2.29 if the failing 30% of scenarios always fail.",
+      "plain": "All spend, failed attempts included, divided by correct calls. A retry policy of up to three attempts is costed by walking each scenario's recorded reruns in order, not with c / (1 − f), which assumes each retry is an independent draw. If a failing scenario fails again, the formula understates the cost: in an illustrative calculation with f = 0.3 and a cap of 3, the formula and independent failures give 1.43 calls per success, and 2.29 if the failing 30% of scenarios always fail.",
       "analogy": "Capacity planning for retries: independent failures make retries cheap, but a poison message that fails every time makes every retry pure cost."
     },
     {
       "id": "contradiction",
       "short": "Known contradiction in the sources",
       "term": "Known contradiction in the sources: the August learning guide against the amendment",
-      "plain": "The August design's learning guide (§9b) and its definition of done (§10) predate the amendment that governs the design. Module 4 teaches \"20 scenarios × 20 repetitions = 400 observations\"; the amendment sets at least 24 scenarios and N from the pilot's ρ. Module 5 and §10 present Wilson intervals for reported proportions; the amendment allows Wilson only within one scenario. Module 6 teaches temperature-0 nondeterminism as the headline (August H5); the amendment withdraws it and cites near-deterministic reruns. The amendment says it governs, and its supersession list (§11) replaces §5's Wilson-on-cell-rates and the ~20-scenario count, but does not name §9b's modules 4 and 5 or §10's Wilson item. **This page follows the amendment.**",
+      "plain": "The August design's learning guide (§9b) and its definition of done (§10) predate the amendment that governs the design. Module 4 works an example of 20 scenarios × 20 repetitions = 400 observations; the amendment sets at least 24 scenarios and N from the pilot's ρ. Module 5 and §10 present Wilson intervals for reported proportions; the amendment allows Wilson only within one scenario. Module 6 teaches temperature-0 nondeterminism as the headline (August H5); amendment §12 revises it and adds a module on clustering, citing near-deterministic reruns. The amendment says it governs, and its supersession list (§11) replaces §5's Wilson-on-cell-rates and the ~20-scenario count, but does not name §9b's modules 4 and 5 or §10's Wilson item (§12 does revise Module 6). **This page follows the amendment.**",
       "analogy": "A runbook that predates an incident-driven change to the design: where the two disagree, the later, approved document is the one to follow, and the stale one is a known trap."
     }
   ],
@@ -578,7 +578,7 @@
       "level": "dynamic",
       "style": "sequence",
       "title": "One recovery conversation, opaque error (predicted, not observed)",
-      "caption": "Scenario `weather-forecast-lisbon`, kind `invalid_parameter` on `location`, baseline cell. The ordering is what `recovery.converse` and the mock service do in code; the model's replies are what H4 predicts, not something any model has done. With an actionable message the second call would name the country, and H4 predicts a recovery.",
+      "caption": "Scenario `weather-forecast-lisbon`, kind `invalid_parameter` on `location`, baseline cell. The ordering is what `recovery.converse` and the mock service do in code; the model's replies are what H4 predicts, not something any model has done. With an actionable message the second call would name the country, and H4 predicts fewer identical retries.",
       "participants": [
         {
           "id": "h",
@@ -712,8 +712,7 @@
       "title": "Strictness is schema content; constrained decoding stays off",
       "problem": "Read literally, the August strict arm would let a provider's strict mode do the work, making the malformed category nearly impossible by construction. That would test the API, not the model.",
       "options": [
-        "The strict arm is the provider's strict mode, as the August design read it",
-        "The strict arm is the schema the model sees, with decoding unconstrained in all eight cells",
+        "A reading of the August strict arm that lets provider strict mode do the work (amendment §4a)",
         "Schema content in all eight cells, plus one exploratory slice with strict mode on"
       ],
       "chosen": "Schema content in all eight cells, plus one exploratory slice with strict mode on",
@@ -777,11 +776,11 @@
       "problem": "Reruns of a scenario are correlated, so the count of calls overstates the information. The August design had scenarios shrink before repetitions and used Wilson intervals on proportions, both resting on rerun variance being the headline.",
       "options": [
         "About 20 scenarios with many repetitions, scenarios shrinking first, Wilson intervals on cell proportions (August)",
-        "N from the pilot's ρ at 95% of the S/ρ limit with a floor of 5, at least 24 scenarios, a bootstrap over scenarios, Wilson only within one scenario (amendment)"
+        "N from the pilot's ρ with a floor of 5, at least 24 scenarios, a bootstrap over scenarios, Wilson only within one scenario (amendment)"
       ],
-      "chosen": "N from the pilot's ρ at 95% of the S/ρ limit with a floor of 5, at least 24 scenarios, a bootstrap over scenarios, Wilson only within one scenario (amendment)",
+      "chosen": "N from the pilot's ρ with a floor of 5, at least 24 scenarios, a bootstrap over scenarios, Wilson only within one scenario (amendment)",
       "why": "With near-deterministic reruns an extra repetition adds almost nothing to a cell rate's interval; the information is in the scenarios. A Wilson interval over all S·N calls treats them as independent, the error the clustering exists to prevent. If the budget binds, N drops to its floor before S drops.",
-      "cost": "Authoring time, not money, limits S. With 10 pilot repetitions and the band, the realised ρ is at most about 0.61, so N is at least 13. The premise (near-deterministic reruns) is the Noise Floor Audit's, read by the amendment on abstracts and not checked here.",
+      "cost": "Authoring time, not money, limits S. The 95% of the S/ρ limit used to size N is `TARGET_FRACTION` in `toolcall/budget.py`, not the amendment. With 10 pilot repetitions and the band, the realised ρ is at most about 0.61, so N is at least 13. The premise (near-deterministic reruns) is the Noise Floor Audit's, read by the amendment on abstracts and not checked here.",
       "why_short": "With near-deterministic reruns the information is in the scenarios, and Wilson over all calls treats them as independent.",
       "cost_short": "Authoring time limits S; the band caps ρ near 0.61 so N is 13 or more; the near-deterministic premise is a cited abstract.",
       "serves": [
@@ -1438,7 +1437,7 @@
         "grader"
       ],
       "takeaway": "The grader places a response where its rules say, boundary by boundary. A control of the instrument, not a result.",
-      "arithmetic": "tests/test_toolcall_grader.py: 21 labelled cases covering all six categories and two exclusions; `pytest -k toolcall` 2026-10-19: 1104 passed, 3452 deselected."
+      "arithmetic": "tests/test_toolcall_grader.py: 21 labelled cases covering all six categories and two exclusions; `pytest -k toolcall` 2026-10-19: 1104 passed."
     },
     {
       "title": "Hypotheses H1 to H5 as the approved amendment words them (not yet frozen; results pending)",
@@ -1587,7 +1586,7 @@
             "label": "may not be testable"
           }
         ],
-        "note": "Wording from amendment §2, tests from §4f and §14 item 8. Frozen only when pre-registration step 1 is committed; it is not. One-sided cluster-bootstrap p-values, 10,000 draws, Holm at 0.05."
+        "note": "Wording from amendment §2, tests from §4f and §14 item 8; H3's three-part magnitude test and the failure definition are in `toolcall/hypotheses.py`. Frozen only when pre-registration step 1 is committed; it is not. One-sided cluster-bootstrap p-values, 10,000 draws, Holm at 0.05."
       },
       "axis": "One row per hypothesis. Tone is what the prediction expects; no model has been run.",
       "read_as": "H1 bets that rich descriptions help more at 20 tools than at 3. H2 bets that strictness moves malformed and wrong-value calls and leaves tool choice within a small margin. H3 bets that count drives wrong-tool calls most. H4 bets that an opaque error gets more identical retries, if the floor lets it be tested. H5 bets that count moves results more than rerun noise does.",
@@ -1662,7 +1661,7 @@
       },
       {
         "q": "Why not cost a retry policy as c / (1 − f)?",
-        "a": "That formula assumes each retry is an independent draw. With near-deterministic reruns a scenario that fails tends to fail again, so it understates what retries cost; in a worked example with f = 0.3 and a cap of 3, 1.43 calls per success becomes 2.29 if the failing 30% of scenarios always fail. The study walks each scenario's recorded reruns in order. It is the scenario-as-unit argument expressed in money."
+        "a": "That formula assumes each retry is an independent draw. With near-deterministic reruns a scenario that fails tends to fail again, so it understates what retries cost; in an illustrative calculation with f = 0.3 and a cap of 3, 1.43 calls per success becomes 2.29 if the failing 30% of scenarios always fail. The study walks each scenario's recorded reruns in order. It is the scenario-as-unit argument expressed in money."
       }
     ],
     "limits": "No results exist: no hypothesis has an outcome and no cost per successful call has been measured. The hypotheses are worded in the approved amendment and are frozen only when pre-registration step 1 is committed; it has not been, and no pilot or campaign records are committed. When results exist they will hold for the pinned model snapshots on their run dates, each at the provider's most deterministic available setting (which may be the provider default, recorded as a deviation), for structurally checkable single-call scenarios in seven public or synthetic domains, one call per turn, and a suite chosen by a baseline band. A \"check first\" call is graded `WRONG_TOOL` because grading is single-turn; `hallucinated_success` is a regex proxy with known misses; the high-count filler is partly cross-domain. The prior-work table is cited from abstracts the amendment's author read and is not re-read here. The sources contradict each other in one place (the August learning guide against the amendment) and this page follows the amendment. A later revision of the pilot plan is uncommitted and is not used here."
@@ -1990,7 +1989,7 @@
     },
     {
       "value": "0.3",
-      "how": "the assumed per-call failure rate of the worked example; an illustration, not a measurement."
+      "how": "the assumed per-call failure rate of the illustrative calculation; an illustration, not a measurement."
     },
     {
       "value": "0.09",
@@ -1998,11 +1997,7 @@
     },
     {
       "value": "1104",
-      "how": "pytest -k toolcall on 2026-10-19 (offline, no key set): 1104 passed, 3452 deselected."
-    },
-    {
-      "value": "3452",
-      "how": "the deselected count of the same run."
+      "how": "pytest -k toolcall on 2026-10-19 (offline, no key set): 1104 passed."
     },
     {
       "value": "0.164",
