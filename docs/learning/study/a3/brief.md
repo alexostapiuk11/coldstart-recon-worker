@@ -422,7 +422,7 @@ Milestones: 1. August design: factorial, six categories, no LLM judge (2026-08-1
 
 - Axis: Constructed to show the arithmetic: 20 scenarios × 20 repetitions, 80 failures in both datasets. Spread: 0 to 7 failures per scenario. Concentrated: four scenarios fail every repetition and sixteen never fail. 95% intervals. Formula rows: the same cell at three correlations ρ.
 - Read it as: The pooled rate is 20% in both and the Wilson interval on 400 calls is identical, because it sees only 80 and 400. Resampling scenarios leaves the spread dataset near ±4 points and widens the concentrated one to 5 to 40: its effective size is about 20 scenarios, not about 400 calls. The formula rows widen the same way: effective size 400, 32.3, 22.1.
-- How it is computed: toolcall.effects, offline: wilson(80, 400) = 0.164 to 0.242; cluster_bootstrap, 10,000 draws, seed 1: 0.16 to 0.24 and 0.05 to 0.40. Formula rows: 20% ± 1.96 × 0.0200 × √(1 + 19ρ). Constructed, not data.
+- How it is computed: toolcall.effects: wilson(80, 400) = 0.164 to 0.242; cluster_bootstrap (10,000 draws, seed 1): 0.16 to 0.24 and 0.05 to 0.40. Formula rows are a normal approximation, not the bootstrap: 20% ± 1.96 × 0.0200 × √(1 + 19ρ).
 - Wilson over all 400 calls (both datasets): 20 % of calls failing (interval 16.4 to 24.2)
 - Scenario bootstrap: failures spread: 20 % of calls failing (interval 16 to 24)
 - Scenario bootstrap: failures concentrated: 20 % of calls failing (interval 5 to 40)
@@ -433,8 +433,8 @@ Milestones: 1. August design: factorial, six categories, no LLM judge (2026-08-1
 
 ### Repetitions stop paying
 
-- Axis: N / (1 + (N − 1)ρ). Dots: the N the sizing rule picks, between 5 and 20.
-- Read it as: Each curve flattens at its limit 1/ρ; at ρ = 0.9 the twentieth repetition adds almost nothing.
+- Axis: N / (1 + (N − 1)ρ). Dots: the N the sizing rule picks. Floor 5 (amendment §4d); cap 20 is the N the cost table assumes, neither frozen.
+- Read it as: Each curve flattens at its limit 1/ρ; at ρ = 0.9 the twentieth repetition adds almost nothing. The band caps the baseline ρ near 0.61; 0.9 is an extreme.
 - Axes: x is repetitions per scenario, N; y is effective size per scenario
 - ρ = 0.3, limit 3.33: 1: 1.0, 2: 1.54, 3: 1.88, 4: 2.11, 5: 2.27, 6: 2.4, 8: 2.58, 10: 2.7, 13: 2.83, 16: 2.91, 20: 2.99
 - ρ = 0.6, limit 1.67: 1: 1.0, 2: 1.25, 3: 1.36, 4: 1.43, 5: 1.47, 6: 1.5, 8: 1.54, 10: 1.56, 13: 1.59, 16: 1.6, 20: 1.61
@@ -444,7 +444,7 @@ Milestones: 1. August design: factorial, six categories, no LLM judge (2026-08-1
 ### Retry walk, illustrative
 
 - Axis: Assumed failure rate f = 0.3, up to three attempts; not a measurement.
-- Read it as: The formula understates the right bar by 37.5%: a failing scenario tends to fail again.
+- Read it as: In this extreme case, where 30% of scenarios always fail, the formula understates the right bar by 37.5%; that figure holds only here. If a failing scenario fails again, retries cost more than the formula says.
 - How it is computed: Left: 1 + 0.3 + 0.09 = 1.39 calls per group, 97.3% of groups succeed, 1.39 / 0.973 = 1.43. Right: 0.7 × 1 + 0.3 × 3 = 1.6 calls, 70% succeed, 1.6 / 0.7 = 2.29.
 - Independent failures, c / (1 − f): 1.43 calls per success
 - 30% of scenarios always fail: 2.29 calls per success

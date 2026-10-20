@@ -90,7 +90,7 @@ RED FLAG: "We grade against what the model saw, to be fair."
 ### Drill 4 of 12
 
 Q: Provider strict mode is on and `MALFORMED` is zero. What have you learned about the model's structural ability?
-KEY: Very little: constrained decoding makes a conforming call nearly certain by construction, so a zero measures the decoder. The vendors' exceptions as the amendment read them (refusals, truncation, enum capitalisation) were not re-checked here. What stays informative is `WRONG_TOOL`, value-level `WRONG_PARAMS`, `MISSING` and `SPURIOUS`, which is why strict mode is off in the eight cells and run as one labelled exploratory slice.
+KEY: Very little: constrained decoding makes a conforming call nearly certain by construction, so a zero measures the decoder. The vendors' exceptions as the amendment read them (refusals, truncation, enum capitalisation) were not re-checked here. What stays informative is `WRONG_TOOL`, `WRONG_PARAMS` for valid but wrong values, `MISSING` and `SPURIOUS`, which is why strict mode is off in the eight cells and run as one labelled exploratory slice.
 RED FLAG: "The model is perfectly reliable at formatting."
 
 ### Drill 5 of 12
@@ -138,7 +138,7 @@ RED FLAG: "Retries are geometric, so 1 / (1 − f)."
 ### Drill 12 of 12
 
 Q: Design a test that separates "the model reads the schema" from "the decoder enforces it", and one that separates "rich descriptions disambiguate" from "rich descriptions restate the enum".
-KEY: First: a 2 × 2 of schema content (loose, strict) × constrained decoding (off, on) on the same scenarios. The repo runs strict content with decoding off (the eight cells) and one exploratory slice with decoding on; the other corners are not run, and loose content with decoding on may not be expressible where strict mode needs every property required (the amendment's reading of OpenAI, not re-checked). Second: a richness level whose rich text omits enum values and patterns; the deviations log notes units' rich text lists the enum, so there strictness adds nothing. Label it exploratory.
+KEY: First: a 2 × 2 of schema content (loose, strict) × constrained decoding (off, on) on the same scenarios. The design uses strict content with decoding off (the eight cells) and one exploratory slice with decoding on; the other corners are not run, and loose content with decoding on would need the null-union rewrite of §14 item 7, so it is not the same loose schema. Second: a richness level whose rich text omits enum values and patterns; the deviations log notes units' rich text lists the enum, so there strictness adds nothing. Label it exploratory.
 RED FLAG: "Just compare strict against loose." That mixes content and decoding.
 
 ## Design scenario
@@ -174,7 +174,7 @@ Setup:
 
 Steps:
 
-1. Grade by hand, then by machine. Build the 12 responses of the boundary-cases table with `toolcall.responses.openai_call`, `openai_text` and `toolcall.providers.openai_parse` (`tests/test_toolcall_grader.py` has the calls). Write your predicted category first, then call `toolcall.grader.grade`.
+1. Grade by hand, then by machine. With `tests.a3_examples` (the flight library and scenario), build the 12 responses of the boundary-cases table as `tests/test_toolcall_grader.py` does (`toolcall.responses`, `toolcall.providers.openai_parse`). Predict each category, then call `toolcall.grader.grade`.
 2. Same call, two renderings. Load `toolcall/data/tools` and `toolcall/data/scenarios` (`load_library`, `load_scenarios`). For `weather-forecast-lisbon` grade `get_current_weather` with location Lisbon using `toolcall.formulation.tool_names(scenario, library, "low")`, then `"high"`.
 3. Clustering. Build two datasets of 20 scenarios × 20 reruns with 80 failures each: spread (0 to 7 per scenario) and concentrated (4 scenarios fail 20 of 20, 16 fail 0). Call `toolcall.effects.wilson(80, 400)`, `cluster_bootstrap(rates, average, iterations=10000, seed=1)` and `toolcall.budget.icc`.
 4. Sweep ρ. For ρ in 0.3, 0.5, 0.61, 0.7 and 0.9 print `toolcall.budget.reps_for(rho, 5, 20)` and `effective_n(30, n, rho)` for n = 5, 13 and 20.
@@ -189,12 +189,12 @@ Record:
 - N the rule picks, and effective size, for each ρ.
 - Calls per success and share of groups that succeed, independent and always-fail.
 
-KEY expected result: 1: the table. 2: `MALFORMED` (not in context) in the low cell, `WRONG_TOOL` (confusable) in the high cell. 3: Wilson 0.164 to 0.242 for both; bootstrap about 0.16 to 0.24 spread, 0.05 to 0.40 concentrated; ICC about 0.004 against 1.0. 4: N = 20, 19, 13, 9, 5; effective size at ρ = 0.9 is 32.6 at N = 5, 33.1 at N = 20. 5: about 1.43 calls per success, 97% of groups succeeding, when independent (seed-dependent); 2.29 and 70% when 9 scenarios always fail. 6: 147 graded calls.
+KEY expected result: 1: the table. 2: `MALFORMED` (not in context) low, `WRONG_TOOL` (confusable) high. 3: Wilson 0.164 to 0.242 for both; bootstrap 0.16 to 0.24 spread, 0.05 to 0.40 concentrated; ICC near 0 (0.004 here, up to about 0.1 for other spreads) against 1.0. 4: N = 20, 19, 13, 9, 5; effective size at ρ = 0.9 is 32.6 at N = 5, 33.1 at N = 20. 5: about 1.43 calls per success, 97% of groups succeeding if independent (seed-dependent); 2.29 and 70% with 9 always-fail scenarios. 6: 147 graded calls.
 KEY what it shows: The category is a function of the rendering plus one canonical schema; the interval is a function of how failures cluster; retry economics follow the clustering. None of it needs a model call.
 
 ## Calculator
 
-Design effect and the N rule What-ifs, not measurements: no ρ has been measured. Formulas: the page's effective-size concept (normal approximation for the half-width) and toolcall/budget.py (95% of the limit, floor 5, cap 20).
+Design effect and the N rule What-ifs, not measurements: no ρ has been measured. Formulas: the page's effective-size concept (normal approximation for the half-width) and toolcall/budget.py (95% of the limit; floor 5 per amendment §4d, cap 20 is the N the cost table assumes, neither frozen).
 
 Inputs (default, range):
 
@@ -224,7 +224,7 @@ Outputs at the defaults:
 - [cells] What does a loose schema keep in required? -> KEY: Only the tool's first required parameter; strict renders enums, patterns, every required parameter and additionalProperties: false.
 - [cells] Why is provider strict mode off in all eight cells? -> KEY: It would make `MALFORMED` nearly impossible by construction and test the decoder, not the model. One labelled exploratory slice turns it on.
 - [cluster] Effective sample size, and what it approaches. -> KEY: S·N / (1 + (N − 1)ρ), approaching S/ρ as N grows. Another repetition buys almost nothing at high ρ, so the information is in the scenarios.
-- [cluster] The N rule. -> KEY: The smallest N reaching 95% of S/ρ: N ≥ 19(1 − ρ)/ρ, between a floor of 5 and a cap of 20 (toolcall/budget.py).
+- [cluster] The N rule. -> KEY: The smallest N reaching 95% of S/ρ: N ≥ 19(1 − ρ)/ρ, floor 5 (amendment §4d); cap 20 is the N the cost table assumes, neither frozen (toolcall/budget.py).
 - [cluster] Wilson interval for 0 failures in 20 reruns of one scenario? -> KEY: 0% to 16.1% (toolcall.effects.wilson(0, 20)); the normal approximation would give a zero-width interval. Wilson is used only within one scenario.
 - [contrasts] A main effect, in words. Is the interaction halved here? -> KEY: High-level rate minus low-level rate, averaged over the other two factors, in points. The interaction is the effect at the other factor's high level minus its effect at the low level: not halved. Say which convention you mean.
 - [hypotheses] H4's floor rule. -> KEY: If the opaque arm's identical-retry rate is under 5%, report H4 as not testable at this rate. It counts neither as support nor refutation, and Holm runs over the other four.
