@@ -84,7 +84,7 @@
   "walkthrough": [
     {
       "title": "One K batch, killed in the commit window",
-      "lead": "A prediction (H1), not a result: values illustrate one payment, from the code and pre-registration. Only N has been seen duplicating this way (in the gate); K's abort-and-recommit path has not been run.",
+      "lead": "A prediction (H1), not a result: values illustrate one payment. Only N has been seen duplicating this way (in the gate); K's abort-and-recommit path has not been run on a real cluster under a fault.",
       "registers": [
         {
           "id": "ledger",
@@ -126,7 +126,7 @@
           "decision": "order"
         },
         {
-          "say": "K sends the record and adds its offsets: open, nothing visible. In one recon run (pre-campaign), 67% and 65% of transactions retried the offset commit after ~100 ms, widening [this window](a6:window) (H5).",
+          "say": "K sends the record and adds its offsets: open, unseen. In one unscored diagnostic run (`diag_k1`, 200/s, 120 s), 67% and 65% of transactions retried the commit after ~100 ms, widening [this window](a6:window) (H5).",
           "values": {
             "txn": "open; records, offsets pending",
             "out": "pending, hidden"
@@ -226,7 +226,7 @@
     },
     {
       "title": "A zombie consumer: paused, replaced, then it writes",
-      "lead": "Observed on N in reconnaissance (all 17 F5 trials), except step 3. K and I are predictions (H1, H2).",
+      "lead": "Observed on N in reconnaissance (all 17 F5 trials), except steps 3 and 4's ledger count. K and I are predictions (H1, H2).",
       "registers": [
         {
           "id": "a",
@@ -251,7 +251,7 @@
           }
         },
         {
-          "say": "With no heartbeat for `session.timeout.ms` (10 s), the coordinator moves A's partitions to B. In all 17 recon trials the generation went from 1 to 2 while A was paused.",
+          "say": "With no heartbeat for `session.timeout.ms` (10 s), the coordinator moves A's partitions to B. In all 17 recon trials the generation went from 1 to 2 while the paused consumer (A or B) was paused.",
           "values": {
             "group": "generation 2: B"
           }
@@ -276,7 +276,7 @@
           }
         }
       ],
-      "takeaway": "The zombie wrote, then its commit failed; the ledger holds the payment twice if B applied first. H1 predicts the same for K; H2, that I's key insert skips."
+      "takeaway": "The zombie wrote, then its commit failed; the ledger holds the payment twice (B's apply is documented semantics, not in the recon record). H1 predicts the same for K; H2, that I's key insert skips."
     }
   ],
   "views": [
@@ -1754,7 +1754,7 @@
         "legend": [
           {
             "status": "observed",
-            "label": "seen"
+            "label": "seen in the gate (N only)"
           },
           {
             "status": "predicted",
@@ -2268,7 +2268,7 @@
         "legend": [
           {
             "status": "observed",
-            "label": "seen"
+            "label": "seen on N in recon"
           },
           {
             "status": "predicted",

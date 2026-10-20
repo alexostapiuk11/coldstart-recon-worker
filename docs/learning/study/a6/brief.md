@@ -30,13 +30,13 @@ Read first: How these experiments earn trust (P2), Delivery guarantees and dupli
 
 ## How it works 1 of 3: One K batch, killed in the commit window
 
-A prediction (H1), not a result: values illustrate one payment, from the code and pre-registration. Only N has been seen duplicating this way (in the gate); K's abort-and-recommit path has not been run.
+A prediction (H1), not a result: values illustrate one payment. Only N has been seen duplicating this way (in the gate); K's abort-and-recommit path has not been run on a real cluster under a fault.
 
 | Step | What happens | Ledger rows, 1 payment | Committed offset | Kafka transaction | payments-applied | Consumer K process |
 |---|---|---|---|---|---|---|
 | 1 | K polls a batch. `beginTransaction()` is client-local: the broker has heard nothing, so a kill now would leave no Kafka transaction to abort. | 0 | start of this batch | none at the broker | nothing | running |
 | 2 | The ledger transaction commits to Postgres first. Kafka is not part of it, so this row is permanent whatever Kafka does next. (Decision: Postgres first, one state at the hook) | **1, committed** | start of this batch | none at the broker | nothing | running |
-| 3 | K sends the record and adds its offsets: open, nothing visible. In one recon run (pre-campaign), 67% and 65% of transactions retried the offset commit after ~100 ms, widening this window (H5). | 1, committed | start of this batch | **open; records, offsets pending** | **pending, hidden** | running |
+| 3 | K sends the record and adds its offsets: open, unseen. In one unscored diagnostic run (`diag_k1`, 200/s, 120 s), 67% and 65% of transactions retried the commit after ~100 ms, widening this window (H5). | 1, committed | start of this batch | **open; records, offsets pending** | **pending, hidden** | running |
 | 4 | F4-con-t sends SIGKILL at `before_kafka_commit`: row committed, transaction open and never finished. Nothing in the dead process can undo the row. (Decision: Crash-only, every mode) | 1, committed | start of this batch | open; records, offsets pending | pending, hidden | **killed** |
 | 5 | It restarts 5 s later; `initTransactions()` on the same `transactional.id` aborts the open transaction. Had it not come back, `transaction.timeout.ms` (60 s default) would. | 1, committed | start of this batch | **aborted** | **aborted, hidden** | **restarted** |
 | 6 | The offsets were never committed, so the group resumes from the last committed offset and delivers the same batch again. | 1, committed | **unchanged** | aborted | aborted, hidden | restarted |
@@ -65,19 +65,19 @@ Bold cells changed in that step.
 
 ## How it works 3 of 3: A zombie consumer: paused, replaced, then it writes
 
-Observed on N in reconnaissance (all 17 F5 trials), except step 3. K and I are predictions (H1, H2).
+Observed on N in reconnaissance (all 17 F5 trials), except steps 3 and 4's ledger count. K and I are predictions (H1, H2).
 
 | Step | What happens | Consumer A | Group | Ledger rows, 1 payment |
 |---|---|---|---|---|
 | 1 | A polls a batch; the `after_poll` hook holds it and the orchestrator runs `docker pause` on A. Batch in hand, no database work yet. | paused, batch held | generation 1: A | 0 |
-| 2 | With no heartbeat for `session.timeout.ms` (10 s), the coordinator moves A's partitions to B. In all 17 recon trials the generation went from 1 to 2 while A was paused. | paused, batch held | **generation 2: B** | 0 |
+| 2 | With no heartbeat for `session.timeout.ms` (10 s), the coordinator moves A's partitions to B. In all 17 recon trials the generation went from 1 to 2 while the paused consumer (A or B) was paused. | paused, batch held | **generation 2: B** | 0 |
 | 3 | B resumes from the last committed offset, gets the same batch and applies it (documented semantics; not in the recon record). | paused, batch held | generation 2: B | **1 (B)** |
 | 4 | A unpauses 5 to 20 s (seeded) past the session timeout. Its first act is the `db_commit` of its held batch; Postgres cannot tell A is stale. About 0.1 s on, its offset commit is refused with `CommitFailedException`. | **wrote, then refused** | generation 2: B | **2 (B, then A)** |
 | 5 | Crash-only: A exits and restarts into the next generation. Fencing stopped the Kafka commit, not the ledger write. | **exited, restarted** | generation 2: B | 2 (B, then A) |
 
 Bold cells changed in that step.
 
-**Takeaway:** The zombie wrote, then its commit failed; the ledger holds the payment twice if B applied first. H1 predicts the same for K; H2, that I's key insert skips.
+**Takeaway:** The zombie wrote, then its commit failed; the ledger holds the payment twice (B's apply is documented semantics, not in the recon record). H1 predicts the same for K; H2, that I's key insert skips.
 
 ## System views (C4)
 
@@ -444,7 +444,7 @@ Milestones: 4. Reconnaissance A: rate, VM, K's commit step (2026-10-08 to 10-10 
 
 | prediction | Gap P: source→Kafka (COMMIT to Kafka ack) | Gap C: ledger→Kafka (COMMIT to Kafka commit) | Hypotheses |
 |---|---|---|---|
-| N | a kill loses it [seen, open] | a kill repeats it [seen, open] | gate: both seen [seen] |
+| N | a kill loses it [seen in the gate (N only), open] | a kill repeats it [seen in the gate (N only), open] | gate: both seen [seen in the gate (N only)] |
 | K | same dual write [predicted, open] | window predicted wider [predicted, open] | H1, H5; H3, H4 [predicted] |
 | I | same dual write [predicted, open] | closed by the key [predicted, closed] | H2; H3 [predicted] |
 | O+I | outbox in the commit [predicted, closed] | closed by the key [predicted, closed] | H2, H3 [predicted] |
@@ -515,7 +515,7 @@ Milestones: 4. Reconnaissance A: rate, VM, K's commit step (2026-10-08 to 10-10 
 |---|---|---|
 | Issued by | group coordinator [rule] | transaction coordinator [rule] |
 | Rejects | offset commit from an old generation [rule] | an older run of the same id [rule] |
-| Seen here in | F5 on N: commitSync refused [seen] | F4-con-t on K: restart aborts txn [predicted] |
+| Seen here in | F5 on N: commitSync refused [seen on N in recon] | F4-con-t on K: restart aborts txn [predicted] |
 | Stops the duplicate? | No: Postgres committed first [rule, no] | No: B has its own id [rule, no] |
 
 - Note: KIP-447 added the generation check to K's TxnOffsetCommit.

@@ -45,17 +45,17 @@
     },
     {
       "q": "K is killed after its Postgres commit and before commitTransaction. Walk me through recovery.",
-      "a": "The broker holds an open transaction with pending payments-applied records and pending offsets. On restart, initTransactions on the same transactional.id aborts it; transaction.timeout.ms (60 s default) would if the process never returned. The committed offset is still the old one, so the batch is redelivered and the Postgres commit runs again; the first one stands. Output once at read_committed, ledger twice. H1 predicts this; no K trial has run.",
+      "a": "The broker holds an open transaction with pending payments-applied records and pending offsets. On restart, initTransactions on the same transactional.id aborts it; transaction.timeout.ms (60 s default) would if the process never returned. The committed offset is still the old one, so the batch is redelivered and the Postgres commit runs again; the first one stands. Output once at read_committed, ledger twice. H1 predicts this; no K fault trial has run.",
       "red_flag": "The Kafka transaction rolls back the Postgres write."
     },
     {
       "q": "A zombie consumer wakes with a batch in hand. Which mechanism rejects it, where, and does that stop the duplicate?",
-      "a": "Generation fencing, at the offset commit: the coordinator refuses a commit from an old generation. On N, reconnaissance saw CommitFailedException about 0.1 s after the zombie's db_commit in all 17 F5 trials; KIP-447 gave K's TxnOffsetCommit the same check. The Postgres write has already happened. Epoch fencing does not help: the consumer that took the partitions has its own transactional.id. Only a check inside the ledger transaction, the key, can stop it (H2 predicts that).",
+      "a": "Generation fencing, at the offset commit: the coordinator refuses a commit from an old generation. On N, reconnaissance saw CommitFailedException about 0.1 s after the zombie's db_commit in all 17 F5 trials; KIP-447 gave K's TxnOffsetCommit the same check. The Postgres write has already happened. Epoch fencing does not help: the consumer that took the partitions has its own transactional.id. Only a check inside the ledger transaction (the key, or offsets stored in Postgres) can stop it (H2 predicts the key).",
       "red_flag": "Fencing stops the zombie from writing."
     },
     {
       "q": "F6: the ledger COMMIT reaches Postgres, the reply is lost, and the client's socket times out. What happens in N and in I?",
-      "a": "The consumer cannot tell whether the commit happened. Crash-only exits without committing the offset, so the batch is redelivered. N applies it twice. In I the key row committed with the first attempt, so the replay conflicts and is skipped (H2 predicts that; not run). It is the Two Generals problem at the database boundary; an idempotent apply is the clean answer short of reading state back.",
+      "a": "The consumer cannot tell whether the commit happened. Crash-only exits without committing the offset, so the batch is redelivered. Predicted: N applies it twice. In I the key row committed with the first attempt, so the replay conflicts and is skipped (H2 predicts that; not run). It is the Two Generals problem at the database boundary; an idempotent apply is the clean answer short of reading state back.",
       "red_flag": "The commit failed, so nothing was written."
     },
     {
@@ -75,7 +75,7 @@
     },
     {
       "q": "H5 predicts K duplicates more often than N under random kills. Why, and what could make it inconclusive?",
-      "a": "A random kill duplicates only if it lands between the ledger COMMIT returning and Kafka progress committing. K's window holds the output sends, sendOffsetsToTransaction and commitTransaction, and an earlier-environment recon run saw about two-thirds of K's transactions wait about 100 ms on CONCURRENT_TRANSACTIONS. So H5 predicts K's duty cycle exceeds N's. It is inconclusive if the paired interval on p_K − p_N includes 0; with 30 blocks only a large difference resolves, and an exact McNemar test needs at least 6 discordant blocks all one way for p below 0.05.",
+      "a": "A random kill duplicates only if it lands between the ledger COMMIT returning and Kafka progress committing. K's window holds the output sends, sendOffsetsToTransaction and commitTransaction, and an earlier-environment run saw about two-thirds of K's transactions wait ~100 ms on CONCURRENT_TRANSACTIONS. So H5 predicts K's duty cycle exceeds N's. It is inconclusive if the Newcombe interval on p_K − p_N includes 0; with 30 blocks only a large difference resolves. McNemar is reported beside the H5 rule, not the rule itself: it needs at least 6 discordant blocks all one way for p below 0.05.",
       "red_flag": "Transactions are strictly safer, so K cannot duplicate more than N."
     },
     {
@@ -140,7 +140,7 @@
       "Hooks by environment variable: a sleep after the ledger commit (gap C) and, in a tiny dual-write service, a sleep after the source commit (gap P)."
     ],
     "steps": [
-      "Gap C on N: produce 1,000 payments, arm the hook for the third batch, kill -9 the consumer during the sleep, restart, and group apply_log by payment_id for counts above one.",
+      "Gap C on N: produce 1,000 payments, set max.poll.records=100, arm the hook for the third batch, kill -9 the consumer during the sleep, restart, and group apply_log by payment_id for counts above one.",
       "Same on I: expect no duplicates, and log the skipped inserts (the ON CONFLICT misses).",
       "Same on K: read payments-applied once with isolation.level=read_committed and once with read_uncommitted, and compare with apply_log.",
       "Gap P: in the dual-write service, kill during the sleep after the source commit. Expect the row in the source and no record in the topic.",
@@ -177,7 +177,7 @@
     {
       "tag": "K",
       "front": "Why can't a Kafka transaction prevent a ledger duplicate?",
-      "back": "Postgres is not a participant. The ledger commit stands when K's transaction aborts and the batch is redelivered. H1 predicts this; no K trial has run."
+      "back": "Postgres is not a participant. The ledger commit stands when K's transaction aborts and the batch is redelivered. H1 predicts this; no K fault trial has run."
     },
     {
       "tag": "K",
@@ -203,13 +203,13 @@
     {
       "tag": "fencing",
       "front": "Draw it: the F5 zombie on N, from the pause to CommitFailedException.",
-      "back": "Pause A with its batch; no heartbeat; the coordinator moves its partitions to B (generation 2); B applies the batch; A unpauses and writes its held batch; A's offset commit is refused; A exits and restarts.",
+      "back": "Pause A with its batch; no heartbeat; the coordinator moves its partitions to B (generation 2); B applies the batch (documented semantics, not in recon); A unpauses and writes its held batch; A's offset commit is refused; A exits and restarts.",
       "draw": true
     },
     {
       "tag": "fencing",
       "front": "Does fencing stop the zombie's ledger write?",
-      "back": "No. The refusal comes at the offset commit, after the Postgres commit. Only a check inside the ledger transaction, the key, can stop the write (H2)."
+      "back": "No. The refusal comes at the offset commit, after the Postgres commit. Only a check inside the ledger transaction (the key, or offsets stored in Postgres) can stop the write (H2)."
     },
     {
       "tag": "attribution",
@@ -276,7 +276,7 @@
     {
       "tag": "F6",
       "front": "A lost COMMIT reply: what happens in N and in I?",
-      "back": "The outcome is unknown, so crash-only exits and the batch is redelivered. N applies it twice; I skips it on the key conflict (H2 predicts that)."
+      "back": "The outcome is unknown, so crash-only exits and the batch is redelivered. Predicted: N applies it twice; I skips it on the key conflict (H2 predicts that)."
     },
     {
       "tag": "trust",
