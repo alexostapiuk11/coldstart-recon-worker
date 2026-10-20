@@ -1,0 +1,270 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Practice: the book, the sync and the pause</title><style>
+:root{--bg:#fafaf7;--fg:#1d2330;--muted:#5b6475;--card:#fff;--line:#d9dce3;
+--accent:#2f5fd0;--soft:#e8eefc;--warn:#b4540a;--warnsoft:#fdf0e3;--ok:#1f7a4d;
+--c0:#2a78d6;--c1:#eb6834;--c2:#1baf7a;--c3:#eda100;--c4:#e87ba4;--c5:#008300;
+--c6:#4a3aa7;--c7:#e34948;--t0:#000;--t1:#000;--t2:#000;--t3:#000;--t4:#000;
+--t5:#fff;--t6:#fff;--t7:#000}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#14171f;
+--fg:#e6e8ee;--muted:#9aa3b5;--card:#1c202b;--line:#323849;--accent:#7ea2ff;
+--soft:#222b45;--warn:#f0a15e;--warnsoft:#33261a;--ok:#5fcf9a;--c0:#3987e5;--c1:#d95926;
+--c2:#199e70;--c3:#c98500;--c4:#d55181;--c5:#008300;--c6:#9085e9;--c7:#e66767;
+--t6:#000;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#14171f;--fg:#e6e8ee;--muted:#9aa3b5;--card:#1c202b;
+--line:#323849;--accent:#7ea2ff;--soft:#222b45;--warn:#f0a15e;--warnsoft:#33261a;
+--ok:#5fcf9a;--c0:#3987e5;--c1:#d95926;--c2:#199e70;--c3:#c98500;--c4:#d55181;
+--c5:#008300;--c6:#9085e9;--c7:#e66767;--t6:#000;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans-serif;
+overflow-wrap:break-word}
+main{max-width:980px;margin:0 auto;padding:0 clamp(16px,4vw,40px) 64px}
+header.hero{padding:32px 0 8px}
+.kicker{color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.06em}
+h1{font-size:28px;line-height:1.2;margin:6px 0 8px}
+h2{font-size:21px;margin:0 0 8px}
+h3{font-size:16px;margin:12px 0 4px}
+p{margin:6px 0}
+.forunit{color:var(--muted);font-size:17px;margin:0 0 6px}
+.why{color:var(--muted);font-size:15px}
+nav.pills{position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);padding:8px 0;
+display:flex;gap:6px;flex-wrap:wrap;z-index:2;border-bottom:1px solid var(--line)}
+nav.pills a{padding:3px 10px;border:1px solid var(--line);border-radius:99px;
+color:var(--fg);text-decoration:none;font-size:13px}
+section{margin-top:34px;scroll-margin-top:64px}
+.card[id]{scroll-margin-top:64px}
+a{color:var(--accent)}
+ul,ol{margin:6px 0;padding-left:22px}li{margin:3px 0}
+code{font-size:.92em;background:var(--soft);padding:1px 5px;border-radius:4px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+padding:12px 16px;margin:10px 0}
+.card h3:first-child{margin-top:0}
+.code{display:inline-block;font-size:12px;font-weight:700;line-height:1.5;color:var(--accent);
+border:1px solid var(--accent);border-radius:5px;padding:0 5px;margin-right:8px;
+vertical-align:2px;font-variant-numeric:tabular-nums}
+.q{font-size:17px;margin:4px 0 8px}
+.dn{color:var(--muted);font-size:13px;font-weight:600;text-transform:uppercase;
+letter-spacing:.05em}
+details{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 12px;
+margin:6px 0}
+details>summary{cursor:pointer;font-weight:600}
+details[open]>summary{margin-bottom:4px}
+.card>details:first-of-type{margin-top:8px}
+details.redflag{border-color:var(--warn);background:var(--warnsoft)}
+details.redflag>summary{color:var(--warn)}
+.miss{color:var(--muted);font-size:15px}
+.badge{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.05em;
+text-transform:uppercase;border:1.5px solid currentColor;border-radius:99px;padding:1px 10px}
+.cost-none{color:var(--ok)}.cost-local{color:var(--accent)}.cost-gpu{color:var(--warn)}
+.cost-paid{background:var(--warn);border-color:var(--warn);color:var(--bg)}
+.lab-top{margin:0 0 6px}
+.rgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));
+gap:10px;align-items:start}
+.rgrid details{margin:0;background:var(--card)}
+.rcard>summary{font-weight:500}
+.tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;
+text-transform:uppercase;color:var(--muted);border:1px solid var(--line);border-radius:4px;
+padding:0 6px;margin-right:6px;vertical-align:1px}
+.drawmark{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;
+text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);border-radius:4px;
+padding:0 6px;margin-left:6px;vertical-align:1px}
+.rcard.draw{border-style:dashed;border-color:var(--accent)}
+.rback{margin-top:6px;padding-top:6px;border-top:1px solid var(--line)}
+.sched{list-style:none;padding:0}
+.sched li{display:grid;grid-template-columns:150px 1fr;gap:10px;padding:8px 0;
+border-top:1px solid var(--line)}
+.sched li:first-child{border-top:0}
+.sched b{color:var(--muted)}
+.callout{border-left:4px solid var(--accent);padding:6px 12px;background:var(--soft);
+border-radius:0 8px 8px 0;margin:8px 0}
+@media (min-width:1100px){body{font-size:17px}h1{font-size:34px}h2{font-size:24px}}
+@media (max-width:600px){h1{font-size:24px}.q{font-size:16px}
+.sched li{grid-template-columns:1fr;gap:0}
+nav.pills{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+--fadeL:#000;--fadeR:transparent;
+-webkit-mask-image:linear-gradient(#000,#000),linear-gradient(to right,var(--fadeL),#000 36px,#000 calc(100% - 36px),var(--fadeR));
+mask-image:linear-gradient(#000,#000),linear-gradient(to right,var(--fadeL),#000 36px,#000 calc(100% - 36px),var(--fadeR));
+-webkit-mask-size:100% 1px,100% 100%;mask-size:100% 1px,100% 100%;
+-webkit-mask-position:0 100%,0 0;mask-position:0 100%,0 0;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat}
+nav.pills[data-more=""]{-webkit-mask-image:none;mask-image:none}
+nav.pills[data-more~="left"]{--fadeL:transparent}nav.pills[data-more="left"]{--fadeR:#000}
+nav.pills::after{content:"";flex:none;width:32px}
+nav.pills::-webkit-scrollbar{display:none}nav.pills a{flex:none}}
+
+.calc-row{display:grid;grid-template-columns:minmax(0,1.2fr) 130px minmax(0,1.6fr);gap:6px 14px;
+align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+.calc-row:first-of-type{border-top:0}
+.calc-row label{font-weight:600}
+.calc-unit{color:var(--muted);font-size:13px;font-weight:400;margin-left:4px}
+.calc-row input[type=number]{font:inherit;width:100%;min-height:40px;padding:6px 8px;
+border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);
+font-variant-numeric:tabular-nums}
+.calc-row input[type=number]:focus-visible,.calc-reset:focus-visible{outline:3px solid var(--accent);
+outline-offset:2px}
+.calc-row input[type=range]{width:100%;min-height:32px;accent-color:var(--accent)}
+.calc-row input:disabled{opacity:.55}
+.calc-outs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));
+gap:10px;margin:12px 0 4px}
+.calc-out{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+.calc-ol{display:block;color:var(--muted);font-size:13px;font-weight:600;
+text-transform:uppercase;letter-spacing:.04em}
+.calc-ov{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.25}
+.calc-ov output{overflow-wrap:anywhere}
+.calc-nojs{color:var(--muted);font-size:14px;margin:8px 0 0}
+.calc-js .calc-nojs{display:none}
+.calc-reset{font:inherit;font-size:14px;color:var(--fg);background:var(--card);
+border:1px solid var(--line);border-radius:8px;padding:6px 14px;min-height:36px;cursor:pointer}
+.calc-reset[hidden]{display:none}
+.calc-reset:hover{background:var(--soft);border-color:var(--accent)}
+@media (max-width:600px){.calc-row{grid-template-columns:110px minmax(0,1fr)}
+.calc-row label{grid-column:1/-1}}
+</style></head><body><main><header class="hero"><div class="kicker">Practice page · about 35 min</div><h1>Practice: the book, the sync and the pause</h1><p class="forunit">Practice for: The anatomy of a matching engine&#x27;s tail</p><p class="why">Try every question before you open its answer. The study page is the reading; this page is the doing.</p></header><nav class="pills"><a href="#objectives">Objectives</a><a href="#check">Check first</a><a href="#estimation">Estimation</a><a href="#drills">Drills</a><a href="#scenario">Scenario</a><a href="#lab">Lab</a><a href="#calculator">Calculator</a><a href="#cards">Cards</a><a href="#schedule">Schedule</a><a href="#assumptions">Assumptions</a></nav><section id="objectives"><h2>Objectives</h2><ul><li>Trace five orders through a price-time book and state each trade price, each scan and why the price is the resting one.</li><li>Say why replaying the sequenced input must reproduce the output hash, and name four things that would break it.</li><li>For a stall of a given length at a given rate, count what a closed loop records against what an open loop scores.</li><li>From one sync time, bound a D2 message&#x27;s wait and a D3 ceiling, and say which inputs were measured.</li><li>Decide whether G1 pauses reach the p99.99 by comparing total paused time with 0.01% of the window.</li><li>State three things the study did not test: power loss, scans in the tail, a tuned JVM.</li></ul></section><section id="check"><h2>Check yourself first</h2><p class="why">Three questions the study page prepared you for. Answer out loud, then open.</p><div class="card pq"><p class="q"><span class="code">1</span>A load generator sends the next request only when the last response arrives. What happens to its record of a 1 s stall?</p><details><summary>Show the answer</summary><p>It sends one request instead of the many that were due, so the stall is sampled once and the tail is under-reported. An open loop fixes send times in advance and scores latency from the intended time.</p><p class="miss">If you missed it, review <a href="page.html#c-co">Coordinated omission</a>.</p></details></div><div class="card pq"><p class="q"><span class="code">2</span>What does write() guarantee that fdatasync() does not, and what does fdatasync() add?</p><details><summary>Show the answer</summary><p>write() puts bytes in the page cache: they survive a killed process, not a kernel crash or power loss. fdatasync() returns once the data is on stable storage; a drive with a volatile write cache must flush first.</p><p class="miss">If you missed it, review <a href="page.html#c-fsync">Page-cache write, fdatasync, group commit</a>.</p></details></div><div class="card pq"><p class="q"><span class="code">3</span>Why can a single thread over a totally ordered input be replayed to the same state, and what could break that?</p><details><summary>Show the answer</summary><p>Its output depends on nothing but the input, so the same input gives the same state. Breakers: hash-ordered iteration, clock reads, floating-point prices, threads in the core.</p><p class="miss">If you missed it, review <a href="page.html#c-replay">Deterministic replay</a>.</p></details></div></section><section id="estimation"><h2>Estimation drills</h2><p class="why">Do the arithmetic on paper first, then open the worked steps.</p><div class="card est" id="est-1"><h3>The durability budget: D2&#x27;s tail, H3a and D3&#x27;s ceiling</h3><p>At 20,000/s the ungated p99.99 (D1) is 1.39 µs. One in-pipeline fdatasync has median 23.5 µs and p99.99 48.4 µs; a batch write takes 0.55 µs; fio&#x27;s isolated median is 14.66 µs. Estimate (a) a range for D2&#x27;s p99.99, (b) the least D2 over D1 and whether H3a (under 2.00x) could hold, (c) D3&#x27;s ceiling, (d) whether D3 can serve 100,000/s.</p><details><summary>Worked answer</summary><ol><li>(a) A gated message waits for the rest of the sync in flight (0 to S), then its batch&#x27;s write (0.55 µs) and its batch&#x27;s whole sync (S): between S and 2S + 0.55 µs.</li><li>With S from 23.5 µs (median) to 48.4 µs (p99.99): about 24 µs to 97.4 µs (2 x 48.4 + 0.55 = 97.35). Measured D2 p99.99: 72.1 µs, inside the range. A rough bracket, not a prediction.</li><li>(b) Any gated reply waits for a whole sync. Even fio&#x27;s 14.66 µs gives D2 / D1 &gt;= 14.66 / 1.39 = 10.5. H3a needs under 2.00x, so a sync under 2 x 1.39 = 2.78 µs. No sync measured here is that fast. Measured ratio: 52.0x.</li><li>(c) Ceiling = 1 / time per order. Fio&#x27;s median gives 1 / 14.66 µs = 68,200/s, an upper bound that ignores the write and the hand-offs. Fio&#x27;s mean (17.5 µs; 57,264 IOPS on h2) gives about 57,000/s.</li><li>Measured: saturated D3 forks sustained 23,929 to 23,979/s: about 41.8 µs per order (1 / 23,929), 35% of 68,200. Why is not separated.</li><li>(d) At 100,000/s the offered work is 100,000 x 41.8 µs = 4.18 s per second; even at fio&#x27;s median it is 1.47. It saturates: the backlog grows by about 76,000 orders a second. Observed: saturated on all three hosts, in no test.</li></ol><p><b>Answer.</b> D2 p99.99 between about 24 and 97 µs (measured 72.1). D2 is at least 10.5 times D1, so H3a could not hold. D3 is capped near 68,200/s by fio, reached 23,929/s, so 100,000/s saturates.</p></details></div><div class="card est" id="est-2"><h3>The pause budget: how many G1 pauses reach the p99.99?</h3><p>Queue + park at E1: a G1 pause lasts about 2.5 ms (medians 2.49 to 2.68 ms). The window is max(60 s, 2,000,000 messages): 200 s at 10,000/s, 60 s at 100,000 and 500,000/s. How many pauses per window put one at the p99.99, and what do 1, 2 and 5 to 7 pauses at those rates give?</p><details><summary>Worked answer</summary><ol><li>Arrivals are evenly spread, so a pause of length L delays about rate x L messages (a floor: the backlog after it adds more).</li><li>The p99.99 rank is 0.01% of the window&#x27;s messages: 0.0001 x rate x T. n pauses reach it when rate x L x n &gt; 0.0001 x rate x T.</li><li>The rate cancels: n x L &gt; 0.0001 x T. A 60 s window needs more than 6 ms of pause in total; a 200 s window, more than 20 ms.</li><li>At 2.5 ms: 60 s needs 3 pauses (two give 5 ms, under 6 ms); 200 s needs more than 8.</li><li>Data: 10,000/s, 1 pause of 2.68 ms: about 27 vs rank 200, no. 100,000/s, 2 pauses: about 500 vs 600, short of it; 9 of 30 launches had queue + park over 100 µs. 500,000/s, 5 to 7 pauses: about 7,500 vs 3,000, yes; 30 of 30.</li></ol><p><b>Answer.</b> A pause shows at p99.99 once total paused time exceeds 0.01% of the window: 6 ms per 60 s. Pause count and length decide it, not the rate; the ring arms had no pauses. Arithmetic and a floor; post hoc.</p></details></div></section><section id="drills"><h2>Deep-dive drill</h2><p class="why">Ordered easy to hard. Answer out loud, open the model answer, then the red-flag answer: the tempting reply that sounds right and is not.</p><div class="card drill" id="drill-1"><div class="dn">Drill 1 of 12</div><p class="q">A buy limit order crosses two ask levels. Walk through what FastEngine does.</p><details><summary>Model answer</summary><p>It takes the best ask level and fills the oldest order there first, at the resting order&#x27;s price. A fully filled maker is unlinked and its pool node freed. When a level empties, the best ask moves to the next non-empty level by scanning outward. When the limit stops crossing, any remainder rests at the back of its own level. Cost follows the orders and levels touched (walkthrough 2, seq 20).</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;It finds the best matching order&quot;: no FIFO, no resting-price rule; or a sorted map that allocates per order, with no thought for the cost of touching levels.</p></details></div><div class="card drill" id="drill-2"><div class="dn">Drill 2 of 12</div><p class="q">Why does the matcher run on one thread? Isn&#x27;t that a bottleneck?</p><details><summary>Model answer</summary><p>One writer needs no locks and applies messages in one total order, so replaying the journal rebuilds the same state and the output hash shows it. Throughput scales by sharding symbols across engines, which the money view assumes; the study did not run shards. At a median match_service of 80 ns (D2, 20,000/s), one thread is not this workload&#x27;s limit.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>A lock per book and several matching threads, with no answer for a deterministic order or for replay.</p></details></div><div class="card drill" id="drill-3"><div class="dn">Drill 3 of 12</div><p class="q">Your generator waits for each response. A 10 ms stall hits at 100,000/s. What does it record, and what should it?</p><details><summary>Model answer</summary><p>It records one slow request; 1,000 were due (100,000 x 0.010 s). An open loop scores all 1,000 from their intended send times; if evenly spaced, the slowest 100 wait over 9 ms. So a closed loop can hide a tail of 1% of the messages. Bridge: wrk2&#x27;s README says it measures from when each request was due and that wrk&#x27;s model suffers coordinated omission.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;Run it longer&quot; or &quot;add client threads&quot;: still a closed loop, so a stall is still sampled once per connection.</p></details></div><div class="card drill" id="drill-4"><div class="dn">Drill 4 of 12</div><p class="q">Ring or ArrayBlockingQueue: what actually differs, and what did the study measure?</p><details><summary>Model answer</summary><p>The ring is a preallocated array with one writer per sequence counter: publish with a release store, consume with an acquire read, counters padded against false sharing; no lock, no allocation (spec Module 7). The queue has one lock for both ends, and a thread that must wait allocates a wait node and parks. Measured: the ring arms allocated nothing; the queue + park matcher thread allocated about 32 B per voluntary context switch at 10,000/s.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;The ring is lock-free, so it is always faster.&quot; At 10,000/s a parking ring (5.32 µs) was slower than a spinning queue (4.08 µs).</p></details></div><div class="card drill" id="drill-5"><div class="dn">Drill 5 of 12</div><p class="q">Group commit amortises the sync. Why is D2&#x27;s p99.99 about 52 times D1&#x27;s?</p><details><summary>Model answer</summary><p>Amortising helps throughput, not the wait: every gated reply waits for at least one whole sync, plus the rest of the one in flight if it arrives mid-sync. Even fio&#x27;s 14.66 µs against D1&#x27;s 1.39 µs is 10.5 times; the pipeline&#x27;s median sync was 23.5 µs. 52.0x is this setup at 20,000/s, not a property of group commit.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;Group commit makes durability nearly free.&quot;</p></details></div><div class="card drill" id="drill-6"><div class="dn">Drill 6 of 12</div><p class="q">Spin or park a hand-off: how do you decide?</p><details><summary>Model answer</summary><p>Parking added about 1.7 µs per hop at the median at 10,000/s (ring match wait 0.18 to 1.92 µs), and spinning keeps cores busy: three of six, $0.205/h per host here. Spin when microseconds have a price and cores are free; park otherwise. At 500,000/s the parking ring&#x27;s p99.99 was 5.56 µs, so parking was not what hurt there. Bridge: CUDA&#x27;s runtime offers spin, yield and blocking-sync device flags for the same trade.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;Always spin&quot;, or &quot;parking is free&quot;, with no price on the core.</p></details></div><div class="card drill" id="drill-7"><div class="dn">Drill 7 of 12</div><p class="q">D1 never waits for disk. What exactly can go wrong, and what would fix it?</p><details><summary>Model answer</summary><p>A response can leave before its order is in the page cache, so a killed JVM loses an answered order: 3 of 10 laptop kills at D1 failed the crash check. Gating release on the write would cover a process crash, since the page cache survives a killed JVM (the post&#x27;s reasoning; not run here). fdatasync adds kernel-crash and power-loss safety, which the study could not test.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;The page cache makes it durable&quot;, with no crash model.</p></details></div><div class="card drill" id="drill-8"><div class="dn">Drill 8 of 12</div><p class="q">A 2.68 ms G1 pause at 10,000/s did not show in the queue + park arm&#x27;s 6.13 µs p99.99. Why?</p><details><summary>Model answer</summary><p>A p99.99 registers a pause only when the messages it delays outnumber 0.01% of the window. One pause delays about 27 messages (a floor) against a rank of 200 in 2,000,000. Same test in time: total paused time must exceed 0.01% of the window, 20 ms in a 200 s window; one 2.68 ms pause is far under.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;There was no pause.&quot;</p></details></div><div class="card drill" id="drill-9"><div class="dn">Drill 9 of 12</div><p class="q">At 500,000/s the queue&#x27;s p99.99 was about 2 ms. Is that the queue or the GC?</p><details><summary>Model answer</summary><p>Both, and the split is post hoc. The allocation is structural (the queue&#x27;s waiters allocate; the ring arms allocated nothing); the pause length is partly configuration (one G1 thread on a shared core). By arithmetic, 5 to 7 pauses of about 2.5 ms delay about 7,500 messages against a rank of 3,000. Verdicts are unchanged; a tuned JVM was not tested.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;Java is slow&quot;, or blaming the queue&#x27;s algorithm with no rank arithmetic.</p></details></div><div class="card drill" id="drill-10"><div class="dn">Drill 10 of 12</div><p class="q">Fio says a sync takes 14.66 µs, so D3 should reach 68,200/s. It saturated near 23,900. What do you say?</p><details><summary>Model answer</summary><p>1 / median is an upper bound: capacity is 1 / mean service time, and it ignores the write and the hand-offs. Fio&#x27;s mean was 17.5 µs (about 57,000/s). The saturated forks took about 41.8 µs per order, 35% of the ceiling. Why the pipeline is slower than fio was not separated; interrupts on the journaler&#x27;s core are a candidate, untested.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;Fio was wrong&quot;, or no capacity reasoning.</p></details></div><div class="card drill" id="drill-11"><div class="dn">Drill 11 of 12</div><p class="q">A tail message overlaps a safepoint. Is the safepoint its cause?</p><details><summary>Model answer</summary><p>Not on overlap: slow messages overlap more of everything because they last longer. Credit a cause when it covers at least 50% of the message&#x27;s excess over the fork&#x27;s median, inside its busy period, and compare with a null: the event timeline shifted 200 times. Publish what no cause covers: the residual was 6.66% to 10.1% of tail messages at D0 and D1.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;It overlapped, so yes.&quot;</p></details></div><div class="card drill" id="drill-12"><div class="dn">Drill 12 of 12</div><p class="q">You ran 2,000,000 messages. Why not trust that run&#x27;s own interval on p99.99?</p><details><summary>Model answer</summary><p>Messages from one JVM share its JIT decisions, memory layout and host, so they are not independent. Same-seed launches differed 5.64 to 8.90 times more than one run&#x27;s error implies (H4). The launch is the unit; intervals go over rounds, per host and pooled.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>Bootstrapping the 2,000,000 messages.</p></details></div></section><section id="scenario"><h2>Design scenario</h2><div class="card"><p class="q">Design the order-entry path for a venue with 400 symbols and 300,000 messages/s at peak. An acknowledged order must survive the loss of one host, and the ack p99.99 target is 500 µs. What do you build, what do you measure first, and what would change your design?</p><details><summary>Outline of a strong answer</summary><ol><li>Shape: shard symbols across independent single-writer matchers; each shard has a sequencer (a seq per message), a journal beside the matcher, and release gated by the durable sequence number, never by a clock. The study ran one shard; sharding was assumed, not measured.</li><li>Surviving a host loss means a replicated journal: acknowledge after a replica has persisted. The study measured only local syncs (23.5 µs median here, far worse on a drive with a volatile write cache); the replica round trip is the next study&#x27;s question, not a number you may quote.</li><li>Hand-offs: preallocated rings; spin only where microseconds pay for the cores. Verify no allocation on the hot path by method (per-thread allocated bytes, an Epsilon-GC cell), not by assumption.</li><li>Capacity: per shard, utilisation = rate x time per order; use mean service time, not the median; keep the durability stage well below saturation (D3 saturated at 100,000/s here).</li><li>Measure first: open-loop at Poisson and at bursty rates, one clock per host, per-stage percentiles up to what the sample supports (at least 100 samples above), tail attribution with a published residual, repeated launches across hosts.</li><li>What would change it: a sync distribution that is slow or bimodal in place; GC pauses reaching the rank; a network round trip that dominates the budget.</li></ol></details><details class="redflag"><summary>Pitfalls to check your answer against</summary><ul><li>Benchmarking closed loop, or reporting a p99.99 from too few samples.</li><li>Claiming power-loss safety from a kill-the-JVM test: the study&#x27;s crash check tests process crashes only.</li><li>Quoting 1 / median sync as capacity, or fio&#x27;s sync time as the in-pipeline one.</li><li>Gating release on wall-clock time instead of a sequence number, or letting a hash-ordered map, a clock read or a float price into the matcher.</li><li>Treating synthetic Poisson load on thin books as real order flow.</li></ul></details></div></section><section id="lab"><h2>Lab</h2><div class="card lab"><div class="lab-top"><span class="badge cost-local">Runs on your machine</span></div><p><b>Goal.</b> Run the engine&#x27;s own order book on the five walkthrough orders, count the empty slots each scan skips, and check that the book and a reference engine agree.</p><p class="why">No paid API, GPU or cloud. Reads the study&#x27;s repo; modifies nothing in it.</p><h3>Setup</h3><ul><li>JDK 25 (the study used Temurin 25.0.4.1); any recent JDK should compile these files.</li><li>A scratch folder OUTSIDE ~/projects/matching-engine-tail. Copy the 13 files of engine/src/main/java/mtail/engine/ into it. Never build inside the study&#x27;s repo.</li><li>In the copy of FastEngine.java, add a counter to the two scan loops in unlink() (one for bids, one for asks) and print it.</li></ul><h3>Steps</h3><ol><li>Write a Trace class: one FastEngine on Band.standard(), an ExecutionSink that prints fills and cancel acks, and messages built as OrderMsg (type, seq, orderId, symbol 0, side, priceTicks, qty).</li><li>Setup orders, seq 16 to 19: SELL S1 5 at 10,002; SELL S2 3 at 10,002; SELL S3 10 at 10,004; BUY B1 4 at 9,999.</li><li>Then seq 20: BUY B9 10 at 10,004; 21: SELL S4 6 at 10,004; 22: CANCEL S3; 23: BUY B10 7 at 10,004; 24: SELL S5 3 at 9,999. Compile with javac and run.</li><li>Compare the fills, the cancel ack and the scan counts with walkthrough 2 (1, 2,044 and 4 empty slots at seq 20, 23, 24).</li><li>Feed the same nine messages to ReferenceEngine, folding both engines&#x27; events into an OutputHash each; the two hashes and bookStateHash() values must match.</li><li>Move S3 to 12,000 and rerun: seq 20 now fills S1 and S2 only, and the scan after the 10,002 level empties grows to the whole gap. Then time many repeats of one order that empties the best level, next level 1 tick away against far away (warm up first).</li></ol><h3>Record</h3><ul><li>Fills and cancel acks per message</li><li>Empty slots skipped per scan</li><li>Equal or unequal output hashes, FastEngine against ReferenceEngine</li><li>Nanoseconds per apply, near against far next level (your machine only)</li></ul><details><summary>Expected result and what it shows</summary><p><b>Expected.</b> A prediction, not run for this page: the fills, prices and scan counts match walkthrough 2, which was produced with the same method; the two engines&#x27; hashes are equal; the far-level case takes longer per call than the near one. Your nanoseconds are not comparable with the study&#x27;s, and nothing here shows whether scans reach the study&#x27;s measured tail.</p><p><b>Shows.</b> The book&#x27;s rules, that scan cost follows empty slots, and that two independently written engines must agree on every event: the idea behind the hash gate.</p></details></div></section><section id="calculator"><h2>A sync time, the D2 bracket and the D3 ceiling</h2><p class="why">Defaults are measured in this study (S = the median in-pipeline sync at 20,000/s, 23.5 µs). Arithmetic bounds, not a queueing model: try S = 48.4 for the slow-sync end. Measured D3 reached only 35% of the fio-based ceiling, so read the ceiling as an upper bound.</p><div class="card" data-calc><div class="calc-row"><label for="calc-sync">Sync time S<span class="calc-unit">µs</span></label><input type="number" id="calc-sync" data-id="sync" value="23.5" min="1" max="2000" step="any" disabled><input type="range" data-for="sync" value="23.5" min="1" max="2000" step="0.5" disabled aria-label="Sync time S"></div><div class="calc-row"><label for="calc-write">Batch write time<span class="calc-unit">µs</span></label><input type="number" id="calc-write" data-id="write" value="0.55" min="0.1" max="50" step="any" disabled><input type="range" data-for="write" value="0.55" min="0.1" max="50" step="0.05" disabled aria-label="Batch write time"></div><div class="calc-row"><label for="calc-base">Ungated p99.99 (D1)<span class="calc-unit">µs</span></label><input type="number" id="calc-base" data-id="base" value="1.39" min="0.5" max="10" step="any" disabled><input type="range" data-for="base" value="1.39" min="0.5" max="10" step="0.01" disabled aria-label="Ungated p99.99 (D1)"></div><div class="calc-row"><label for="calc-rate">Offered rate<span class="calc-unit">/s</span></label><input type="number" id="calc-rate" data-id="rate" value="20000" min="1000" max="200000" step="any" disabled><input type="range" data-for="rate" value="20000" min="1000" max="200000" step="1000" disabled aria-label="Offered rate"></div><div class="calc-outs" aria-live="polite"><div class="calc-out"><span class="calc-ol">D2 least: S + write</span><span class="calc-ov"><output data-expr="sync + write" data-digits="2">24.05</output> <span class="calc-unit">µs</span></span></div><div class="calc-out"><span class="calc-ol">D2 most: 2S + write</span><span class="calc-ov"><output data-expr="2 * sync + write" data-digits="2">47.55</output> <span class="calc-unit">µs</span></span></div><div class="calc-out"><span class="calc-ol">D2 over D1, at least</span><span class="calc-ov"><output data-expr="(sync + write) / base" data-digits="1">17.3</output> <span class="calc-unit">x</span></span></div><div class="calc-out"><span class="calc-ol">S that would meet H3a</span><span class="calc-ov"><output data-expr="2 * base - write" data-digits="2">2.23</output> <span class="calc-unit">µs</span></span></div><div class="calc-out"><span class="calc-ol">D3 ceiling, 1 / (S + write)</span><span class="calc-ov"><output data-expr="1000000 / (sync + write)" data-digits="0">41,580</output> <span class="calc-unit">/s</span></span></div><div class="calc-out"><span class="calc-ol">D3 utilisation at the rate</span><span class="calc-ov"><output data-expr="rate * (sync + write) / 1000000" data-digits="2">0.48</output></span></div></div><p class="calc-nojs">JavaScript is off: these are the values at the default inputs.</p><p><button type="button" class="calc-reset" hidden>Reset to defaults</button></p></div></section><section id="cards"><h2>Recall cards</h2><p class="why">Read the front, say the back, then open. A card marked "Draw it" asks you to sketch first.</p><div class="rgrid"><details class="rcard"><summary><span class="tag">book</span>Price-time priority in one sentence?</summary><div class="rback">Best price first; at the same price, the oldest order first.</div></details><details class="rcard"><summary><span class="tag">book</span>At what price does a crossing trade execute?</summary><div class="rback">The resting (maker) order&#x27;s price: in walkthrough 2, seq 24 sells with a limit of 9,999 and trades at 10,004.</div></details><details class="rcard"><summary><span class="tag">book</span>FastEngine&#x27;s book layout?</summary><div class="rback">Per symbol and side, an array of price levels (4,097: reference +-2,048 ticks), each a FIFO of pooled order nodes; an id-to-node map for cancels; best bid and ask kept as indices; integer ticks; nothing allocated. A price outside the band is rejected.</div></details><details class="rcard draw"><summary><span class="tag">book</span>Draw the book after seq 20 and after seq 23 of walkthrough 2.<span class="drawmark">Draw it</span></summary><div class="rback">After seq 20: asks 10,004 [S3 8]; bids 9,999 [B1 4]. After seq 23: no asks; bids 10,004 [B10 1] and 9,999 [B1 4].</div></details><details class="rcard"><summary><span class="tag">book</span>What does emptying the best level cost, and what is not known?</summary><div class="rback">A scan outward to the next non-empty level: up to the band&#x27;s edge, 2,044 empty slots at seq 23. Whether such scans show in the measured match tail was not tested.</div></details><details class="rcard"><summary><span class="tag">determinism</span>What breaks replay determinism in the engine&#x27;s rules?</summary><div class="rback">Wall-clock reads, hash-ordered iteration, hashCode dependence, threads inside the matcher, randomness not from the seed, floating-point prices (spec 4.3).</div></details><details class="rcard"><summary><span class="tag">determinism</span>Sequencer, journal, replay: how do they fit, and what is the bridge?</summary><div class="rback">The sequencer fixes the order, the journal records it, replay rebuilds the state: state-machine replication without consensus (spec Module 2). A Raft-replicated state machine has the same shape with consensus agreeing the order.</div></details><details class="rcard"><summary><span class="tag">co</span>Closed against open loop: which under-reports, and what is the HTTP bridge?</summary><div class="rback">Closed loop: a stall is sampled once. Open loop scores from the intended time. wrk2 (-R) is the open-loop fork of wrk, per its README.</div></details><details class="rcard"><summary><span class="tag">co</span>100,000/s and a 10 ms stall: closed against open?</summary><div class="rback">Closed records 1 slow request; open scores all 1,000 due, the slowest 100 over 9 ms if evenly spaced.</div></details><details class="rcard draw"><summary><span class="tag">co</span>Draw a closed-loop and an open-loop client across a stall.<span class="drawmark">Draw it</span></summary><div class="rback">Closed: one request waits, nothing else is sent. Open: sends stay on the schedule and each is scored from its intended time, so the due ones pile up as slow samples.</div></details><details class="rcard"><summary><span class="tag">samples</span>How many messages before p99.99 may be reported?</summary><div class="rback">At least 100 samples above it: n x (1 - q) &gt;= 100, so 1,000,000 messages for p99.99 and 10,000 for p99. Here 2,000,000 leave 200 above p99.99.</div></details><details class="rcard"><summary><span class="tag">ring</span>What makes a one-producer ring lock-free and allocation-free?</summary><div class="rback">Preallocated slots; one writer per sequence counter; release store to publish, acquire read to consume; counters on separate cache lines (spec Module 7).</div></details><details class="rcard draw"><summary><span class="tag">ring</span>Draw an 8-slot ring with the producer at sequence 11 and the consumer through 3. Can sequence 12 be published? (toy numbers)<span class="drawmark">Draw it</span></summary><div class="rback">No. Sequence 12 reuses slot 4, still holding unconsumed sequence 4 (12 - 8 = 4 &gt; 3). The producer waits: spin, or park.</div></details><details class="rcard"><summary><span class="tag">queue</span>Why does queue + park allocate even with no contention?</summary><div class="rback">A take on an empty queue waits on a condition. At 10,000/s the matcher thread allocated 62,375,392 B over 1,947,577 voluntary context switches: about 32.0 B per park, consistent with a wait node per park (JDK internals not read here).</div></details><details class="rcard"><summary><span class="tag">wait</span>Cost of parking against spinning, and the GPU bridge?</summary><div class="rback">About 1.7 µs per hop at the median at 10,000/s; spinning three of six cores is $0.205/h per host. CUDA&#x27;s spin and blocking-sync device flags are the same trade (CUDA runtime docs).</div></details><details class="rcard"><summary><span class="tag">gc</span>Why does an allocation-free thread still stop for GC?</summary><div class="rback">A G1 pause is a global safepoint: every Java thread stops, so the generator and the ring consumers wait too.</div></details><details class="rcard"><summary><span class="tag">gc</span>When does a pause reach the p99.99?</summary><div class="rback">When the messages it delays exceed 0.01% of the window: total paused time over 0.01% of the window, 6 ms per 60 s. At 10,000, 100,000 and 500,000/s: 27 against 200, 500 against 600, 7,500 against 3,000 (floors).</div></details><details class="rcard"><summary><span class="tag">durability</span>What survives what: write against fdatasync?</summary><div class="rback">write: a killed JVM, not a kernel crash or power loss. fdatasync: all three, on drives that honour it; check the volatile-write-cache bit (VWC 0 here). Kafka&#x27;s default posture is the page-cache one (D1), per the post; not checked in Kafka&#x27;s docs.</div></details><details class="rcard draw"><summary><span class="tag">durability</span>Draw one D2 message from arrival to release.<span class="drawmark">Draw it</span></summary><div class="rback">Arrives mid-sync A; waits; journaler drains batch B, write, one fdatasync, stores durableSeq; Output, spinning on durableSeq, releases it. Up to about two syncs.</div></details><details class="rcard"><summary><span class="tag">durability</span>Why could H3a (D2 under 2.00x D1) not hold?</summary><div class="rback">A gated reply waits for a whole sync: even 14.66 µs against 1.39 µs is 10.5 times. Measured: 52.0 times. The rule was fixed at design approval and kept.</div></details><details class="rcard"><summary><span class="tag">capacity</span>D3&#x27;s ceiling: formula, and what was measured?</summary><div class="rback">1 / mean service time per order. Fio&#x27;s median gave 68,200/s (an upper bound); the saturated forks sustained 23,929/s, about 41.8 µs per order.</div></details><details class="rcard"><summary><span class="tag">attribution</span>Share against credit?</summary><div class="rback">Share: the fraction of a message&#x27;s latency spent in a stage (H1). Credit: a cause covers at least 50% of the message&#x27;s excess over the median, counted per message (H6).</div></details></div></section><section id="schedule"><h2>Review schedule</h2><ul class="sched"><li><b>Day 1, after the page</b><span>Draw the container view from memory; redo walkthrough 2 for seq 20 and 24 on paper; cards 1 to 10.</span></li><li><b>Day 3</b><span>Cards 11 to 22 out loud; redo the 10 ms stall and the pause budget (estimation 2) closed book; drills 1 to 6.</span></li><li><b>Day 7</b><span>Estimation 1 from the prompt only; drills 7 to 12; the lab if not yet run.</span></li><li><b>Day 21</b><span>The 2-minute pitch timed; the design scenario in 20 minutes; interview mode in brief.md as a skeptic, deep.</span></li></ul></section><section id="assumptions"><details><summary>Numbers assumed or worked out on this page, 30</summary><p class="why">None of these comes from the study page's sources.</p><ul><li><code>400</code> Scenario parameter chosen for the exercise: the number of symbols. Not from the study.</li><li><code>300,000</code> Scenario parameter chosen for the exercise: peak messages per second. Not from the study.</li><li><code>500</code> Scenario parameter chosen for the exercise: the ack p99.99 target in microseconds. Not from the study.</li><li><code>9,999 10,004 12,000 10,002</code> Prices of the made-up toy book in walkthrough 2 and the lab, in integer ticks around the reference price 10,000. Not from a run of the campaign.</li><li><code>10.5</code> worked out: 14.66 / 1.39 = 10.55: fio&#x27;s median sync over D1&#x27;s 20,000/s p99.99 (the post, durability section).</li><li><code>14.66</code> worked out: recon.md: fio fdatasync p50 14,656 ns on h2, in microseconds to two decimals.</li><li><code>97.35</code> worked out: 2 x 48.4 + 0.55 = 97.35 microseconds.</li><li><code>97.4</code> worked out: 97.35 rounded to one decimal.</li><li><code>2.78</code> worked out: 2 x 1.39 = 2.78 microseconds.</li><li><code>17.5</code> worked out: 1 / 57,264 IOPS = 17.46 microseconds, fio&#x27;s mean (recon.md, h2).</li><li><code>41.8</code> worked out: 1 / 23,929 per second = 41.79 microseconds per order.</li><li><code>4.18</code> worked out: 100,000 x 41.8 microseconds = 4.18 seconds of work per second.</li><li><code>1.47</code> worked out: 100,000 x 14.66 microseconds = 1.466 seconds of work per second.</li><li><code>68,200</code> worked out: 1 / 14.656 microseconds = 68,231 per second, rounded as the unit does.</li><li><code>57,000</code> worked out: 1 / 17.5 microseconds = 57,100 per second; fio reported 57,264 IOPS (recon.md, h2), about 57,000.</li><li><code>76,000</code> worked out: 100,000 offered - 23,929 sustained = 76,071 per second, about 76,000.</li><li><code>0.0001</code> worked out: 0.01% as a fraction.</li><li><code>2.5</code> worked out: The G1 pause length used in the estimation: the medians were 2.49 to 2.68 ms (the post).</li><li><code>7,500</code> worked out: 6 pauses x 2.5 ms x 500,000 per second = 7,500 messages (the post&#x27;s own arithmetic).</li><li><code>32.0</code> worked out: 62,375,392 B / 1,947,577 voluntary context switches = 32.03 B (results-a7.md 11.4, E1-ABQ_PARK-D1-10000, matcher thread).</li><li><code>1.7</code> worked out: 1,923.5 - 180.0 = 1,743.5 ns at the median (results-a7.md 6, ring match_wait, 10,000/s).</li><li><code>0.18</code> worked out: results-a7.md 6, E1-RING_SPIN-D1-10000 match_wait p50 180.0 ns.</li><li><code>1.92</code> worked out: results-a7.md 6, E1-RING_PARK-D1-10000 match_wait p50 1923.5 ns.</li><li><code>4,097</code> worked out: 2 x 2048 + 1, Band.levels().</li><li><code>2,044</code> worked out: Empty slots the seq 23 scan skips, confirmed by running FastEngine with a counter in a scratch copy.</li><li><code>1,000</code> worked out: 100,000 per second x 0.010 s.</li><li><code>1,000,000</code> worked out: n x (1 - q) &gt;= 100 with q = 0.9999 gives n &gt;= 1,000,000.</li><li><code>10,000</code> worked out: n x (1 - q) &gt;= 100 with q = 0.99 gives n &gt;= 10,000.</li><li><code>62,375,392</code> worked out: results-a7.md 11.4 allocated_bytes_delta, matcher, E1-ABQ_PARK-D1-10000.</li><li><code>1,947,577</code> worked out: results-a7.md 11.4 voluntary_cs_delta, matcher, E1-ABQ_PARK-D1-10000.</li></ul></details></section></main><script>
+for (const n of document.querySelectorAll('nav.pills')) {
+  // Which edges hide pills: the phone CSS fades those edges, and none once all fit.
+  const mark = () => { const more = [];
+    if (n.scrollLeft > 2) more.push('left');
+    if (n.scrollLeft + n.clientWidth < n.scrollWidth - 2) more.push('right');
+    n.dataset.more = more.join(' '); };
+  n.addEventListener('scroll', mark, {passive: true});
+  addEventListener('resize', mark);
+  mark();
+}
+
+const CALC_FUNCTIONS = {ceil: [1, 1], floor: [1, 1], abs: [1, 1], sqrt: [1, 1], log2: [1, 1],
+  log10: [1, 1], min: [2, Infinity], max: [2, Infinity]};
+function calcParse(src) {
+  if (!src.trim()) throw new Error('the expression is empty');
+  if (src.length > 200) throw new Error('the expression is too long');
+  const re = /\s*(?:(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)|([A-Za-z_][A-Za-z0-9_]*)|(.))/y;
+  const text = src.replace(/\s+$/, ''), toks = [];
+  while (re.lastIndex < text.length) {
+    const m = re.exec(text);
+    if (m[1] !== undefined) toks.push(['num', m[1]]);
+    else if (m[2] !== undefined) toks.push(['name', m[2]]);
+    else if ('+-*/^(),'.includes(m[3])) toks.push(['op', m[3]]);
+    else throw new Error("unexpected character '" + m[3] + "'");
+  }
+  let i = 0, depth = 0;
+  const peek = () => (i < toks.length ? toks[i] : ['end', '']);
+  const isOp = (...ops) => { const t = peek(); return t[0] === 'op' && ops.includes(t[1]); };
+  const fail = () => { throw new Error('unexpected ' + peek()[0] + ' ' + peek()[1]); };
+  const enter = () => { if (++depth > 32) throw new Error('nested too deep'); };
+  const close = () => { if (!isOp(')')) fail(); i++; depth--; };
+  function expr() {
+    let n = term();
+    while (isOp('+', '-')) { const o = toks[i++][1]; n = ['bin', o, n, term()]; }
+    return n;
+  }
+  function term() {
+    let n = unary();
+    while (isOp('*', '/')) { const o = toks[i++][1]; n = ['bin', o, n, unary()]; }
+    return n;
+  }
+  function unary() {
+    if (isOp('-', '+')) { const s = toks[i++][1], n = unary(); return s === '-' ? ['neg', n] : n; }
+    return power();
+  }
+  function power() {
+    const base = atom();
+    if (isOp('^')) { i++; return ['bin', '^', base, unary()]; }
+    return base;
+  }
+  function atom() {
+    const t = peek();
+    if (t[0] === 'num') { i++; return ['num', parseFloat(t[1])]; }
+    if (t[0] === 'name') {
+      i++;
+      if (!isOp('(')) return ['var', t[1]];
+      if (!(t[1] in CALC_FUNCTIONS)) throw new Error('unknown function ' + t[1]);
+      i++; enter();
+      const args = [expr()];
+      while (isOp(',')) { i++; args.push(expr()); }
+      close();
+      const [lo, hi] = CALC_FUNCTIONS[t[1]];
+      if (args.length < lo || args.length > hi) throw new Error('wrong number of arguments to ' + t[1]);
+      return ['call', t[1], args];
+    }
+    if (t[0] === 'op' && t[1] === '(') { i++; enter(); const n = expr(); close(); return n; }
+    return fail();
+  }
+  const tree = expr();
+  if (peek()[0] !== 'end') fail();
+  return tree;
+}
+function calcFinite(v) {
+  if (!Number.isFinite(v)) throw new Error('not a finite number');
+  return v;
+}
+function calcEval(n, vars) {
+  switch (n[0]) {
+    case 'num': return n[1];
+    case 'var':
+      if (!(n[1] in vars)) throw new Error('no value for ' + n[1]);
+      return calcFinite(vars[n[1]]);
+    case 'neg': return -calcEval(n[1], vars);
+    case 'call': {
+      const a = n[2].map(x => calcEval(x, vars)), x = a[0];
+      switch (n[1]) {
+        case 'min': return calcFinite(Math.min(...a));
+        case 'max': return calcFinite(Math.max(...a));
+        case 'ceil': return calcFinite(Math.ceil(x));
+        case 'floor': return calcFinite(Math.floor(x));
+        case 'abs': return calcFinite(Math.abs(x));
+        case 'sqrt': if (x < 0) throw new Error('sqrt of a negative number');
+          return calcFinite(Math.sqrt(x));
+        default: if (x <= 0) throw new Error('log of a non-positive number');
+          return calcFinite(n[1] === 'log2' ? Math.log2(x) : Math.log10(x));
+      }
+    }
+    default: {
+      const a = calcEval(n[2], vars), b = calcEval(n[3], vars);
+      switch (n[1]) {
+        case '+': return calcFinite(a + b);
+        case '-': return calcFinite(a - b);
+        case '*': return calcFinite(a * b);
+        case '/': if (b === 0) throw new Error('division by zero');
+          return calcFinite(a / b);
+        default: return calcFinite(Math.pow(a, b));
+      }
+    }
+  }
+}
+function calcFmt(v, digits) {
+  if (Math.abs(v) >= 1e15) return v.toExponential(digits);
+  const t = Math.abs(v).toFixed(digits), p = t.split('.');
+  const out = p[0].replace(/\B(?=(\d{3})+$)/g, ',') + (p[1] ? '.' + p[1] : '');
+  return (v < 0 && /[1-9]/.test(t) ? '-' : '') + out;
+}
+
+for (const g of document.querySelectorAll('[data-calc]')) {
+  const nums = [...g.querySelectorAll('input[type=number]')];
+  const outs = [...g.querySelectorAll('output[data-expr]')];
+  const trees = outs.map(o => { try { return calcParse(o.dataset.expr); } catch (e) { return null; } });
+  const slider = n => g.querySelector('input[type=range][data-for="' + n.dataset.id + '"]');
+  const run = () => {
+    const vars = {};
+    nums.forEach(n => { vars[n.dataset.id] = n.value.trim() === '' ? NaN : Number(n.value); });
+    const ok = Object.values(vars).every(Number.isFinite);
+    outs.forEach((o, i) => {
+      let text = 'n/a';
+      try { if (ok && trees[i]) text = calcFmt(calcEval(trees[i], vars), +o.dataset.digits); }
+      catch (e) { /* stays n/a */ }
+      o.textContent = text;
+    });
+  };
+  nums.forEach(n => {
+    const r = slider(n);
+    n.addEventListener('input', () => {
+      if (r && n.value.trim() !== '' && Number.isFinite(Number(n.value))) r.value = n.value;
+      run();
+    });
+    if (r) r.addEventListener('input', () => { n.value = r.value; run(); });
+  });
+  g.querySelector('.calc-reset').addEventListener('click', () => {
+    nums.forEach(n => { n.value = n.defaultValue; const r = slider(n); if (r) r.value = r.defaultValue; });
+    run();
+  });
+  g.querySelectorAll('input').forEach(i => { i.disabled = false; });
+  g.querySelector('.calc-reset').hidden = false;
+  g.classList.add('calc-js');
+  run();
+}
+</script></body></html>

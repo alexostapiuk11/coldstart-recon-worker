@@ -48,20 +48,20 @@
     {
       "id": "co",
       "short": "Coordinated omission",
-      "term": "Coordinated omission, open versus closed loop",
-      "plain": "**Closed loop**: send the next request when the last response arrives. During a stall it sends one request instead of the many that were due, so the stall is sampled once and the tail under-reported (Gil Tene named this). **Open loop**: send times are fixed in advance and latency runs from the **intended** time, so a generator that falls behind counts against the system."
+      "term": "Coordinated omission",
+      "plain": "**Closed loop**: send the next request when the last response arrives. During a stall it sends one request instead of the many that were due, so the stall is sampled once and the tail under-reported (Gil Tene named this). **Open loop**: send times are fixed in advance and latency runs from the **intended** time, so a late generator counts against the system. At 100,000/s a 10 ms stall leaves 1,000 requests due: closed loop records one slow request, open loop all 1,000 (the slowest 100 over 9 ms, if evenly spaced)."
     },
     {
       "id": "hdr",
       "short": "p99.99 and its samples",
-      "term": "HdrHistogram and what a p99.99 rests on",
+      "term": "HdrHistogram and p99.99",
       "plain": "[p99.99](p2:percentiles): the latency 99.99% of messages stay at or under. **HdrHistogram** keeps 3 significant digits over a huge range and merges without loss. A percentile is reported only with at least 100 samples above it: 2,000,000 messages leave 200 above p99.99 but 20 above p99.999, so this study reports nothing past p99.99."
     },
     {
       "id": "ring",
       "short": "Ring, queue, spin, park",
-      "term": "The Disruptor ring, the queue, and wait strategies",
-      "plain": "**Ring buffer**: a preallocated array with sequence counters; one producer and one consumer allocate nothing; with busy-spin they take no lock (the blocking strategy enters a monitor per publish). `ArrayBlockingQueue`: one lock for both ends; a thread that must wait (lock held, or an empty queue in the park arm) enqueues a wait node (allocates) and parks. **Wait strategy**: what an idle consumer does, **busy-spin** (poll in a loop, burning a core) or **park** (sleep until woken)."
+      "term": "Ring, queue, wait strategies",
+      "plain": "**Ring buffer**: a preallocated array with sequence counters; one producer and one consumer allocate nothing and, with busy-spin, take no lock (the blocking strategy enters a monitor per publish). `ArrayBlockingQueue`: one lock for both ends; a thread that must wait (lock held, or queue empty in the park arm) allocates a wait node and parks. **Wait strategy**: what an idle consumer does, **busy-spin** (poll, burning a core) or **park** (sleep until woken)."
     },
     {
       "id": "fsync",
@@ -73,127 +73,188 @@
       "id": "safepoint",
       "short": "Safepoints and G1 pauses",
       "term": "JVM safepoints and G1 pauses",
-      "plain": "Some JVM operations stop **every** Java thread: GC pauses, some deoptimisation. So a thread that allocates nothing still stops when another thread's allocation triggers a collection; a **handshake** acts on one thread without stopping the rest. Here: G1 with one GC thread on the housekeeping core. The generator stops too, but latency runs from the intended time, so the stop counts."
+      "plain": "Some JVM operations stop **every** Java thread: GC pauses, some deoptimisation. So a thread that allocates nothing still stops when another thread's allocation triggers a collection; a **handshake** acts on one thread without stopping the rest. Here: G1 with one GC thread on the housekeeping core. The generator stops too, and that counts (latency runs from the intended time)."
     },
     {
       "id": "replay",
       "short": "Replay determinism",
-      "term": "Deterministic replay and the hash gate",
-      "plain": "One thread over a totally ordered input, depending on nothing else: replaying the input rebuilds the same state. Breakers: hash-ordered iteration, clock reads, floating-point prices, threads in the core; the engine has none. The matcher's rolling output hash, checkpointed every million sequence numbers, must reappear when a fresh matcher replays the journal."
+      "term": "Deterministic replay",
+      "plain": "The gateway numbers every message (seq); one matcher thread applies them in that order and depends on nothing else, so replaying the input rebuilds the same state: state-machine replication without consensus. Breakers: hash-ordered iteration, clock reads, floating-point prices, threads in the core; the engine has none. The matcher's rolling output hash, checkpointed every million sequence numbers, must reappear when a fresh matcher replays the journal.",
+      "analogy": "The shape of a Raft-replicated state machine without the consensus: an agreed log order, applied deterministically."
     },
     {
       "id": "attribution",
       "short": "Tail attribution vs a null",
-      "term": "Tail attribution against a shifted null",
+      "term": "Tail attribution against a null",
       "plain": "**Excess**: a tail message's latency minus the fork's median. **Busy period**: back to when the in-flight count last rose above its median. A cause is credited if it covers **at least 50% of the excess**: durability wait and matcher path from the message's own stamps; safepoints and **sentinel gaps** (idle polls over 5 µs apart) by time in the busy period, checked against a **null** of 200 circular shifts. Credits are non-exclusive; uncredited is **residual**."
     }
   ],
-  "walkthrough": {
-    "title": "What a D2 message waits for: the sync already running",
-    "lead": "One order, m, arrives mid-sync at D2 (ring + busy-spin). The path is from the code; each timing is a separate stage percentile from the 20,000/s cell, not a trace of m. Stage values do not sum to the end-to-end median.",
-    "registers": [
-      {
-        "id": "jr",
-        "label": "Journaler (core 4)"
-      },
-      {
-        "id": "m",
-        "label": "Order m"
-      },
-      {
-        "id": "ds",
-        "label": "durableSeq vs m"
-      },
-      {
-        "id": "out",
-        "label": "Output (core 5)"
-      },
-      {
-        "id": "ms",
-        "label": "Measured at 20,000/s"
-      }
-    ],
-    "steps": [
-      {
-        "say": "Gateway decodes m, gives it a seq and fans it out. The journaler is already inside `fdatasync` for batch A, which began before m arrived. This is the case to follow: m lands mid-sync.",
-        "values": {
-          "jr": "fdatasync of batch A",
-          "m": "sequenced, fanned out",
-          "ds": "below m",
-          "out": "waiting for m",
-          "ms": "no number: the setup"
+  "walkthrough": [
+    {
+      "title": "What a D2 message waits for: the sync already running",
+      "lead": "One order, m, arrives mid-sync at D2 (ring + busy-spin). The path is from the code; each timing is a separate stage percentile from the 20,000/s cell, not a trace of m. Stage values do not sum to the end-to-end median.",
+      "registers": [
+        {
+          "id": "jr",
+          "label": "Journaler (core 4)"
         },
-        "decision": "topo"
-      },
-      {
-        "say": "The match branch is quick: `match_service` median is 80 ns. Output takes m from the matcher, then spins re-reading `durableSeq` until it reaches m's seq. It is below, so m is matched but held.",
-        "values": {
-          "m": "matched, held by Output",
-          "out": "spinning: durableSeq < m",
-          "ms": "match_service p50: 80 ns"
-        }
-      },
-      {
-        "say": "On the journal side m sits in its channel: the journaler is one thread, inside the sync, so it cannot drain. `journal_wait` p99 is 38.2 µs here, 0.27 µs at D1. That fits this wait; the data does not isolate it.",
-        "values": {
-          "m": "queued, journaler busy",
-          "ms": "journal_wait p99: 38.2 µs"
-        }
-      },
-      {
-        "say": "Sync A returns and the journaler stores `durableSeq` = A's last seq: still below m, so Output keeps spinning. The journaler drains everything queued in one snapshot, up to 4,096: batch B, m among it.",
-        "values": {
-          "jr": "draining batch B (m inside)",
-          "m": "in batch B",
-          "ds": "A's last: still below m",
-          "ms": "batch cap: 4,096 (the code)"
-        }
-      },
-      {
-        "say": "One `write()` puts all of B in the page cache. Written is not durable: a page-cache write survives a killed JVM, not power loss. `journal_write` median is 0.55 µs.",
-        "values": {
-          "jr": "write() of batch B",
-          "m": "in the page cache",
-          "ms": "journal_write p50: 0.55 µs"
-        }
-      },
-      {
-        "say": "Then one `fdatasync` for the whole batch. m waits all of it, and every message in B shares this sync's end as its durable time. Per sync, not per message: median 23.5 µs, p99.99 48.4 µs.",
-        "values": {
-          "jr": "fdatasync of batch B",
-          "m": "waiting on B's sync",
-          "ms": "sync p50 23.5, p99.99 48.4 µs"
+        {
+          "id": "m",
+          "label": "Order m"
         },
-        "decision": "e2"
-      },
-      {
-        "say": "The sync returns and the journaler stores `durableSeq` = B's last seq, after the stamps. Output now reads a value at least m's seq, stamps RELEASED and m leaves. m paid the rest of A's sync, a write and B's sync.",
-        "values": {
-          "jr": "back to its channel",
-          "m": "released",
-          "ds": "B's last: at least m",
-          "out": "released m",
-          "ms": "e2e p99.99, D2: 72.1 µs"
+        {
+          "id": "ds",
+          "label": "durableSeq vs m"
+        },
+        {
+          "id": "out",
+          "label": "Output (core 5)"
+        },
+        {
+          "id": "ms",
+          "label": "Measured at 20,000/s"
         }
-      },
-      {
-        "say": "At D1 Output never spins on `durableSeq`, so the journal side stops mattering to the response. The journal still writes beside the matcher, but nothing waits for it: end-to-end p99.99 is 1.39 µs.",
-        "values": {
-          "jr": "write() only, nobody waits",
-          "m": "released when matched",
-          "ds": "not read at D1",
-          "out": "releases at once",
-          "ms": "e2e p99.99, D1: 1.39 µs"
+      ],
+      "steps": [
+        {
+          "say": "Gateway decodes m, gives it a seq and fans it out. The journaler is already inside `fdatasync` for batch A, which began before m arrived. This is the case to follow: m lands mid-sync.",
+          "values": {
+            "jr": "fdatasync of batch A",
+            "m": "sequenced, fanned out",
+            "ds": "below m",
+            "out": "waiting for m",
+            "ms": "no number: the setup"
+          },
+          "decision": "topo"
+        },
+        {
+          "say": "The match branch is quick: `match_service` median is 80 ns. Output takes m from the matcher, then spins re-reading `durableSeq` until it reaches m's seq. It is below, so m is matched but held.",
+          "values": {
+            "m": "matched, held by Output",
+            "out": "spinning: durableSeq < m",
+            "ms": "match_service p50: 80 ns"
+          }
+        },
+        {
+          "say": "On the journal side m sits in its channel: the journaler is one thread, inside the sync, so it cannot drain. `journal_wait` p99 is 38.2 µs here, 0.27 µs at D1. That fits this wait; the data does not isolate it.",
+          "values": {
+            "m": "queued, journaler busy",
+            "ms": "journal_wait p99: 38.2 µs"
+          }
+        },
+        {
+          "say": "Sync A returns and the journaler stores `durableSeq` = A's last seq: still below m, so Output keeps spinning. The journaler drains everything queued in one snapshot, up to 4,096: batch B, m among it.",
+          "values": {
+            "jr": "draining batch B (m inside)",
+            "m": "in batch B",
+            "ds": "A's last: still below m",
+            "ms": "batch cap: 4,096 (the code)"
+          }
+        },
+        {
+          "say": "One `write()` puts all of B in the page cache. Written is not durable: a page-cache write survives a killed JVM, not power loss. `journal_write` median is 0.55 µs.",
+          "values": {
+            "jr": "write() of batch B",
+            "m": "in the page cache",
+            "ms": "journal_write p50: 0.55 µs"
+          }
+        },
+        {
+          "say": "Then one `fdatasync` for the whole batch. m waits all of it, and every message in B shares this sync's end as its durable time. Per sync, not per message: median 23.5 µs, p99.99 48.4 µs.",
+          "values": {
+            "jr": "fdatasync of batch B",
+            "m": "waiting on B's sync",
+            "ms": "sync p50 23.5, p99.99 48.4 µs"
+          },
+          "decision": "e2"
+        },
+        {
+          "say": "The sync returns and the journaler stores `durableSeq` = B's last seq, after the stamps. Output now reads a value at least m's seq, stamps RELEASED and m leaves. m paid the rest of A's sync, a write and B's sync.",
+          "values": {
+            "jr": "back to its channel",
+            "m": "released",
+            "ds": "B's last: at least m",
+            "out": "released m",
+            "ms": "e2e p99.99, D2: 72.1 µs"
+          }
+        },
+        {
+          "say": "At D1 Output never spins on `durableSeq`, so the journal side stops mattering to the response. The journal still writes beside the matcher, but nothing waits for it: end-to-end p99.99 is 1.39 µs.",
+          "values": {
+            "jr": "write() only, nobody waits",
+            "m": "released when matched",
+            "ds": "not read at D1",
+            "out": "releases at once",
+            "ms": "e2e p99.99, D1: 1.39 µs"
+          }
         }
-      }
-    ],
-    "takeaway": "A D2 message pays its own batch's sync, plus the rest of the one in flight if it arrives mid-sync: up to about two syncs. D2's 72.1 µs p99.99 is about 1.5 times the 48.4 µs p99.99 sync (arithmetic, not a breakdown)."
-  },
+      ],
+      "takeaway": "A D2 message pays its own batch's sync, plus the rest of the one in flight if it arrives mid-sync: up to about two syncs. D2's 72.1 µs p99.99 is about 1.5 times the 48.4 µs p99.99 sync (arithmetic, not a breakdown)."
+    },
+    {
+      "title": "What the matcher does with five orders",
+      "lead": "Five made-up orders on one symbol, run through `FastEngine`: fills and scan counts are what the code does, not timings. Prices are integer ticks; seq is the message number the gateway gives.",
+      "registers": [
+        {
+          "id": "ask",
+          "label": "Asks"
+        },
+        {
+          "id": "bid",
+          "label": "Bids"
+        },
+        {
+          "id": "ev",
+          "label": "Events"
+        }
+      ],
+      "steps": [
+        {
+          "say": "Per symbol and side the book is an array of price levels (4,097: the reference price ±2,048 ticks), each a FIFO of resting orders, oldest first. Best bid and ask are tracked as indices.",
+          "values": {
+            "ask": "10,002 [S1 5, S2 3]; 10,004 [S3 10]",
+            "bid": "9,999 [B1 4]",
+            "ev": "none yet"
+          }
+        },
+        {
+          "say": "seq 20: BUY B9, 10 at 10,004, crosses. It fills the oldest order at the best level first: S1 for 5, S2 for 3, at 10,002. That empties the level, so it scans up one empty slot to 10,004 and fills S3 for 2.",
+          "values": {
+            "ask": "10,004 [S3 8]",
+            "ev": "B9: 5 and 3 at 10,002; 2 at 10,004"
+          }
+        },
+        {
+          "say": "seq 21: SELL S4, 6 at 10,004, does not cross (best bid 9,999), so it rests behind S3: price first, then time. seq 22: CANCEL S3 is found by order id and unlinked from the middle of its FIFO.",
+          "values": {
+            "ask": "10,004 [S4 6]",
+            "ev": "cancel ack: S3, 8 cancelled"
+          }
+        },
+        {
+          "say": "seq 23: BUY B10, 7 at 10,004. It fills S4 for 6 and empties the last ask level, so it scans up 2,044 empty slots to the band's edge and finds no asks. The 1 left rests as a bid.",
+          "values": {
+            "ask": "none",
+            "bid": "10,004 [B10 1]; 9,999 [B1 4]",
+            "ev": "B10: 6 at 10,004"
+          }
+        },
+        {
+          "say": "seq 24: SELL S5, 3 at 9,999. Best bid 10,004 is above its limit, so it crosses at the resting order's price, 10,004: B10 for 1. It scans down 4 empty slots to 9,999 and fills B1 for 2.",
+          "values": {
+            "bid": "9,999 [B1 2]",
+            "ev": "S5: 1 at 10,004; 2 at 9,999"
+          }
+        }
+      ],
+      "takeaway": "A message costs what it touches: fills, emptied levels, the scan for the next best price (2,044 slots at seq 23). Replay must give the same events. Whether scans reach the measured match tail was not tested."
+    }
+  ],
   "views": [
     {
       "level": "container",
       "title": "One fork: five threads, three swapped channels",
-      "caption": "One JVM per fork, one thread per isolated core. The wire ring is fixed; E1 swaps the three `Channel`s, E2 the `Durability`. Output releases when matched and, at D2 and D3, once the durable sequence reaches the order: latency is the slower branch, not the sum.",
+      "caption": "One JVM per fork, one thread per isolated core. The wire ring is fixed; E1 swaps the three `Channel`s, E2 the `Durability`. Output releases when matched and, at D2 and D3, once the durable sequence reaches the order: latency is the slower branch, not the sum. The p99.99 belongs to the match stage and its queue without a sync (1.39 µs), the sync with one (72.1 to 197 µs), G1 pauses in the queue arms at 500,000/s (2.02 to 2.16 ms).",
       "nodes": [
         {
           "id": "gen",
@@ -641,7 +702,7 @@
   "decisions": [
     {
       "id": "topo",
-      "title": "Journal beside the matcher; release gated by sequence number",
+      "title": "Journal beside the matcher",
       "problem": "The journal must sit somewhere relative to matching, and the queue and the ring must be swappable in the same places.",
       "options": [
         "LMAX multicast: one ring, matcher and journaler consuming the same slots",
@@ -661,7 +722,7 @@
         },
         {
           "req": "R6",
-          "because": "Release waits on the durable sequence, checked by sequence number on every message. No decision covers the per-round host read-back."
+          "because": "Release waits on the durable sequence, checked on every message. No decision covers the per-round host read-back."
         }
       ],
       "uses": [
@@ -677,7 +738,7 @@
     },
     {
       "id": "open",
-      "title": "Open-loop from a fixed schedule, stamped in one clock",
+      "title": "Open loop, one clock",
       "problem": "A tail is only as honest as where its clock starts.",
       "options": [
         "Closed loop: send the next order when the response arrives",
@@ -709,7 +770,7 @@
     },
     {
       "id": "e1",
-      "title": "Split the hand-off into structure and wait strategy",
+      "title": "Structure apart from wait strategy",
       "problem": "The 2011 Disruptor paper does not say which wait strategy its run used, so its ring-versus-queue gap cannot be split into structure and waiting.",
       "options": [
         "Ring against queue only, the original framing",
@@ -741,7 +802,7 @@
     },
     {
       "id": "e2",
-      "title": "Sweep durability where per-order sync can keep up",
+      "title": "Durability at its own rates",
       "problem": "One `fdatasync` per order caps D3 near one order per sync, so at E1's rates D3 would saturate everywhere.",
       "options": [
         "One rate set for both experiments",
@@ -773,7 +834,7 @@
     },
     {
       "id": "attr",
-      "title": "Credit causes by coverage of the excess, against a shifted null",
+      "title": "Credit by coverage, against a null",
       "problem": "Slow messages overlap more of everything because they last longer, so overlap alone proves nothing.",
       "options": [
         "Credit a cause whenever it overlaps a tail message",
@@ -809,7 +870,7 @@
     },
     {
       "id": "unit",
-      "title": "The launch is the unit; intervals over rounds",
+      "title": "The launch is the unit",
       "problem": "A fork holds millions of messages, so an interval from them is tiny and assumes they are independent.",
       "options": [
         "Intervals over the messages of one long run",
@@ -871,8 +932,8 @@
     {
       "phase": "Build offline",
       "label": "Build the engine and pipeline on the laptop",
-      "detail": "Engine with a differential test against a reference engine; four `Channel` kinds; four durability levels; stamps; post-processor. Laptop runs are not data; a D1 crash check failed 3 of 10 kills, so D1's check became informational.",
-      "output": "engine and pipeline, 390 tests green; laptop runs at five rates (not data)",
+      "detail": "Engine with a differential test against a reference engine; four `Channel` kinds; four durability levels; stamps; post-processor. Laptop runs are not data. D1's crash check failed 3 of 10 kills, so it became informational.",
+      "output": "engine and pipeline, 390 tests green",
       "when": "2026-10-08 to 10-09 (−07:00)",
       "evidence": [
         {
@@ -892,7 +953,7 @@
       "phase": "Build offline",
       "label": "Amendment 1, before any host",
       "detail": "Plan 1 showed the design silent or wrong in places: the tail's tie rule, the busy period, the queue + spin lock-park row, timeouts. Hypotheses unchanged.",
-      "output": "a dated [amendment](p2:amendment) approved before any host was rented; laptop runs, which are not data, prompted it",
+      "output": "a dated [amendment](p2:amendment), approved before any host was rented",
       "when": "2026-10-09 (−07:00)",
       "evidence": [
         {
@@ -926,7 +987,7 @@
     {
       "phase": "Reconnoitre and pre-register",
       "label": "Rent the hosts; reconnaissance on h1",
-      "detail": "turbostat found boost not capped (cores near 5.4 GHz); NVMe names swapped across a reboot: both fixed. fio: about 14.7 µs per sync. Single forks per rate on h1, not data; the D3 probe at 100,000/s saturated near 23,900/s.",
+      "detail": "turbostat found boost not capped (cores near 5.4 GHz); NVMe names swapped across a reboot: both fixed. Single forks per rate on h1 are not data; the D3 probe at 100,000/s saturated.",
       "output": "docs/recon.md: 23 of 23 read-back checks on three hosts, three deviations, recon rule keeps 5,000/s",
       "when": "2026-10-09 to 10-10 (−07:00)",
       "evidence": [
@@ -988,7 +1049,7 @@
     {
       "phase": "Analyse and publish",
       "label": "Analyse, then rank before drafting",
-      "detail": "analysis.json, byte-identical across two runs; every verdict copied into results-a7.md; the headline ranked by the pre-registered rule before any draft.",
+      "detail": "Byte-identical across two runs; every verdict copied into results-a7.md; headline ranked by the pre-registered rule before any draft.",
       "output": "data/a7/analysis.json and docs/results-a7.md: H2 leads, H4 never leads",
       "milestone": true,
       "when": "2026-10-11 (−07:00)",
@@ -1142,11 +1203,11 @@
         "attr",
         "e2"
       ],
-      "takeaway": "Which stage owns the tail flips with durability. H1 fails on time, not count: the matcher path is 56.7%–60.5% of a tail message's latency at D0 and D1 (pooled medians); the bars count messages.",
+      "takeaway": "Which stage owns the tail flips with durability. The bars count messages; H1's failure is about time share (F4).",
       "arithmetic": "results-a7.md §8.2 as percent. Non-exclusive matcher-path credit at D0 and D1: 89.1%–93.1%. Engine service alone: 35.1%–45.1% of a 1.39 µs tail."
     },
     {
-      "title": "Hand-off p99.99 against load: ring or queue, spin or park",
+      "title": "Hand-off p99.99 against load",
       "short": "Load decides which choice matters",
       "chart": {
         "type": "xy",
@@ -1256,13 +1317,13 @@
         "note": "Whiskers: 95% interval over 30 forks."
       },
       "axis": "E1 at D1, 30 forks per point over three hosts. H2's D: the wait strategy's effect minus the structure's, in log p99.99; D > 0 means waiting matters more.",
-      "read_as": "10,000/s: spinning 1.43 and 4.08 µs, parking 5.32 and 6.13; waiting matters more (D +0.257, holds). 500,000/s: the queue arms jump to milliseconds (D −5.957, fails). 100,000/s: mixed. No arm saturated.",
+      "read_as": "10,000/s: spinning 1.43 and 4.08 µs, parking 5.32 and 6.13; waiting matters more (D +0.257, holds). Ring median wait per hand-off: 0.18 µs spinning, 1.92 parking (output side 0.19, 1.90): about 1.7 µs a hop, a median, not the tail's cause. 500,000/s: the queue arms jump to milliseconds (D −5.957, fails). 100,000/s: mixed. No arm saturated.",
       "so": "e1",
       "takeaway": "H2, \"waiting beats structure at every rate\", fails: true at low load, reversed at high load, where the queue's lock and allocation set the tail.",
       "arithmetic": "Post \"Ring or spin?\" table; 2.16 and 2.02 ms drawn as 2,160 and 2,020 µs. D's 97.9% intervals: +0.176 to +0.282, −0.128 to +0.052, −5.996 to −5.813."
     },
     {
-      "title": "Group commit and per-order sync against the page-cache write",
+      "title": "Durability cost against the page-cache write",
       "short": "Group commit: 52× here, not 2×",
       "chart": {
         "type": "xy",
@@ -1497,7 +1558,7 @@
       "arithmetic": "Post \"Every verdict, as it came out\"; results-a7.md §4. 72 of 75 (host, cell) pairs eligible; the rest are D3 at 100,000/s."
     },
     {
-      "title": "One run's precision against launch-to-launch spread (H4)",
+      "title": "One run's error against launch spread (H4)",
       "short": "Launches vary 5.6–8.9× a run's error",
       "chart": {
         "type": "bars",
@@ -1524,68 +1585,56 @@
       "axis": "D1 at 100,000/s. Each round, three extra same-seed forks ran back to back: same code, input and host. Bar: SD of log p99.99 across them ÷ the error one fork implies if its messages were independent.",
       "read_as": "Launches differed by about 2–3% at p99.99 (SD 0.0175–0.0279), several times one run's own error, on all hosts: H4 holds.",
       "so": "unit",
-      "takeaway": "One run's tight interval understates the spread; every interval here is over launches. A known JVM lesson, demonstrated, never the headline.",
+      "takeaway": "One run's interval understates the spread; every interval here is over launches.",
       "arithmetic": "results-a7.md §4.5: h1 0.0175 ÷ 0.00311 = 5.64. That launches differ in JIT and memory layout is the author's reading, not tested."
     },
     {
-      "title": "EXPLORATORY, POST HOC: when do the queue's G1 pauses reach the p99.99?",
+      "title": "EXPLORATORY, POST HOC: do the queue's G1 pauses reach the p99.99?",
       "short": "POST HOC: GC pauses cross the rank",
       "chart": {
         "type": "xy",
-        "unit": "messages",
+        "unit": "× the p99.99 rank",
         "x_label": "offered rate, messages/s",
-        "y_label": "messages per window",
+        "y_label": "due during pauses ÷ rank",
         "x_log": true,
+        "y_log": true,
         "series": [
           {
-            "name": "due during G1 pauses (arithmetic)",
+            "name": "due during G1 pauses ÷ p99.99 rank",
             "style": "points",
             "points": [
               {
                 "x": 10000,
-                "y": 27
+                "y": 0.135
               },
               {
                 "x": 100000,
-                "y": 500
+                "y": 0.833
               },
               {
                 "x": 500000,
-                "y": 7500
-              }
-            ]
-          },
-          {
-            "name": "p99.99 rank: 0.01% of the window",
-            "style": "points",
-            "points": [
-              {
-                "x": 10000,
-                "y": 200
-              },
-              {
-                "x": 100000,
-                "y": 600
-              },
-              {
-                "x": 500000,
-                "y": 3000
+                "y": 2.5
               }
             ]
           }
         ],
-        "note": "Arithmetic, not measurement: rate × pause length × pauses, per window. It counts only messages due during the pauses, so it is a floor. Changes no verdict.",
-        "y_log": true
+        "refs": [
+          {
+            "y": 1,
+            "label": "a pause reaches the rank"
+          }
+        ],
+        "note": "Arithmetic, not measurement: rate × pause length × pauses, per window, over the rank (0.01% of the window). It counts only messages due during the pauses, so it is a floor. Changes no verdict."
       },
       "axis": "E1's queue arms. Counted after the analysis: every in-window safepoint there was a G1 allocation pause, median 2.49–2.68 ms; the ring arms had none.",
       "read_as": "A p99.99 registers a pause once the messages it delays outnumber 0.01% of the window: not at 10,000/s, nearly at 100,000/s, far past at 500,000/s. Measured: queue + park over 100 µs in 0, 9 and 30 of 30 launches.",
       "so": "e1",
       "takeaway": "Part of H2's load dependence is whether G1 pauses reach the p99.99 rank. Post hoc, and partly configuration: one GC thread on a shared core.",
-      "arithmetic": "Pauses per window, queue + park: 1, 2, 5–7. Ring arms: 0 of 180 launches over 100 µs. At 100,000 and 500,000/s, 97.2%–99.1% of the queue arms' gap time lies inside pauses."
+      "arithmetic": "Due ÷ rank: 27 ÷ 200, 500 ÷ 600, 7,500 ÷ 3,000. Pauses per window, queue + park: 1, 2, 5–7. Ring arms: 0 of 180 launches over 100 µs. At 100,000 and 500,000/s, 97.2%–99.1% of the queue arms' gap time lies inside pauses."
     }
   ],
   "interview": {
-    "pitch30": "I built a deterministic Java matching engine, ran it open-loop as one in-process pipeline on three rented bare-metal servers, and attributed its slowest messages to causes, with rules fixed before the campaign. The lead finding: which hand-off decision sets the tail depends on load. At low load, spinning versus parking matters more than ring versus queue; at 500,000 messages a second the queue's tail goes to milliseconds while the ring's stays in single microseconds. And once an fdatasync is on the response path, waiting for it is the whole tail.",
+    "pitch30": "I built a deterministic Java matching engine, ran it open-loop on three rented bare-metal servers, and attributed its slowest messages to causes, with rules fixed before the campaign. Which hand-off decision sets the tail depends on load: at low load spinning versus parking matters more than ring versus queue; at 500,000 messages a second the queue's tail reaches milliseconds while the ring's stays in single microseconds. And once an fdatasync is on the response path, waiting for it is the whole tail.",
     "pitch120": "In 2011 the Disruptor paper showed a ring beating a queue, but not whether that was the data structure or the consumer spinning instead of sleeping. I built a deterministic Java matching engine, eight order books behind a sequencer and a journal, as one pipeline of five pinned threads, driven open-loop from each message's intended send time. Two experiments: ring or `ArrayBlockingQueue` crossed with spin or park, and four durability levels from no journal to an fdatasync per order. Six hypotheses pre-registered, 840 JVM launches on three hosts, tail messages attributed against a shifted null with the residual published. Most predictions did not hold, and those are the findings. At 10,000 messages a second waiting mattered more than structure; at 500,000 the queue went to about two milliseconds while the spinning ring stayed at 1.53 µs, and a post hoc count, with arithmetic, puts G1 pauses across the p99.99 rank. With no sync on the path the match stage is the tail; with one, durability wait is all of it, and group commit came out 52 times the page-cache write here, against a predicted under 2. And same-seed JVM launches differed several times more than one run's interval admits.",
     "followups": [
       {
@@ -2001,6 +2050,38 @@
     {
       "file": "~/projects/matching-engine-tail/mtail/nulls.py",
       "section": "def enrichment(observed: float, null: list[float]) -> dict:"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/engine/src/main/java/mtail/engine/FastEngine.java",
+      "section": "public final class FastEngine implements MatchingEngine"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/engine/src/main/java/mtail/engine/Band.java",
+      "section": "public record Band(long[] referenceTicks, int halfWidth)"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/pipeline/src/main/java/mtail/pipeline/stage/Gateway.java",
+      "section": "public final class Gateway implements Runnable"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### 4.3 The engine"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### Module 2 — Sequencer, journal and deterministic replay"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### Module 3 — Coordinated omission and open-loop load"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/superpowers/specs/2026-10-08-matching-engine-latency-design.md",
+      "section": "### Self-check questions"
+    },
+    {
+      "file": "~/projects/matching-engine-tail/docs/results-a7.md",
+      "section": "## 6. Stages (`stages`)"
     }
   ],
   "derived_numbers": [
@@ -2087,6 +2168,78 @@
     {
       "value": "1.5",
       "how": "72.1 / 48.4 = 1.49: the D2 end-to-end p99.99 (docs/post.md, 'What durability costs in the tail') over the p99.99 of the pipeline's own fdatasync calls (docs/results-a7.md §6), to one decimal."
+    },
+    {
+      "value": "0.135",
+      "how": "27 ÷ 200: messages due during G1 pauses over the p99.99 rank at 10,000/s, both from the chart this one replaces (rate × pause length × pauses; 0.01% of the window)."
+    },
+    {
+      "value": "0.833",
+      "how": "500 ÷ 600 at 100,000/s, same arithmetic (0.8333)."
+    },
+    {
+      "value": "2.5",
+      "how": "7,500 ÷ 3,000 at 500,000/s, same arithmetic."
+    },
+    {
+      "value": "0.18",
+      "how": "docs/results-a7.md §6, E1-RING_SPIN-D1-10000, match_wait p50 180.0 ns, in µs."
+    },
+    {
+      "value": "1.92",
+      "how": "docs/results-a7.md §6, E1-RING_PARK-D1-10000, match_wait p50 1923.5 ns, in µs to two decimals."
+    },
+    {
+      "value": "0.19",
+      "how": "docs/results-a7.md §6, E1-RING_SPIN-D1-10000, out_wait p50 191.0 ns, in µs."
+    },
+    {
+      "value": "1.90",
+      "how": "docs/results-a7.md §6, E1-RING_PARK-D1-10000, out_wait p50 1903.0 ns, in µs to two decimals."
+    },
+    {
+      "value": "1.7",
+      "how": "(1923.5 - 180.0) = 1743.5 ns and (1903.0 - 191.0) = 1712.0 ns, both about 1.7 µs."
+    },
+    {
+      "value": "4,097",
+      "how": "2 x 2048 + 1: Band.levels() for halfWidth 2048 (engine/Band.java)."
+    },
+    {
+      "value": "2,044",
+      "how": "4097 - 2053: level index of price 10,005 is 2053 (price - (ref 10,000 - 2048)); the scan from 10,005 to the sentinel at index 4097 skips 2,044 empty slots; confirmed by running FastEngine with a counter in a scratch copy."
+    },
+    {
+      "value": "10,002",
+      "how": "a made-up price for the toy book: the reference price 10,000 (Band.standard, symbol 0) plus 2 ticks. The five-order trace was run through FastEngine itself."
+    },
+    {
+      "value": "10,003",
+      "how": "toy book: reference 10,000 plus 3 ticks."
+    },
+    {
+      "value": "10,004",
+      "how": "toy book: reference 10,000 plus 4 ticks."
+    },
+    {
+      "value": "10,005",
+      "how": "toy book: reference 10,000 plus 5 ticks (first slot the seq 23 scan examines)."
+    },
+    {
+      "value": "9,999",
+      "how": "toy book: reference 10,000 minus 1 tick."
+    },
+    {
+      "value": "1,000",
+      "how": "100,000 messages/s x 0.010 s = 1,000 due during a 10 ms stall (the spec's self-check question 3 scenario)."
+    },
+    {
+      "value": "100,000",
+      "how": "the spec's self-check question 3 rate: 100k msg/s."
+    },
+    {
+      "value": "9",
+      "how": "the slowest 100 of the 1,000 delayed messages wait at least 10 ms - 100 x 10 us = 9 ms, if evenly spaced at 10 us (1 / 100,000 per second)."
     }
   ],
   "links": {
