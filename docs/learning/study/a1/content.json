@@ -26,16 +26,16 @@
     },
     {
       "id": "R4",
-      "short": "Rules before data",
-      "text": "Commit the hypotheses, which runs get thrown out, when to stop and how the headline is chosen, before the first paid measurement run.",
-      "why": "Git timestamps then show the rules came before the data, and the headline cannot be picked by which result cost the most effort."
+      "short": "Rules before the campaign",
+      "text": "Commit the hypotheses, which runs get thrown out, when to stop and how the headline is chosen, before the first campaign run (three paid reconnaissance captures came first).",
+      "why": "Git timestamps then show the rules came before the campaign data, and the headline cannot be picked by which result cost the most effort."
     },
     {
       "id": "R5",
       "short": "Tested code, laptop-checkable numbers",
       "text": "Run on paid GPUs only code already tested offline, and let anyone re-derive every number on a laptop.",
       "why": "The whole budget was $200, and debugging on live GPUs eats it. A number a reader cannot re-derive must be taken on trust.",
-      "unlinked_reason": "It is met by process: in the flow, \"Build against the captures; prove it end to end\" tests the code on recorded logs and a free fake engine before any campaign run, and \"Analyse from the committed store\" re-derives every number with no GPU."
+      "unlinked_reason": "It is met by process: in the flow, \"Build against the captures; test it end to end\" tests the code on recorded logs and a free fake engine before any campaign run, and \"Analyse from the committed store\" re-derives every number with no GPU."
     }
   ],
   "concepts": [
@@ -55,31 +55,31 @@
       "id": "contrasts",
       "short": "Contrasts and their difference",
       "term": "Contrast, and difference of contrasts",
-      "plain": "A **contrast** is the difference of two arms' medians, with a 95% bootstrap interval (resample the runs 10,000 times, keep the middle 95%): A minus B is the weight cache's saving, B minus C the compile cache's. Their **difference**, (A minus B) minus (B minus C), ranks the caches only if its interval excludes zero; negative favours the compile cache."
+      "plain": "A **contrast** is the difference of two arms' medians, with a 95% [bootstrap interval](p2:interval) (resample the runs 10,000 times, keep the middle 95%), a plausible range for the true difference, not where a re-run would land: A minus B is the weight cache's saving, B minus C the compile cache's. Their **difference**, (A minus B) minus (B minus C), ranks the caches only if its interval excludes zero; negative favours the compile cache."
     },
     {
       "id": "clocks",
       "short": "Two clocks, platform residual",
       "term": "Two clocks and the platform residual",
-      "plain": "**Clock A** (laptop) brackets the whole job; total [cold start](p1:coldstart) is its span minus the worker-clock warmup after the first request. **Clock B** (worker) starts just before `vllm serve` is launched. **Platform time** = total minus clock B time, the one allowed cross-clock subtraction: queue, container start, handler set-up, teardown, polling lag."
+      "plain": "**Clock A** (laptop) brackets the whole job and sees it finish only when the laptop polls the job status, every 5 s; total [cold start](p1:coldstart) is its span minus the worker-clock warmup after the first request. **Clock B** (worker) starts just before `vllm serve` is launched. **Platform time** = total minus clock B time, the one allowed cross-clock subtraction: container and handler start, teardown and up to one 5 s poll of lag. RunPod's own queue delay was about 0.13 s (median), so this is not queueing."
     },
     {
       "id": "percentiles",
       "short": "Percentiles and the ECDF",
       "term": "Percentiles and the ECDF",
-      "plain": "**p90** is the time 90% of runs finish within; p50 is the median. An **ECDF** plots every run (seconds across, share finished up), so the tail stays visible."
+      "plain": "**p90** is the time 90% of runs finish within; p50 is the median. An **[ECDF](p2:ecdf)** plots every run (seconds across, share finished up), so the tail stays visible."
     },
     {
       "id": "hypotheses",
       "short": "Hypotheses H1 to H5",
       "term": "The five hypotheses",
-      "plain": "**H1**: weight handling is over half of worker-clock time through the first request in arm A. **H2**: volume weights cut it materially. **H3**: compiling is a non-trivial part of engine start, and a warm cache cuts it. **H4**: host differences drive how far p95 sits above the median. **H5**: a warm compile cache leaves more [KV cache](p1:kvcache)."
+      "plain": "**H1**: weight handling is over half of worker-clock time through the first request in arm A. **H2**: volume weights cut it materially. **H3**: compiling is a non-trivial part of engine start, and a warm cache cuts it. **H4**: host differences drive how far p95 sits above the median. **H5**: a warm compile cache leaves more [KV cache](p1:kvcache). H1 holds only by its definition: weight handling is a median 0.58 of worker-clock time in arm A, above half in all 100 runs, but that phase is mostly server start-up; vLLM's own loading time is 17.40 s of 79.09 s, about 22%."
     },
     {
       "id": "prereg",
       "short": "Pre-registration",
       "term": "Pre-registration",
-      "plain": "Hypotheses, contrasts, which runs to throw out, when to stop and how to pick the headline, committed in `docs/experiment.md` before any priming or campaign run (after three paid reconnaissance captures), four days before the first retained run; later additions dated in git."
+      "plain": "Hypotheses, contrasts, which runs to throw out, when to stop and how to pick the headline, committed in `docs/experiment.md` before any priming or campaign run (after three paid reconnaissance captures), four days before the first retained run; later changes are dated [amendments](p2:amendment) in git."
     }
   ],
   "views": [
@@ -394,7 +394,7 @@
     {
       "level": "dynamic",
       "title": "One run, in order",
-      "caption": "Clock A (laptop) runs from step 2; clock B (worker) starts between steps 4 and 5. The caches act in the highlighted steps 5 and 6; the compile cache also shortened step 5 by about 9 s, unexplained. Platform time is everything clock A sees outside clock B.",
+      "caption": "Clock A (laptop) runs from step 2; clock B (worker) starts between steps 4 and 5. The caches act in the highlighted steps 5 and 6; the warm cache directory also shortened step 5 by about 9 s, mostly before the engine core starts (cause unconfirmed). Platform time is everything clock A sees outside clock B.",
       "nodes": [
         {
           "id": "s1",
@@ -415,7 +415,7 @@
         {
           "id": "s3",
           "label": "3 Platform boots",
-          "sub": "queue, find a 4090, start container",
+          "sub": "container start; queueing was short",
           "kind": "external",
           "col": 2,
           "row": 0
@@ -566,14 +566,13 @@
       "problem": "vLLM's interesting phases are internal, and part of every cold start (queue, container start, image pull) happens before our code exists.",
       "options": [
         "Time startup through vLLM's Python engine API",
-        "One clock, and give all the time to the stages you can see",
         "Run the real `vllm serve`, bracket it with a worker clock, split phases from its log, and get platform time by subtraction"
       ],
       "chosen": "Run the real `vllm serve`, bracket it with a worker clock, split phases from its log, and get platform time by subtraction",
-      "why": "The Python API would measure a startup path nobody deploys. With one clock you cannot detect that it is lying; the implemented check compares the laptop and worker clocks and discards a run whose total leaves no room for a network round trip.",
-      "cost": "Platform time is one residual holding teardown and polling lag as well as queueing. RunPod's queue and execution durations (clock C) are recorded but not used to split it. Two engine sub-phases (device init and KV allocation) are not delineated by this vLLM build, so they sit merged in an unattributed row. The log patterns are tied to vLLM 0.27.1.",
+      "why": "The Python API would measure a startup path nobody deploys. Two clocks make a lying clock detectable: the implemented check compares the laptop and worker clocks and discards a run whose total leaves no room for a network round trip.",
+      "cost": "Platform time is one residual: container and handler start, teardown and up to one 5 s poll of lag. RunPod's own queue and execution durations (clock C) are recorded but not used to split it; its queue delay was about 0.13 s (median), so the residual is not queueing. Two engine sub-phases (device init and KV allocation) are not delineated by this vLLM build, so they sit merged in an unattributed row. The log patterns are tied to vLLM 0.27.1.",
       "why_short": "Timing the real `vllm serve` from outside measures the path people deploy, and a second clock lets a lying run be caught.",
-      "cost_short": "Platform time is one residual that also holds teardown and polling lag; two engine sub-phases stay merged.",
+      "cost_short": "Platform time is one residual (container start, teardown, poll lag), not queueing; two engine sub-phases stay merged.",
       "short": "Measure from outside the engine",
       "serves": [
         {
@@ -598,9 +597,9 @@
       ],
       "chosen": "Interleaved triples: one run of each arm per triple, order shuffled from a seed",
       "why": "Blocking confounds the cache with time-of-day conditions, and on rented GPUs that confound can make or erase the whole effect. Triples also allow a paired, same-host check as supporting evidence.",
-      "cost": "A resumed campaign must rebuild the exact schedule, so the harness refuses a resume whose stored arms disagree with the seed. The windows ended up hours apart rather than on separate days, so drift between windows is only partly covered; the post says so.",
+      "cost": "A resumed campaign must rebuild the exact schedule, so the harness refuses a resume whose stored arms disagree with the seed. The three windows (about 2 hours each, all on one host) fell on consecutive days, 19.8 and 17.5 hours apart, so some day-to-day drift is covered but longer-term drift is not.",
       "why_short": "Running all of one arm first would mix the cache effect with time-of-day conditions on the platform.",
-      "cost_short": "A resume must rebuild the exact schedule; drift between windows hours apart is only partly covered.",
+      "cost_short": "A resume must rebuild the exact schedule; three ~2 h windows on consecutive days cover only some drift.",
       "short": "Interleave arms in shuffled triples",
       "serves": [
         {
@@ -653,10 +652,10 @@
         "Bootstrap the difference of contrasts on total cold start, and pick the headline by a rule fixed in advance"
       ],
       "chosen": "Bootstrap the difference of contrasts on total cold start, and pick the headline by a rule fixed in advance",
-      "why": "\"Compile cache mattered more\" is only a finding if the gap between the two effects excludes zero. The difference needs one shared unit, so it is computed on total cold start; subtracting weight time from compile time would difference two different quantities. The headline rule, lead with what transfers furthest to other infrastructure, was committed before data.",
-      "cost": "Total time is noisier than the mechanism units, so the interval is wide: −10.39 s, 95% [−20.30, −5.54]. The pre-registration requires it reported before any ranking claim.",
+      "why": "\"Compile cache mattered more\" is only a finding if the gap between the two effects excludes zero. The difference needs one shared unit, so it is computed on total cold start; subtracting weight time from compile time would difference two different quantities. The headline rule, lead with what transfers furthest to other infrastructure, was committed before the campaign data.",
+      "cost": "Total time is read off the laptop's 5 s status poll, so each total carries up to one poll of lag (just above arm A's median the sorted totals jump 4.6 s), and the interval spans about three poll steps: −10.39 s, 95% [−20.30, −5.54]. The pre-registration requires it reported before any ranking claim. On the worker clock, which has no poll lag and leaves platform time out, the same difference is −12.16 s [−15.54, −10.74]: an exploratory check, not the pre-registered result.",
       "why_short": "\"Compile cache mattered more\" is a finding only if the gap between the two effects excludes zero.",
-      "cost_short": "Total time is noisy, so the interval is wide and the ranking claim must always carry it.",
+      "cost_short": "Total time carries up to one 5 s poll of lag, so the interval is wide; the ranking claim must always carry it.",
       "short": "Rank by the difference's interval",
       "serves": [
         {
@@ -665,7 +664,7 @@
         },
         {
           "req": "R4",
-          "because": "Leading with what transfers furthest, a rule committed before data, stops the headline being picked afterwards."
+          "because": "Leading with what transfers furthest, a rule committed before the campaign data, stops the headline being picked afterwards."
         }
       ],
       "uses": [
@@ -691,7 +690,7 @@
       ],
       "chosen": "p50, p90, p95 and a full ECDF, no p99, and H4 reported as unanswerable",
       "why": "A mean is pulled by the tail. At 100 runs a p99 is one or two observations, not an estimate. Before the published campaign began (a discarded window had already shown runs piling onto one host), the pre-registration committed to publishing the host count whatever it was. The same single host made every triple host-complete, so the paired check is fully supplied.",
-      "cost": "The far tail stays unresolved: B's largest repeat-host runs were longer than A's, for no known reason, and whether host placement drives the tail is unanswered.",
+      "cost": "The far tail stays unresolved: B's largest repeat-host runs were longer than A's. Two of B's three slowest also had slow weight loads (17.45 and 66.2 s against a 4.57 s median), and the slowest was the first run after a 19.8 h gap, so a cold host cache is one possible reading, unverified; if so, the 4.57 s volume load is a warm-host figure. Whether host placement drives the tail is unanswered.",
       "why_short": "A mean hides the tail, and at 100 runs a p99 would be one or two observations.",
       "cost_short": "The far tail stays unresolved, and whether host placement drives it is unanswered.",
       "short": "Report the shape and its limits",
@@ -775,7 +774,7 @@
     },
     {
       "phase": "Build and prove offline",
-      "label": "Build against the captures; prove it end to end",
+      "label": "Build against the captures; test it end to end",
       "detail": "Log parser, platform clock, a probe around `vllm serve` and a free stub replaying the real logs; a synthetic campaign through it recovers the known effects.",
       "output": "tests/test_end_to_end.py: the whole pipeline runs with no GPU",
       "milestone": true,
@@ -869,7 +868,7 @@
     {
       "phase": "Measure",
       "label": "Run 100 interleaved triples",
-      "detail": "Seeded triples, one job in flight, one JSON line per run, no retries. Three windows hours apart, all on one host.",
+      "detail": "Seeded triples, one job in flight, one JSON line per run, no retries. Three ~2-hour windows on consecutive days, all on one host.",
       "output": "data/campaign.jsonl: 300 runs, 100 per arm, no failures, no discards",
       "milestone": true,
       "when": "2026-09-01 to 09-03 (−07:00)",
@@ -1060,7 +1059,7 @@
           },
           {
             "between": "B → C",
-            "text": "Compile cache only: compile falls 18.79 → 0.33 s. Launch to model loaded also falls, 30.35 → 21.34 s, unexplained."
+            "text": "Compile cache only: compile falls 18.79 → 0.33 s. Launch to model loaded also falls, 30.35 → 21.34 s; the engine log puts most of that before the engine core starts, cause unconfirmed."
           }
         ],
         "merge": [
@@ -1080,7 +1079,7 @@
           "on_bar": "C"
         }
       },
-      "axis": "Median seconds per phase, 100 runs per arm. A: nothing cached; B: weights cached; C: both cached. Compile is drawn last, out of time order (it follows model loading). Unattributed engine start: two sub-phases the log does not split. Other fixed steps: [memory profiling](p1:vllm), [graph capture](p1:compile), the ready check (engine up until health answers, mostly API-server start-up), the first request, start to finish.",
+      "axis": "Median seconds per phase, 100 runs per arm. A: nothing cached; B: weights cached; C: both cached. Compile is drawn last, out of time order (it follows model loading). Unattributed engine start: two sub-phases the log does not split. Other fixed steps: [memory profiling](p1:vllm), [graph capture](p1:compile), the ready check (end of engine start until the health endpoint answers, polled every 0.25 s; not split further), the first request (up to 16 tokens, start to finish; time to first token is 0.042 s).",
       "read_as": "The launch segment runs from starting `vllm serve` to its \"Model loading took\" line, so it holds process start-up too; vLLM's own loading time is 17.40, 4.57, 4.54 s. Dashed box on C: B's compile time.",
       "so": [
         "arms",
@@ -1187,7 +1186,7 @@
         "zero_label": "no saving"
       },
       "axis": "Seconds of total cold start each cache saves (median difference), with a 95% bootstrap interval.",
-      "read_as": "Both clear zero, but side by side they do not rank the caches; the next chart does. Only 18.46 s of the compile cache's 26.07 s is compilation; the other 7.6 s roughly matches the unexplained launch-segment gap (8.85 s).",
+      "read_as": "Both clear zero, but side by side they do not rank the caches; the next chart does. Only 18.46 s of the compile cache's 26.07 s is compilation; the other 7.6 s roughly matches the launch-segment gap (8.85 s), which the engine log places before the engine core starts.",
       "so": "arms",
       "short": "Each cache's saving, alone",
       "takeaway": "Each cache saves time on its own, with neither interval near zero; context, not the ranking.",
@@ -1213,7 +1212,7 @@
         "shade": "left"
       },
       "axis": "Weight-cache saving minus compile-cache saving: seconds of total cold start, 95% bootstrap interval.",
-      "read_as": "The whole interval, −20.30 to −5.54 s, lies left of zero, which licenses the ranking.",
+      "read_as": "The whole interval, −20.30 to −5.54 s, lies left of zero, which licenses the ranking. It is a plausible range for the true difference, not where a re-run would land, and it is wide partly because each total carries up to one 5 s poll of lag; on the worker clock the same difference is −12.16 s [−15.54, −10.74], an exploratory check.",
       "so": "rank",
       "takeaway": "The compile cache saves more, about 10 s per cold start, and the interval never crosses zero, so the ranking is a finding, not a reading of two bars.",
       "arithmetic": "15.68 − 26.07 = −10.39 s, on unrounded medians; the interval comes from 10,000 resamples of the runs."
@@ -1239,7 +1238,7 @@
         ]
       },
       "axis": "KV cache tokens vLLM allocated at startup, same card and flags in every arm.",
-      "read_as": "C keeps 20.3 % more KV cache: one more full-length (8192-token) request served at once, 5 instead of 4. On a cold arm the compiler's working set is resident while vLLM measures free memory, so the cache is sized smaller. Registered ahead as H5, though reconnaissance had logged both values once.",
+      "read_as": "C keeps 20.3 % more KV cache: one more full-length (8192-token) request served at once, 5 instead of 4. By the mechanism registered as H5, the compiler's working set is resident on a cold arm while vLLM measures free memory, so the cache is sized smaller; the engine log's peak-activation line (1.18 GiB cold, 0.19 GiB warm) fits that. Registered ahead as H5, though reconnaissance had logged both values once.",
       "short": "KV cache left for serving",
       "so": "arms",
       "takeaway": "B and C differ only in the compile cache, yet C gets 20.3 % more KV cache: one more full-length request at a time, for the replica's whole life.",
@@ -1260,11 +1259,11 @@
       },
       {
         "q": "What surprised you?",
-        "a": "C reached \"model loaded\" 8.85 s sooner than B, on arms differing only in compile cache, while vLLM's own model-loading time is the same in B and C (4.57 vs 4.54 s): not host, not position in the triple, and this campaign does not explain it. And \"ready is not fast\" was wrong here: [vLLM](p1:vllm) does its warmup before answering health, so the first request is already near steady state."
+        "a": "C reached \"model loaded\" 8.85 s sooner than B, on arms differing only in compile cache, while vLLM's own model-loading time is the same in B and C (4.57 vs 4.54 s): not host, not position in the triple. The engine log's own timestamps put almost all of the gap before the engine core starts, between the arguments line and architecture resolution: about 10 s in B, about 1 s in C. Arm C warms the whole vLLM cache directory, not just compiled code; my best guess is a cached model-inspection result there, which I have not confirmed. And \"ready is not fast\" was wrong here: [vLLM](p1:vllm) does its warmup before answering health, so the first request is already near steady state."
       },
       {
         "q": "What would you do differently?",
-        "a": "The host question failed: a serially-submitting driver kept landing on the one machine that had the image cached. The windows were hours apart, not separate days. And the first window was thrown out because arm A's per-run [weights](p1:weights) filled the worker disk (A failed 3 of its 9 runs, C one, B none), which would have biased the contrast; the worker now empties cold directories before and after each run."
+        "a": "The host question failed: a serially-submitting driver kept landing on the one machine that had the image cached. The three windows ran on consecutive days, 19.8 and 17.5 hours apart, so drift over a longer period is not covered. And the first window was thrown out because arm A's per-run [weights](p1:weights) filled the worker disk (A failed 3 of its 9 runs, C one, B none), which would have biased the contrast; the worker now empties cold directories before and after each run."
       },
       {
         "q": "What does this not tell you?",
@@ -1275,16 +1274,16 @@
         "a": "It is the better buy and the more fragile one. A [compile cache](p1:compile) costs nothing to store, but any change to engine version, model, hardware or flags invalidates it, so every upgrade pays the cold compile again unless warming is built into the deploy. The weight cache is a volume you rent every month whether you scale or not."
       }
     ],
-    "limits": "One provider, GPU model, model, engine version, region and host: the seconds do not transfer; the mechanisms do. H4 (does host placement drive the tail?) is unanswerable: all 300 runs landed on one host. Single replica, no contention. No percentile past p95. The first-touch rule that keeps the 2266.6 s run out of the ECDF (it stays in the medians) was written after seeing the data and is disclosed as post hoc. Why C reaches \"model loaded\" 8.85 s sooner than B is not settled."
+    "limits": "One provider, GPU model, model, engine version, region and host: the seconds do not transfer; the mechanisms do. H4 (does host placement drive the tail?) is unanswerable: all 300 runs landed on one host. Single replica, no contention. No percentile past p95. The first-touch rule that keeps the 2266.6 s run out of the ECDF (it stays in the medians) was written after seeing the data and is disclosed as post hoc. Why C reaches \"model loaded\" 8.85 s sooner than B is placed before the engine core starts by the log timestamps, but its cause is not confirmed."
   },
   "recall": [
     {
       "q": "B and C differ only in the compile cache. Which chart segment should change, and which other one changed?",
-      "a": "Only compile should move, and it does: 18.79 to 0.33 s. The launch segment also shrank, 30.35 to 21.34 s, though vLLM's own loading time is the same in B and C (4.57 vs 4.54 s). The campaign does not explain it."
+      "a": "Only compile should move, and it does: 18.79 to 0.33 s. The launch segment also shrank, 30.35 to 21.34 s, though vLLM's own loading time is the same in B and C (4.57 vs 4.54 s). The engine log puts the gap before the engine core starts (about 10 s in B, 1 s in C); its cause is unconfirmed."
     },
     {
       "q": "On the one-run view, where does clock B start, and what lands in platform time?",
-      "a": "Between steps 4 and 5: the probe starts clock B just before launching `vllm serve`. Platform time is everything the laptop clock sees outside it: queueing, finding a GPU, starting the container and handler set-up before; teardown and the driver's 5 s polling after."
+      "a": "Between steps 4 and 5: the probe starts clock B just before launching `vllm serve`. Platform time is everything the laptop clock sees outside it: container and handler start before; teardown and up to one 5 s poll of lag after. RunPod's own queue delay was only about 0.13 s."
     },
     {
       "q": "Why is arm C primed outside the campaign?",
@@ -1312,7 +1311,7 @@
     },
     {
       "q": "Why does the warm compile cache leave more KV cache?",
-      "a": "vLLM sizes the KV cache from free memory measured during a profiling pass. On a cold arm the compiler's working set is resident during that pass, so less memory looks free, and the smaller cache stays for the replica's life."
+      "a": "vLLM sizes the KV cache from free memory measured during a profiling pass. By the mechanism registered as H5, on a cold arm the compiler's working set is resident during that pass, so less memory looks free, and the smaller cache stays for the replica's life."
     }
   ],
   "sources": [
@@ -1545,15 +1544,64 @@
     {
       "value": "5.5",
       "how": "The pitch's spoken \"5.5 to 20 seconds more\": the interval's upper end, -5.54 s in docs/post.md, to one decimal, sign flipped to read as extra saving."
+    },
+    {
+      "value": "19.8",
+      "how": "Hours from the start of window 1's last run (run 99) to window 2's first (run 100), from t0_wall in data/campaign.jsonl: 19.79 h (2026-09-01 23:59 to 09-02 19:46, -07:00)."
+    },
+    {
+      "value": "17.5",
+      "how": "Hours from window 2's last run (run 199) to window 3's first (run 200), from t0_wall in data/campaign.jsonl: 17.52 h (09-02 21:35 to 09-03 15:07, -07:00)."
+    },
+    {
+      "value": "0.13",
+      "how": "Median of clock_C.delay_ms (RunPod's reported delayTime) over the 100 runs of each arm, in data/campaign.jsonl: 0.131 s (A), 0.129 s (B), 0.1295 s (C)."
+    },
+    {
+      "value": "4.6",
+      "how": "In arm A's sorted per-run totals (data/campaign.jsonl, via coldstart.analysis.metrics.derive) rank 51 is 81.16 s and rank 52 is 85.72 s, a 4.56 s jump just above the median pair."
+    },
+    {
+      "value": "12.16",
+      "how": "Same bootstrap_contrast_difference call as the headline (seed 3, 10,000 resamples) but on t_process, the worker-clock time through the first request: point -12.1575 s."
+    },
+    {
+      "value": "15.54",
+      "how": "Lower end of the worker-clock interval, -15.5449 s: same call as 12.16."
+    },
+    {
+      "value": "10.74",
+      "how": "Upper end of the worker-clock interval, -10.7415 s: same call as 12.16."
+    },
+    {
+      "value": "17.45",
+      "how": "vLLM's own 'Model loading took ... seconds' for run 100, the first arm B run after the 19.8 h gap, from its stored engine log in data/campaign.jsonl: 17.453 s."
+    },
+    {
+      "value": "66.2",
+      "how": "vLLM's own 'Model loading took ... seconds' for run 60, arm B's second-slowest total (127.3 s), from its stored engine log in data/campaign.jsonl: 66.21 s."
+    },
+    {
+      "value": "0.58",
+      "how": "Median over arm A's 100 runs of t_weights / t_process (coldstart.analysis.metrics.derive, data/campaign.jsonl): 0.584; the smallest ratio is 0.541, so all 100 exceed 0.5."
+    },
+    {
+      "value": "79.09",
+      "how": "Arm A's median t_process (worker-clock time through the first request) from derive on data/campaign.jsonl: 79.09 s; 17.40 / 79.09 = 22%."
     }
   ],
   "links": {
-    "p1": "https://claude.ai/artifact/ERS8Z3tRWUkSD4131zgwzY"
+    "p1": "https://claude.ai/artifact/ERS8Z3tRWUkSD4131zgwzY",
+    "p2": "https://claude.ai/artifact/A4MJnGXGWMBmi5z5ntxZBz"
   },
   "prereqs": [
     {
       "unit": "p1",
       "label": "LLM serving on a GPU"
+    },
+    {
+      "unit": "p2",
+      "label": "How these experiments earn trust"
     }
   ]
 }
