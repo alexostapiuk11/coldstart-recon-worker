@@ -352,7 +352,7 @@ Milestones: 1. Specify, get it reviewed, approve (2026-10-08 (−07:00)); 6. Pre
 ### Who owns the tail, by durability level
 
 - Axis: Host h1, ring + busy-spin, 20,000/s, about 2,000 tail messages per level over 10 forks. Each message goes to its first credited cause in a fixed order, for the figure only; h2 and h3 look the same.
-- Read it as: No sync on the path: the match stage and its queue are the tail. A sync on the path: durability wait is all of it. At D3 and 20,000/s, arrival burst was also credited on 100%, a tie the bars hide.
+- Read it as: No sync on the path: the match stage and its queue are the tail. At D3 and 20,000/s, arrival burst was also credited on 100%, a tie the bars hide.
 - How it is computed: results-a7.md §8.2 as percent. Non-exclusive matcher-path credit at D0 and D1: 89.1%–93.1%. Engine service alone: 35.1%–45.1% of a 1.39 µs tail.
 - D0 no journal: Matcher path 91.8, Host hiccup 0.3, Residual 7.9 (% of tail messages, first credited cause)
 - D1 page cache: Matcher path 90.1, Host hiccup 0.3, Residual 9.6 (% of tail messages, first credited cause)

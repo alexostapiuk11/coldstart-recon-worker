@@ -1137,7 +1137,7 @@
         ]
       },
       "axis": "Host h1, ring + busy-spin, 20,000/s, about 2,000 tail messages per level over 10 forks. Each message goes to its first credited cause in a fixed order, for the figure only; h2 and h3 look the same.",
-      "read_as": "No sync on the path: the match stage and its queue are the tail. A sync on the path: durability wait is all of it. At D3 and 20,000/s, arrival burst was also credited on 100%, a tie the bars hide.",
+      "read_as": "No sync on the path: the match stage and its queue are the tail. At D3 and 20,000/s, arrival burst was also credited on 100%, a tie the bars hide.",
       "so": [
         "attr",
         "e2"
