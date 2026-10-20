@@ -2504,7 +2504,7 @@
   ],
   "walkthrough": {
     "title": "Where 21, 10 and 12 GPUs come from",
-    "lead": "One reference point: bursty arrivals, Zipf s = 1.0, 20 models, one GPU of load. The simulator behind these counts failed its gate. Watch which of the three counts the SLO search actually decided.",
+    "lead": "One reference point: bursty arrivals, Zipf s = 1.0, 20 models, one GPU of load. Dedicate's and co-locate's counts are arithmetic; swap's 10 and the SLO checks are simulated, by a simulator that failed its gate.",
     "registers": [
       {
         "id": "pinned",
@@ -2573,14 +2573,14 @@
         "decision": "sizing"
       },
       {
-        "say": "Co-locate: pinned GPUs plus the 19 tail models paired, 9 pairs and 1 single, so 12. Un-pairing adds GPUs up to 21. The first count already passed (worst decile 6.1 s, simulated), so 12 is the pairing floor.",
+        "say": "Co-locate: pinned GPUs plus the 19 tail models paired, 9 pairs and 1 single, so 12. Un-pairing adds GPUs up to 21. The first count tried, 12, already passed (worst decile 6.1 s, simulated): the pairing floor.",
         "values": {
           "coloc": "12 (floor, passed)"
         },
         "decision": "sizing"
       },
       {
-        "say": "Both searches end at 21, dedicate's layout, so dedicate can tie but never win. Average load over capacity: 1/21 = 4.8%, 1/10 = 10%, 1/12 = 8.3% (derived). The counts dwarf the one GPU of load: holding models drives them.",
+        "say": "Both searches end at 21, so dedicate can tie but never win. Load used: 1/21 = 4.8%, 1/10 = 10%, 1/12 = 8.3% (derived). Models held set dedicate's and co-locate's counts; swap's comes from swap delay.",
         "values": {
           "dedicate": "21 (4.8% used)",
           "swap": "10 (10%)",
@@ -2588,6 +2588,6 @@
         }
       }
     ],
-    "takeaway": "Dedicate's 21 and co-locate's 12 follow from the hot rule and pairing; the simulator only showed 12 passes the SLO, at all 11 evaluable points. Only swap's 10 was moved by the search. All unvalidated."
+    "takeaway": "Dedicate's 21 and co-locate's 12 follow from the hot rule and pairing; the simulator only showed the pairing floor passes the SLO (12 here; all 11 evaluable points). Only swap's 10 was searched. All unvalidated."
   }
 }

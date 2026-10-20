@@ -30,7 +30,7 @@ Read first: LLM serving on a GPU (P1), How these experiments earn trust (P2).
 
 ## How it works
 
-One reference point: bursty arrivals, Zipf s = 1.0, 20 models, one GPU of load. The simulator behind these counts failed its gate. Watch which of the three counts the SLO search actually decided.
+One reference point: bursty arrivals, Zipf s = 1.0, 20 models, one GPU of load. Dedicate's and co-locate's counts are arithmetic; swap's 10 and the SLO checks are simulated, by a simulator that failed its gate.
 
 | Step | What happens | Pinned hot GPUs | Tail models | Dedicate GPUs | Swap GPUs | Co-locate GPUs |
 |---|---|---|---|---|---|---|
@@ -40,12 +40,12 @@ One reference point: bursty arrivals, Zipf s = 1.0, 20 models, one GPU of load. 
 | 4 | Dedicate: the pinned GPUs plus one GPU per tail model, 2 + 19 = 21 (derived). One placement, never searched. (Decision: One sizing rule for every strategy, judged per decile) | 2 | 19 | **21 (fixed)** | not yet | not yet |
 | 5 | Swap: the pinned GPUs plus a shared LRU pool grown from 1 to 19 GPUs, so 3 to 21 in all. Sizing takes the first count where all ten popularity deciles meet the 75.6 s p99 SLO. (Decision: One sizing rule for every strategy, judged per decile) | 2 | 19 | 21 (fixed) | **search 3 to 21** | not yet |
 | 6 | At 9 GPUs the two hottest deciles sit at 87.7 and 77.2 s, over the SLO. At 10 (a pool of 8) the worst decile is 56.8 s. So the first count to pass is 10 (simulated, median of 30 runs). (Decision: One sizing rule for every strategy, judged per decile) | 2 | 19 | 21 (fixed) | **10 (first to pass)** | not yet |
-| 7 | Co-locate: pinned GPUs plus the 19 tail models paired, 9 pairs and 1 single, so 12. Un-pairing adds GPUs up to 21. The first count already passed (worst decile 6.1 s, simulated), so 12 is the pairing floor. (Decision: One sizing rule for every strategy, judged per decile) | 2 | 19 | 21 (fixed) | 10 (first to pass) | **12 (floor, passed)** |
-| 8 | Both searches end at 21, dedicate's layout, so dedicate can tie but never win. Average load over capacity: 1/21 = 4.8%, 1/10 = 10%, 1/12 = 8.3% (derived). The counts dwarf the one GPU of load: holding models drives them. | 2 | 19 | **21 (4.8% used)** | **10 (10%)** | **12 (8.3%)** |
+| 7 | Co-locate: pinned GPUs plus the 19 tail models paired, 9 pairs and 1 single, so 12. Un-pairing adds GPUs up to 21. The first count tried, 12, already passed (worst decile 6.1 s, simulated): the pairing floor. (Decision: One sizing rule for every strategy, judged per decile) | 2 | 19 | 21 (fixed) | 10 (first to pass) | **12 (floor, passed)** |
+| 8 | Both searches end at 21, so dedicate can tie but never win. Load used: 1/21 = 4.8%, 1/10 = 10%, 1/12 = 8.3% (derived). Models held set dedicate's and co-locate's counts; swap's comes from swap delay. | 2 | 19 | **21 (4.8% used)** | **10 (10%)** | **12 (8.3%)** |
 
 Bold cells changed in that step.
 
-**Takeaway:** Dedicate's 21 and co-locate's 12 follow from the hot rule and pairing; the simulator only showed 12 passes the SLO, at all 11 evaluable points. Only swap's 10 was moved by the search. All unvalidated.
+**Takeaway:** Dedicate's 21 and co-locate's 12 follow from the hot rule and pairing; the simulator only showed the pairing floor passes the SLO (12 here; all 11 evaluable points). Only swap's 10 was searched. All unvalidated.
 
 ## System views (C4)
 
