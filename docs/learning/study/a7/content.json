@@ -90,7 +90,7 @@
   ],
   "walkthrough": {
     "title": "What a D2 message waits for: the sync already running",
-    "lead": "One order, m, arrives while the journaler is mid-sync at D2 (ring + busy-spin). The path is from the code; each timing is a stage percentile (median over forks) from the 20,000/s cell, not a trace of m.",
+    "lead": "One order, m, arrives mid-sync at D2 (ring + busy-spin). The path is from the code; each timing is a separate stage percentile from the 20,000/s cell, not a trace of m. Stage values do not sum to the end-to-end median.",
     "registers": [
       {
         "id": "jr",
@@ -169,7 +169,7 @@
       {
         "say": "The sync returns and the journaler stores `durableSeq` = B's last seq, after the stamps. Output now reads a value at least m's seq, stamps RELEASED and m leaves. m paid the rest of A's sync, a write and B's sync.",
         "values": {
-          "jr": "back to channel ②",
+          "jr": "back to its channel",
           "m": "released",
           "ds": "B's last: at least m",
           "out": "released m",
@@ -187,7 +187,7 @@
         }
       }
     ],
-    "takeaway": "A D2 message pays its own batch's sync, plus the rest of the one in flight if it arrives mid-sync: one to two syncs. D2's 72.1 µs p99.99 is about 1.5 times the 48.4 µs p99.99 sync (arithmetic, not a breakdown)."
+    "takeaway": "A D2 message pays its own batch's sync, plus the rest of the one in flight if it arrives mid-sync: up to about two syncs. D2's 72.1 µs p99.99 is about 1.5 times the 48.4 µs p99.99 sync (arithmetic, not a breakdown)."
   },
   "views": [
     {
@@ -1638,7 +1638,7 @@
     },
     {
       "q": "Why is \"group commit costs 52×\" not a property of group commit?",
-      "a": "It is this setup at 20,000/s: a tiny ungated tail (1.39 µs) against 72.1 µs. fio measured an isolated sync at about 15 µs on drives with no volatile cache, but inside the pipeline the median sync took 23.5 µs, and a D2 message waits one to two of them (see How it works). The direction transfers; the size does not."
+      "a": "It is this setup at 20,000/s: a tiny ungated tail (1.39 µs) against 72.1 µs. fio measured an isolated sync at about 15 µs on drives with no volatile cache, but inside the pipeline the median sync took 23.5 µs, and a D2 message waits between one and two of them (see How it works). The direction transfers; the size does not."
     },
     {
       "q": "Why did D3 saturate at 100,000/s, and why was that never a hypothesis?",

@@ -31,7 +31,7 @@ Read first: How these experiments earn trust (P2).
 
 ## How it works
 
-One order, m, arrives while the journaler is mid-sync at D2 (ring + busy-spin). The path is from the code; each timing is a stage percentile (median over forks) from the 20,000/s cell, not a trace of m.
+One order, m, arrives mid-sync at D2 (ring + busy-spin). The path is from the code; each timing is a separate stage percentile from the 20,000/s cell, not a trace of m. Stage values do not sum to the end-to-end median.
 
 | Step | What happens | Journaler (core 4) | Order m | durableSeq vs m | Output (core 5) | Measured at 20,000/s |
 |---|---|---|---|---|---|---|
@@ -41,12 +41,12 @@ One order, m, arrives while the journaler is mid-sync at D2 (ring + busy-spin). 
 | 4 | Sync A returns and the journaler stores `durableSeq` = A's last seq: still below m, so Output keeps spinning. The journaler drains everything queued in one snapshot, up to 4,096: batch B, m among it. | **draining batch B (m inside)** | **in batch B** | **A's last: still below m** | spinning: durableSeq < m | **batch cap: 4,096 (the code)** |
 | 5 | One `write()` puts all of B in the page cache. Written is not durable: a page-cache write survives a killed JVM, not power loss. `journal_write` median is 0.55 µs. | **write() of batch B** | **in the page cache** | A's last: still below m | spinning: durableSeq < m | **journal_write p50: 0.55 µs** |
 | 6 | Then one `fdatasync` for the whole batch. m waits all of it, and every message in B shares this sync's end as its durable time. Per sync, not per message: median 23.5 µs, p99.99 48.4 µs. (Decision: Sweep durability where per-order sync can keep up) | **fdatasync of batch B** | **waiting on B's sync** | A's last: still below m | spinning: durableSeq < m | **sync p50 23.5, p99.99 48.4 µs** |
-| 7 | The sync returns and the journaler stores `durableSeq` = B's last seq, after the stamps. Output now reads a value at least m's seq, stamps RELEASED and m leaves. m paid the rest of A's sync, a write and B's sync. | **back to channel ②** | **released** | **B's last: at least m** | **released m** | **e2e p99.99, D2: 72.1 µs** |
+| 7 | The sync returns and the journaler stores `durableSeq` = B's last seq, after the stamps. Output now reads a value at least m's seq, stamps RELEASED and m leaves. m paid the rest of A's sync, a write and B's sync. | **back to its channel** | **released** | **B's last: at least m** | **released m** | **e2e p99.99, D2: 72.1 µs** |
 | 8 | At D1 Output never spins on `durableSeq`, so the journal side stops mattering to the response. The journal still writes beside the matcher, but nothing waits for it: end-to-end p99.99 is 1.39 µs. | **write() only, nobody waits** | **released when matched** | **not read at D1** | **releases at once** | **e2e p99.99, D1: 1.39 µs** |
 
 Bold cells changed in that step.
 
-**Takeaway:** A D2 message pays its own batch's sync, plus the rest of the one in flight if it arrives mid-sync: one to two syncs. D2's 72.1 µs p99.99 is about 1.5 times the 48.4 µs p99.99 sync (arithmetic, not a breakdown).
+**Takeaway:** A D2 message pays its own batch's sync, plus the rest of the one in flight if it arrives mid-sync: up to about two syncs. D2's 72.1 µs p99.99 is about 1.5 times the 48.4 µs p99.99 sync (arithmetic, not a breakdown).
 
 ## System views (C4)
 
@@ -465,7 +465,7 @@ Milestones: 1. Specify, get it reviewed, approve (2026-10-08 (−07:00)); 6. Pre
 - Q: Why does a 2.68 ms G1 pause at 10,000/s not show in the queue + park arm's 6.13 µs p99.99?
   A: A p99.99 sees a pause only if the messages it delays outnumber 0.01% of the window: about 27 due during the pause (a floor: the backlog adds more) against a rank of 200 in 2,000,000 messages (arithmetic, not measurement).
 - Q: Why is "group commit costs 52×" not a property of group commit?
-  A: It is this setup at 20,000/s: a tiny ungated tail (1.39 µs) against 72.1 µs. fio measured an isolated sync at about 15 µs on drives with no volatile cache, but inside the pipeline the median sync took 23.5 µs, and a D2 message waits one to two of them (see How it works). The direction transfers; the size does not.
+  A: It is this setup at 20,000/s: a tiny ungated tail (1.39 µs) against 72.1 µs. fio measured an isolated sync at about 15 µs on drives with no volatile cache, but inside the pipeline the median sync took 23.5 µs, and a D2 message waits between one and two of them (see How it works). The direction transfers; the size does not.
 - Q: Why did D3 saturate at 100,000/s, and why was that never a hypothesis?
   A: One `fdatasync` per order: 1 ÷ fio's median sync (14,656 ns on h1) is about 68,200/s, an upper bound that ignores the write and the hand-offs, and the pipeline sustained about 23,900/s. The arithmetic and reconnaissance both pointed there, so it was a stated prediction, not a hypothesis, and the cell left every test.
 - Q: A tail message overlaps a safepoint. When is the safepoint credited, and why not on overlap alone?
