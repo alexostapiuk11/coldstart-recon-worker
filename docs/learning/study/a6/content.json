@@ -60,7 +60,7 @@
       "id": "window",
       "short": "Commit-window duty cycle",
       "term": "The commit-window duty cycle",
-      "plain": "The share of a consumer's running time between its ledger `COMMIT` returning and its Kafka progress committing (`commitSync` for N and I, `commitTransaction` for K), measured in F0 trials over 20–50 s, the window random kills draw from. A random kill duplicates only if it lands inside the window, so the duty cycle should predict the F4-con-r duplicate rate (H5)."
+      "plain": "The share of a consumer's running time between its ledger `COMMIT` returning and its Kafka progress committing (`commitSync` for N and I, `commitTransaction` for K), measured in F0 trials over 20–50 s, the window random kills draw from (the analysis sums both consumers' windows over 60 s). A random kill duplicates only if it lands inside the window, so the duty cycle should predict the F4-con-r duplicate rate (H5)."
     },
     {
       "id": "blocks",
@@ -542,7 +542,7 @@
         },
         {
           "kind": "gap",
-          "label": "4.4 s later"
+          "label": "4.4 s later, as logged (matrix: 5 s)"
         },
         {
           "from": "orch",
@@ -1616,7 +1616,7 @@
             {
               "text": "pending",
               "status": "pending",
-              "note": "cost runs need new images, built after the campaign (amendment A5)"
+              "note": "cost runs need new images, built after the campaign (a planned amendment A5)"
             }
           ]
         ],
@@ -1778,7 +1778,7 @@
       },
       {
         "q": "Kafka has exactly-once. Why doesn't K solve it?",
-        "a": "A Kafka transaction commits Kafka partitions and consumer offsets atomically; Postgres is not a participant, and KIP-939, two-phase commit with external participants, has not shipped. By the documented semantics, killing K after its Postgres commit and before `commitTransaction` makes `initTransactions` abort the transaction on restart and redeliver the batch; the Postgres commit stands. H1 predicts duplicates in at least 8 of 10 such trials, and in the zombie cell; the campaign will say."
+        "a": "A Kafka transaction commits Kafka partitions and consumer offsets atomically; Postgres is not a participant, and KIP-939, two-phase commit with external participants, had not shipped as of October 2026 (its code was reverted for Kafka 4.2). By the documented semantics, killing K after its Postgres commit and before `commitTransaction` makes `initTransactions` abort the transaction on restart and redeliver the batch; the Postgres commit stands. H1 predicts duplicates in at least 8 of 10 such trials, and in the zombie cell; the campaign will say."
       },
       {
         "q": "Why not store offsets in Postgres in the same transaction?",
@@ -1790,7 +1790,7 @@
       },
       {
         "q": "Your zombie consumer: which fencing stops it, and does it stop the duplicate write?",
-        "a": "Generation fencing (KIP-447), at the offset commit. In reconnaissance on N, in all 17 F5 trials, the paused consumer's first act after unpause was a `db_commit` of the batch it held, then `CommitFailedException` about 0.1 s later. The Postgres write is another system's commit and has already happened, so fencing stops the Kafka commit, not the ledger write. Epoch fencing does not apply: each instance has its own `transactional.id`. For K the same is predicted at `TxnOffsetCommit` (H1)."
+        "a": "Generation fencing, at the offset commit: the group coordinator rejects a commit from an old generation. On N that is the ordinary check on `commitSync` in the classic group protocol; KIP-447 added the same check to K's `TxnOffsetCommit`. In reconnaissance on N, in all 17 F5 trials, the paused consumer's first act after unpause was a `db_commit` of the batch it held, then `CommitFailedException` about 0.1 s later. The Postgres write is another system's commit and has already happened, so fencing stops the Kafka commit, not the ledger write. Epoch fencing protects a `transactional.id` from its own earlier incarnation, and it is what aborts K's open transaction when K restarts. It cannot stop this zombie, because the consumer that took the partitions has its own `transactional.id`. For K, H1 predicts the same duplicate at `TxnOffsetCommit`."
       },
       {
         "q": "What came before your pre-registration tag?",
