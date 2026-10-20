@@ -71,11 +71,13 @@ def unknown_link_units(s: str, known: set[str]) -> list[str]:
     return [m.group(2) for m in UNIT_LINK.finditer(s) if m.group(2) not in known]
 
 
-def resolve_links(c: dict, mode: str) -> dict:
+def resolve_links(c: dict, mode: str, own_url: str | None = None) -> dict:
     """A copy of the unit with every [text](unit:concept) link resolved for `mode`:
 
     - "page": a marker inline() renders as <a href="<url>#c-<concept>"> (new tab for
-      another unit; a plain anchor for this unit's own concepts) and esc() as the text;
+      another unit; a plain anchor for this unit's own concepts, or, when the content is not
+      on the unit's own page (the practice page), `own_url` + "#c-<concept>") and esc() as
+      the text;
     - "brief": plain text, "text (P1: concept)", or just the text for this unit.
 
     Raises ContentError for a link to a unit the content does not know (see known_units).
@@ -92,7 +94,7 @@ def resolve_links(c: dict, mode: str) -> dict:
         own = unit == c.get("id")
         if mode == "brief":
             return text if own else f"{text} ({unit.upper()}: {concept})"
-        url = f"#c-{concept}" if own else f"{unit_url(c, unit)}#c-{concept}"
+        url = f"{own_url or ''}#c-{concept}" if own else f"{unit_url(c, unit)}#c-{concept}"
         return f"\x01{text}\x02{url}\x03"
 
     def walk(node, key=None):

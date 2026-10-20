@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 from study.matrix import cell_text, cell_words, words
-from study.schema import flow_phases, merged_segments, phased, so_ids, walkthrough_states
+from study.schema import (
+    flow_phases,
+    merged_segments,
+    phased,
+    so_ids,
+    walkthrough_states,
+    walkthroughs,
+)
 from study.seq import numbered, step_line
 from study.text import plural, resolve_links
 
@@ -212,16 +219,15 @@ def _matrix_lines(ch):
     return out
 
 
-def _walkthrough_lines(c):
+def _walkthrough_lines(c, wt, heading="How it works"):
     """'## How it works': the lead, one table with a row per step (its text, then the state
     of every register after it; a value that changed in that step is bold), the takeaway."""
-    wt = c["walkthrough"]
     titles = {d["id"]: d["title"] for d in c.get("decisions", [])}
 
     def cell(text):
         return text.replace("|", "\\|")
 
-    out = ["## How it works", "", wt["lead"], "",
+    out = [f"## {heading}", "", wt["lead"], "",
            "| " + " | ".join(["Step", "What happens"] + [cell(r["label"]) for r in wt["registers"]])
            + " |", "|" + "---|" * (len(wt["registers"]) + 2)]
     for n, (s, state) in enumerate(zip(wt["steps"], walkthrough_states(wt)), 1):
@@ -262,8 +268,11 @@ def render_brief(c: dict) -> str:
                 line += f" Why it matters: {t['why']}"
             out.append(line)
         out.append("")
-    if c.get("walkthrough"):
-        out += _walkthrough_lines(c)
+    wts = walkthroughs(c)
+    for i, wt in enumerate(wts, 1):
+        # Several walkthroughs are numbered and titled; one keeps its plain heading.
+        out += _walkthrough_lines(c, wt, f"How it works {i} of {len(wts)}: {wt['title']}"
+                                  if len(wts) > 1 else "How it works")
     if c.get("views"):
         out += ["## System views (C4)" if c["kind"] == "artifact" else "## Views", ""]
         for v in c["views"]:

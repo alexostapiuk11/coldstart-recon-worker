@@ -180,3 +180,44 @@ def _git_repo(path: Path) -> str:
 
 def load(unit_dir: Path) -> dict:
     return json.loads((unit_dir / "content.json").read_text())
+
+
+# Keys of practice.json whose strings are never numeric claims: the declarations
+# themselves, a calculator input's id and expression (constants there are unit
+# conversions; a price or a rate belongs in an input), the unit id and review targets.
+PRACTICE_NOT_CLAIMS = NOT_CLAIMS + ("assumed_numbers", "unit", "expr", "id", "review")
+
+
+def _practice_strings(node):
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for k, v in node.items():
+            if k not in PRACTICE_NOT_CLAIMS:
+                yield from _practice_strings(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _practice_strings(v)
+
+
+def untraced_practice_numbers(practice: dict, unit: dict) -> list[str]:
+    """Numbers in practice.json's text that no source of the unit holds. A number counts as
+    traced (same rules as `untraced_numbers`) if it appears in one of the UNIT's source
+    files or derived_numbers, or in the practice file's own `assumed_numbers` (a labelled
+    assumption) or `derived_numbers`. A calculator's numeric fields (default, range, step)
+    are parameters, not claims, and are not scanned."""
+    known = set()
+    for s in unit["sources"]:
+        known |= {_normalise(t) for t in NUMBER.findall(_read(s["file"]))}
+    known |= {_normalise(str(d["value"])) for d in unit.get("derived_numbers", [])}
+    known |= {_normalise(str(d["value"])) for d in practice.get("derived_numbers", [])}
+    for a in practice.get("assumed_numbers", []):
+        known |= {_normalise(t) for t in NUMBER.findall(a["value"])}
+    seen, flagged = set(), []
+    for s in _practice_strings(practice):
+        for token in NUMBER.findall(s):
+            n = _normalise(token)
+            if _significant(token) and n not in known and n not in seen:
+                flagged.append(n)
+            seen.add(n)
+    return flagged

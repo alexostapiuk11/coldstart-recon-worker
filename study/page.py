@@ -13,12 +13,13 @@ from __future__ import annotations
 
 from study.links import link_index, req_label, traced
 from study.map import MAP_CSS, MAP_JS, has_map, map_section
-from study.schema import flow_phases, phased, so_ids, walkthrough_states
+from study.schema import flow_phases, phased, so_ids, walkthrough_states, walkthroughs
 from study.seq import list_below, sequence_html
 from study.svg import chart_html, diagram_html, segment_slots
 from study.text import esc, inline, plural, resolve_links, unit_url
 
-CSS = """
+# The colour tokens and the dark-mode switch; the practice page shares them (study.practice_page).
+TOKENS_CSS = """
 :root{--bg:#fafaf7;--fg:#1d2330;--muted:#5b6475;--card:#fff;--line:#d9dce3;
 --accent:#2f5fd0;--soft:#e8eefc;--warn:#b4540a;--warnsoft:#fdf0e3;--ok:#1f7a4d;
 --c0:#2a78d6;--c1:#eb6834;--c2:#1baf7a;--c3:#eda100;--c4:#e87ba4;--c5:#008300;
@@ -33,7 +34,9 @@ CSS = """
 --line:#323849;--accent:#7ea2ff;--soft:#222b45;--warn:#f0a15e;--warnsoft:#33261a;
 --ok:#5fcf9a;--c0:#3987e5;--c1:#d95926;--c2:#199e70;--c3:#c98500;--c4:#d55181;
 --c5:#008300;--c6:#9085e9;--c7:#e66767;--t6:#000;color-scheme:dark}
-*{box-sizing:border-box}
+"""
+
+CSS = TOKENS_CSS + """*{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans-serif}
 main{max-width:1560px;margin:0 auto;padding:0 clamp(16px,4vw,56px) 64px}
 header.hero{padding:32px 0 8px}
@@ -246,7 +249,8 @@ nav.pills::-webkit-scrollbar{display:none}nav.pills a{flex:none}
 .xyt,.xyax,.xyv,.xyrt,.xybt,.xyn,.xypl,.xyfl{font-size:15px}}
 """
 
-JS = """
+# The pills bar's scroll fade (the phone CSS reads data-more); the practice page shares it.
+NAV_JS = """
 for (const n of document.querySelectorAll('nav.pills')) {
   // Which edges hide pills: the phone CSS fades those edges, and none once all fit.
   const mark = () => { const more = [];
@@ -257,7 +261,9 @@ for (const n of document.querySelectorAll('nav.pills')) {
   addEventListener('resize', mark);
   mark();
 }
-for (const g of document.querySelectorAll('[data-tabs]')) {
+"""
+
+JS = NAV_JS + """for (const g of document.querySelectorAll('[data-tabs]')) {
   const tabs = g.querySelectorAll('[role=tab]'), panels = g.querySelectorAll('[role=tabpanel]');
   const show = i => { tabs.forEach((t, j) => t.setAttribute('aria-selected', j === i));
     panels.forEach((p, j) => { p.hidden = j !== i; }); };
@@ -462,8 +468,7 @@ for (const g of document.querySelectorAll('[data-wt]')) {
 """
 
 
-def _walkthrough(c):
-    wt = c["walkthrough"]
+def _walkthrough(c, wt, sec_id="walkthrough", heading="How it works"):
     codes = link_index(c)["dec_code"]
     titles = {d["id"]: d["title"] for d in c.get("decisions", [])}
     n = len(wt["steps"])
@@ -487,7 +492,7 @@ def _walkthrough(c):
     bar = ('<div class="wt-bar" hidden><button type="button" class="wt-prev">Previous</button>'
            f'<span class="wt-count">Step 1 of {n}</span>'
            '<button type="button" class="wt-next">Next</button></div>')
-    return (f'<section id="walkthrough"><h2>How it works</h2><h3>{esc(wt["title"])}</h3>'
+    return (f'<section id="{sec_id}"><h2>{heading}</h2><h3>{esc(wt["title"])}</h3>'
             f'<p class="why">{inline(wt["lead"])}</p><div class="card" data-wt>{bar}'
             f'<ol class="wt-steps" aria-live="polite" aria-atomic="true">{"".join(items)}</ol>'
             f'</div><div class="callout"><b>Takeaway.</b> {inline(wt["takeaway"])}</div>'
@@ -553,7 +558,7 @@ def _decision_links(c, ix, d):
 def _core_decisions(c):
     """Ids of the decisions shown in full: those a walkthrough step names, else the first
     three. The rest collapse (see _decisions)."""
-    named = {s["decision"] for s in c.get("walkthrough", {}).get("steps", [])
+    named = {s["decision"] for wt in walkthroughs(c) for s in wt["steps"]
              if s.get("decision")}
     decisions = c.get("decisions", [])
     if named:
@@ -769,8 +774,15 @@ def render_page(c: dict) -> str:
 
     if c.get("concepts"):
         add("concepts", "Concepts", _concepts(c))
-    if c.get("walkthrough"):
-        add("walkthrough", "How it works", _walkthrough(c))
+    wts = walkthroughs(c)
+    for i, wt in enumerate(wts):
+        # One walkthrough keeps its plain name; several are numbered, in the pills and
+        # headings, and every section after the first gets its own id.
+        sid = "walkthrough" if i == 0 else f"walkthrough-{i + 1}"
+        many = len(wts) > 1
+        add(sid, f"How it works {i + 1}" if many else "How it works",
+            _walkthrough(c, wt, sid, f"How it works ({i + 1} of {len(wts)})" if many
+                         else "How it works"))
     if art:
         add("why", "Requirements", _requirements(c))
     if c.get("views"):
@@ -799,7 +811,7 @@ def render_page(c: dict) -> str:
     css, js = (CSS + MAP_CSS, JS + MAP_JS) if has_map(c) else (CSS, JS)
     if _sequences(c):
         css += seq_css(_sequences(c))
-    if c.get("walkthrough"):
+    if walkthroughs(c):
         css, js = css + WT_CSS, js + WT_JS
     if len(_core_decisions(c)) < len(c.get("decisions", [])):
         css, js = css + MINOR_CSS, js + MINOR_JS

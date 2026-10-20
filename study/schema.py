@@ -67,6 +67,7 @@ MAX_WT_LINE = 220  # the lead, a step's `say`, the takeaway
 MAX_WT_VALUE = 40
 WT_REGISTERS = (2, 6)
 WT_STEPS = (3, 14)
+MAX_WALKTHROUGHS = 3  # `walkthrough` may be one object or a list of up to this many
 
 
 class ContentError(ValueError):
@@ -753,16 +754,48 @@ def _view(v, where, allowed):
                 raise ContentError(f"{where}.edges[{i}]: edge {end} is not a node id")
 
 
+def walkthroughs(c: dict) -> list[dict]:
+    """The unit's walkthroughs in order: none, one (`walkthrough` an object) or several
+    (`walkthrough` a list of up to MAX_WALKTHROUGHS objects)."""
+    wt = c.get("walkthrough")
+    if wt is None:
+        return []
+    return list(wt) if isinstance(wt, list) else [wt]
+
+
 def _walkthrough(c, where):
-    """Optional `walkthrough` {title, lead, registers, steps, takeaway}: a trace the page
-    shows one step at a time. `registers` are 2 to 6 {id, label (<= 22 characters)} state
-    cells; `steps` are 3 to 14 of {say (<= 220), optional values {register id: text
-    (<= 40)}, optional decision id}. The first step sets every register; a later step sets
-    only what changes and the rest carry over (see walkthrough_states)."""
+    """Optional `walkthrough`: one object, or a non-empty list of up to MAX_WALKTHROUGHS
+    (their titles distinct). Each is checked by _one_walkthrough; a list item's errors name
+    it as `walkthrough[i]`."""
     if "walkthrough" not in c:
         return
-    w = f"{where}.walkthrough"
-    wt = _get(c, "walkthrough", dict, where)
+    wt = c["walkthrough"]
+    if isinstance(wt, dict):
+        _one_walkthrough(c, wt, f"{where}.walkthrough")
+        return
+    if not isinstance(wt, list):
+        raise ContentError(f"{where}.walkthrough: expected dict or list of dicts")
+    if not 1 <= len(wt) <= MAX_WALKTHROUGHS:
+        raise ContentError(f"{where}.walkthrough: needs 1 to {MAX_WALKTHROUGHS} items, "
+                           f"has {len(wt)}")
+    titles = []
+    for i, one in enumerate(wt):
+        w = f"{where}.walkthrough[{i}]"
+        if not isinstance(one, dict):
+            raise ContentError(f"{w}: expected dict")
+        _one_walkthrough(c, one, w)
+        if one["title"] in titles:
+            raise ContentError(f"{w}.title duplicates walkthrough[{titles.index(one['title'])}]"
+                               f"; give each walkthrough its own title")
+        titles.append(one["title"])
+
+
+def _one_walkthrough(c, wt, w):
+    """A walkthrough {title, lead, registers, steps, takeaway}: a trace the page shows one
+    step at a time. `registers` are 2 to 6 {id, label (<= 22 characters)} state cells;
+    `steps` are 3 to 14 of {say (<= 220), optional values {register id: text (<= 40)},
+    optional decision id}. The first step sets every register; a later step sets only what
+    changes and the rest carry over (see walkthrough_states)."""
     for key, limit in (("title", MAX_WT_TITLE), ("lead", MAX_WT_LINE),
                        ("takeaway", MAX_WT_LINE)):
         if not _get(wt, key, str, w).strip():
