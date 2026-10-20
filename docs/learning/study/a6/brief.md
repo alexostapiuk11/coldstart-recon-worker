@@ -28,6 +28,25 @@ Read first: How these experiments earn trust (P2), Delivery guarantees and dupli
 - **The zero bound and the rule of three**: The trial is the unit: payments in one trial share a fault and are never pooled. If 0 of N trials show an anomaly, the per-trial probability is below 1 − 0.05^(1/N), one-sided 95%: 0.095 at N = 30, 0.259 at N = 10. The **rule of three**, about 3/N, approximates it.
 - **The detection gate, as run here**: Run after the pre-registration tag, before the campaign, and not counted in it: the checker on synthetic histories with every anomaly class planted; two positive controls (P3: controls) on **N only** (a commit-window kill must give a duplicate, a kill after the source commit a loss, each in at least 8 of 10 trials); a negative control of five no-fault trials per stack, all clean. All four must pass.
 
+## How it works
+
+A prediction (H1), not a result. Values illustrate the mechanism for one payment, from the code and the pre-registration; only stack N has been seen doing this, in the gate.
+
+| Step | What happens | Ledger rows, 1 payment | Committed offset | Kafka transaction | payments-applied | Consumer K process |
+|---|---|---|---|---|---|---|
+| 1 | K polls a batch. `beginTransaction()` is client-local: the broker has heard nothing, so a kill now would leave no Kafka transaction to abort. | 0 | start of this batch | none at the broker | nothing | running |
+| 2 | The ledger transaction commits to Postgres first. Kafka is not part of it, so this row is permanent whatever Kafka does next. (Decision: Postgres commits first; the targeted kill hits every stack in one state) | **1, committed** | start of this batch | none at the broker | nothing | running |
+| 3 | K sends the `payments-applied` record and adds its offsets to the transaction. Open, nothing visible. In recon, about two-thirds of commits then waited ~100 ms, widening this window (H5). | 1, committed | start of this batch | **open; records, offsets pending** | **pending, hidden** | running |
+| 4 | F4-con-t sends SIGKILL at `before_kafka_commit`: row committed, transaction open and never finished. Nothing in the dead process can undo the row. (Decision: One failure policy for every mode: crash-only) | 1, committed | start of this batch | open; records, offsets pending | pending, hidden | **killed** |
+| 5 | It restarts 5 s later; `initTransactions()` on the same `transactional.id` aborts the open transaction. Had it not come back, `transaction.timeout.ms` (60 s default) would. | 1, committed | start of this batch | **aborted** | **aborted, hidden** | **restarted** |
+| 6 | The offsets were never committed, so the group resumes from the last committed offset and delivers the same batch again. | 1, committed | **same: batch redelivered** | aborted | aborted, hidden | restarted |
+| 7 | K has no key check, so the Postgres commit runs again in a new transaction. The batch is in the ledger twice; Postgres was never in the one that aborted. | **2, same partition and offset** | same: batch redelivered | **new one, open** | **1 aborted, 1 pending** | restarted |
+| 8 | This second `commitTransaction` succeeds: offsets move on, and a `read_committed` reader sees the payment once. Kafka is consistent; the ledger is not. | 2, same partition and offset | **past this batch** | **committed** | **once** | **running** |
+
+Bold cells changed in that step.
+
+**Takeaway:** Output once, ledger twice: Kafka's transaction ended cleanly, but Postgres was never in it. H1 predicts this in at least 8 of 10 F4-con-t trials; this page reports no K result.
+
 ## System views (C4)
 
 ### Who and what the experiment touches (context)
@@ -77,7 +96,7 @@ O+I runs consumer mode I; its service writes the outbox row in the payment's own
 
 ### Inside one ledger consumer: where the defenses sit (component)
 
-Every mode runs this loop; only the key check (N and K skip it) and the Kafka step differ. K begins its transaction client-locally, commits Postgres, then sends one payments-applied record per payment and adds its offsets to the transaction before `before_kafka_commit`, so a kill there leaves a real open transaction. Hooks are named code points: disarmed, one volatile read; armed, they block until released or killed.
+Every mode runs this loop; only the key check (N and K skip it) and the Kafka step differ. K's step is traced in the walkthrough above. Hooks are named code points: disarmed, one volatile read; armed, they block until released or killed.
 
 - **Poll a batch**: 100 ms poll, up to 500 records
 - **after_poll hook**: batch in hand, no DB work (F5)
@@ -155,7 +174,7 @@ Trial `gate_cons_1`, a positive control on N in cell F4-con-t, as `docs/gate.md`
 
 **Chosen:** Postgres first in every mode; `before_kafka_commit` placed per mode, for K after `sendOffsetsToTransaction`
 
-**Why:** Postgres first is the common order; the reverse trades duplicates for losses, which the post states by reasoning and does not measure. At the first draft's hook K had no broker-side transaction (`beginTransaction()` is client-local), so K and N ran the same code path; the review moved it. Now every stack is hit with the ledger committed and Kafka's progress not, and for K that includes a real open transaction with pending offsets.
+**Why:** Postgres first is the common order; the reverse trades duplicates for losses, which the post states by reasoning and does not measure. At the first draft's hook K had no broker-side transaction, so K and N ran the same code path; the review moved it. Now every stack is hit with the ledger committed and Kafka's progress not.
 
 **Cost:** Results hold for this commit order only: a reader whose Postgres commits after Kafka is outside what is measured. K's commit step also carries Kafka's default ~100 ms `CONCURRENT_TRANSACTIONS` retry in about two-thirds of transactions (reconnaissance); it is left as is, named, and lengthens the window H5 measures.
 

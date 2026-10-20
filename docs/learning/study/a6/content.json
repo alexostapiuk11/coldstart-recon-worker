@@ -81,6 +81,97 @@
       "plain": "Run after the pre-registration tag, before the campaign, and not counted in it: the checker on synthetic histories with every anomaly class planted; two [positive controls](p3:controls) on **N only** (a commit-window kill must give a duplicate, a kill after the source commit a loss, each in at least 8 of 10 trials); a negative control of five no-fault trials per stack, all clean. All four must pass."
     }
   ],
+  "walkthrough": {
+    "title": "One K batch, killed in the commit window",
+    "lead": "A prediction (H1), not a result. Values illustrate the mechanism for one payment, from the code and the pre-registration; only stack N has been seen doing this, in the gate.",
+    "registers": [
+      {
+        "id": "ledger",
+        "label": "Ledger rows, 1 payment"
+      },
+      {
+        "id": "offset",
+        "label": "Committed offset"
+      },
+      {
+        "id": "txn",
+        "label": "Kafka transaction"
+      },
+      {
+        "id": "out",
+        "label": "payments-applied"
+      },
+      {
+        "id": "proc",
+        "label": "Consumer K process"
+      }
+    ],
+    "steps": [
+      {
+        "say": "K polls a batch. `beginTransaction()` is client-local: the broker has heard nothing, so a kill now would leave no Kafka transaction to abort.",
+        "values": {
+          "ledger": "0",
+          "offset": "start of this batch",
+          "txn": "none at the broker",
+          "out": "nothing",
+          "proc": "running"
+        }
+      },
+      {
+        "say": "The ledger transaction commits to Postgres first. Kafka is not part of it, so this row is permanent whatever Kafka does next.",
+        "values": {
+          "ledger": "1, committed"
+        },
+        "decision": "order"
+      },
+      {
+        "say": "K sends the `payments-applied` record and adds its offsets to the transaction. Open, nothing visible. In recon, about two-thirds of commits then waited ~100 ms, widening [this window](a6:window) (H5).",
+        "values": {
+          "txn": "open; records, offsets pending",
+          "out": "pending, hidden"
+        }
+      },
+      {
+        "say": "F4-con-t sends SIGKILL at `before_kafka_commit`: row committed, transaction open and never finished. Nothing in the dead process can undo the row.",
+        "values": {
+          "proc": "killed"
+        },
+        "decision": "crash"
+      },
+      {
+        "say": "It restarts 5 s later; `initTransactions()` on the same `transactional.id` aborts the open transaction. Had it not come back, `transaction.timeout.ms` (60 s default) would.",
+        "values": {
+          "proc": "restarted",
+          "txn": "aborted",
+          "out": "aborted, hidden"
+        }
+      },
+      {
+        "say": "The offsets were never committed, so the group resumes from the last committed offset and delivers the same batch again.",
+        "values": {
+          "offset": "same: batch redelivered"
+        }
+      },
+      {
+        "say": "K has no key check, so the Postgres commit runs again in a new transaction. The batch is in the ledger twice; Postgres was never in the one that aborted.",
+        "values": {
+          "ledger": "2, same partition and offset",
+          "txn": "new one, open",
+          "out": "1 aborted, 1 pending"
+        }
+      },
+      {
+        "say": "This second `commitTransaction` succeeds: offsets move on, and a `read_committed` reader sees the payment once. Kafka is consistent; the ledger is not.",
+        "values": {
+          "offset": "past this batch",
+          "txn": "committed",
+          "out": "once",
+          "proc": "running"
+        }
+      }
+    ],
+    "takeaway": "Output once, ledger twice: Kafka's transaction ended cleanly, but Postgres was never in it. H1 predicts this in at least 8 of 10 F4-con-t trials; this page reports no K result."
+  },
   "views": [
     {
       "level": "context",
@@ -332,7 +423,7 @@
     {
       "level": "component",
       "title": "Inside one ledger consumer: where the defenses sit",
-      "caption": "Every mode runs this loop; only the key check (N and K skip it) and the Kafka step differ. K begins its transaction client-locally, commits Postgres, then sends one payments-applied record per payment and adds its offsets to the transaction before `before_kafka_commit`, so a kill there leaves a real open transaction. Hooks are named code points: disarmed, one volatile read; armed, they block until released or killed.",
+      "caption": "Every mode runs this loop; only the key check (N and K skip it) and the Kafka step differ. K's step is traced in the walkthrough above. Hooks are named code points: disarmed, one volatile read; armed, they block until released or killed.",
       "nodes": [
         {
           "id": "poll",
@@ -624,7 +715,7 @@
         "Postgres first in every mode; `before_kafka_commit` placed per mode, for K after `sendOffsetsToTransaction`"
       ],
       "chosen": "Postgres first in every mode; `before_kafka_commit` placed per mode, for K after `sendOffsetsToTransaction`",
-      "why": "Postgres first is the common order; the reverse trades duplicates for losses, which the post states by reasoning and does not measure. At the first draft's hook K had no broker-side transaction (`beginTransaction()` is client-local), so K and N ran the same code path; the review moved it. Now every stack is hit with the ledger committed and Kafka's progress not, and for K that includes a real open transaction with pending offsets.",
+      "why": "Postgres first is the common order; the reverse trades duplicates for losses, which the post states by reasoning and does not measure. At the first draft's hook K had no broker-side transaction, so K and N ran the same code path; the review moved it. Now every stack is hit with the ledger committed and Kafka's progress not.",
       "cost": "Results hold for this commit order only: a reader whose Postgres commits after Kafka is outside what is measured. K's commit step also carries Kafka's default ~100 ms `CONCURRENT_TRANSACTIONS` retry in about two-thirds of transactions (reconnaissance); it is left as is, named, and lengthens the window H5 measures.",
       "why_short": "The common order, and one state for every stack at the hook: ledger committed, Kafka progress not; for K, a real open transaction.",
       "cost_short": "Kafka-first consumers are outside what is measured; K keeps Kafka's default ~100 ms commit retry.",
