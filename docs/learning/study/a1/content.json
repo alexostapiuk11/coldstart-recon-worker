@@ -35,7 +35,7 @@
       "short": "Tested code, laptop-checkable numbers",
       "text": "Run on paid GPUs only code already tested offline, and let anyone re-derive every number on a laptop.",
       "why": "The whole budget was $200, and debugging on live GPUs eats it. A number a reader cannot re-derive must be taken on trust.",
-      "unlinked_reason": "It is met by process: in the flow, \"Build against the captures; test it end to end\" tests the code on recorded logs and a free fake engine before any campaign run, and \"Analyse from the committed store\" re-derives every number with no GPU."
+      "unlinked_reason": "It is met by process: the flow's \"Build against the captures; test it end to end\" tests the code on recorded logs and a free fake engine, and \"Analyse from the committed store\" re-derives every number with no GPU."
     }
   ],
   "concepts": [
@@ -55,13 +55,13 @@
       "id": "contrasts",
       "short": "Contrasts and their difference",
       "term": "Contrast, and difference of contrasts",
-      "plain": "A **contrast** is the difference of two arms' medians, with a 95% [bootstrap interval](p2:interval) (resample the runs 10,000 times, keep the middle 95%), a plausible range for the true difference, not where a re-run would land: A minus B is the weight cache's saving, B minus C the compile cache's. Their **difference**, (A minus B) minus (B minus C), ranks the caches only if its interval excludes zero; negative favours the compile cache."
+      "plain": "A **contrast** is the difference of two arms' medians, with a 95% [bootstrap interval](p2:interval), a plausible range for the true difference, not where a re-run would land: A minus B is the weight cache's saving, B minus C the compile cache's. Their **difference**, (A minus B) minus (B minus C), ranks the caches only if its interval excludes zero; negative favours the compile cache."
     },
     {
       "id": "clocks",
       "short": "Two clocks, platform residual",
       "term": "Two clocks and the platform residual",
-      "plain": "**Clock A** (laptop) brackets the whole job and sees it finish only when the laptop polls the job status, every 5 s; total [cold start](p1:coldstart) is its span minus the worker-clock warmup after the first request. **Clock B** (worker) starts just before `vllm serve` is launched. **Platform time** = total minus clock B time, the one allowed cross-clock subtraction: container and handler start, teardown and up to one 5 s poll of lag. RunPod's own queue delay was about 0.13 s (median), so this is not queueing."
+      "plain": "**Clock A** (laptop) brackets the whole job and sees it finish only when the laptop polls the job status, every 5 s; total [cold start](p1:coldstart) is its span minus the worker-clock warmup after the first request. **Clock B** (worker) starts just before `vllm serve`. **Platform time** = total minus clock B time, the one allowed cross-clock subtraction: container and handler start, teardown and up to one 5 s poll of lag. RunPod's own queue delay was about 0.13 s (median), so this is not queueing."
     },
     {
       "id": "percentiles",
@@ -73,7 +73,7 @@
       "id": "hypotheses",
       "short": "Hypotheses H1 to H5",
       "term": "The five hypotheses",
-      "plain": "**H1**: weight handling is over half of worker-clock time through the first request in arm A. **H2**: volume weights cut it materially. **H3**: compiling is a non-trivial part of engine start, and a warm cache cuts it. **H4**: host differences drive how far p95 sits above the median. **H5**: a warm compile cache leaves more [KV cache](p1:kvcache). H1 holds only by its definition: weight handling is a median 0.58 of worker-clock time in arm A, above half in all 100 runs, but that phase is mostly server start-up; vLLM's own loading time is 17.40 s of 79.09 s, about 22%."
+      "plain": "**H1**: weight handling is over half of worker-clock time through the first request in arm A. **H2**: volume weights cut it materially. **H3**: compiling is a non-trivial part of engine start, and a warm cache cuts it. **H4**: host differences drive how far p95 sits above the median. **H5**: a warm compile cache leaves more [KV cache](p1:kvcache). H1 holds only by its definition: weight handling is a median 0.58 of worker-clock time in arm A, above half in all 100 runs, but mostly server start-up; vLLM's own loading time is 17.40 s of 79.09 s, about 22%."
     },
     {
       "id": "prereg",
@@ -476,135 +476,119 @@
     },
     {
       "level": "dynamic",
+      "style": "sequence",
       "title": "One run, in order",
-      "caption": "Clock A (laptop) runs from step 2; clock B (worker) starts between steps 4 and 5. The caches act in the highlighted steps 5 and 6; the warm cache directory also shortened step 5 by about 9 s, mostly before the engine core starts (cause unconfirmed). Platform time is everything clock A sees outside clock B.",
-      "nodes": [
+      "caption": "Clock A (laptop) runs from step 1 until a poll sees the result; clock B (worker) runs from step 4 to the end of step 9. The weight cache acts at step 6, the compile cache at step 7; the warm cache directory also shortened the time before step 6 (F2).",
+      "participants": [
         {
-          "id": "s1",
-          "label": "1 Schedule picks arm",
-          "sub": "next slot in a seeded, shuffled triple",
-          "kind": "system",
-          "col": 0,
-          "row": 0
+          "id": "drv",
+          "label": "Driver",
+          "sub": "laptop, clock A",
+          "kind": "system"
         },
         {
-          "id": "s2",
-          "label": "2 Driver submits",
-          "sub": "new run id; clock A starts",
-          "kind": "system",
-          "col": 1,
-          "row": 0
+          "id": "rp",
+          "label": "RunPod endpoint",
+          "kind": "external"
         },
         {
-          "id": "s3",
-          "label": "3 Platform boots",
-          "sub": "container start; queueing was short",
-          "kind": "external",
-          "col": 2,
-          "row": 0
+          "id": "hnd",
+          "label": "Handler",
+          "sub": "worker",
+          "kind": "system"
         },
         {
-          "id": "s4",
-          "label": "4 Handler sets cache",
-          "sub": "two paths, snapshot compile cache",
-          "kind": "system",
-          "col": 3,
-          "row": 0
+          "id": "prb",
+          "label": "Probe",
+          "sub": "worker, clock B",
+          "kind": "focus"
         },
         {
-          "id": "s5",
-          "label": "5 Launch, load weights",
-          "sub": "the weight cache acts here: hub or volume",
-          "kind": "focus",
-          "col": 3,
-          "row": 1
-        },
-        {
-          "id": "s6",
-          "label": "6 Engine compiles",
-          "sub": "the compile cache acts here; then profile, capture",
-          "kind": "focus",
-          "col": 2,
-          "row": 1
-        },
-        {
-          "id": "s7",
-          "label": "7 Ten requests",
-          "sub": "first request, then the latency curve",
-          "kind": "system",
-          "col": 1,
-          "row": 1
-        },
-        {
-          "id": "s8",
-          "label": "8 Result returned",
-          "sub": "bundle rides the job result, not logs",
-          "kind": "system",
-          "col": 0,
-          "row": 1
-        },
-        {
-          "id": "s9",
-          "label": "9 Record built",
-          "sub": "laptop parses the log, builds the record",
-          "kind": "system",
-          "col": 0,
-          "row": 2
-        },
-        {
-          "id": "s10",
-          "label": "10 Appended",
-          "sub": "one line in the store, never retried",
-          "kind": "store",
-          "col": 1,
-          "row": 2
+          "id": "vl",
+          "label": "vllm serve",
+          "kind": "external"
         }
       ],
-      "edges": [
+      "steps": [
         {
-          "from": "s1",
-          "to": "s2",
-          "label": "arm"
+          "from": "drv",
+          "to": "rp",
+          "label": "Submit job {arm, run id}",
+          "text": "clock A starts"
         },
         {
-          "from": "s2",
-          "to": "s3",
-          "label": "arm, run id"
+          "from": "rp",
+          "to": "hnd",
+          "label": "Boot container, start handler",
+          "text": "queue delay about 0.13 s"
         },
         {
-          "from": "s3",
-          "to": "s4",
-          "label": "process starts"
+          "from": "hnd",
+          "to": "hnd",
+          "label": "Set cache paths, snapshot compile cache"
         },
         {
-          "from": "s4",
-          "to": "s5",
-          "label": "clock B starts"
+          "from": "hnd",
+          "to": "prb",
+          "label": "Run the probe",
+          "text": "clock B starts just before launch"
         },
         {
-          "from": "s5",
-          "to": "s6",
-          "label": "model loaded"
+          "from": "prb",
+          "to": "vl",
+          "label": "Launch vllm serve"
         },
         {
-          "from": "s6",
-          "to": "s7",
-          "label": "health OK"
+          "from": "vl",
+          "to": "prb",
+          "label": "\"Model loading took\" log line",
+          "text": "weight cache acts here",
+          "kind": "reply"
         },
         {
-          "from": "s7",
-          "to": "s8",
-          "label": "bundle"
+          "from": "vl",
+          "label": "Compile (compile cache acts), profile, capture",
+          "kind": "note"
         },
         {
-          "from": "s8",
-          "to": "s9",
-          "label": "payload"
+          "from": "prb",
+          "to": "vl",
+          "label": "Poll /health every 0.25 s until it answers"
         },
         {
-          "from": "s9",
-          "to": "s10",
-          "label": "record"
+          "from": "prb",
+          "to": "vl",
+          "label": "Request 1 (16 tokens)",
+          "text": "clock B stops after the reply"
+        },
+        {
+          "from": "prb",
+          "to": "vl",
+          "label": "Requests 2 to 10",
+          "text": "subtracted from clock A's span"
+        },
+        {
+          "from": "hnd",
+          "to": "rp",
+          "label": "Job result carries marks, log, cache state"
+        },
+        {
+          "from": "drv",
+          "to": "rp",
+          "label": "Status poll every 5 s"
+        },
+        {
+          "from": "rp",
+          "to": "drv",
+          "label": "COMPLETED + bundle",
+          "text": "clock A stops: up to 5 s lag",
+          "kind": "reply"
+        },
+        {
+          "from": "drv",
+          "to": "drv",
+          "label": "Parse the log, build and append the record",
+          "text": "one JSONL line, never retried"
         }
       ]
     }
@@ -635,11 +619,11 @@
       "uses": [
         {
           "concept": "arms",
-          "because": "Three arms give each cache its own one-step comparison: A to B for weights, B to C for compile."
+          "because": "Each cache gets its own one-step comparison: A to B, B to C."
         },
         {
           "concept": "contrasts",
-          "because": "Each adjacent pair of arms yields one contrast, so each cache's saving is measured on its own."
+          "because": "Each adjacent pair of arms yields one contrast."
         }
       ]
     },
@@ -660,13 +644,13 @@
       "serves": [
         {
           "req": "R1",
-          "because": "Engine phases come from vLLM's own log; what it cannot split goes in a labelled unattributed row and a named platform residual, so nothing is hidden."
+          "because": "Engine phases come from vLLM's own log; what it cannot split goes in a labelled unattributed row and the platform residual, so nothing is hidden."
         }
       ],
       "uses": [
         {
           "concept": "clocks",
-          "because": "Two clocks let platform time be found by subtraction, and let a run whose clocks disagree be caught."
+          "because": "Two clocks give platform time by subtraction and catch a run whose clocks disagree."
         }
       ]
     },
@@ -693,7 +677,7 @@
       "uses": [
         {
           "concept": "triples",
-          "because": "Each triple puts all three arms in the same stretch of time, so drift lands on every arm alike."
+          "because": "A triple puts all three arms in one stretch of time, so drift hits each alike."
         }
       ]
     },
@@ -715,7 +699,7 @@
       "serves": [
         {
           "req": "R2",
-          "because": "A leaked warm cache, or a cold compile in arm C, would make the arms differ in more than their configured cache, and the configuration alone does not show what was on disk."
+          "because": "A leaked warm cache, or a cold compile in arm C, would make the arms differ in more than configuration, which alone does not show what was on disk."
         }
       ],
       "uses": [
@@ -757,7 +741,7 @@
         },
         {
           "concept": "prereg",
-          "because": "The pre-registration requires the difference's interval before any ranking claim, so the claim never appears without it."
+          "because": "The pre-registration requires the difference's interval before any ranking claim."
         }
       ]
     },
@@ -790,7 +774,7 @@
       "uses": [
         {
           "concept": "percentiles",
-          "because": "p50 to p95 hold up at 100 runs per arm; a p99 would be one or two runs."
+          "because": "p50 to p95 hold up at 100 runs per arm."
         },
         {
           "concept": "hypotheses",
@@ -1023,24 +1007,32 @@
             "label": "A",
             "segments": [
               {
-                "name": "Platform (by subtraction)",
+                "name": "Platform",
                 "value": 4.37
               },
               {
-                "name": "Server launch to model loaded",
-                "value": 45.83
+                "name": "Server start-up before load",
+                "value": 28.19
               },
               {
-                "name": "Memory profiling",
+                "name": "Weight load",
+                "value": 17.4
+              },
+              {
+                "name": "Compile",
+                "value": 19.01
+              },
+              {
+                "name": "Profiling",
                 "value": 0.09
+              },
+              {
+                "name": "Unattributed",
+                "value": 4.46
               },
               {
                 "name": "Graph capture",
                 "value": 4.0
-              },
-              {
-                "name": "Unattributed engine start",
-                "value": 4.46
               },
               {
                 "name": "Ready check",
@@ -1049,10 +1041,6 @@
               {
                 "name": "First request",
                 "value": 0.3
-              },
-              {
-                "name": "Compile",
-                "value": 19.01
               }
             ]
           },
@@ -1060,24 +1048,32 @@
             "label": "B",
             "segments": [
               {
-                "name": "Platform (by subtraction)",
+                "name": "Platform",
                 "value": 4.07
               },
               {
-                "name": "Server launch to model loaded",
-                "value": 30.35
+                "name": "Server start-up before load",
+                "value": 25.28
               },
               {
-                "name": "Memory profiling",
+                "name": "Weight load",
+                "value": 4.57
+              },
+              {
+                "name": "Compile",
+                "value": 18.79
+              },
+              {
+                "name": "Profiling",
                 "value": 0.11
+              },
+              {
+                "name": "Unattributed",
+                "value": 4.38
               },
               {
                 "name": "Graph capture",
                 "value": 4.0
-              },
-              {
-                "name": "Unattributed engine start",
-                "value": 4.38
               },
               {
                 "name": "Ready check",
@@ -1086,10 +1082,6 @@
               {
                 "name": "First request",
                 "value": 0.3
-              },
-              {
-                "name": "Compile",
-                "value": 18.79
               }
             ]
           },
@@ -1097,24 +1089,32 @@
             "label": "C",
             "segments": [
               {
-                "name": "Platform (by subtraction)",
+                "name": "Platform",
                 "value": 4.83
               },
               {
-                "name": "Server launch to model loaded",
-                "value": 21.34
+                "name": "Server start-up before load",
+                "value": 16.67
               },
               {
-                "name": "Memory profiling",
+                "name": "Weight load",
+                "value": 4.54
+              },
+              {
+                "name": "Compile",
+                "value": 0.33
+              },
+              {
+                "name": "Profiling",
                 "value": 0.17
+              },
+              {
+                "name": "Unattributed",
+                "value": 3.83
               },
               {
                 "name": "Graph capture",
                 "value": 4.0
-              },
-              {
-                "name": "Unattributed engine start",
-                "value": 3.83
               },
               {
                 "name": "Ready check",
@@ -1123,37 +1123,34 @@
               {
                 "name": "First request",
                 "value": 0.3
-              },
-              {
-                "name": "Compile",
-                "value": 0.33
               }
             ]
           }
         ],
         "highlight": [
-          "Server launch to model loaded",
-          "Compile"
-        ],
-        "deltas": [
-          {
-            "between": "A → B",
-            "text": "Weight cache only: launch to model loaded falls 45.83 → 30.35 s; compile stays near 19 s."
-          },
-          {
-            "between": "B → C",
-            "text": "Compile cache only: compile falls 18.79 → 0.33 s. Launch to model loaded also falls, 30.35 → 21.34 s; the engine log puts most of that before the engine core starts, cause unconfirmed."
-          }
+          "Server start-up before load",
+          "Weight load",
+          "Compile",
+          "Unattributed"
         ],
         "merge": [
           {
             "names": [
-              "Memory profiling",
               "Graph capture",
               "Ready check",
               "First request"
             ],
-            "label": "Other fixed steps"
+            "label": "Capture to first request"
+          }
+        ],
+        "deltas": [
+          {
+            "between": "A → B",
+            "text": "Weight cache only: vLLM's load falls 17.40 → 4.57 s, start-up 28.19 → 25.28 s; compile stays near 19 s."
+          },
+          {
+            "between": "B → C",
+            "text": "Compile cache only: compile falls 18.79 → 0.33 s; start-up before load also falls, 25.28 → 16.67 s (F2)."
           }
         ],
         "ghost": {
@@ -1162,15 +1159,93 @@
           "on_bar": "C"
         }
       },
-      "axis": "Median seconds per phase, 100 runs per arm. A: nothing cached; B: weights cached; C: both cached. Compile is drawn last, out of time order (it follows model loading). Unattributed engine start: two sub-phases the log does not split. Other fixed steps: [memory profiling](p1:vllm), [graph capture](p1:compile), the ready check (end of engine start until the health endpoint answers, polled every 0.25 s; not split further), the first request (up to 16 tokens, start to finish; time to first token is 0.042 s).",
-      "read_as": "The launch segment runs from starting `vllm serve` to its \"Model loading took\" line, so it holds process start-up too; vLLM's own loading time is 17.40, 4.57, 4.54 s. Dashed box on C: B's compile time.",
+      "axis": "Median seconds per phase, 100 runs per arm, in clock order. A: nothing cached; B: weights cached; C: both. Platform is drawn first but includes teardown and poll lag. Unattributed: two engine sub-phases the log does not split, device initialisation (before compile) and KV allocation (after profiling), so its place here is not measured. Capture to first request: graph capture, the ready check (end of engine start until the health endpoint answers, polled every 0.25 s) and the first request (up to 16 tokens; time to first token is 0.042 s).",
+      "read_as": "Start-up before load: each run's launch-to-loaded time minus vLLM's own reported load time (17.40, 4.57, 4.54 s). Dashed box on C: B's compile time.",
       "so": [
         "arms",
         "clocks"
       ],
       "short": "Where each arm's time goes",
-      "takeaway": "Each cache shrinks the phase it acts on: weights the launch segment, compile the compile segment. One segment moved that should not have: C also reaches \"model loaded\" sooner than B.",
-      "arithmetic": "Each segment is one phase's median over 100 runs; Other fixed steps adds four such medians (A: 8.82 s), so it is not itself a median, and bars miss the median totals (81.12, 65.43, 39.37 s)."
+      "takeaway": "Each cache shrinks the phase it acts on; C also starts up sooner than B, which it should not.",
+      "arithmetic": "Each segment is one phase's median over 100 runs (the last adds three medians), and medians do not add: the bars sum to 82.25, 66.07 and 38.77 s against median totals of 81.12, 65.43 and 39.37 s."
+    },
+    {
+      "title": "Start-up before load",
+      "short": "Start-up before load",
+      "chart": {
+        "type": "stacked_bars",
+        "unit": "s",
+        "show_totals": true,
+        "bars": [
+          {
+            "label": "A",
+            "segments": [
+              {
+                "name": "Args to architecture",
+                "value": 10
+              },
+              {
+                "name": "Architecture to init",
+                "value": 9
+              },
+              {
+                "name": "Init to load start",
+                "value": 3
+              },
+              {
+                "name": "Load start to done",
+                "value": 17
+              }
+            ]
+          },
+          {
+            "label": "B",
+            "segments": [
+              {
+                "name": "Args to architecture",
+                "value": 10
+              },
+              {
+                "name": "Architecture to init",
+                "value": 7
+              },
+              {
+                "name": "Init to load start",
+                "value": 3
+              },
+              {
+                "name": "Load start to done",
+                "value": 4
+              }
+            ]
+          },
+          {
+            "label": "C",
+            "segments": [
+              {
+                "name": "Args to architecture",
+                "value": 1
+              },
+              {
+                "name": "Architecture to init",
+                "value": 7
+              },
+              {
+                "name": "Init to load start",
+                "value": 3
+              },
+              {
+                "name": "Load start to done",
+                "value": 4
+              }
+            ]
+          }
+        ]
+      },
+      "axis": "Median gaps between four vLLM log lines, 100 runs per arm; 1 s timestamp resolution.",
+      "read_as": "C's head start is the first gap (10 s in A and B, 1 s in C), in the API server before the engine core starts. Its cause is not confirmed; a cached model-inspection result is the working guess.",
+      "so": "arms",
+      "takeaway": "C's head start precedes the engine core; its cause is unconfirmed."
     },
     {
       "title": "How spread out the runs are",
@@ -1243,12 +1318,181 @@
       },
       "axis": "Seconds of total cold start per arm: p50 (median), p90, p95.",
       "read_as": "The arm order holds at every percentile shown; hollow markers show it break in the far tail. No p99: at 100 runs it would be one or two runs.",
-      "arithmetic": "Percentiles use all 300 publishable runs, among them arm A's 2266.6 s run on a host's first image pull (far past p95); each hollow marker is that arm's largest repeat-host run (A: 99 runs, B: 100).",
+      "arithmetic": "Percentiles use all 300 publishable runs, among them arm A's 2266.6 s run on a host's first image pull (far past p95) (hollow markers: A over 99 runs, B over 100).",
       "so": "shape",
-      "takeaway": "The ranking holds out to p95, yet among repeat-host runs B's largest exceeds A's: the far tail is not the median."
+      "takeaway": "The ranking holds to p95; in the far tail, B's largest run exceeds A's."
     },
     {
-      "title": "The two effects, each measured on its own",
+      "title": "Every run: the ECDF",
+      "short": "The ECDF",
+      "chart": {
+        "type": "xy",
+        "unit": "%",
+        "x_label": "Total cold start (s, whole seconds)",
+        "y_label": "Runs finished",
+        "y_from_zero": true,
+        "series": [
+          {
+            "name": "A",
+            "style": "step",
+            "points": [
+              {
+                "x": 81,
+                "y": 0
+              },
+              {
+                "x": 81,
+                "y": 52
+              },
+              {
+                "x": 86,
+                "y": 83
+              },
+              {
+                "x": 91,
+                "y": 88
+              },
+              {
+                "x": 96,
+                "y": 97
+              },
+              {
+                "x": 101,
+                "y": 98
+              },
+              {
+                "x": 107,
+                "y": 99
+              },
+              {
+                "x": 112,
+                "y": 100
+              }
+            ]
+          },
+          {
+            "name": "B",
+            "style": "step",
+            "points": [
+              {
+                "x": 65,
+                "y": 0
+              },
+              {
+                "x": 65,
+                "y": 52
+              },
+              {
+                "x": 66,
+                "y": 56
+              },
+              {
+                "x": 70,
+                "y": 68
+              },
+              {
+                "x": 71,
+                "y": 73
+              },
+              {
+                "x": 76,
+                "y": 76
+              },
+              {
+                "x": 81,
+                "y": 86
+              },
+              {
+                "x": 86,
+                "y": 95
+              },
+              {
+                "x": 91,
+                "y": 96
+              },
+              {
+                "x": 102,
+                "y": 97
+              },
+              {
+                "x": 127,
+                "y": 99
+              },
+              {
+                "x": 148,
+                "y": 100
+              }
+            ]
+          },
+          {
+            "name": "C",
+            "style": "step",
+            "points": [
+              {
+                "x": 34,
+                "y": 0
+              },
+              {
+                "x": 34,
+                "y": 9
+              },
+              {
+                "x": 35,
+                "y": 10
+              },
+              {
+                "x": 39,
+                "y": 74
+              },
+              {
+                "x": 40,
+                "y": 83
+              },
+              {
+                "x": 44,
+                "y": 84
+              },
+              {
+                "x": 45,
+                "y": 85
+              },
+              {
+                "x": 55,
+                "y": 98
+              },
+              {
+                "x": 60,
+                "y": 99
+              },
+              {
+                "x": 70,
+                "y": 100
+              }
+            ]
+          }
+        ],
+        "refs": [
+          {
+            "x": 81.1,
+            "label": "A p50"
+          },
+          {
+            "x": 65.4,
+            "label": "B p50"
+          },
+          {
+            "x": 39.4,
+            "label": "C p50"
+          }
+        ]
+      },
+      "axis": "Share of the 299 repeat-host runs finished by each total, in whole seconds and per cents; dashed lines: medians.",
+      "read_as": "The curves climb in steps about 5 s apart, as the laptop's 5 s status poll would make them: arm A's totals ranked 41 to 51 lie at 80.92–81.16 s, ranks 52 to 61 at 85.72–85.89 s, none between, and 289 of 299 clock A spans fall within 0.25 s of one 5.175 s grid.",
+      "so": "shape",
+      "takeaway": "The 5 s stairs are the poll grid."
+    },
+    {
+      "title": "Each effect on its own",
       "chart": {
         "type": "interval",
         "unit": "s",
@@ -1269,14 +1513,14 @@
         "zero_label": "no saving"
       },
       "axis": "Seconds of total cold start each cache saves (median difference), with a 95% bootstrap interval.",
-      "read_as": "Both clear zero, but side by side they do not rank the caches; the next chart does. Only 18.46 s of the compile cache's 26.07 s is compilation; the other 7.6 s roughly matches the launch-segment gap (8.85 s), which the engine log places before the engine core starts.",
+      "read_as": "Both clear zero, but side by side they do not rank the caches; the next chart does. Only 18.46 s of the compile cache's 26.07 s is compilation; the other 7.6 s roughly matches the 8.68 s start-up gap (F1). B − C is lopsided because B's runs ranked 41 to 56 lie at 65.35–65.80 s and rank 57 is 70.29 s: about one resample in ten lifts B's median into that cluster (70.4 − 39.4 = 31.0, the top), while the packed low runs leave the bottom 0.10 s under the estimate.",
       "so": "arms",
       "short": "Each cache's saving, alone",
       "takeaway": "Each cache saves time on its own, with neither interval near zero; context, not the ranking.",
       "arithmetic": "A − B and B − C use unrounded medians, so 15.68 and 26.07 s, not the 15.69 and 26.06 the rounded medians (81.12, 65.43, 39.37) give."
     },
     {
-      "title": "Which cache bought more: the interval on the difference",
+      "title": "Which cache bought more",
       "short": "Which cache bought more",
       "chart": {
         "type": "interval",
@@ -1295,9 +1539,9 @@
         "shade": "left"
       },
       "axis": "Weight-cache saving minus compile-cache saving: seconds of total cold start, 95% bootstrap interval.",
-      "read_as": "The whole interval, −20.30 to −5.54 s, lies left of zero, which licenses the ranking. It is a plausible range for the true difference, not where a re-run would land, and it is wide partly because each total carries up to one 5 s poll of lag; on the worker clock the same difference is −12.16 s [−15.54, −10.74], an exploratory check.",
+      "read_as": "The whole interval, −20.30 to −5.54 s, lies left of zero, which licenses the ranking. It is a plausible range for the true difference, not where a re-run would land, and it is wide partly because each total carries up to one 5 s poll of lag (the ECDF shows the stairs); on the worker clock the same difference is −12.16 s [−15.54, −10.74], an exploratory check.",
       "so": "rank",
-      "takeaway": "The compile cache saves more, about 10 s per cold start, and the interval never crosses zero, so the ranking is a finding, not a reading of two bars.",
+      "takeaway": "The compile cache saves about 10 s more per cold start, and the interval never crosses zero: a finding, not a reading of two bars.",
       "arithmetic": "15.68 − 26.07 = −10.39 s, on unrounded medians; the interval comes from 10,000 resamples of the runs."
     },
     {
@@ -1357,7 +1601,7 @@
         "a": "It is the better buy and the more fragile one. A [compile cache](p1:compile) costs nothing to store, but any change to engine version, model, hardware or flags invalidates it, so every upgrade pays the cold compile again unless warming is built into the deploy. The weight cache is a volume you rent every month whether you scale or not."
       }
     ],
-    "limits": "One provider, GPU model, model, engine version, region and host: the seconds do not transfer; the mechanisms do. H4 (does host placement drive the tail?) is unanswerable: all 300 runs landed on one host. Single replica, no contention. No percentile past p95. The first-touch rule that keeps the 2266.6 s run out of the ECDF (it stays in the medians) was written after seeing the data and is disclosed as post hoc. Why C reaches \"model loaded\" 8.85 s sooner than B is placed before the engine core starts by the log timestamps, but its cause is not confirmed."
+    "limits": "One provider, GPU model, model, engine version, region and host: the seconds do not transfer; the mechanisms do. H4 (does host placement drive the tail?) is unanswerable: all 300 runs landed on one host. Single replica, no contention. No percentile past p95. The first-touch rule that keeps the 2266.6 s run out of the ECDF (it stays in the medians) was written after seeing the data: post hoc."
   },
   "recall": [
     {
@@ -1366,7 +1610,7 @@
     },
     {
       "q": "On the one-run view, where does clock B start, and what lands in platform time?",
-      "a": "Between steps 4 and 5: the probe starts clock B just before launching `vllm serve`. Platform time is everything the laptop clock sees outside it: container and handler start before; teardown and up to one 5 s poll of lag after. RunPod's own queue delay was only about 0.13 s."
+      "a": "At step 4: the probe starts clock B just before launching `vllm serve`. Platform time is everything the laptop clock sees outside it: container and handler start before; teardown and up to one 5 s poll of lag after. RunPod's own queue delay was only about 0.13 s."
     },
     {
       "q": "Why is arm C primed outside the campaign?",
@@ -1597,18 +1841,6 @@
       "how": "Chart value 4.10 s (S5 ready, arm C) from docs/post.md, The decomposition; the trace check formats chart values without trailing zeros."
     },
     {
-      "value": "8.82",
-      "how": "Other fixed steps for arm A, a sum of four phase medians in docs/post.md 'The decomposition' (memory profiling, graph capture, S5 ready, S6): 0.09 + 4.00 + 4.43 + 0.30."
-    },
-    {
-      "value": "8.98",
-      "how": "Other fixed steps for arm B, drawn on the chart: 0.11 + 4.00 + 4.57 + 0.30, from docs/post.md 'The decomposition'."
-    },
-    {
-      "value": "8.57",
-      "how": "Other fixed steps for arm C, drawn on the chart: 0.17 + 4.00 + 4.10 + 0.30, from docs/post.md 'The decomposition'."
-    },
-    {
       "value": "15.69",
       "how": "81.12 - 65.43, the A minus B difference of the rounded median totals in docs/post.md 'The decomposition' (the reported contrast, on unrounded medians, is 15.68)."
     },
@@ -1699,6 +1931,102 @@
     {
       "value": "7,248",
       "how": "43,040 - 35,792 = 7,248 tokens of extra KV cache (docs/post.md 'KV capacity')."
+    },
+    {
+      "value": "28.19",
+      "how": "scripts/weights_phase_check.py on data/campaign.jsonl: the median over each arm's 100 runs of t_weights minus vLLM's reported 'Model loading took' seconds (arm A; load 17.40 s)."
+    },
+    {
+      "value": "25.28",
+      "how": "scripts/weights_phase_check.py on data/campaign.jsonl: the median over each arm's 100 runs of t_weights minus vLLM's reported 'Model loading took' seconds (arm B)."
+    },
+    {
+      "value": "16.67",
+      "how": "scripts/weights_phase_check.py on data/campaign.jsonl: the median over each arm's 100 runs of t_weights minus vLLM's reported 'Model loading took' seconds (arm C)."
+    },
+    {
+      "value": "82.25",
+      "how": "Sum of arm A's nine drawn segment medians: 4.37 + 28.19 + 17.40 + 19.01 + 0.09 + 4.46 + 4.00 + 4.43 + 0.30."
+    },
+    {
+      "value": "66.07",
+      "how": "Sum of arm B's nine drawn segment medians: 4.07 + 25.28 + 4.57 + 18.79 + 0.11 + 4.38 + 4.00 + 4.57 + 0.30."
+    },
+    {
+      "value": "38.77",
+      "how": "Sum of arm C's nine drawn segment medians: 4.83 + 16.67 + 4.54 + 0.33 + 0.17 + 3.83 + 4.00 + 4.10 + 0.30."
+    },
+    {
+      "value": "80.92",
+      "how": "Rank 41 of arm A's 100 sorted per-run totals (data/campaign.jsonl via coldstart.analysis.metrics.derive): 80.92 s; rank 51 is 81.16 s."
+    },
+    {
+      "value": "81.16",
+      "how": "Rank 51 of arm A's 100 sorted per-run totals (data/campaign.jsonl via derive): 81.16 s; the next rank is 85.72 s, the 4.6 s jump."
+    },
+    {
+      "value": "85.72",
+      "how": "Rank 52 of arm A's sorted per-run totals: 85.72 s. No run lies between rank 51 (81.16 s) and rank 52."
+    },
+    {
+      "value": "85.89",
+      "how": "Rank 61 of arm A's sorted per-run totals: 85.89 s."
+    },
+    {
+      "value": "65.35",
+      "how": "Rank 41 of arm B's 100 sorted per-run totals (data/campaign.jsonl via derive): 65.35 s; rank 56 is 65.80 s."
+    },
+    {
+      "value": "65.8",
+      "how": "Rank 56 of arm B's sorted per-run totals: 65.80 s."
+    },
+    {
+      "value": "70.29",
+      "how": "Rank 57 of arm B's sorted per-run totals: 70.29 s, 4.49 s above rank 56; ranks 62 to 64 are 70.39, 70.41, 70.42 s."
+    },
+    {
+      "value": "70.4",
+      "how": "Ranks 62 to 64 of arm B's sorted totals are 70.39, 70.41 and 70.42 s: 70.4 s to one decimal."
+    },
+    {
+      "value": "31.0",
+      "how": "70.4 - 39.4 = 31.0 s, the published interval's upper end, 31.01 s (docs/post.md)."
+    },
+    {
+      "value": "0.10",
+      "how": "26.07 - 25.97 = 0.10 s: the estimate minus the interval's lower end (docs/post.md)."
+    },
+    {
+      "value": "5.175",
+      "how": "Best-fitting period of clock A's spans (t_result - t_submit, data/campaign.jsonl) over the 299 repeat-host runs: searched in 1 ms steps from 4.8 to 5.6 s, the period with the longest mean unit vector of exp(2 pi i t / P) is 5.175 s (length 0.987)."
+    },
+    {
+      "value": "289",
+      "how": "Of the 299 repeat-host runs, 289 have a clock A span within 0.25 s of the fitted 5.175 s grid (297 within 0.5 s); a uniform spread would put about 10 % within 0.25 s (0.5 / 5.175)."
+    },
+    {
+      "value": "101",
+      "how": "ECDF chart x value: whole-second rounding of a per-run total in data/campaign.jsonl (derive), arm A: 101.31 s."
+    },
+    {
+      "value": "107",
+      "how": "ECDF chart x value: whole-second rounding of a per-run total in data/campaign.jsonl (derive), arm A: 106.65 s."
+    },
+    {
+      "value": "112",
+      "how": "ECDF chart x value: whole-second rounding of a per-run total in data/campaign.jsonl (derive), arm A's largest repeat-host run, 111.6 s."
+    },
+    {
+      "value": "102",
+      "how": "ECDF chart x value: whole-second rounding of a per-run total in data/campaign.jsonl (derive), arm B: 101.66 s."
+    },
+    {
+      "value": "127",
+      "how": "ECDF chart x value: whole-second rounding of a per-run total in data/campaign.jsonl (derive), arm B: 127.01 and 127.33 s."
+    },
+    {
+      "value": "148",
+      "how": "ECDF chart x value: whole-second rounding of a per-run total in data/campaign.jsonl (derive), arm B's largest repeat-host run, 148.2 s."
     }
   ],
   "links": {

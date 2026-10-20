@@ -1,0 +1,470 @@
+{
+  "unit": "a1",
+  "title": "Practice: where a vLLM cold start goes",
+  "minutes": 35,
+  "objectives": [
+    "Draw one cold start as a time-ordered bar, naming what each cache shrinks and which block cannot be placed in order.",
+    "Compute KV cache tokens from the card, utilisation, weights, profiling peak and bytes per token, then the requests held at a length.",
+    "Explain why a warm cache directory gave 0.99 GiB more KV cache, and say what the log shows and what it does not.",
+    "Tell clock A from clock B, name what sets clock A's resolution, and say what platform time holds.",
+    "Justify three arms and the interval on the difference of contrasts, and say what claim an interval crossing zero allows.",
+    "State three limits of the result and one platform design that warms the cache directory on deploy."
+  ],
+  "prereq_check": [
+    {
+      "q": "An 8B-parameter model in 16-bit weights: roughly how much GPU memory do the weights take, and what else has to fit?",
+      "a": "About 16 GB (this unit's log: 15.27 GiB). Also the KV cache and the working memory the engine measures at its profiling peak.",
+      "review": "p1:hbm"
+    },
+    {
+      "q": "A bootstrap interval on a median: what is resampled, and can the interval reach a value no run took?",
+      "a": "The runs, with replacement; each resample gives a median. Yes: a median can fall between two runs, so the interval can span a gap in the data.",
+      "review": "p2:interval"
+    },
+    {
+      "q": "Why interleave arms in shuffled triples instead of running them in blocks?",
+      "a": "Slow drift, such as a busy hour on the rented GPUs, then lands on all three arms instead of posing as an arm effect.",
+      "review": "p2:pairing"
+    }
+  ],
+  "drills": [
+    {
+      "q": "Why three arms, and not two or four?",
+      "a": "A to B changes only the weight cache and B to C only the compile cache, so each saving gets its own one-step comparison. Two arms would test only weights; that was the fallback had this vLLM not compiled at startup, and it does. The fourth cell (weights cold, compile warm) has no operational meaning. A baked-image arm only moves the bytes into the image pull, inside the unsplit platform residual.",
+      "red_flag": "\"More arms is always better\", or proposing the baked image without saying its bytes move into a time the study cannot observe."
+    },
+    {
+      "q": "What is in platform time, and what is not?",
+      "a": "Platform time is total cold start minus the worker clock's time: container and handler start, teardown and up to one 5 s poll of lag. It is the one allowed cross-clock subtraction, a residual rather than a measured phase. RunPod's own queue delay was about 0.13 s (median), so it is not queueing.",
+      "red_flag": "\"Platform time is the queue.\" Or treating it as a measured phase."
+    },
+    {
+      "q": "H1 says weight handling is over half of worker-clock time. Does weight loading dominate a cold start?",
+      "a": "H1 holds by its pre-registered definition: weight handling is a median 0.58 of worker-clock time in arm A, above half in all 100 runs. But that phase runs from launching vllm serve to the \"Model loading took\" line, so it is mostly server start-up (28.19 s median) beside vLLM's own load (17.40 s of 79.09 s, about 22%). \"Weights dominate\" claims more than the data shows.",
+      "red_flag": "\"Yes, weights dominate cold start\", read straight off the 0.58."
+    },
+    {
+      "q": "What is clock A's resolution, and what does it do to your intervals?",
+      "a": "The laptop learns a job has finished only at a status poll, every 5 s. Clock A's spans repeat on a grid of about 5.175 s (289 of the 299 repeat-host runs lie within 0.25 s of it), so totals move in steps: arm A has runs at 80.92 to 81.16 s and at 85.72 to 85.89 s, none between. That is part of why the interval on the difference is wide. On the worker clock the same difference is −12.16 s [−15.54, −10.74], an exploratory check, not the pre-registered result.",
+      "red_flag": "\"The cloud is noisy.\" Or swapping in the narrower worker-clock interval after seeing it."
+    },
+    {
+      "q": "Why is the compile cache's interval, 25.97 to 31.01 s around 26.07 s, lopsided?",
+      "a": "B's runs ranked 41 to 56 lie at 65.35 to 65.80 s and rank 57 is 70.29 s, while C's median is steady near 39.4 s. A resample that draws few of B's low runs, about one in ten, lifts B's median into the 70 s cluster: 70.4 − 39.4 = 31.0, the interval's top. The low runs are packed, so the bottom sits only 0.10 s under the estimate. The interval shows where the median can jump, given the gaps in the data.",
+      "red_flag": "\"The bootstrap is broken\", or reaching for a t-test because the interval is asymmetric."
+    },
+    {
+      "q": "Why does a warm compile cache leave more KV cache? Show the arithmetic, and say what is measured.",
+      "a": "vLLM plans with 0.92 of the card: 0.92 × 23.52 = 21.64 GiB. The KV cache gets what is left after weights and non-torch memory (15.54 GiB) and the profiling pass's peak: 21.64 − 15.54 − 1.18 = 4.92 GiB after a cold compile, 21.64 − 15.54 − 0.19 = 5.91 GiB after a warm one, 35,792 against 43,040 tokens. It is sized once, so it is fixed for the replica's life. The log shows the drop in peak, not its cause; H5 registered the compiler's memory still being resident during profiling.",
+      "red_flag": "\"The compiler leaks memory\", or \"it frees up after compile, so it does not matter\", or stating the cause as measured."
+    },
+    {
+      "q": "Is \"one more concurrent request\" the right way to state the KV gain?",
+      "a": "Not as the headline. 43,040 against 35,792 tokens is 20.3% more (7,248 tokens). Whole requests held depend on length: at 8,192 tokens, 4.37 → 4 against 5.25 → 5; at 2,048 tokens, 17.48 → 17 against 21.02 → 21. Report tokens, and give concurrency only for a stated length.",
+      "red_flag": "\"25% more users\" (5 against 4), or quoting concurrency without the request length."
+    },
+    {
+      "q": "Arm C reaches \"model loaded\" 8.85 s sooner than B, with only the compile cache changed. What do you check?",
+      "a": "vLLM's own load time is the same (4.57 vs 4.54 s). The engine log's timestamps put the gap before the engine core starts: the API server's step from the arguments line to architecture resolution takes about 10 s in B and 1 s in C. Arm C warms the whole vLLM cache directory, not only compiled code; a cached model-inspection result is the working guess, not confirmed. A next step would be to warm only part of the directory and watch that gap.",
+      "red_flag": "\"Noise\", or \"it is the compile\", or \"unknown\" with no next step."
+    },
+    {
+      "q": "The volume load took 4.57 s for about 16 GB. Is that the volume's throughput?",
+      "a": "It would be about 3.6 GB/s, high for network storage. All 300 runs landed on one host, and the first arm B run after a 19.8 h gap spent 17.45 s in vLLM's load, so a warm host cache is one possible reading, unverified. Treat 4.57 s as a warm-host figure until it is measured on fresh hosts.",
+      "red_flag": "Quoting 4.57 s as the volume's throughput for any host."
+    },
+    {
+      "q": "Which cache do you build into a platform, and how do you justify it?",
+      "a": "Warm the compile cache in the deploy pipeline. It costs nothing to store, but a change of engine version, model, hardware or flags invalidates it, so otherwise the first scale-up after every upgrade pays the cold compile again (18.5 s here). The weight cache is a volume billed continuously: at the post's illustrative prices it breaks even at 26.6 scale-ups a day. Say which numbers are assumptions.",
+      "red_flag": "\"Cache everything on a shared volume\" with no invalidation story, or quoting the break-even as a measured result."
+    },
+    {
+      "q": "What does the study not tell you about a hundred replicas scaling at once?",
+      "a": "Nothing: every run was one replica alone, so contention on the volume, registry pulls and many hosts starting together were not tested. The one first-touch run, an image pull on a host that had never seen it, took 2266.6 s, far above every cache effect (15 to 26 s). If scale-up can reach new hosts, image distribution may dominate; that is one observation, not a headline.",
+      "red_flag": "Extrapolating this study's seconds to fleet behaviour."
+    }
+  ],
+  "estimation": [
+    {
+      "title": "KV cache capacity on the 24 GB card",
+      "problem": "From the log: the card reports 23.52 GiB, vLLM plans with 0.92 of it, weights plus non-torch memory use 15.54 GiB, and the profiling peak is 1.18 GiB (cold) or 0.19 GiB (warm). Assume Qwen3-8B keeps 2-byte K and V for 36 layers, 8 KV heads, head dim 128. How many tokens fit, and how many 8,192-token requests?",
+      "steps": [
+        "Budget: 0.92 × 23.52 = 21.64 GiB.",
+        "KV memory: 21.64 − 15.54 − 1.18 = 4.92 GiB cold; 21.64 − 15.54 − 0.19 = 5.91 GiB warm.",
+        "Bytes per token: 2 (K and V) × 36 × 8 × 128 × 2 bytes = 147,456 B = 144 KiB (the shape is assumed).",
+        "Tokens: 4.92 GiB / 144 KiB ≈ 35,826 against the log's 35,792, which is 2,237 blocks of 16 (block size assumed); 5.91 GiB gives ≈ 43,031 against 43,040. Rounding in the logged GiB explains the gap.",
+        "Gain: 0.99 GiB / 144 KiB ≈ 7,209 tokens against the observed 7,248. One GiB of profiling peak costs about 7,282 tokens.",
+        "Requests: 35,792 / 8,192 = 4.37 → 4 and 43,040 / 8,192 = 5.25 → 5; at 2,048 tokens, 17 against 21."
+      ],
+      "answer": "Close to the logged 35,792 and 43,040 tokens: 20.3% more warm, 4 against 5 whole 8,192-token requests, 17 against 21 at 2,048."
+    },
+    {
+      "title": "Does the weight cache pay for itself?",
+      "problem": "Use the post's illustrative prices (assumptions, not measured): $1.00 per GPU-hour, $3.50 a month for the volume, 24 scale-ups a day. The weight cache saves 15.60 s per scale-up. At how many scale-ups a day does it break even?",
+      "steps": [
+        "Saving per scale-up: 15.60 s × $1.00 / 3,600 s ≈ $0.00433.",
+        "Volume per day: $3.50 / 30.42 days ≈ $0.115.",
+        "Break-even: 0.115 / 0.00433 ≈ 26.6 scale-ups a day.",
+        "At 24 a day the saving is 24 × 0.00433 ≈ $0.104 a day against $0.115: a small loss, a marginal call.",
+        "The compile cache stores for free (26.13 s saved per scale-up, break-even 0.16 a day), but each version change pays a cold compile again."
+      ],
+      "answer": "About 26.6 scale-ups a day, so 24 a day does not quite pay. Every dollar figure rescales with your own prices."
+    }
+  ],
+  "scenario": {
+    "prompt": "You run a serverless inference platform. Customers deploy 7B to 14B open-weight models on 24 GB GPUs. Product wants the first token of a scale-from-zero replica within 30 s at p95, and engine upgrades ship every two weeks. Design the cold-start path, and say what you would measure.",
+    "outline": [
+      "Decompose before optimising: a worker clock around the engine with log-line timestamps, and a platform clock finer than a 5 s poll. Budget platform, start-up, weight load, compile, profiling, capture, ready and first token.",
+      "Compile and engine caches as build artifacts: in CI, start the engine once per engine version, model revision, GPU model and flag set, and publish the cache directory versioned. Check the key at start and alert on a miss. Here a warm directory was worth about 26 s a start and 20.3% more KV cache.",
+      "Weights: a volume or node-local copy beat the hub here (vLLM's load 17.40 s against 4.57 s), but 4.57 s may be a warm-host figure. Measure first reads on fresh hosts before promising it, and weigh the volume's fixed cost against scale-up frequency.",
+      "Image distribution: the one first-touch run took 2266.6 s, far above every cache effect. Pre-pull on node join and keep the image warm; this study has one observation, not a rate.",
+      "Capture and readiness: graph capture is a flat 4 s here, and skipping it (--enforce-eager) saves that per start but costs on every token after, so it suits only short-lived replicas. Gate traffic on /health, and check per engine version that warm-up finishes before it answers (true for 0.27.1 here).",
+      "Capacity: report KV tokens per replica as an indicator. A cold compile cost 20.3% of it for the replica's life here.",
+      "Measure: p50 and p95 time to first token from zero, split by host warmth; cache-key miss rate after each upgrade; KV tokens per replica; and contention when many replicas start together, which this study did not test.",
+      "Trade-offs: the cache matrix grows with GPU models, versions and flags, so build only what the fleet runs. A warm pool costs idle GPU-hours; compare it with the break-even arithmetic."
+    ],
+    "pitfalls": [
+      "Quoting this study's seconds for other GPUs, models, engine versions or providers: the seconds do not transfer, the mechanisms do.",
+      "Promising the weight-cache speed-up from warm-host numbers: all 300 runs used one host.",
+      "A compile cache with no key check, so a routine upgrade turns it cold in silence.",
+      "Reporting a p99 or a mean from a hundred starts per set-up.",
+      "Treating a first-touch image pull as a normal start, or ignoring it."
+    ]
+  },
+  "lab": {
+    "goal": "See the poll grid, the log localisation, the memory line and the exact re-derivation on your own laptop.",
+    "setup": [
+      "A checkout of the repo with the committed data/campaign.jsonl. Use .venv/bin/python and never uv run.",
+      "No GPU, no network and no paid call."
+    ],
+    "steps": [
+      "Run .venv/bin/python scripts/analyse.py --store data/campaign.jsonl > /tmp/a1_analysis.json, then cmp /tmp/a1_analysis.json data/analysis.json. Expect no output: the file reproduces byte for byte.",
+      "Run .venv/bin/python scripts/weights_phase_check.py --store data/campaign.jsonl. Expect start-up before load of 28.19, 25.28 and 16.67 s beside vLLM-reported loads of 17.40, 4.57 and 4.54 s.",
+      "Take each run's clock A span (t_total_job from coldstart.analysis.metrics.derive) and fold it modulo trial periods around 5 s. The period with the tightest bunching is about 5.175 s.",
+      "Plot an ECDF of t_total per arm over the repeat-host runs (drop the one first-touch run). Expect stairs about 5 s apart.",
+      "Call harness.stats.bootstrap_contrast_difference(a, b, c, seed=3) on t_process, then on t_total. Expect about −12.16 [−15.54, −10.74] and −10.39 [−20.30, −5.54].",
+      "For each run's engine log lines, take the timestamps of the non-default args line and the Resolved architecture line, and print the median gap per arm. Expect 10, 10 and 1 s.",
+      "Read the Desired GPU memory utilization and Actual usage log lines, and recompute KV memory and tokens with the calculator on this page."
+    ],
+    "metrics": [
+      "Byte identity of the analysis file",
+      "Fitted poll period, and how many of the 299 spans lie within 0.25 s of it (expect 289)",
+      "Interval widths on the worker clock and the laptop clock",
+      "Median engine-log gaps per arm",
+      "KV memory and tokens against the logged 4.92 and 5.91 GiB, 35,792 and 43,040 tokens"
+    ],
+    "expected": "Everything reproduces from the committed store: identical analysis file, the three start-up figures, a poll grid near 5.175 s, a worker-clock interval about a third as wide as the laptop-clock one, a 10 s, 10 s and 1 s architecture gap, and KV numbers within rounding of the log.",
+    "demonstrates": "The clock's resolution sets interval width, the engine log holds more than the summary, and the memory arithmetic closes within rounding.",
+    "cost": "none",
+    "note": "An optional paid extension (warming only part of the vLLM cache directory on one rented GPU) would test the cause of the head start; it is not part of this lab and is untested."
+  },
+  "cards": [
+    {
+      "tag": "phases",
+      "front": "List one cold start's phases in clock order.",
+      "back": "Platform, start-up before load, weight load, compile, profiling, unattributed engine start (device initialisation and KV allocation, not split by the log), graph capture, ready check, first request."
+    },
+    {
+      "tag": "phases",
+      "front": "Median start-up before load and vLLM-reported load, per arm?",
+      "back": "A: 28.19 s and 17.40 s. B: 25.28 s and 4.57 s. C: 16.67 s and 4.54 s."
+    },
+    {
+      "tag": "caches",
+      "front": "What did the weight cache (A to B) shrink?",
+      "back": "vLLM's load, 17.40 → 4.57 s. Start-up before load barely moved, 28.19 → 25.28 s, and compile stayed near 19 s."
+    },
+    {
+      "tag": "caches",
+      "front": "What did the warm cache directory (B to C) shrink?",
+      "back": "Compile, 18.79 → 0.33 s, and start-up before load, 25.28 → 16.67 s. vLLM's load did not change."
+    },
+    {
+      "tag": "caches",
+      "front": "Where in the engine log is arm C's start-up head start?",
+      "back": "Between the arguments line and architecture resolution, in the API server before the engine core: median 10 s in A and B, 1 s in C. The cause is unconfirmed."
+    },
+    {
+      "tag": "memory",
+      "front": "Write the KV budget with this run's numbers.",
+      "back": "KV = 0.92 × 23.52 − 15.54 − peak: 4.92 GiB at a 1.18 GiB peak, 5.91 GiB at 0.19."
+    },
+    {
+      "tag": "memory",
+      "front": "KV bytes per token for Qwen3-8B (assumed shape)?",
+      "back": "2 × 36 × 8 × 128 × 2 = 147,456 B = 144 KiB, matching the log's 35,792 tokens in 4.92 GiB within rounding."
+    },
+    {
+      "tag": "memory",
+      "front": "Why does the smaller KV cache from a cold compile last?",
+      "back": "It is sized once, from the profiling pass's peak, and not resized, so it is fixed for the replica's life."
+    },
+    {
+      "tag": "memory",
+      "front": "Whole 8,192-token requests held, cold against warm? And at 2,048 tokens?",
+      "back": "4 against 5 (4.37 and 5.25); 17 against 21 (17.48 and 21.02)."
+    },
+    {
+      "tag": "clocks",
+      "front": "Where does clock B start and stop?",
+      "back": "From just before vllm serve is launched to the end of the first request. Requests 2 to 10 are the warm-up tail, subtracted from clock A's span."
+    },
+    {
+      "tag": "clocks",
+      "front": "What sets clock A's resolution?",
+      "back": "The 5 s status poll: spans repeat on a grid of about 5.175 s, 289 of 299 within 0.25 s of it."
+    },
+    {
+      "tag": "clocks",
+      "front": "What is platform time, and what is it not?",
+      "back": "Total minus clock B time: container and handler start, teardown, up to one poll of lag. Not queueing: RunPod's queue delay was about 0.13 s."
+    },
+    {
+      "tag": "stats",
+      "front": "The headline difference and its interval?",
+      "back": "−10.39 s, 95% [−20.30, −5.54] on total cold start: the compile cache saves more."
+    },
+    {
+      "tag": "stats",
+      "front": "The same difference on the worker clock?",
+      "back": "−12.16 s [−15.54, −10.74]: exploratory, with no poll lag and platform time left out."
+    },
+    {
+      "tag": "stats",
+      "front": "Why is B − C's interval, 25.97 to 31.01 around 26.07, lopsided?",
+      "back": "B's runs ranked 41 to 56 sit at 65.35 to 65.80 s and rank 57 is 70.29 s: a resample can lift B's median into the 70 s cluster, but not far below."
+    },
+    {
+      "tag": "stats",
+      "front": "If the difference's interval ran from −20 to +3 s, what could you claim?",
+      "back": "Each cache's own saving, but not the ranking, which needs an interval that excludes zero."
+    },
+    {
+      "tag": "design",
+      "front": "Why prime arm C outside the campaign?",
+      "back": "Otherwise its early runs compile cold and later ones do not: a mixture that looks like a trend."
+    },
+    {
+      "tag": "design",
+      "front": "Why check the cache state before the engine starts?",
+      "back": "A cold compile creates the directory as it finishes, so checked afterwards every cold run would look warm."
+    },
+    {
+      "tag": "design",
+      "front": "What was fixed before the campaign, and what was added after?",
+      "back": "Before: hypotheses, contrasts, exclusion and stopping rules, the headline rule. After, as dated amendments: the first-touch rule (post hoc) and the H4 scoping."
+    },
+    {
+      "tag": "limits",
+      "front": "Three things this study cannot tell you.",
+      "back": "Other GPUs, models, engine versions or providers; contention with many replicas at once; whether host placement drives the tail (all runs on one host)."
+    },
+    {
+      "tag": "ops",
+      "front": "What invalidates a compile cache, and what is the platform fix?",
+      "back": "A change of engine version, model, hardware or flags. Warm it in the deploy pipeline, keyed per combination."
+    },
+    {
+      "tag": "draw it: phases",
+      "draw": true,
+      "front": "Draw it: the time-ordered bar for arms B and C, naming which block each cache shrinks.",
+      "back": "Left to right: platform, start-up before load, weight load, compile, profiling, unattributed, capture to first request. The weight cache shrinks the load block; the warm cache directory shrinks compile and start-up."
+    },
+    {
+      "tag": "draw it: clocks",
+      "draw": true,
+      "front": "Draw it: one run as a sequence with both clocks, the 0.25 s health poll and the 5 s status poll.",
+      "back": "Driver, RunPod, handler, probe, vllm serve. Clock A from the submit to the poll that sees the result; clock B from just before the launch to the first reply; requests 2 to 10 subtracted from clock A's span."
+    },
+    {
+      "tag": "draw it: memory",
+      "draw": true,
+      "front": "Draw it: the memory budget for the cold and the warm arm, with its four numbers.",
+      "back": "A 21.64 GiB budget: 15.54 for weights and non-torch, a peak of 1.18 or 0.19, and 4.92 or 5.91 left for the KV cache."
+    }
+  ],
+  "schedule": [
+    {
+      "when": "Day 1",
+      "test": "Draw the last three cards from memory and check them against the page. Do the first estimation without notes."
+    },
+    {
+      "when": "Day 3",
+      "test": "Cards 1 to 12 out loud, then drills 1 to 5, then the 2-minute answer in the interview card."
+    },
+    {
+      "when": "Day 7",
+      "test": "Cards 13 to 21 and the second estimation; drills 6 to 11 with the brief's interview mode."
+    },
+    {
+      "when": "Day 21",
+      "test": "The design scenario, whiteboarded in 20 minutes; redraw the three draw cards; run the lab if not done."
+    }
+  ],
+  "calculator": {
+    "title": "KV cache capacity",
+    "note": "Defaults are arm B's logged values (cold compile); set the peak to 0.19 for arm C. Card, utilisation, fixed memory and peak come from the engine log. Bytes per token and request length are assumptions, listed below.",
+    "inputs": [
+      {
+        "id": "card",
+        "label": "Card memory",
+        "unit": "GiB",
+        "value": 23.52,
+        "min": 8,
+        "max": 80,
+        "step": 0.01
+      },
+      {
+        "id": "util",
+        "label": "Utilisation fraction",
+        "value": 0.92,
+        "min": 0.5,
+        "max": 0.98,
+        "step": 0.01
+      },
+      {
+        "id": "fixed",
+        "label": "Weights + non-torch",
+        "unit": "GiB",
+        "value": 15.54,
+        "min": 4,
+        "max": 70,
+        "step": 0.01
+      },
+      {
+        "id": "peak",
+        "label": "Profiling peak",
+        "unit": "GiB",
+        "value": 1.18,
+        "min": 0,
+        "max": 6,
+        "step": 0.01
+      },
+      {
+        "id": "kib",
+        "label": "KV bytes per token",
+        "unit": "KiB",
+        "value": 144,
+        "min": 16,
+        "max": 1024,
+        "step": 1
+      },
+      {
+        "id": "req",
+        "label": "Request length",
+        "unit": "tokens",
+        "value": 8192,
+        "min": 256,
+        "max": 32768,
+        "step": 256
+      }
+    ],
+    "outputs": [
+      {
+        "label": "KV cache memory",
+        "unit": "GiB",
+        "digits": 2,
+        "expr": "card * util - fixed - peak"
+      },
+      {
+        "label": "Tokens that fit",
+        "digits": 0,
+        "expr": "max(0, floor((card * util - fixed - peak) * 1048576 / kib))"
+      },
+      {
+        "label": "Whole requests held",
+        "digits": 0,
+        "expr": "max(0, floor(floor((card * util - fixed - peak) * 1048576 / kib) / req))"
+      },
+      {
+        "label": "Tokens per GiB of peak",
+        "digits": 0,
+        "expr": "1048576 / kib"
+      }
+    ]
+  },
+  "assumed_numbers": [
+    {
+      "value": "36 layers, 8 KV heads, head dim 128",
+      "why": "Qwen3-8B's published shape, with 2-byte K and V, not read in this repo. It reproduces the log: 4.92 GiB over 35,792 tokens is about 144 KiB per token."
+    },
+    {
+      "value": "16-token blocks",
+      "why": "vLLM's block size, assumed; the log prints tokens, not blocks. Both token counts are multiples of 16."
+    },
+    {
+      "value": "$1.00 an hour, $3.50 a month, 24 a day",
+      "why": "The post's illustrative GPU price, volume price and scale-up frequency. The study measured seconds, not invoices."
+    },
+    {
+      "value": "2,048 tokens",
+      "why": "An assumed average request length for the second concurrency case; 8,192 is the pinned context length."
+    }
+  ],
+  "derived_numbers": [
+    {
+      "value": "147,456",
+      "how": "2 (K and V) x 36 layers x 8 KV heads x 128 head dim x 2 bytes, from the assumed shape."
+    },
+    {
+      "value": "144",
+      "how": "147,456 B / 1,024 = 144 KiB per token."
+    },
+    {
+      "value": "35,826",
+      "how": "4.92 GiB x 2^30 B / 147,456 B per token = 35,826.2."
+    },
+    {
+      "value": "43,031",
+      "how": "5.91 GiB x 2^30 B / 147,456 B per token = 43,031.5."
+    },
+    {
+      "value": "7,209",
+      "how": "0.99 GiB x 2^30 B / 147,456 B per token = 7,208.97."
+    },
+    {
+      "value": "7,282",
+      "how": "2^30 B / 147,456 B per token = 7,281.8: tokens one GiB of profiling peak costs."
+    },
+    {
+      "value": "2,237",
+      "how": "35,792 / 16 = 2,237 blocks, exact."
+    },
+    {
+      "value": "17.48",
+      "how": "35,792 / 2,048 = 17.477."
+    },
+    {
+      "value": "21.02",
+      "how": "43,040 / 2,048 = 21.016."
+    },
+    {
+      "value": "16.4",
+      "how": "15.27 GiB x 1.0737 GB per GiB = 16.40 GB."
+    },
+    {
+      "value": "3.6",
+      "how": "16.40 GB / 4.57 s = 3.59 GB/s."
+    },
+    {
+      "value": "3,600",
+      "how": "Seconds in an hour."
+    },
+    {
+      "value": "0.00433",
+      "how": "15.60 s x $1.00 per hour / 3,600 s = $0.004333 per scale-up."
+    },
+    {
+      "value": "30.42",
+      "how": "365 / 12 days in an average month."
+    },
+    {
+      "value": "0.115",
+      "how": "$3.50 / 30.42 days = $0.1151 per day."
+    },
+    {
+      "value": "0.104",
+      "how": "24 x $0.004333 = $0.104 per day."
+    }
+  ]
+}

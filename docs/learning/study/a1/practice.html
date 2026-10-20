@@ -1,0 +1,270 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Practice: where a vLLM cold start goes</title><style>
+:root{--bg:#fafaf7;--fg:#1d2330;--muted:#5b6475;--card:#fff;--line:#d9dce3;
+--accent:#2f5fd0;--soft:#e8eefc;--warn:#b4540a;--warnsoft:#fdf0e3;--ok:#1f7a4d;
+--c0:#2a78d6;--c1:#eb6834;--c2:#1baf7a;--c3:#eda100;--c4:#e87ba4;--c5:#008300;
+--c6:#4a3aa7;--c7:#e34948;--t0:#000;--t1:#000;--t2:#000;--t3:#000;--t4:#000;
+--t5:#fff;--t6:#fff;--t7:#000}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#14171f;
+--fg:#e6e8ee;--muted:#9aa3b5;--card:#1c202b;--line:#323849;--accent:#7ea2ff;
+--soft:#222b45;--warn:#f0a15e;--warnsoft:#33261a;--ok:#5fcf9a;--c0:#3987e5;--c1:#d95926;
+--c2:#199e70;--c3:#c98500;--c4:#d55181;--c5:#008300;--c6:#9085e9;--c7:#e66767;
+--t6:#000;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#14171f;--fg:#e6e8ee;--muted:#9aa3b5;--card:#1c202b;
+--line:#323849;--accent:#7ea2ff;--soft:#222b45;--warn:#f0a15e;--warnsoft:#33261a;
+--ok:#5fcf9a;--c0:#3987e5;--c1:#d95926;--c2:#199e70;--c3:#c98500;--c4:#d55181;
+--c5:#008300;--c6:#9085e9;--c7:#e66767;--t6:#000;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans-serif;
+overflow-wrap:break-word}
+main{max-width:980px;margin:0 auto;padding:0 clamp(16px,4vw,40px) 64px}
+header.hero{padding:32px 0 8px}
+.kicker{color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.06em}
+h1{font-size:28px;line-height:1.2;margin:6px 0 8px}
+h2{font-size:21px;margin:0 0 8px}
+h3{font-size:16px;margin:12px 0 4px}
+p{margin:6px 0}
+.forunit{color:var(--muted);font-size:17px;margin:0 0 6px}
+.why{color:var(--muted);font-size:15px}
+nav.pills{position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);padding:8px 0;
+display:flex;gap:6px;flex-wrap:wrap;z-index:2;border-bottom:1px solid var(--line)}
+nav.pills a{padding:3px 10px;border:1px solid var(--line);border-radius:99px;
+color:var(--fg);text-decoration:none;font-size:13px}
+section{margin-top:34px;scroll-margin-top:64px}
+.card[id]{scroll-margin-top:64px}
+a{color:var(--accent)}
+ul,ol{margin:6px 0;padding-left:22px}li{margin:3px 0}
+code{font-size:.92em;background:var(--soft);padding:1px 5px;border-radius:4px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+padding:12px 16px;margin:10px 0}
+.card h3:first-child{margin-top:0}
+.code{display:inline-block;font-size:12px;font-weight:700;line-height:1.5;color:var(--accent);
+border:1px solid var(--accent);border-radius:5px;padding:0 5px;margin-right:8px;
+vertical-align:2px;font-variant-numeric:tabular-nums}
+.q{font-size:17px;margin:4px 0 8px}
+.dn{color:var(--muted);font-size:13px;font-weight:600;text-transform:uppercase;
+letter-spacing:.05em}
+details{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 12px;
+margin:6px 0}
+details>summary{cursor:pointer;font-weight:600}
+details[open]>summary{margin-bottom:4px}
+.card>details:first-of-type{margin-top:8px}
+details.redflag{border-color:var(--warn);background:var(--warnsoft)}
+details.redflag>summary{color:var(--warn)}
+.miss{color:var(--muted);font-size:15px}
+.badge{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.05em;
+text-transform:uppercase;border:1.5px solid currentColor;border-radius:99px;padding:1px 10px}
+.cost-none{color:var(--ok)}.cost-local{color:var(--accent)}.cost-gpu{color:var(--warn)}
+.cost-paid{background:var(--warn);border-color:var(--warn);color:var(--bg)}
+.lab-top{margin:0 0 6px}
+.rgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));
+gap:10px;align-items:start}
+.rgrid details{margin:0;background:var(--card)}
+.rcard>summary{font-weight:500}
+.tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;
+text-transform:uppercase;color:var(--muted);border:1px solid var(--line);border-radius:4px;
+padding:0 6px;margin-right:6px;vertical-align:1px}
+.drawmark{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;
+text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);border-radius:4px;
+padding:0 6px;margin-left:6px;vertical-align:1px}
+.rcard.draw{border-style:dashed;border-color:var(--accent)}
+.rback{margin-top:6px;padding-top:6px;border-top:1px solid var(--line)}
+.sched{list-style:none;padding:0}
+.sched li{display:grid;grid-template-columns:150px 1fr;gap:10px;padding:8px 0;
+border-top:1px solid var(--line)}
+.sched li:first-child{border-top:0}
+.sched b{color:var(--muted)}
+.callout{border-left:4px solid var(--accent);padding:6px 12px;background:var(--soft);
+border-radius:0 8px 8px 0;margin:8px 0}
+@media (min-width:1100px){body{font-size:17px}h1{font-size:34px}h2{font-size:24px}}
+@media (max-width:600px){h1{font-size:24px}.q{font-size:16px}
+.sched li{grid-template-columns:1fr;gap:0}
+nav.pills{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+--fadeL:#000;--fadeR:transparent;
+-webkit-mask-image:linear-gradient(#000,#000),linear-gradient(to right,var(--fadeL),#000 36px,#000 calc(100% - 36px),var(--fadeR));
+mask-image:linear-gradient(#000,#000),linear-gradient(to right,var(--fadeL),#000 36px,#000 calc(100% - 36px),var(--fadeR));
+-webkit-mask-size:100% 1px,100% 100%;mask-size:100% 1px,100% 100%;
+-webkit-mask-position:0 100%,0 0;mask-position:0 100%,0 0;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat}
+nav.pills[data-more=""]{-webkit-mask-image:none;mask-image:none}
+nav.pills[data-more~="left"]{--fadeL:transparent}nav.pills[data-more="left"]{--fadeR:#000}
+nav.pills::after{content:"";flex:none;width:32px}
+nav.pills::-webkit-scrollbar{display:none}nav.pills a{flex:none}}
+
+.calc-row{display:grid;grid-template-columns:minmax(0,1.2fr) 130px minmax(0,1.6fr);gap:6px 14px;
+align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+.calc-row:first-of-type{border-top:0}
+.calc-row label{font-weight:600}
+.calc-unit{color:var(--muted);font-size:13px;font-weight:400;margin-left:4px}
+.calc-row input[type=number]{font:inherit;width:100%;min-height:40px;padding:6px 8px;
+border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);
+font-variant-numeric:tabular-nums}
+.calc-row input[type=number]:focus-visible,.calc-reset:focus-visible{outline:3px solid var(--accent);
+outline-offset:2px}
+.calc-row input[type=range]{width:100%;min-height:32px;accent-color:var(--accent)}
+.calc-row input:disabled{opacity:.55}
+.calc-outs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));
+gap:10px;margin:12px 0 4px}
+.calc-out{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+.calc-ol{display:block;color:var(--muted);font-size:13px;font-weight:600;
+text-transform:uppercase;letter-spacing:.04em}
+.calc-ov{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.25}
+.calc-ov output{overflow-wrap:anywhere}
+.calc-nojs{color:var(--muted);font-size:14px;margin:8px 0 0}
+.calc-js .calc-nojs{display:none}
+.calc-reset{font:inherit;font-size:14px;color:var(--fg);background:var(--card);
+border:1px solid var(--line);border-radius:8px;padding:6px 14px;min-height:36px;cursor:pointer}
+.calc-reset[hidden]{display:none}
+.calc-reset:hover{background:var(--soft);border-color:var(--accent)}
+@media (max-width:600px){.calc-row{grid-template-columns:110px minmax(0,1fr)}
+.calc-row label{grid-column:1/-1}}
+</style></head><body><main><header class="hero"><div class="kicker">Practice page · about 35 min</div><h1>Practice: where a vLLM cold start goes</h1><p class="forunit">Practice for: Where a vLLM cold start goes</p><p class="why">Try every question before you open its answer. The study page is the reading; this page is the doing.</p></header><nav class="pills"><a href="#objectives">Objectives</a><a href="#check">Check first</a><a href="#estimation">Estimation</a><a href="#drills">Drills</a><a href="#scenario">Scenario</a><a href="#lab">Lab</a><a href="#calculator">Calculator</a><a href="#cards">Cards</a><a href="#schedule">Schedule</a><a href="#assumptions">Assumptions</a></nav><section id="objectives"><h2>Objectives</h2><ul><li>Draw one cold start as a time-ordered bar, naming what each cache shrinks and which block cannot be placed in order.</li><li>Compute KV cache tokens from the card, utilisation, weights, profiling peak and bytes per token, then the requests held at a length.</li><li>Explain why a warm cache directory gave 0.99 GiB more KV cache, and say what the log shows and what it does not.</li><li>Tell clock A from clock B, name what sets clock A&#x27;s resolution, and say what platform time holds.</li><li>Justify three arms and the interval on the difference of contrasts, and say what claim an interval crossing zero allows.</li><li>State three limits of the result and one platform design that warms the cache directory on deploy.</li></ul></section><section id="check"><h2>Check yourself first</h2><p class="why">Three questions the study page prepared you for. Answer out loud, then open.</p><div class="card pq"><p class="q"><span class="code">1</span>An 8B-parameter model in 16-bit weights: roughly how much GPU memory do the weights take, and what else has to fit?</p><details><summary>Show the answer</summary><p>About 16 GB (this unit&#x27;s log: 15.27 GiB). Also the KV cache and the working memory the engine measures at its profiling peak.</p><p class="miss">If you missed it, review <a href="../p1/page.html#c-hbm">GPU memory (VRAM)</a>.</p></details></div><div class="card pq"><p class="q"><span class="code">2</span>A bootstrap interval on a median: what is resampled, and can the interval reach a value no run took?</p><details><summary>Show the answer</summary><p>The runs, with replacement; each resample gives a median. Yes: a median can fall between two runs, so the interval can span a gap in the data.</p><p class="miss">If you missed it, review <a href="../p2/page.html#c-interval">Spread versus interval</a>.</p></details></div><div class="card pq"><p class="q"><span class="code">3</span>Why interleave arms in shuffled triples instead of running them in blocks?</p><details><summary>Show the answer</summary><p>Slow drift, such as a busy hour on the rented GPUs, then lands on all three arms instead of posing as an arm effect.</p><p class="miss">If you missed it, review <a href="../p2/page.html#c-pairing">Paired, interleaved runs</a>.</p></details></div></section><section id="estimation"><h2>Estimation drills</h2><p class="why">Do the arithmetic on paper first, then open the worked steps.</p><div class="card est" id="est-1"><h3>KV cache capacity on the 24 GB card</h3><p>From the log: the card reports 23.52 GiB, vLLM plans with 0.92 of it, weights plus non-torch memory use 15.54 GiB, and the profiling peak is 1.18 GiB (cold) or 0.19 GiB (warm). Assume Qwen3-8B keeps 2-byte K and V for 36 layers, 8 KV heads, head dim 128. How many tokens fit, and how many 8,192-token requests?</p><details><summary>Worked answer</summary><ol><li>Budget: 0.92 × 23.52 = 21.64 GiB.</li><li>KV memory: 21.64 − 15.54 − 1.18 = 4.92 GiB cold; 21.64 − 15.54 − 0.19 = 5.91 GiB warm.</li><li>Bytes per token: 2 (K and V) × 36 × 8 × 128 × 2 bytes = 147,456 B = 144 KiB (the shape is assumed).</li><li>Tokens: 4.92 GiB / 144 KiB ≈ 35,826 against the log&#x27;s 35,792, which is 2,237 blocks of 16 (block size assumed); 5.91 GiB gives ≈ 43,031 against 43,040. Rounding in the logged GiB explains the gap.</li><li>Gain: 0.99 GiB / 144 KiB ≈ 7,209 tokens against the observed 7,248. One GiB of profiling peak costs about 7,282 tokens.</li><li>Requests: 35,792 / 8,192 = 4.37 → 4 and 43,040 / 8,192 = 5.25 → 5; at 2,048 tokens, 17 against 21.</li></ol><p><b>Answer.</b> Close to the logged 35,792 and 43,040 tokens: 20.3% more warm, 4 against 5 whole 8,192-token requests, 17 against 21 at 2,048.</p></details></div><div class="card est" id="est-2"><h3>Does the weight cache pay for itself?</h3><p>Use the post&#x27;s illustrative prices (assumptions, not measured): $1.00 per GPU-hour, $3.50 a month for the volume, 24 scale-ups a day. The weight cache saves 15.60 s per scale-up. At how many scale-ups a day does it break even?</p><details><summary>Worked answer</summary><ol><li>Saving per scale-up: 15.60 s × $1.00 / 3,600 s ≈ $0.00433.</li><li>Volume per day: $3.50 / 30.42 days ≈ $0.115.</li><li>Break-even: 0.115 / 0.00433 ≈ 26.6 scale-ups a day.</li><li>At 24 a day the saving is 24 × 0.00433 ≈ $0.104 a day against $0.115: a small loss, a marginal call.</li><li>The compile cache stores for free (26.13 s saved per scale-up, break-even 0.16 a day), but each version change pays a cold compile again.</li></ol><p><b>Answer.</b> About 26.6 scale-ups a day, so 24 a day does not quite pay. Every dollar figure rescales with your own prices.</p></details></div></section><section id="drills"><h2>Deep-dive drill</h2><p class="why">Ordered easy to hard. Answer out loud, open the model answer, then the red-flag answer: the tempting reply that sounds right and is not.</p><div class="card drill" id="drill-1"><div class="dn">Drill 1 of 11</div><p class="q">Why three arms, and not two or four?</p><details><summary>Model answer</summary><p>A to B changes only the weight cache and B to C only the compile cache, so each saving gets its own one-step comparison. Two arms would test only weights; that was the fallback had this vLLM not compiled at startup, and it does. The fourth cell (weights cold, compile warm) has no operational meaning. A baked-image arm only moves the bytes into the image pull, inside the unsplit platform residual.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;More arms is always better&quot;, or proposing the baked image without saying its bytes move into a time the study cannot observe.</p></details></div><div class="card drill" id="drill-2"><div class="dn">Drill 2 of 11</div><p class="q">What is in platform time, and what is not?</p><details><summary>Model answer</summary><p>Platform time is total cold start minus the worker clock&#x27;s time: container and handler start, teardown and up to one 5 s poll of lag. It is the one allowed cross-clock subtraction, a residual rather than a measured phase. RunPod&#x27;s own queue delay was about 0.13 s (median), so it is not queueing.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;Platform time is the queue.&quot; Or treating it as a measured phase.</p></details></div><div class="card drill" id="drill-3"><div class="dn">Drill 3 of 11</div><p class="q">H1 says weight handling is over half of worker-clock time. Does weight loading dominate a cold start?</p><details><summary>Model answer</summary><p>H1 holds by its pre-registered definition: weight handling is a median 0.58 of worker-clock time in arm A, above half in all 100 runs. But that phase runs from launching vllm serve to the &quot;Model loading took&quot; line, so it is mostly server start-up (28.19 s median) beside vLLM&#x27;s own load (17.40 s of 79.09 s, about 22%). &quot;Weights dominate&quot; claims more than the data shows.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;Yes, weights dominate cold start&quot;, read straight off the 0.58.</p></details></div><div class="card drill" id="drill-4"><div class="dn">Drill 4 of 11</div><p class="q">What is clock A&#x27;s resolution, and what does it do to your intervals?</p><details><summary>Model answer</summary><p>The laptop learns a job has finished only at a status poll, every 5 s. Clock A&#x27;s spans repeat on a grid of about 5.175 s (289 of the 299 repeat-host runs lie within 0.25 s of it), so totals move in steps: arm A has runs at 80.92 to 81.16 s and at 85.72 to 85.89 s, none between. That is part of why the interval on the difference is wide. On the worker clock the same difference is −12.16 s [−15.54, −10.74], an exploratory check, not the pre-registered result.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;The cloud is noisy.&quot; Or swapping in the narrower worker-clock interval after seeing it.</p></details></div><div class="card drill" id="drill-5"><div class="dn">Drill 5 of 11</div><p class="q">Why is the compile cache&#x27;s interval, 25.97 to 31.01 s around 26.07 s, lopsided?</p><details><summary>Model answer</summary><p>B&#x27;s runs ranked 41 to 56 lie at 65.35 to 65.80 s and rank 57 is 70.29 s, while C&#x27;s median is steady near 39.4 s. A resample that draws few of B&#x27;s low runs, about one in ten, lifts B&#x27;s median into the 70 s cluster: 70.4 − 39.4 = 31.0, the interval&#x27;s top. The low runs are packed, so the bottom sits only 0.10 s under the estimate. The interval shows where the median can jump, given the gaps in the data.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;The bootstrap is broken&quot;, or reaching for a t-test because the interval is asymmetric.</p></details></div><div class="card drill" id="drill-6"><div class="dn">Drill 6 of 11</div><p class="q">Why does a warm compile cache leave more KV cache? Show the arithmetic, and say what is measured.</p><details><summary>Model answer</summary><p>vLLM plans with 0.92 of the card: 0.92 × 23.52 = 21.64 GiB. The KV cache gets what is left after weights and non-torch memory (15.54 GiB) and the profiling pass&#x27;s peak: 21.64 − 15.54 − 1.18 = 4.92 GiB after a cold compile, 21.64 − 15.54 − 0.19 = 5.91 GiB after a warm one, 35,792 against 43,040 tokens. It is sized once, so it is fixed for the replica&#x27;s life. The log shows the drop in peak, not its cause; H5 registered the compiler&#x27;s memory still being resident during profiling.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;The compiler leaks memory&quot;, or &quot;it frees up after compile, so it does not matter&quot;, or stating the cause as measured.</p></details></div><div class="card drill" id="drill-7"><div class="dn">Drill 7 of 11</div><p class="q">Is &quot;one more concurrent request&quot; the right way to state the KV gain?</p><details><summary>Model answer</summary><p>Not as the headline. 43,040 against 35,792 tokens is 20.3% more (7,248 tokens). Whole requests held depend on length: at 8,192 tokens, 4.37 → 4 against 5.25 → 5; at 2,048 tokens, 17.48 → 17 against 21.02 → 21. Report tokens, and give concurrency only for a stated length.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;25% more users&quot; (5 against 4), or quoting concurrency without the request length.</p></details></div><div class="card drill" id="drill-8"><div class="dn">Drill 8 of 11</div><p class="q">Arm C reaches &quot;model loaded&quot; 8.85 s sooner than B, with only the compile cache changed. What do you check?</p><details><summary>Model answer</summary><p>vLLM&#x27;s own load time is the same (4.57 vs 4.54 s). The engine log&#x27;s timestamps put the gap before the engine core starts: the API server&#x27;s step from the arguments line to architecture resolution takes about 10 s in B and 1 s in C. Arm C warms the whole vLLM cache directory, not only compiled code; a cached model-inspection result is the working guess, not confirmed. A next step would be to warm only part of the directory and watch that gap.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;Noise&quot;, or &quot;it is the compile&quot;, or &quot;unknown&quot; with no next step.</p></details></div><div class="card drill" id="drill-9"><div class="dn">Drill 9 of 11</div><p class="q">The volume load took 4.57 s for about 16 GB. Is that the volume&#x27;s throughput?</p><details><summary>Model answer</summary><p>It would be about 3.6 GB/s, high for network storage. All 300 runs landed on one host, and the first arm B run after a 19.8 h gap spent 17.45 s in vLLM&#x27;s load, so a warm host cache is one possible reading, unverified. Treat 4.57 s as a warm-host figure until it is measured on fresh hosts.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>Quoting 4.57 s as the volume&#x27;s throughput for any host.</p></details></div><div class="card drill" id="drill-10"><div class="dn">Drill 10 of 11</div><p class="q">Which cache do you build into a platform, and how do you justify it?</p><details><summary>Model answer</summary><p>Warm the compile cache in the deploy pipeline. It costs nothing to store, but a change of engine version, model, hardware or flags invalidates it, so otherwise the first scale-up after every upgrade pays the cold compile again (18.5 s here). The weight cache is a volume billed continuously: at the post&#x27;s illustrative prices it breaks even at 26.6 scale-ups a day. Say which numbers are assumptions.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>&quot;Cache everything on a shared volume&quot; with no invalidation story, or quoting the break-even as a measured result.</p></details></div><div class="card drill" id="drill-11"><div class="dn">Drill 11 of 11</div><p class="q">What does the study not tell you about a hundred replicas scaling at once?</p><details><summary>Model answer</summary><p>Nothing: every run was one replica alone, so contention on the volume, registry pulls and many hosts starting together were not tested. The one first-touch run, an image pull on a host that had never seen it, took 2266.6 s, far above every cache effect (15 to 26 s). If scale-up can reach new hosts, image distribution may dominate; that is one observation, not a headline.</p></details><details class="redflag"><summary>Red-flag answer</summary><p>Extrapolating this study&#x27;s seconds to fleet behaviour.</p></details></div></section><section id="scenario"><h2>Design scenario</h2><div class="card"><p class="q">You run a serverless inference platform. Customers deploy 7B to 14B open-weight models on 24 GB GPUs. Product wants the first token of a scale-from-zero replica within 30 s at p95, and engine upgrades ship every two weeks. Design the cold-start path, and say what you would measure.</p><details><summary>Outline of a strong answer</summary><ol><li>Decompose before optimising: a worker clock around the engine with log-line timestamps, and a platform clock finer than a 5 s poll. Budget platform, start-up, weight load, compile, profiling, capture, ready and first token.</li><li>Compile and engine caches as build artifacts: in CI, start the engine once per engine version, model revision, GPU model and flag set, and publish the cache directory versioned. Check the key at start and alert on a miss. Here a warm directory was worth about 26 s a start and 20.3% more KV cache.</li><li>Weights: a volume or node-local copy beat the hub here (vLLM&#x27;s load 17.40 s against 4.57 s), but 4.57 s may be a warm-host figure. Measure first reads on fresh hosts before promising it, and weigh the volume&#x27;s fixed cost against scale-up frequency.</li><li>Image distribution: the one first-touch run took 2266.6 s, far above every cache effect. Pre-pull on node join and keep the image warm; this study has one observation, not a rate.</li><li>Capture and readiness: graph capture is a flat 4 s here, and skipping it (--enforce-eager) saves that per start but costs on every token after, so it suits only short-lived replicas. Gate traffic on /health, and check per engine version that warm-up finishes before it answers (true for 0.27.1 here).</li><li>Capacity: report KV tokens per replica as an indicator. A cold compile cost 20.3% of it for the replica&#x27;s life here.</li><li>Measure: p50 and p95 time to first token from zero, split by host warmth; cache-key miss rate after each upgrade; KV tokens per replica; and contention when many replicas start together, which this study did not test.</li><li>Trade-offs: the cache matrix grows with GPU models, versions and flags, so build only what the fleet runs. A warm pool costs idle GPU-hours; compare it with the break-even arithmetic.</li></ol></details><details class="redflag"><summary>Pitfalls to check your answer against</summary><ul><li>Quoting this study&#x27;s seconds for other GPUs, models, engine versions or providers: the seconds do not transfer, the mechanisms do.</li><li>Promising the weight-cache speed-up from warm-host numbers: all 300 runs used one host.</li><li>A compile cache with no key check, so a routine upgrade turns it cold in silence.</li><li>Reporting a p99 or a mean from a hundred starts per set-up.</li><li>Treating a first-touch image pull as a normal start, or ignoring it.</li></ul></details></div></section><section id="lab"><h2>Lab</h2><div class="card lab"><div class="lab-top"><span class="badge cost-none">No cost</span></div><p><b>Goal.</b> See the poll grid, the log localisation, the memory line and the exact re-derivation on your own laptop.</p><p class="why">An optional paid extension (warming only part of the vLLM cache directory on one rented GPU) would test the cause of the head start; it is not part of this lab and is untested.</p><h3>Setup</h3><ul><li>A checkout of the repo with the committed data/campaign.jsonl. Use .venv/bin/python and never uv run.</li><li>No GPU, no network and no paid call.</li></ul><h3>Steps</h3><ol><li>Run .venv/bin/python scripts/analyse.py --store data/campaign.jsonl &gt; /tmp/a1_analysis.json, then cmp /tmp/a1_analysis.json data/analysis.json. Expect no output: the file reproduces byte for byte.</li><li>Run .venv/bin/python scripts/weights_phase_check.py --store data/campaign.jsonl. Expect start-up before load of 28.19, 25.28 and 16.67 s beside vLLM-reported loads of 17.40, 4.57 and 4.54 s.</li><li>Take each run&#x27;s clock A span (t_total_job from coldstart.analysis.metrics.derive) and fold it modulo trial periods around 5 s. The period with the tightest bunching is about 5.175 s.</li><li>Plot an ECDF of t_total per arm over the repeat-host runs (drop the one first-touch run). Expect stairs about 5 s apart.</li><li>Call harness.stats.bootstrap_contrast_difference(a, b, c, seed=3) on t_process, then on t_total. Expect about −12.16 [−15.54, −10.74] and −10.39 [−20.30, −5.54].</li><li>For each run&#x27;s engine log lines, take the timestamps of the non-default args line and the Resolved architecture line, and print the median gap per arm. Expect 10, 10 and 1 s.</li><li>Read the Desired GPU memory utilization and Actual usage log lines, and recompute KV memory and tokens with the calculator on this page.</li></ol><h3>Record</h3><ul><li>Byte identity of the analysis file</li><li>Fitted poll period, and how many of the 299 spans lie within 0.25 s of it (expect 289)</li><li>Interval widths on the worker clock and the laptop clock</li><li>Median engine-log gaps per arm</li><li>KV memory and tokens against the logged 4.92 and 5.91 GiB, 35,792 and 43,040 tokens</li></ul><details><summary>Expected result and what it shows</summary><p><b>Expected.</b> Everything reproduces from the committed store: identical analysis file, the three start-up figures, a poll grid near 5.175 s, a worker-clock interval about a third as wide as the laptop-clock one, a 10 s, 10 s and 1 s architecture gap, and KV numbers within rounding of the log.</p><p><b>Shows.</b> The clock&#x27;s resolution sets interval width, the engine log holds more than the summary, and the memory arithmetic closes within rounding.</p></details></div></section><section id="calculator"><h2>KV cache capacity</h2><p class="why">Defaults are arm B&#x27;s logged values (cold compile); set the peak to 0.19 for arm C. Card, utilisation, fixed memory and peak come from the engine log. Bytes per token and request length are assumptions, listed below.</p><div class="card" data-calc><div class="calc-row"><label for="calc-card">Card memory<span class="calc-unit">GiB</span></label><input type="number" id="calc-card" data-id="card" value="23.52" min="8" max="80" step="any" disabled><input type="range" data-for="card" value="23.52" min="8" max="80" step="0.01" disabled aria-label="Card memory"></div><div class="calc-row"><label for="calc-util">Utilisation fraction</label><input type="number" id="calc-util" data-id="util" value="0.92" min="0.5" max="0.98" step="any" disabled><input type="range" data-for="util" value="0.92" min="0.5" max="0.98" step="0.01" disabled aria-label="Utilisation fraction"></div><div class="calc-row"><label for="calc-fixed">Weights + non-torch<span class="calc-unit">GiB</span></label><input type="number" id="calc-fixed" data-id="fixed" value="15.54" min="4" max="70" step="any" disabled><input type="range" data-for="fixed" value="15.54" min="4" max="70" step="0.01" disabled aria-label="Weights + non-torch"></div><div class="calc-row"><label for="calc-peak">Profiling peak<span class="calc-unit">GiB</span></label><input type="number" id="calc-peak" data-id="peak" value="1.18" min="0" max="6" step="any" disabled><input type="range" data-for="peak" value="1.18" min="0" max="6" step="0.01" disabled aria-label="Profiling peak"></div><div class="calc-row"><label for="calc-kib">KV bytes per token<span class="calc-unit">KiB</span></label><input type="number" id="calc-kib" data-id="kib" value="144" min="16" max="1024" step="any" disabled><input type="range" data-for="kib" value="144" min="16" max="1024" step="1" disabled aria-label="KV bytes per token"></div><div class="calc-row"><label for="calc-req">Request length<span class="calc-unit">tokens</span></label><input type="number" id="calc-req" data-id="req" value="8192" min="256" max="32768" step="any" disabled><input type="range" data-for="req" value="8192" min="256" max="32768" step="256" disabled aria-label="Request length"></div><div class="calc-outs" aria-live="polite"><div class="calc-out"><span class="calc-ol">KV cache memory</span><span class="calc-ov"><output data-expr="card * util - fixed - peak" data-digits="2">4.92</output> <span class="calc-unit">GiB</span></span></div><div class="calc-out"><span class="calc-ol">Tokens that fit</span><span class="calc-ov"><output data-expr="max(0, floor((card * util - fixed - peak) * 1048576 / kib))" data-digits="0">35,814</output></span></div><div class="calc-out"><span class="calc-ol">Whole requests held</span><span class="calc-ov"><output data-expr="max(0, floor(floor((card * util - fixed - peak) * 1048576 / kib) / req))" data-digits="0">4</output></span></div><div class="calc-out"><span class="calc-ol">Tokens per GiB of peak</span><span class="calc-ov"><output data-expr="1048576 / kib" data-digits="0">7,282</output></span></div></div><p class="calc-nojs">JavaScript is off: these are the values at the default inputs.</p><p><button type="button" class="calc-reset" hidden>Reset to defaults</button></p></div></section><section id="cards"><h2>Recall cards</h2><p class="why">Read the front, say the back, then open. A card marked "Draw it" asks you to sketch first.</p><div class="rgrid"><details class="rcard"><summary><span class="tag">phases</span>List one cold start&#x27;s phases in clock order.</summary><div class="rback">Platform, start-up before load, weight load, compile, profiling, unattributed engine start (device initialisation and KV allocation, not split by the log), graph capture, ready check, first request.</div></details><details class="rcard"><summary><span class="tag">phases</span>Median start-up before load and vLLM-reported load, per arm?</summary><div class="rback">A: 28.19 s and 17.40 s. B: 25.28 s and 4.57 s. C: 16.67 s and 4.54 s.</div></details><details class="rcard"><summary><span class="tag">caches</span>What did the weight cache (A to B) shrink?</summary><div class="rback">vLLM&#x27;s load, 17.40 → 4.57 s. Start-up before load barely moved, 28.19 → 25.28 s, and compile stayed near 19 s.</div></details><details class="rcard"><summary><span class="tag">caches</span>What did the warm cache directory (B to C) shrink?</summary><div class="rback">Compile, 18.79 → 0.33 s, and start-up before load, 25.28 → 16.67 s. vLLM&#x27;s load did not change.</div></details><details class="rcard"><summary><span class="tag">caches</span>Where in the engine log is arm C&#x27;s start-up head start?</summary><div class="rback">Between the arguments line and architecture resolution, in the API server before the engine core: median 10 s in A and B, 1 s in C. The cause is unconfirmed.</div></details><details class="rcard"><summary><span class="tag">memory</span>Write the KV budget with this run&#x27;s numbers.</summary><div class="rback">KV = 0.92 × 23.52 − 15.54 − peak: 4.92 GiB at a 1.18 GiB peak, 5.91 GiB at 0.19.</div></details><details class="rcard"><summary><span class="tag">memory</span>KV bytes per token for Qwen3-8B (assumed shape)?</summary><div class="rback">2 × 36 × 8 × 128 × 2 = 147,456 B = 144 KiB, matching the log&#x27;s 35,792 tokens in 4.92 GiB within rounding.</div></details><details class="rcard"><summary><span class="tag">memory</span>Why does the smaller KV cache from a cold compile last?</summary><div class="rback">It is sized once, from the profiling pass&#x27;s peak, and not resized, so it is fixed for the replica&#x27;s life.</div></details><details class="rcard"><summary><span class="tag">memory</span>Whole 8,192-token requests held, cold against warm? And at 2,048 tokens?</summary><div class="rback">4 against 5 (4.37 and 5.25); 17 against 21 (17.48 and 21.02).</div></details><details class="rcard"><summary><span class="tag">clocks</span>Where does clock B start and stop?</summary><div class="rback">From just before vllm serve is launched to the end of the first request. Requests 2 to 10 are the warm-up tail, subtracted from clock A&#x27;s span.</div></details><details class="rcard"><summary><span class="tag">clocks</span>What sets clock A&#x27;s resolution?</summary><div class="rback">The 5 s status poll: spans repeat on a grid of about 5.175 s, 289 of 299 within 0.25 s of it.</div></details><details class="rcard"><summary><span class="tag">clocks</span>What is platform time, and what is it not?</summary><div class="rback">Total minus clock B time: container and handler start, teardown, up to one poll of lag. Not queueing: RunPod&#x27;s queue delay was about 0.13 s.</div></details><details class="rcard"><summary><span class="tag">stats</span>The headline difference and its interval?</summary><div class="rback">−10.39 s, 95% [−20.30, −5.54] on total cold start: the compile cache saves more.</div></details><details class="rcard"><summary><span class="tag">stats</span>The same difference on the worker clock?</summary><div class="rback">−12.16 s [−15.54, −10.74]: exploratory, with no poll lag and platform time left out.</div></details><details class="rcard"><summary><span class="tag">stats</span>Why is B − C&#x27;s interval, 25.97 to 31.01 around 26.07, lopsided?</summary><div class="rback">B&#x27;s runs ranked 41 to 56 sit at 65.35 to 65.80 s and rank 57 is 70.29 s: a resample can lift B&#x27;s median into the 70 s cluster, but not far below.</div></details><details class="rcard"><summary><span class="tag">stats</span>If the difference&#x27;s interval ran from −20 to +3 s, what could you claim?</summary><div class="rback">Each cache&#x27;s own saving, but not the ranking, which needs an interval that excludes zero.</div></details><details class="rcard"><summary><span class="tag">design</span>Why prime arm C outside the campaign?</summary><div class="rback">Otherwise its early runs compile cold and later ones do not: a mixture that looks like a trend.</div></details><details class="rcard"><summary><span class="tag">design</span>Why check the cache state before the engine starts?</summary><div class="rback">A cold compile creates the directory as it finishes, so checked afterwards every cold run would look warm.</div></details><details class="rcard"><summary><span class="tag">design</span>What was fixed before the campaign, and what was added after?</summary><div class="rback">Before: hypotheses, contrasts, exclusion and stopping rules, the headline rule. After, as dated amendments: the first-touch rule (post hoc) and the H4 scoping.</div></details><details class="rcard"><summary><span class="tag">limits</span>Three things this study cannot tell you.</summary><div class="rback">Other GPUs, models, engine versions or providers; contention with many replicas at once; whether host placement drives the tail (all runs on one host).</div></details><details class="rcard"><summary><span class="tag">ops</span>What invalidates a compile cache, and what is the platform fix?</summary><div class="rback">A change of engine version, model, hardware or flags. Warm it in the deploy pipeline, keyed per combination.</div></details><details class="rcard draw"><summary><span class="tag">draw it: phases</span>Draw it: the time-ordered bar for arms B and C, naming which block each cache shrinks.<span class="drawmark">Draw it</span></summary><div class="rback">Left to right: platform, start-up before load, weight load, compile, profiling, unattributed, capture to first request. The weight cache shrinks the load block; the warm cache directory shrinks compile and start-up.</div></details><details class="rcard draw"><summary><span class="tag">draw it: clocks</span>Draw it: one run as a sequence with both clocks, the 0.25 s health poll and the 5 s status poll.<span class="drawmark">Draw it</span></summary><div class="rback">Driver, RunPod, handler, probe, vllm serve. Clock A from the submit to the poll that sees the result; clock B from just before the launch to the first reply; requests 2 to 10 subtracted from clock A&#x27;s span.</div></details><details class="rcard draw"><summary><span class="tag">draw it: memory</span>Draw it: the memory budget for the cold and the warm arm, with its four numbers.<span class="drawmark">Draw it</span></summary><div class="rback">A 21.64 GiB budget: 15.54 for weights and non-torch, a peak of 1.18 or 0.19, and 4.92 or 5.91 left for the KV cache.</div></details></div></section><section id="schedule"><h2>Review schedule</h2><ul class="sched"><li><b>Day 1</b><span>Draw the last three cards from memory and check them against the page. Do the first estimation without notes.</span></li><li><b>Day 3</b><span>Cards 1 to 12 out loud, then drills 1 to 5, then the 2-minute answer in the interview card.</span></li><li><b>Day 7</b><span>Cards 13 to 21 and the second estimation; drills 6 to 11 with the brief&#x27;s interview mode.</span></li><li><b>Day 21</b><span>The design scenario, whiteboarded in 20 minutes; redraw the three draw cards; run the lab if not done.</span></li></ul></section><section id="assumptions"><details><summary>Numbers assumed or worked out on this page, 20</summary><p class="why">None of these comes from the study page's sources.</p><ul><li><code>36 layers, 8 KV heads, head dim 128</code> Qwen3-8B&#x27;s published shape, with 2-byte K and V, not read in this repo. It reproduces the log: 4.92 GiB over 35,792 tokens is about 144 KiB per token.</li><li><code>16-token blocks</code> vLLM&#x27;s block size, assumed; the log prints tokens, not blocks. Both token counts are multiples of 16.</li><li><code>$1.00 an hour, $3.50 a month, 24 a day</code> The post&#x27;s illustrative GPU price, volume price and scale-up frequency. The study measured seconds, not invoices.</li><li><code>2,048 tokens</code> An assumed average request length for the second concurrency case; 8,192 is the pinned context length.</li><li><code>147,456</code> worked out: 2 (K and V) x 36 layers x 8 KV heads x 128 head dim x 2 bytes, from the assumed shape.</li><li><code>144</code> worked out: 147,456 B / 1,024 = 144 KiB per token.</li><li><code>35,826</code> worked out: 4.92 GiB x 2^30 B / 147,456 B per token = 35,826.2.</li><li><code>43,031</code> worked out: 5.91 GiB x 2^30 B / 147,456 B per token = 43,031.5.</li><li><code>7,209</code> worked out: 0.99 GiB x 2^30 B / 147,456 B per token = 7,208.97.</li><li><code>7,282</code> worked out: 2^30 B / 147,456 B per token = 7,281.8: tokens one GiB of profiling peak costs.</li><li><code>2,237</code> worked out: 35,792 / 16 = 2,237 blocks, exact.</li><li><code>17.48</code> worked out: 35,792 / 2,048 = 17.477.</li><li><code>21.02</code> worked out: 43,040 / 2,048 = 21.016.</li><li><code>16.4</code> worked out: 15.27 GiB x 1.0737 GB per GiB = 16.40 GB.</li><li><code>3.6</code> worked out: 16.40 GB / 4.57 s = 3.59 GB/s.</li><li><code>3,600</code> worked out: Seconds in an hour.</li><li><code>0.00433</code> worked out: 15.60 s x $1.00 per hour / 3,600 s = $0.004333 per scale-up.</li><li><code>30.42</code> worked out: 365 / 12 days in an average month.</li><li><code>0.115</code> worked out: $3.50 / 30.42 days = $0.1151 per day.</li><li><code>0.104</code> worked out: 24 x $0.004333 = $0.104 per day.</li></ul></details></section></main><script>
+for (const n of document.querySelectorAll('nav.pills')) {
+  // Which edges hide pills: the phone CSS fades those edges, and none once all fit.
+  const mark = () => { const more = [];
+    if (n.scrollLeft > 2) more.push('left');
+    if (n.scrollLeft + n.clientWidth < n.scrollWidth - 2) more.push('right');
+    n.dataset.more = more.join(' '); };
+  n.addEventListener('scroll', mark, {passive: true});
+  addEventListener('resize', mark);
+  mark();
+}
+
+const CALC_FUNCTIONS = {ceil: [1, 1], floor: [1, 1], abs: [1, 1], sqrt: [1, 1], log2: [1, 1],
+  log10: [1, 1], min: [2, Infinity], max: [2, Infinity]};
+function calcParse(src) {
+  if (!src.trim()) throw new Error('the expression is empty');
+  if (src.length > 200) throw new Error('the expression is too long');
+  const re = /\s*(?:(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)|([A-Za-z_][A-Za-z0-9_]*)|(.))/y;
+  const text = src.replace(/\s+$/, ''), toks = [];
+  while (re.lastIndex < text.length) {
+    const m = re.exec(text);
+    if (m[1] !== undefined) toks.push(['num', m[1]]);
+    else if (m[2] !== undefined) toks.push(['name', m[2]]);
+    else if ('+-*/^(),'.includes(m[3])) toks.push(['op', m[3]]);
+    else throw new Error("unexpected character '" + m[3] + "'");
+  }
+  let i = 0, depth = 0;
+  const peek = () => (i < toks.length ? toks[i] : ['end', '']);
+  const isOp = (...ops) => { const t = peek(); return t[0] === 'op' && ops.includes(t[1]); };
+  const fail = () => { throw new Error('unexpected ' + peek()[0] + ' ' + peek()[1]); };
+  const enter = () => { if (++depth > 32) throw new Error('nested too deep'); };
+  const close = () => { if (!isOp(')')) fail(); i++; depth--; };
+  function expr() {
+    let n = term();
+    while (isOp('+', '-')) { const o = toks[i++][1]; n = ['bin', o, n, term()]; }
+    return n;
+  }
+  function term() {
+    let n = unary();
+    while (isOp('*', '/')) { const o = toks[i++][1]; n = ['bin', o, n, unary()]; }
+    return n;
+  }
+  function unary() {
+    if (isOp('-', '+')) { const s = toks[i++][1], n = unary(); return s === '-' ? ['neg', n] : n; }
+    return power();
+  }
+  function power() {
+    const base = atom();
+    if (isOp('^')) { i++; return ['bin', '^', base, unary()]; }
+    return base;
+  }
+  function atom() {
+    const t = peek();
+    if (t[0] === 'num') { i++; return ['num', parseFloat(t[1])]; }
+    if (t[0] === 'name') {
+      i++;
+      if (!isOp('(')) return ['var', t[1]];
+      if (!(t[1] in CALC_FUNCTIONS)) throw new Error('unknown function ' + t[1]);
+      i++; enter();
+      const args = [expr()];
+      while (isOp(',')) { i++; args.push(expr()); }
+      close();
+      const [lo, hi] = CALC_FUNCTIONS[t[1]];
+      if (args.length < lo || args.length > hi) throw new Error('wrong number of arguments to ' + t[1]);
+      return ['call', t[1], args];
+    }
+    if (t[0] === 'op' && t[1] === '(') { i++; enter(); const n = expr(); close(); return n; }
+    return fail();
+  }
+  const tree = expr();
+  if (peek()[0] !== 'end') fail();
+  return tree;
+}
+function calcFinite(v) {
+  if (!Number.isFinite(v)) throw new Error('not a finite number');
+  return v;
+}
+function calcEval(n, vars) {
+  switch (n[0]) {
+    case 'num': return n[1];
+    case 'var':
+      if (!(n[1] in vars)) throw new Error('no value for ' + n[1]);
+      return calcFinite(vars[n[1]]);
+    case 'neg': return -calcEval(n[1], vars);
+    case 'call': {
+      const a = n[2].map(x => calcEval(x, vars)), x = a[0];
+      switch (n[1]) {
+        case 'min': return calcFinite(Math.min(...a));
+        case 'max': return calcFinite(Math.max(...a));
+        case 'ceil': return calcFinite(Math.ceil(x));
+        case 'floor': return calcFinite(Math.floor(x));
+        case 'abs': return calcFinite(Math.abs(x));
+        case 'sqrt': if (x < 0) throw new Error('sqrt of a negative number');
+          return calcFinite(Math.sqrt(x));
+        default: if (x <= 0) throw new Error('log of a non-positive number');
+          return calcFinite(n[1] === 'log2' ? Math.log2(x) : Math.log10(x));
+      }
+    }
+    default: {
+      const a = calcEval(n[2], vars), b = calcEval(n[3], vars);
+      switch (n[1]) {
+        case '+': return calcFinite(a + b);
+        case '-': return calcFinite(a - b);
+        case '*': return calcFinite(a * b);
+        case '/': if (b === 0) throw new Error('division by zero');
+          return calcFinite(a / b);
+        default: return calcFinite(Math.pow(a, b));
+      }
+    }
+  }
+}
+function calcFmt(v, digits) {
+  if (Math.abs(v) >= 1e15) return v.toExponential(digits);
+  const t = Math.abs(v).toFixed(digits), p = t.split('.');
+  const out = p[0].replace(/\B(?=(\d{3})+$)/g, ',') + (p[1] ? '.' + p[1] : '');
+  return (v < 0 && /[1-9]/.test(t) ? '-' : '') + out;
+}
+
+for (const g of document.querySelectorAll('[data-calc]')) {
+  const nums = [...g.querySelectorAll('input[type=number]')];
+  const outs = [...g.querySelectorAll('output[data-expr]')];
+  const trees = outs.map(o => { try { return calcParse(o.dataset.expr); } catch (e) { return null; } });
+  const slider = n => g.querySelector('input[type=range][data-for="' + n.dataset.id + '"]');
+  const run = () => {
+    const vars = {};
+    nums.forEach(n => { vars[n.dataset.id] = n.value.trim() === '' ? NaN : Number(n.value); });
+    const ok = Object.values(vars).every(Number.isFinite);
+    outs.forEach((o, i) => {
+      let text = 'n/a';
+      try { if (ok && trees[i]) text = calcFmt(calcEval(trees[i], vars), +o.dataset.digits); }
+      catch (e) { /* stays n/a */ }
+      o.textContent = text;
+    });
+  };
+  nums.forEach(n => {
+    const r = slider(n);
+    n.addEventListener('input', () => {
+      if (r && n.value.trim() !== '' && Number.isFinite(Number(n.value))) r.value = n.value;
+      run();
+    });
+    if (r) r.addEventListener('input', () => { n.value = r.value; run(); });
+  });
+  g.querySelector('.calc-reset').addEventListener('click', () => {
+    nums.forEach(n => { n.value = n.defaultValue; const r = slider(n); if (r) r.value = r.defaultValue; });
+    run();
+  });
+  g.querySelectorAll('input').forEach(i => { i.disabled = false; });
+  g.querySelector('.calc-reset').hidden = false;
+  g.classList.add('calc-js');
+  run();
+}
+</script></body></html>
