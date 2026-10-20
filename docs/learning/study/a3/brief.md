@@ -22,13 +22,13 @@ Read first: How these experiments earn trust (P2).
 ## Need to know first
 
 - **Six categories, and the first rule that applies wins**: The model executes nothing: it emits a structured request (a tool, JSON arguments) and the harness decides what to do with it, so every failure is a property of that request and needs no judgment about meaning. Provider errors, refusals and truncations are excluded first and counted per cell. Then: `MALFORMED` (not a valid call to a tool that was shown: unparseable, a tool not in context, a required key missing, a wrong JSON type), `SPURIOUS` (a call where none was expected), `MISSING` (no call where one was), `WRONG_TOOL`, `WRONG_PARAMS` (a wrong value, enum or pattern miss, or an unknown key), `CORRECT`. The category depends on what was rendered: a call to `get_current_weather` is `MALFORMED` in a cell that shows two other tools and `WRONG_TOOL` in the 20-tool cell that shows it. Think of it as: The model is a client sending an RPC, the harness a gateway validating it: parse, then schema, then routing, then business rules. The order is part of the contract, as a 400 is decided before a 404.
-- **The eight cells**: Count: the scenario's own 2 to 4 tools, or exactly 20 (those, 4 to 6 look-alikes written for the scenario (the current suite has 4 or 5), and filler from its own domain first, then others). Richness: terse one-liners or rich descriptions. Strictness: loose types (only the first required parameter in `required`) or strict enums, patterns and every required key. Baseline: low, terse, loose. Rich text may state a constraint in words that a strict schema states in structure, so richness and strictness overlap. Think of it as: A configuration matrix in which each axis changes one thing and the system prompt is one fixed text in every cell, like a deploy matrix that differs only in the flag under test.
-- **Strictness is schema content, and every call is graded against one canonical schema**: Each tool has one canonical schema, its strict form, and every call in every cell is graded against it, whatever the model was shown. A loose schema is charged for constraints it never showed: that is the measurement of what loose costs, not a bug. Provider strict mode (constrained decoding) is off in all eight cells, because it would make `MALFORMED` nearly impossible by construction and test the API, not the model; one exploratory slice turns it on. Think of it as: Contract testing: a consumer's request is validated against the provider's real contract, not the subset the docs showed. And a type system that makes invalid states unrepresentable versus documentation plus a validator at the edge: this study asks whether the model reads the documentation.
+- **The eight cells**: Three factors, two levels each: tool count, description richness, schema strictness; the table under Results shows the levels. Baseline: low, terse, loose. Think of it as: A configuration matrix in which each axis changes one thing and the system prompt is one fixed text in every cell, like a deploy matrix that differs only in the flag under test.
+- **Strictness is schema content, and every call is graded against one canonical schema**: Each tool has one canonical schema, its strict form, and every call in every cell is graded against it, whatever the model was shown. A loose schema is charged for constraints it never showed: that is the measurement of what loose costs, not a bug. Provider strict mode (constrained decoding) stays off in all eight cells; decision D2 gives the reason. Think of it as: Contract testing: a consumer's request is validated against the provider's real contract, not the subset the docs showed. And a type system that makes invalid states unrepresentable versus documentation plus a validator at the edge: this study asks whether the model reads the documentation.
 - **The unit of independent variation is the scenario**: N reruns of one scenario carry between one and N scenarios' worth of information, set by the intra-scenario correlation ρ. S scenarios × N repetitions have effective size S·N / (1 + (N − 1)ρ), which approaches S/ρ however many repetitions are added. Intervals resample whole scenarios; Wilson intervals are used only within one scenario. Think of it as: A flaky test failing 20 times in CI is one bug with 20 symptoms. A dashboard counting failures counts symptoms; the bootstrap over scenarios counts bugs.
 - **Main effects, interactions and the scale**: A main effect is the high-level rate minus the low-level rate, averaged over the other two factors, in percentage points. An interaction is one factor's effect at the other's high level minus its effect at the low level: the difference, as the code computes it, not that difference halved. Say which convention you mean. The scale is fixed in advance because an interaction on the percentage-point scale can vanish on a ratio scale. Think of it as: An ablation table where you ask not only whether a component helps, but whether it helps more on a large cluster than on a small one.
 - **The baseline band, and what it selects**: Every candidate runs 10 times at the baseline cell and is included if its correct rate falls in a band, proposed as 0.10 to 0.90 and frozen at step 1. It picks where the instrument has resolution: scenarios a model always passes could hide a real effect. Every candidate and decision is published, and excluded ones stay in the repository. One reading the sources do not state: a rate strictly between 0 and 1 means the reruns disagreed, so the band also selects for flipping; how many candidates survive is what the pilot measures. Think of it as: Sizing a load test: choose a load at which the system sometimes fails, because a load at which nothing ever fails cannot show which change helps.
 - **Recovery, and the identical retry**: A mock service rejects a call as the scenario says (an invalid parameter, a contradicting result, a timeout or a malformed payload) in one of two formats: actionable (names the parameter, says what to do) or opaque (`Error: invalid request.`). Up to three attempts follow. Identical retry: the first action after the error repeats the failing call unchanged. For a rejection that is a loop; for a timeout it is the right move, so H4 counts the persistent kinds only. A conversation ends as `recovered`, `gave_up` (stopped calling, no success claim; includes asking the user), `hallucinated_success` (stopped calling, a success-shaped message with no disclosed failure: a pattern proxy with known misses), or `budget_exhausted` (rejected at the third attempt, neither of the other two). Think of it as: HTTP semantics: a 400 with a field error must not be retried unchanged, a 504 may be if the call is idempotent. An agent retrying a non-idempotent call after a timeout meets the duplicate-payment problem of artifact 6.
-- **Cost per successful call, and the retry walk**: All spend, failed attempts included, divided by correct calls. A retry policy of up to three attempts is costed by walking each scenario's recorded reruns in order, not with c / (1 − f), which assumes each retry is an independent draw. If a failing scenario fails again, the formula understates the cost: in an illustrative calculation with f = 0.3 and a cap of 3, the formula and independent failures give 1.43 calls per success, and 2.29 if the failing 30% of scenarios always fail. Think of it as: Capacity planning for retries: independent failures make retries cheap, but a poison message that fails every time makes every retry pure cost.
+- **Cost per successful call, and the retry walk**: All spend, failed attempts included, divided by correct calls. A retry policy of up to three attempts is costed by walking each scenario's recorded reruns in order, not with c / (1 − f), which assumes each retry is an independent draw and understates the cost when a failing scenario fails again (see the retry walk). Think of it as: Capacity planning for retries: independent failures make retries cheap, but a poison message that fails every time makes every retry pure cost.
 - **Known contradiction in the sources: the August learning guide against the amendment**: The August design's learning guide (§9b) and its definition of done (§10) predate the amendment that governs the design. Module 4 works an example of 20 scenarios × 20 repetitions = 400 observations; the amendment sets at least 24 scenarios and N from the pilot's ρ. Module 5 and §10 present Wilson intervals for reported proportions; the amendment allows Wilson only within one scenario. Module 6 teaches temperature-0 nondeterminism as the headline (August H5); amendment §12 revises it and adds a module on clustering, citing near-deterministic reruns. The amendment says it governs, and its supersession list (§11) replaces §5's Wilson-on-cell-rates and the ~20-scenario count, but does not name §9b's modules 4 and 5 or §10's Wilson item (§12 does revise Module 6). **This page follows the amendment.** Think of it as: A runbook that predates an incident-driven change to the design: where the two disagree, the later, approved document is the one to follow, and the stale one is a known trap.
 
 ## How it works
@@ -271,9 +271,12 @@ The conversation from How it works, on `weather-forecast-lisbon`, baseline cell.
 **Results and the decisions they support:**
 
 - What the suite is made of (an instrument fact, not a result) → `grader` Grade by rule, against one canonical schema, `recovery` Keep the recovery sub-design, with a floor rule and at least 20 scenarios
+- Factors, low and high → `factorial` Vary the presentation, hold the model fixed, cross the factors
 - The grader on hand-labelled boundary cases (a control, not a result) → `grader` Grade by rule, against one canonical schema
 - Hypotheses H1 to H5 as the approved amendment words them (not yet frozen; results pending) → `factorial` Vary the presentation, hold the model fixed, cross the factors, `recovery` Keep the recovery sub-design, with a floor rule and at least 20 scenarios, `rules` Pre-register in two dated steps, behind a spend guard
 - Same 80 failures in 400 calls, two splits across scenarios (constructed, not data) → `unit` The scenario is the unit; scenarios and repetitions are sized together
+- Repetitions stop paying → no decision: Worked arithmetic for D4.
+- Retry walk, illustrative → no decision: Worked arithmetic for D4.
 
 ## Implementation flow
 
@@ -361,52 +364,90 @@ Milestones: 1. August design: factorial, six categories, no LLM judge (2026-08-1
 - weather: MALFORMED 1, SPURIOUS 1, MISSING 2, WRONG_TOOL 3, WRONG_PARAMS 2 (scenarios)
 - So: see decisions `grader`, `recovery`
 
+### Factors, low and high
+
+- Axis: What the model is shown at each level.
+- Read it as: Richness and strictness overlap: rich text can state in words what a strict schema states in structure.
+
+| factor | Low | High |
+|---|---|---|
+| Tool count | the scenario's own 2 to 4 tools [defined] | 20: those, look-alikes, filler [defined] (4 to 6 look-alikes; 4 or 5 in the current suite) |
+| Richness | terse one-liners [defined] | rich: constraints and examples [defined] |
+| Strictness | bare types; first required key only [defined] | enums, patterns, every required key [defined] (and additionalProperties: false) |
+
+- So: see decision `factorial`
+
 ### The grader on hand-labelled boundary cases (a control, not a result)
 
-- Axis: One row per precedence boundary the test file labels by hand; the first rule that applies wins.
-- Read it as: Each boundary resolves the way the ordered procedure says: structure beats value, a wrong tool beats wrong params, and provider outcomes come first. This shows the instrument can place a response; it says nothing about how often any model errs.
+- Axis: One row per hand-labelled case, mostly precedence boundaries; the first rule that applies wins.
+- Read it as: Each boundary resolves as the ordered procedure says: structure beats value, a wrong tool beats wrong params, provider outcomes come first. It shows the instrument can place a response, not how often any model errs.
 - How it is computed: tests/test_toolcall_grader.py: 21 labelled cases covering all six categories and two exclusions; `pytest -k toolcall` 2026-10-19: 1104 passed.
 
 | hand-labelled cases | Response | Graded as | Why |
 |---|---|---|---|
-| Hallucinated tool (name not in context) | search_flights_v2 (not shown) [the case as written] | MALFORMED [observed in the offline tests, test passes] | a tool not shown is structural [the case as written] |
-| Required key missing (a call, one key omitted) | destination left out [the case as written] | MALFORMED [observed in the offline tests, test passes] | structure before value [the case as written] |
-| Wrong JSON type ("2" for an integer) | passengers: "2" [the case as written] | MALFORMED [observed in the offline tests, test passes] | R4: a number as a string [the case as written] |
-| Enum outside the set (a value error) | cabin: "first" [the case as written] | WRONG_PARAMS [observed in the offline tests, test passes] | value, not structure [the case as written] |
-| Pattern miss (a value error) | origin: "New York" [the case as written] | WRONG_PARAMS [observed in the offline tests, test passes] | value, not structure [the case as written] |
-| Call, none expected (a well-formed call) | search_flights on small talk [the case as written] | SPURIOUS [observed in the offline tests, test passes] | any valid call [the case as written] |
-| Right-looking args (a different, shown tool) | search_trains, same args [the case as written] | WRONG_TOOL [observed in the offline tests, test passes] | tool before params [the case as written] |
-| Call written in text (no call block) | search_flights(...) as text [the case as written] | MISSING [observed in the offline tests, test passes] | text is not a call [the case as written] |
+| Hallucinated tool (name not in context) | search_flights_v2 (not shown) [case] | MALFORMED [tested, passes] | a tool not shown is structural [case] |
+| Required key missing (a call, one key omitted) | destination left out [case] | MALFORMED [tested, passes] | structure before value [case] |
+| Wrong JSON type ("2" for an integer) | passengers: "2" [case] | MALFORMED [tested, passes] | R4: a number as a string [case] |
+| Enum outside the set (a value error) | cabin: "first" [case] | WRONG_PARAMS [tested, passes] | value, not structure [case] |
+| Pattern miss (a value error) | origin: "New York" [case] | WRONG_PARAMS [tested, passes] | value, not structure [case] |
+| Call, none expected (a well-formed call) | search_flights on small talk [case] | SPURIOUS [tested, passes] | any valid call [case] |
+| Right-looking args (a different, shown tool) | search_trains, same args [case] | WRONG_TOOL [tested, passes] | tool before params [case] |
+| Call written in text (no call block) | search_flights(...) as text [case] | MISSING [tested, passes] | text is not a call [case] |
+| Unknown key (not in the schema) | seat: "aisle" [case] | WRONG_PARAMS [tested, passes] | R7: key not in schema [case] |
+| Unparseable args (JSON cut off) | {"origin": "JFK", [case] | MALFORMED [tested, passes] | must parse as an object [case] |
+| Broken, none needed (small talk, bad JSON) | airport_info, arguments not JSON [case] | MALFORMED [tested, passes] | structure beats intent [case] |
+| Look-alike, 20 tools (a shown confusable) | flight_prices, shown among 20 [case] | WRONG_TOOL [tested, passes] | shown, so a valid call [case] |
 
-- Note: From `tests/test_toolcall_grader.py`, a synthetic flight suite. The grader's tests ran offline for this page: 1104 toolcall tests passed, no model called. A control of the grader, not a statement about any model.
+- Note: From the grader's tests, a synthetic flight suite, run offline: no model called. A control of the grader, not a statement about any model.
 - So: see decision `grader`
 
 ### Hypotheses H1 to H5 as the approved amendment words them (not yet frozen; results pending)
 
 - Axis: One row per hypothesis. Tone is what the prediction expects; no model has been run.
-- Read it as: H1 bets that rich descriptions help more at 20 tools than at 3. H2 bets that strictness moves malformed and wrong-value calls and leaves tool choice within a small margin. H3 bets that count drives wrong-tool calls most. H4 bets that an opaque error gets more identical retries, if the floor lets it be tested. H5 bets that count moves results more than rerun noise does.
+- Read it as: Each row is a bet with its losing condition written first; H4 may not be testable.
 - How it is computed: Holm over the five at 0.05: thresholds 0.01, 0.0125, 0.0167, 0.025, 0.05 (0.05 / 5, / 4, / 3, / 2, / 1); over four if H4 is not testable.
 
 | hypothesis | Predicted | Not supported if | Result |
 |---|---|---|---|
-| H1 richness × count (interaction on failure rate) | negative: rich helps more at 20 [prediction, fewer failures expected] (replication of Guo et al.; failure = share not CORRECT) | Holm does not reject it [as worded in the amendment] | pending [results pending] |
-| H2 strictness (MALFORMED+WRONG_PARAMS) | negative; WRONG_TOOL within ±δ₂ [prediction, fewer failures expected] (equivalence: 90% interval inside ±δ₂, proposed 2 pp) | either part fails [as worded in the amendment] | pending [results pending] |
-| H3 count → WRONG_TOOL (main effect, 3-part test) | positive, above the others [prediction, more failures expected] (larger than \|richness\| and \|strictness\| on WRONG_TOOL) | any of 3 one-sided p too big [as worded in the amendment] | pending [results pending] |
-| H4 error format (opaque − actionable) | positive: more identical retries [prediction, may not be testable] (persistent kinds, injected, paired in cells; floor: opaque under 5%) | Holm does not reject; or not testable [as worded in the amendment] | pending [results pending] |
-| H5 count vs reruns (\|count\| − \|A/A contrast\|) | positive, and count effect ≠ 0 [prediction] (A/A: odd against even repetitions of identical cells) | either part's p too big [as worded in the amendment] | pending [results pending] |
+| H1 richness × count (interaction on failure rate) | negative: rich helps more at 20 [prediction, fewer failures] (replication of Guo et al.; failure = share not CORRECT) | Holm does not reject it [wording] | pending [pending] |
+| H2 strictness (MALFORMED+WRONG_PARAMS) | negative; WRONG_TOOL within ±δ₂ [prediction, fewer failures] (equivalence: 90% interval inside ±δ₂, proposed 2 pp) | either part fails [wording] | pending [pending] |
+| H3 count → WRONG_TOOL (main effect, 3-part test) | positive, above the others [prediction, more failures] (larger than \|richness\| and \|strictness\| on WRONG_TOOL) | any of 3 one-sided p too big [wording] | pending [pending] |
+| H4 error format (opaque − actionable) | positive: more identical retries [prediction, may be untestable] (persistent kinds, injected, paired in cells; floor: opaque under 5%) | Holm does not reject; or not testable [wording] | pending [pending] |
+| H5 count vs reruns (\|count\| − \|A/A contrast\|) | positive, and count effect ≠ 0 [prediction] (A/A: odd against even repetitions of identical cells) | either part's p too big [wording] | pending [pending] |
 
 - Note: Wording from amendment §2, tests from §4f and §14 item 8; H3's three-part magnitude test and the failure definition are in `toolcall/hypotheses.py`. Frozen only when pre-registration step 1 is committed; it is not. One-sided cluster-bootstrap p-values, 10,000 draws, Holm at 0.05.
 - So: see decisions `factorial`, `recovery`, `rules`
 
 ### Same 80 failures in 400 calls, two splits across scenarios (constructed, not data)
 
-- Axis: Constructed to show the arithmetic: 20 scenarios × 20 repetitions, 80 failures in both datasets. Spread: 0 to 7 failures per scenario. Concentrated: four scenarios fail every repetition and sixteen never fail. 95% intervals.
-- Read it as: The pooled rate is 20% in both and the Wilson interval on 400 calls is identical, because it sees only 80 and 400. Resampling scenarios leaves the spread dataset near ±4 points and widens the concentrated one to 5 to 40: its effective size is about 20 scenarios, not about 400 calls.
-- How it is computed: Computed offline with toolcall.effects: wilson(80, 400) = 0.164 to 0.242; cluster_bootstrap, 10,000 draws, seed 1: 0.16 to 0.24 and 0.05 to 0.40. Constructed counts, not data.
+- Axis: Constructed to show the arithmetic: 20 scenarios × 20 repetitions, 80 failures in both datasets. Spread: 0 to 7 failures per scenario. Concentrated: four scenarios fail every repetition and sixteen never fail. 95% intervals. Formula rows: the same cell at three correlations ρ.
+- Read it as: The pooled rate is 20% in both and the Wilson interval on 400 calls is identical, because it sees only 80 and 400. Resampling scenarios leaves the spread dataset near ±4 points and widens the concentrated one to 5 to 40: its effective size is about 20 scenarios, not about 400 calls. The formula rows widen the same way: effective size 400, 32.3, 22.1.
+- How it is computed: toolcall.effects, offline: wilson(80, 400) = 0.164 to 0.242; cluster_bootstrap, 10,000 draws, seed 1: 0.16 to 0.24 and 0.05 to 0.40. Formula rows: 20% ± 1.96 × 0.0200 × √(1 + 19ρ). Constructed, not data.
 - Wilson over all 400 calls (both datasets): 20 % of calls failing (interval 16.4 to 24.2)
 - Scenario bootstrap: failures spread: 20 % of calls failing (interval 16 to 24)
 - Scenario bootstrap: failures concentrated: 20 % of calls failing (interval 5 to 40)
+- Formula, ρ = 0 (design effect 1): 20 % of calls failing (interval 16.1 to 23.9)
+- Formula, ρ = 0.6 (design effect 12.4): 20 % of calls failing (interval 6.2 to 33.8)
+- Formula, ρ = 0.9 (design effect 18.1): 20 % of calls failing (interval 3.3 to 36.7)
 - So: see decision `unit`
+
+### Repetitions stop paying
+
+- Axis: N / (1 + (N − 1)ρ). Dots: the N the sizing rule picks, between 5 and 20.
+- Read it as: Each curve flattens at its limit 1/ρ; at ρ = 0.9 the twentieth repetition adds almost nothing.
+- Axes: x is repetitions per scenario, N; y is effective size per scenario
+- ρ = 0.3, limit 3.33: 1: 1.0, 2: 1.54, 3: 1.88, 4: 2.11, 5: 2.27, 6: 2.4, 8: 2.58, 10: 2.7, 13: 2.83, 16: 2.91, 20: 2.99
+- ρ = 0.6, limit 1.67: 1: 1.0, 2: 1.25, 3: 1.36, 4: 1.43, 5: 1.47, 6: 1.5, 8: 1.54, 10: 1.56, 13: 1.59, 16: 1.6, 20: 1.61
+- ρ = 0.9, limit 1.11: 1: 1.0, 2: 1.05, 3: 1.07, 4: 1.08, 5: 1.09, 6: 1.09, 8: 1.1, 10: 1.1, 13: 1.1, 16: 1.1, 20: 1.1
+- N the rule picks (points): 5: 1.09, 13: 1.59, 20: 2.99
+
+### Retry walk, illustrative
+
+- Axis: Assumed failure rate f = 0.3, up to three attempts; not a measurement.
+- Read it as: The formula understates the right bar by 37.5%: a failing scenario tends to fail again.
+- How it is computed: Left: 1 + 0.3 + 0.09 = 1.39 calls per group, 97.3% of groups succeed, 1.39 / 0.973 = 1.43. Right: 0.7 × 1 + 0.3 × 3 = 1.6 calls, 70% succeed, 1.6 / 0.7 = 2.29.
+- Independent failures, c / (1 − f): 1.43 calls per success
+- 30% of scenarios always fail: 2.29 calls per success
 
 ## Interview card
 

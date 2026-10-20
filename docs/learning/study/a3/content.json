@@ -56,14 +56,14 @@
       "id": "cells",
       "short": "Eight cells",
       "term": "The eight cells",
-      "plain": "Count: the scenario's own 2 to 4 tools, or exactly 20 (those, 4 to 6 look-alikes written for the scenario (the current suite has 4 or 5), and filler from its own domain first, then others). Richness: terse one-liners or rich descriptions. Strictness: loose types (only the first required parameter in `required`) or strict enums, patterns and every required key. Baseline: low, terse, loose. Rich text may state a constraint in words that a strict schema states in structure, so richness and strictness overlap.",
+      "plain": "Three factors, two levels each: tool count, description richness, schema strictness; the table under Results shows the levels. Baseline: low, terse, loose.",
       "analogy": "A configuration matrix in which each axis changes one thing and the system prompt is one fixed text in every cell, like a deploy matrix that differs only in the flag under test."
     },
     {
       "id": "canonical",
       "short": "Schema content, one canonical schema",
       "term": "Strictness is schema content, and every call is graded against one canonical schema",
-      "plain": "Each tool has one canonical schema, its strict form, and every call in every cell is graded against it, whatever the model was shown. A loose schema is charged for constraints it never showed: that is the measurement of what loose costs, not a bug. Provider strict mode (constrained decoding) is off in all eight cells, because it would make `MALFORMED` nearly impossible by construction and test the API, not the model; one exploratory slice turns it on.",
+      "plain": "Each tool has one canonical schema, its strict form, and every call in every cell is graded against it, whatever the model was shown. A loose schema is charged for constraints it never showed: that is the measurement of what loose costs, not a bug. Provider strict mode (constrained decoding) stays off in all eight cells; decision D2 gives the reason.",
       "analogy": "Contract testing: a consumer's request is validated against the provider's real contract, not the subset the docs showed. And a type system that makes invalid states unrepresentable versus documentation plus a validator at the edge: this study asks whether the model reads the documentation."
     },
     {
@@ -98,7 +98,7 @@
       "id": "costsuccess",
       "short": "Cost per successful call",
       "term": "Cost per successful call, and the retry walk",
-      "plain": "All spend, failed attempts included, divided by correct calls. A retry policy of up to three attempts is costed by walking each scenario's recorded reruns in order, not with c / (1 − f), which assumes each retry is an independent draw. If a failing scenario fails again, the formula understates the cost: in an illustrative calculation with f = 0.3 and a cap of 3, the formula and independent failures give 1.43 calls per success, and 2.29 if the failing 30% of scenarios always fail.",
+      "plain": "All spend, failed attempts included, divided by correct calls. A retry policy of up to three attempts is costed by walking each scenario's recorded reruns in order, not with c / (1 − f), which assumes each retry is an independent draw and understates the cost when a failing scenario fails again (see the retry walk).",
       "analogy": "Capacity planning for retries: independent failures make retries cheap, but a poison message that fails every time makes every retry pure cost."
     },
     {
@@ -1239,8 +1239,79 @@
         "grader",
         "recovery"
       ],
-      "takeaway": "49 candidates with every failure mode targeted: the make-up of the instrument, not a finding.",
+      "takeaway": "49 candidates, every failure mode targeted: the instrument's make-up, not a finding.",
       "arithmetic": "Counts of toolcall/data/scenarios/*.json by domain and target_failure_mode: 49 = 35 authored + 14 BFCL (BFCL-SOURCE.md); 38 recovery, 31 persistent (deviations log)."
+    },
+    {
+      "title": "Factors, low and high",
+      "chart": {
+        "type": "matrix",
+        "unit": "factor",
+        "rows": [
+          {
+            "label": "Tool count"
+          },
+          {
+            "label": "Richness"
+          },
+          {
+            "label": "Strictness"
+          }
+        ],
+        "cols": [
+          {
+            "label": "Low"
+          },
+          {
+            "label": "High"
+          }
+        ],
+        "cells": [
+          [
+            {
+              "text": "the scenario's own 2 to 4 tools",
+              "status": "none"
+            },
+            {
+              "text": "20: those, look-alikes, filler",
+              "status": "none",
+              "note": "4 to 6 look-alikes; 4 or 5 in the current suite"
+            }
+          ],
+          [
+            {
+              "text": "terse one-liners",
+              "status": "none"
+            },
+            {
+              "text": "rich: constraints and examples",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "bare types; first required key only",
+              "status": "none"
+            },
+            {
+              "text": "enums, patterns, every required key",
+              "status": "none",
+              "note": "and additionalProperties: false"
+            }
+          ]
+        ],
+        "legend": [
+          {
+            "status": "none",
+            "label": "defined"
+          }
+        ]
+      },
+      "axis": "What the model is shown at each level.",
+      "read_as": "Richness and strictness overlap: rich text can state in words what a strict schema states in structure.",
+      "so": [
+        "factorial"
+      ]
     },
     {
       "title": "The grader on hand-labelled boundary cases (a control, not a result)",
@@ -1280,6 +1351,22 @@
           {
             "label": "Call written in text",
             "sub": "no call block"
+          },
+          {
+            "label": "Unknown key",
+            "sub": "not in the schema"
+          },
+          {
+            "label": "Unparseable args",
+            "sub": "JSON cut off"
+          },
+          {
+            "label": "Broken, none needed",
+            "sub": "small talk, bad JSON"
+          },
+          {
+            "label": "Look-alike, 20 tools",
+            "sub": "a shown confusable"
           }
         ],
         "cols": [
@@ -1413,30 +1500,90 @@
               "text": "text is not a call",
               "status": "none"
             }
+          ],
+          [
+            {
+              "text": "seat: \"aisle\"",
+              "status": "none"
+            },
+            {
+              "text": "WRONG_PARAMS",
+              "status": "observed",
+              "tone": "ok"
+            },
+            {
+              "text": "R7: key not in schema",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "{\"origin\": \"JFK\",",
+              "status": "none"
+            },
+            {
+              "text": "MALFORMED",
+              "status": "observed",
+              "tone": "ok"
+            },
+            {
+              "text": "must parse as an object",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "airport_info, arguments not JSON",
+              "status": "none"
+            },
+            {
+              "text": "MALFORMED",
+              "status": "observed",
+              "tone": "ok"
+            },
+            {
+              "text": "structure beats intent",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "flight_prices, shown among 20",
+              "status": "none"
+            },
+            {
+              "text": "WRONG_TOOL",
+              "status": "observed",
+              "tone": "ok"
+            },
+            {
+              "text": "shown, so a valid call",
+              "status": "none"
+            }
           ]
         ],
         "legend": [
           {
             "status": "none",
-            "label": "the case as written"
+            "label": "case"
           },
           {
             "status": "observed",
-            "label": "observed in the offline tests"
+            "label": "tested"
           },
           {
             "tone": "ok",
-            "label": "test passes"
+            "label": "passes"
           }
         ],
-        "note": "From `tests/test_toolcall_grader.py`, a synthetic flight suite. The grader's tests ran offline for this page: 1104 toolcall tests passed, no model called. A control of the grader, not a statement about any model."
+        "note": "From the grader's tests, a synthetic flight suite, run offline: no model called. A control of the grader, not a statement about any model."
       },
-      "axis": "One row per precedence boundary the test file labels by hand; the first rule that applies wins.",
-      "read_as": "Each boundary resolves the way the ordered procedure says: structure beats value, a wrong tool beats wrong params, and provider outcomes come first. This shows the instrument can place a response; it says nothing about how often any model errs.",
+      "axis": "One row per hand-labelled case, mostly precedence boundaries; the first rule that applies wins.",
+      "read_as": "Each boundary resolves as the ordered procedure says: structure beats value, a wrong tool beats wrong params, provider outcomes come first. It shows the instrument can place a response, not how often any model errs.",
       "so": [
         "grader"
       ],
-      "takeaway": "The grader places a response where its rules say, boundary by boundary. A control of the instrument, not a result.",
+      "takeaway": "The grader places a response where its rules say. A control, not a result.",
       "arithmetic": "tests/test_toolcall_grader.py: 21 labelled cases covering all six categories and two exclusions; `pytest -k toolcall` 2026-10-19: 1104 passed."
     },
     {
@@ -1563,7 +1710,7 @@
         "legend": [
           {
             "status": "none",
-            "label": "as worded in the amendment"
+            "label": "wording"
           },
           {
             "status": "predicted",
@@ -1571,31 +1718,31 @@
           },
           {
             "status": "pending",
-            "label": "results pending"
+            "label": "pending"
           },
           {
             "tone": "ok",
-            "label": "fewer failures expected"
+            "label": "fewer failures"
           },
           {
             "tone": "bad",
-            "label": "more failures expected"
+            "label": "more failures"
           },
           {
             "tone": "warn",
-            "label": "may not be testable"
+            "label": "may be untestable"
           }
         ],
         "note": "Wording from amendment §2, tests from §4f and §14 item 8; H3's three-part magnitude test and the failure definition are in `toolcall/hypotheses.py`. Frozen only when pre-registration step 1 is committed; it is not. One-sided cluster-bootstrap p-values, 10,000 draws, Holm at 0.05."
       },
       "axis": "One row per hypothesis. Tone is what the prediction expects; no model has been run.",
-      "read_as": "H1 bets that rich descriptions help more at 20 tools than at 3. H2 bets that strictness moves malformed and wrong-value calls and leaves tool choice within a small margin. H3 bets that count drives wrong-tool calls most. H4 bets that an opaque error gets more identical retries, if the floor lets it be tested. H5 bets that count moves results more than rerun noise does.",
+      "read_as": "Each row is a bet with its losing condition written first; H4 may not be testable.",
       "so": [
         "factorial",
         "recovery",
         "rules"
       ],
-      "takeaway": "Five bets on which failure moves, each with its losing condition written down. None is frozen in git yet, and none has an outcome.",
+      "takeaway": "Five bets, each with its losing condition. None is frozen in git or has an outcome.",
       "arithmetic": "Holm over the five at 0.05: thresholds 0.01, 0.0125, 0.0167, 0.025, 0.05 (0.05 / 5, / 4, / 3, / 2, / 1); over four if H4 is not testable."
     },
     {
@@ -1623,16 +1770,235 @@
             "estimate": 20,
             "low": 5,
             "high": 40
+          },
+          {
+            "label": "Formula, ρ = 0 (design effect 1)",
+            "estimate": 20,
+            "low": 16.1,
+            "high": 23.9
+          },
+          {
+            "label": "Formula, ρ = 0.6 (design effect 12.4)",
+            "estimate": 20,
+            "low": 6.2,
+            "high": 33.8
+          },
+          {
+            "label": "Formula, ρ = 0.9 (design effect 18.1)",
+            "estimate": 20,
+            "low": 3.3,
+            "high": 36.7
           }
         ]
       },
-      "axis": "Constructed to show the arithmetic: 20 scenarios × 20 repetitions, 80 failures in both datasets. Spread: 0 to 7 failures per scenario. Concentrated: four scenarios fail every repetition and sixteen never fail. 95% intervals.",
-      "read_as": "The pooled rate is 20% in both and the Wilson interval on 400 calls is identical, because it sees only 80 and 400. Resampling scenarios leaves the spread dataset near ±4 points and widens the concentrated one to 5 to 40: its effective size is about 20 scenarios, not about 400 calls.",
+      "axis": "Constructed to show the arithmetic: 20 scenarios × 20 repetitions, 80 failures in both datasets. Spread: 0 to 7 failures per scenario. Concentrated: four scenarios fail every repetition and sixteen never fail. 95% intervals. Formula rows: the same cell at three correlations ρ.",
+      "read_as": "The pooled rate is 20% in both and the Wilson interval on 400 calls is identical, because it sees only 80 and 400. Resampling scenarios leaves the spread dataset near ±4 points and widens the concentrated one to 5 to 40: its effective size is about 20 scenarios, not about 400 calls. The formula rows widen the same way: effective size 400, 32.3, 22.1.",
       "so": [
         "unit"
       ],
       "takeaway": "Counting calls would call the two datasets equally certain; counting scenarios tells them apart.",
-      "arithmetic": "Computed offline with toolcall.effects: wilson(80, 400) = 0.164 to 0.242; cluster_bootstrap, 10,000 draws, seed 1: 0.16 to 0.24 and 0.05 to 0.40. Constructed counts, not data."
+      "arithmetic": "toolcall.effects, offline: wilson(80, 400) = 0.164 to 0.242; cluster_bootstrap, 10,000 draws, seed 1: 0.16 to 0.24 and 0.05 to 0.40. Formula rows: 20% ± 1.96 × 0.0200 × √(1 + 19ρ). Constructed, not data."
+    },
+    {
+      "title": "Repetitions stop paying",
+      "chart": {
+        "type": "xy",
+        "unit": "",
+        "x_label": "repetitions per scenario, N",
+        "y_label": "effective size per scenario",
+        "y_from_zero": true,
+        "series": [
+          {
+            "name": "ρ = 0.3, limit 3.33",
+            "points": [
+              {
+                "x": 1,
+                "y": 1.0
+              },
+              {
+                "x": 2,
+                "y": 1.54
+              },
+              {
+                "x": 3,
+                "y": 1.88
+              },
+              {
+                "x": 4,
+                "y": 2.11
+              },
+              {
+                "x": 5,
+                "y": 2.27
+              },
+              {
+                "x": 6,
+                "y": 2.4
+              },
+              {
+                "x": 8,
+                "y": 2.58
+              },
+              {
+                "x": 10,
+                "y": 2.7
+              },
+              {
+                "x": 13,
+                "y": 2.83
+              },
+              {
+                "x": 16,
+                "y": 2.91
+              },
+              {
+                "x": 20,
+                "y": 2.99
+              }
+            ]
+          },
+          {
+            "name": "ρ = 0.6, limit 1.67",
+            "points": [
+              {
+                "x": 1,
+                "y": 1.0
+              },
+              {
+                "x": 2,
+                "y": 1.25
+              },
+              {
+                "x": 3,
+                "y": 1.36
+              },
+              {
+                "x": 4,
+                "y": 1.43
+              },
+              {
+                "x": 5,
+                "y": 1.47
+              },
+              {
+                "x": 6,
+                "y": 1.5
+              },
+              {
+                "x": 8,
+                "y": 1.54
+              },
+              {
+                "x": 10,
+                "y": 1.56
+              },
+              {
+                "x": 13,
+                "y": 1.59
+              },
+              {
+                "x": 16,
+                "y": 1.6
+              },
+              {
+                "x": 20,
+                "y": 1.61
+              }
+            ]
+          },
+          {
+            "name": "ρ = 0.9, limit 1.11",
+            "points": [
+              {
+                "x": 1,
+                "y": 1.0
+              },
+              {
+                "x": 2,
+                "y": 1.05
+              },
+              {
+                "x": 3,
+                "y": 1.07
+              },
+              {
+                "x": 4,
+                "y": 1.08
+              },
+              {
+                "x": 5,
+                "y": 1.09
+              },
+              {
+                "x": 6,
+                "y": 1.09
+              },
+              {
+                "x": 8,
+                "y": 1.1
+              },
+              {
+                "x": 10,
+                "y": 1.1
+              },
+              {
+                "x": 13,
+                "y": 1.1
+              },
+              {
+                "x": 16,
+                "y": 1.1
+              },
+              {
+                "x": 20,
+                "y": 1.1
+              }
+            ]
+          },
+          {
+            "name": "N the rule picks",
+            "style": "points",
+            "points": [
+              {
+                "x": 5,
+                "y": 1.09
+              },
+              {
+                "x": 13,
+                "y": 1.59
+              },
+              {
+                "x": 20,
+                "y": 2.99
+              }
+            ]
+          }
+        ]
+      },
+      "axis": "N / (1 + (N − 1)ρ). Dots: the N the sizing rule picks, between 5 and 20.",
+      "read_as": "Each curve flattens at its limit 1/ρ; at ρ = 0.9 the twentieth repetition adds almost nothing.",
+      "so_none_reason": "Worked arithmetic for D4."
+    },
+    {
+      "title": "Retry walk, illustrative",
+      "chart": {
+        "type": "bars",
+        "unit": "calls per success",
+        "items": [
+          {
+            "label": "Independent failures, c / (1 − f)",
+            "value": 1.43
+          },
+          {
+            "label": "30% of scenarios always fail",
+            "value": 2.29
+          }
+        ]
+      },
+      "axis": "Assumed failure rate f = 0.3, up to three attempts; not a measurement.",
+      "read_as": "The formula understates the right bar by 37.5%: a failing scenario tends to fail again.",
+      "arithmetic": "Left: 1 + 0.3 + 0.09 = 1.39 calls per group, 97.3% of groups succeed, 1.39 / 0.973 = 1.43. Right: 0.7 × 1 + 0.3 × 3 = 1.6 calls, 70% succeed, 1.6 / 0.7 = 2.29.",
+      "so_none_reason": "Worked arithmetic for D4."
     }
   ],
   "interview": {
@@ -2046,6 +2412,174 @@
     {
       "value": "0.16",
       "how": "cluster_bootstrap lower end for the spread dataset, same run."
+    },
+    {
+      "value": "12.4",
+      "how": "1 + 19 x 0.6 = 12.4, the design effect for N = 20 at rho = 0.6."
+    },
+    {
+      "value": "18.1",
+      "how": "1 + 19 x 0.9 = 18.1, the design effect for N = 20 at rho = 0.9."
+    },
+    {
+      "value": "32.3",
+      "how": "400 / 12.4 = 32.26, the effective size at rho = 0.6."
+    },
+    {
+      "value": "22.1",
+      "how": "400 / 18.1 = 22.10, the effective size at rho = 0.9."
+    },
+    {
+      "value": "0.0200",
+      "how": "sqrt(0.2 x 0.8 / 400) = 0.02, the standard error of a 20% rate over 400 independent calls."
+    },
+    {
+      "value": "1.96",
+      "how": "the 95% normal critical value (toolcall/effects.py wilson uses 1.959964)."
+    },
+    {
+      "value": "3.9",
+      "how": "1.96 x 0.02 = 0.0392, the half-width in points at rho = 0."
+    },
+    {
+      "value": "13.8",
+      "how": "1.96 x 0.02 x sqrt(12.4) = 0.1380, in points."
+    },
+    {
+      "value": "16.7",
+      "how": "1.96 x 0.02 x sqrt(18.1) = 0.1668, in points."
+    },
+    {
+      "value": "16.1",
+      "how": "20 - 3.9 = 16.1."
+    },
+    {
+      "value": "23.9",
+      "how": "20 + 3.9 = 23.9."
+    },
+    {
+      "value": "6.2",
+      "how": "20 - 13.8 = 6.2."
+    },
+    {
+      "value": "33.8",
+      "how": "20 + 13.8 = 33.8."
+    },
+    {
+      "value": "3.3",
+      "how": "20 - 16.7 = 3.3."
+    },
+    {
+      "value": "36.7",
+      "how": "20 + 16.7 = 36.7."
+    },
+    {
+      "value": "1.0",
+      "how": "N / (1 + (N - 1) rho) = 1 / (1 + 0 x 0.3) = 1.0000, effective size per scenario."
+    },
+    {
+      "value": "1.54",
+      "how": "N / (1 + (N - 1) rho) = 2 / (1 + 1 x 0.3) = 1.5385, effective size per scenario."
+    },
+    {
+      "value": "1.88",
+      "how": "N / (1 + (N - 1) rho) = 3 / (1 + 2 x 0.3) = 1.8750, effective size per scenario."
+    },
+    {
+      "value": "2.11",
+      "how": "N / (1 + (N - 1) rho) = 4 / (1 + 3 x 0.3) = 2.1053, effective size per scenario."
+    },
+    {
+      "value": "2.27",
+      "how": "N / (1 + (N - 1) rho) = 5 / (1 + 4 x 0.3) = 2.2727, effective size per scenario."
+    },
+    {
+      "value": "2.4",
+      "how": "N / (1 + (N - 1) rho) = 6 / (1 + 5 x 0.3) = 2.4000, effective size per scenario."
+    },
+    {
+      "value": "2.58",
+      "how": "N / (1 + (N - 1) rho) = 8 / (1 + 7 x 0.3) = 2.5806, effective size per scenario."
+    },
+    {
+      "value": "2.7",
+      "how": "N / (1 + (N - 1) rho) = 10 / (1 + 9 x 0.3) = 2.7027, effective size per scenario."
+    },
+    {
+      "value": "2.83",
+      "how": "N / (1 + (N - 1) rho) = 13 / (1 + 12 x 0.3) = 2.8261, effective size per scenario."
+    },
+    {
+      "value": "2.91",
+      "how": "N / (1 + (N - 1) rho) = 16 / (1 + 15 x 0.3) = 2.9091, effective size per scenario."
+    },
+    {
+      "value": "2.99",
+      "how": "N / (1 + (N - 1) rho) = 20 / (1 + 19 x 0.3) = 2.9851, effective size per scenario."
+    },
+    {
+      "value": "1.25",
+      "how": "N / (1 + (N - 1) rho) = 2 / (1 + 1 x 0.6) = 1.2500, effective size per scenario."
+    },
+    {
+      "value": "1.36",
+      "how": "N / (1 + (N - 1) rho) = 3 / (1 + 2 x 0.6) = 1.3636, effective size per scenario."
+    },
+    {
+      "value": "1.47",
+      "how": "N / (1 + (N - 1) rho) = 5 / (1 + 4 x 0.6) = 1.4706, effective size per scenario."
+    },
+    {
+      "value": "1.5",
+      "how": "N / (1 + (N - 1) rho) = 6 / (1 + 5 x 0.6) = 1.5000, effective size per scenario."
+    },
+    {
+      "value": "1.56",
+      "how": "N / (1 + (N - 1) rho) = 10 / (1 + 9 x 0.6) = 1.5625, effective size per scenario."
+    },
+    {
+      "value": "1.59",
+      "how": "N / (1 + (N - 1) rho) = 13 / (1 + 12 x 0.6) = 1.5854, effective size per scenario."
+    },
+    {
+      "value": "1.61",
+      "how": "N / (1 + (N - 1) rho) = 20 / (1 + 19 x 0.6) = 1.6129, effective size per scenario."
+    },
+    {
+      "value": "1.05",
+      "how": "N / (1 + (N - 1) rho) = 2 / (1 + 1 x 0.9) = 1.0526, effective size per scenario."
+    },
+    {
+      "value": "1.07",
+      "how": "N / (1 + (N - 1) rho) = 3 / (1 + 2 x 0.9) = 1.0714, effective size per scenario."
+    },
+    {
+      "value": "1.08",
+      "how": "N / (1 + (N - 1) rho) = 4 / (1 + 3 x 0.9) = 1.0811, effective size per scenario."
+    },
+    {
+      "value": "1.09",
+      "how": "N / (1 + (N - 1) rho) = 5 / (1 + 4 x 0.9) = 1.0870, effective size per scenario."
+    },
+    {
+      "value": "1.1",
+      "how": "N / (1 + (N - 1) rho) = 8 / (1 + 7 x 0.9) = 1.0959, effective size per scenario."
+    },
+    {
+      "value": "3.33",
+      "how": "1 / 0.3 = 3.333, the limit of the effective size per scenario as N grows."
+    },
+    {
+      "value": "1.67",
+      "how": "1 / 0.6 = 1.667, the limit as N grows."
+    },
+    {
+      "value": "1.11",
+      "how": "1 / 0.9 = 1.111, the limit as N grows."
+    },
+    {
+      "value": "37.5",
+      "how": "(2.2857 - 1.4286) / 2.2857 = 0.375: the independent figure falls this share short of the always-fail figure."
     }
   ],
   "links": {

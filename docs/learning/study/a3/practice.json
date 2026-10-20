@@ -1,0 +1,439 @@
+{
+  "unit": "a3",
+  "title": "Practice: tool-calling failure modes",
+  "minutes": 35,
+  "objectives": [
+    "Put a response in one of the six categories by the grader's ordered rules, and say how the category changes with what was rendered.",
+    "Compute design effect, effective size and a 95% half-width for given S, N and ρ, and say what one more repetition buys.",
+    "Say in two sentences each why a failed H2 equivalence part is not an effect and why H5 is an intersection-union test.",
+    "Work Holm's thresholds over five and over four tests, and the smallest p-value a bootstrap of B draws can give.",
+    "Work main effects and a count × richness interaction by hand from eight cell rates, and say why the scale is fixed before the data.",
+    "Design a test that separates \"the model reads the schema\" from \"the decoder enforces it\", and say what it cannot show."
+  ],
+  "prereq_check": [
+    {
+      "q": "A cell has 400 calls from 20 scenarios and about 20% of them fail. Is its 95% interval about ±4 points, or far wider, and what decides which?",
+      "a": "It depends on how failures cluster within scenarios (the correlation ρ between reruns). About ±4 points only if reruns are independent. The page's constructed example: the same 80 failures give 16% to 24% when spread and 5% to 40% when four scenarios fail every rerun.",
+      "review": "cluster"
+    },
+    {
+      "q": "A service returns a 400 with a field error, and another call times out. Which do you retry unchanged, and what must be true first?",
+      "a": "The timeout, if the call is idempotent; the field error will be rejected the same way every time. This unit's recovery measure counts only the persistent error kinds as an identical-retry loop.",
+      "review": "recovery"
+    },
+    {
+      "q": "A contract test checks a consumer's request. Against which schema: the subset the docs showed, or the provider's real one?",
+      "a": "The provider's real contract. This study grades every call against one canonical strict schema, however much of it the model was shown, so a loose schema is charged for constraints it never showed.",
+      "review": "canonical"
+    }
+  ],
+  "drills": [
+    {
+      "q": "The model is shown two tools and calls a third that exists in your library but was not shown. Category? And if the cell shows 20 tools including it?",
+      "a": "`MALFORMED`: a tool that was not rendered is a structural failure, and structure is checked first. In the 20-tool cell the same call is `WRONG_TOOL`; the grader records which kind (confusable, filler or low-set tool). The category depends on what was rendered, by design.",
+      "red_flag": "\"`WRONG_TOOL`, it is a real tool.\" The grader asks what the model was shown, not what exists."
+    },
+    {
+      "q": "The user only says thanks, so no call is expected, and the model calls a shown tool with a required argument missing. Category?",
+      "a": "`MALFORMED`. The structure check runs before the no-call check, so a broken call is `MALFORMED` whatever the intent. A well-formed call in the same scenario would be `SPURIOUS`. Order is part of the contract.",
+      "red_flag": "\"`SPURIOUS`, it should not have called.\" That reads intent; the grader applies ordered rules."
+    },
+    {
+      "q": "Why is a loose-schema call graded against the strict schema? Isn't that unfair to the loose arm?",
+      "a": "It is the measurement: what a loose schema costs is exactly the constraints the model was not told. Grading against the rendered schema would give the strict arm more ways to fail, so strictness would look like it causes the failures it constrains, a confound the instrument would create. Rich text can state a constraint in words, which is part of the richness and strictness overlap.",
+      "red_flag": "\"We grade against what the model saw, to be fair.\""
+    },
+    {
+      "q": "Provider strict mode is on and `MALFORMED` is zero. What have you learned about the model's structural ability?",
+      "a": "Very little: constrained decoding makes a conforming call nearly certain by construction, so a zero measures the decoder. The vendors' exceptions as the amendment read them (refusals, truncation, enum capitalisation) were not re-checked here. What stays informative is `WRONG_TOOL`, value-level `WRONG_PARAMS`, `MISSING` and `SPURIOUS`, which is why strict mode is off in the eight cells and run as one labelled exploratory slice.",
+      "red_flag": "\"The model is perfectly reliable at formatting.\""
+    },
+    {
+      "q": "A cell has 20 scenarios × 20 repetitions. Why is its interval not based on 400 observations, and what do you resample?",
+      "a": "Reruns of a scenario are correlated, so the effective size is S·N / (1 + (N − 1)ρ), between S and S·N: at ρ = 0.6 about 32.3, not 400, and the half-width is about ±13.8 points against ±3.9 for independent calls (normal approximation, 20% failure rate). Resample whole scenarios, recomputing every cell rate from the drawn set; Wilson is for one scenario's repetitions only.",
+      "red_flag": "\"Wilson on 80 / 400.\" It sees only 80 and 400 and gives the same narrow answer for the spread and the concentrated dataset."
+    },
+    {
+      "q": "At ρ = 0.9 and S = 30, what does going from 5 to 40 repetitions buy? What does this design's pilot imply for N?",
+      "a": "Almost nothing: effective size rises from 32.6 to 33.2 (amendment §4d), under 2%. The information is in the scenarios, so spend on S. Separately, the band keeps baseline rates between 0.10 and 0.90 over 10 reruns, which caps the realised ρ near 0.61, so the rule for N gives at least 13 (12.15 rounded up).",
+      "red_flag": "\"More repetitions always tighten the interval.\""
+    },
+    {
+      "q": "Holm at 0.05 over five hypotheses with add-one bootstrap p-values. What is the smallest p-value you can get, and why does the pre-registration refuse fewer than 100 draws?",
+      "a": "With B draws the smallest p is 1/(B + 1). Holm's first threshold is 0.05 / 5 = 0.01, so B must be at least 99 for any hypothesis to be rejectable at all; at B = 10,000 the floor is about 0.0001. The thresholds are 0.01, 0.0125, 0.0167, 0.025 and 0.05; over four tests (H4 not testable) they are 0.0125, 0.0167, 0.025 and 0.05. The code's `MIN_ITERATIONS` is 100.",
+      "red_flag": "\"Any number of draws is fine, the correction is just a threshold.\""
+    },
+    {
+      "q": "H2's equivalence part fails. Has strictness been shown to move `WRONG_TOOL`?",
+      "a": "No. Failing to show equivalence is inconclusive, not an effect: the code reports `failed_part = \"equivalence\"` when Holm rejects the difference part but the 90% interval is not inside ±δ₂ (proposed 2 points). As a rough bound (normal approximation, true effect zero) it passes only if the across-scenario SD of the strictness contrast is under about 6.0 points at S = 24, 6.7 at S = 30.",
+      "red_flag": "\"Strictness affects tool choice.\" Wide intervals are not an effect."
+    },
+    {
+      "q": "Why is H5 an intersection-union test, and what went wrong with the first version?",
+      "a": "H5 compares |count effect| with |A/A contrast|. With near-deterministic reruns the A/A contrast is about zero, so the statistic reduces to |count effect| and the one-sided p-value collapses to about 1/(B + 1) whatever the data say: a simulated null count effect was \"supported\" 80% of the time (amendment §14 item 8). So H5 also needs a two-sided test that the count effect is not zero, and its p-value is the larger of the two.",
+      "red_flag": "\"The A/A contrast is a fine baseline on its own.\""
+    },
+    {
+      "q": "The amendment expects near-deterministic reruns, yet the band keeps scenarios with a 10% to 90% baseline pass rate. Reconcile them.",
+      "a": "The sources do not reconcile them; this is a reading, not a finding. A rate strictly between 0 and 1 over 10 reruns means the reruns disagreed, so the band also selects for flipping. If reruns barely flip, few candidates may survive and authoring more may not help; the pilot's survival count measures which regime holds, so it is pending. A flip fraction measured on a band-selected set may also not be comparable with the Noise Floor Audit's; that is a reading, not something the sources state.",
+      "red_flag": "\"The band just picks medium-difficulty scenarios.\" It picks scenarios whose reruns disagree."
+    },
+    {
+      "q": "A teammate prices retries as c / (1 − f). In an illustrative case (f = 0.3, up to three attempts) the formula gives 1.43 calls per success. What is wrong with it?",
+      "a": "It assumes each retry is an independent draw. If the 30% of scenarios that fail always fail, a group spends 0.7 × 1 + 0.3 × 3 = 1.6 calls, only 70% of groups succeed, and cost per success is 1.6 / 0.7 = 2.29: the formula understates it by 37.5%. The study walks each scenario's recorded reruns in order, which is the scenario-as-unit argument in money.",
+      "red_flag": "\"Retries are geometric, so 1 / (1 − f).\""
+    },
+    {
+      "q": "Design a test that separates \"the model reads the schema\" from \"the decoder enforces it\", and one that separates \"rich descriptions disambiguate\" from \"rich descriptions restate the enum\".",
+      "a": "First: a 2 × 2 of schema content (loose, strict) × constrained decoding (off, on) on the same scenarios. The repo runs strict content with decoding off (the eight cells) and one exploratory slice with decoding on; the other corners are not run, and loose content with decoding on may not be expressible where strict mode needs every property required (the amendment's reading of OpenAI, not re-checked). Second: a richness level whose rich text omits enum values and patterns; the deviations log notes units' rich text lists the enum, so there strictness adds nothing. Label it exploratory.",
+      "red_flag": "\"Just compare strict against loose.\" That mixes content and decoding."
+    }
+  ],
+  "estimation": [
+    {
+      "title": "What is a 20 × 20 cell worth at three correlations?",
+      "problem": "A cell has 20 scenarios × 20 repetitions = 400 calls and a pooled failure rate of 20%. Give the design effect, the effective size and the 95% half-width (normal approximation) at ρ = 0, 0.6 and 0.9. Then say how many repetitions the sizing rule picks at ρ = 0.6, with a floor of 5 and a cap of 20.",
+      "steps": [
+        "Independent standard error: √(0.2 × 0.8 / 400) = 0.0200, so the independent half-width is 1.96 × 0.0200 = ±3.9 points.",
+        "Design effect 1 + (N − 1)ρ = 1 + 19ρ: 1 at ρ = 0, 12.4 at 0.6, 18.1 at 0.9.",
+        "Effective size 400 / design effect: 400, 32.3 and 22.1.",
+        "Half-width = 3.9 × √design effect: ±3.9, ±13.8 and ±16.7 points. The same 400 calls give an interval more than four times wider at ρ = 0.9.",
+        "Sizing rule: the smallest N reaching 95% of the limit S/ρ, so N ≥ 19(1 − ρ)/ρ = 19 × 0.4 / 0.6 = 12.67, rounded up to 13 (inside 5 to 20)."
+      ],
+      "answer": "Design effect 1, 12.4, 18.1; effective size 400, 32.3, 22.1; half-width ±3.9, ±13.8, ±16.7 points; N = 13 at ρ = 0.6. Say it as: 400 calls are somewhere between 20 and 400 facts."
+    },
+    {
+      "title": "Contrasts and an interaction from eight illustrative rates",
+      "problem": "ILLUSTRATIVE rates, not data or predictions. Failure rate (%) by cell. Low count: terse-loose 30, terse-strict 20, rich-loose 26, rich-strict 16. High count: terse-loose 50, terse-strict 40, rich-loose 34, rich-strict 24. Find the three main effects and the count × richness interaction as the repo defines it, and check it with the code's weights.",
+      "steps": [
+        "Main effect of count = mean(high) − mean(low) = 148 / 4 − 92 / 4 = 37 − 23 = +14 points.",
+        "Richness: mean(rich) − mean(terse) = 100 / 4 − 140 / 4 = 25 − 35 = −10 points. Strictness: strict 25, loose 35, so also −10.",
+        "Richness effect at low count = 21 − 25 = −4 points; at high count = 29 − 45 = −16 points.",
+        "Interaction = effect at high − effect at low = −16 − (−4) = −12 points (the difference, not halved).",
+        "Check with weights s_count × s_richness / 2 over the eight cells: [(30 + 20 + 34 + 24) − (26 + 16 + 50 + 40)] / 2 = (108 − 132) / 2 = −12.",
+        "Strictness × count: effect −10 at high count and −10 at low count, so the interaction is 0.",
+        "Scale: suppose terse 20% falls to rich 10% at low count and 40% to 20% at high count. Risk difference: −20 − (−10) = −10 points of interaction. Ratio: rich halves failures at both counts, so no interaction."
+      ],
+      "answer": "Main effects +14, −10, −10 points; count × richness −12 points (full difference, not halved); strictness × count 0. An interaction on the point scale can vanish on the ratio scale, so the scale is fixed before the data."
+    }
+  ],
+  "scenario": {
+    "prompt": "A fictional travel marketplace exposes 60 tools to one booking agent: flight search, fare rules, seat maps, hotel search, itinerary changes, loyalty points and more. Wrong-tool calls and badly formatted dates are the top support complaints. Leadership asks: \"Should we turn on provider strict mode and cut the agent to 20 tools?\" Design how you would decide and how you would roll it out. Bring nothing from any employer.",
+    "outline": [
+      "Turn the question into failure categories first: grade a sample of traces with a deterministic taxonomy. If most failures are `WRONG_TOOL`, constrained decoding will not fix them; disambiguation and fewer or better-separated tools might.",
+      "Offline factorial on held-out scenarios: tool count (60 against a routed 20) × schema content × constrained decoding on or off, with deliberate look-alikes (fare rules against fare search). Only calls whose correct form can be listed in advance.",
+      "The unit is the scenario: size repetitions from a pilot's ρ, average per scenario, bootstrap over scenarios, report per-category rates with intervals and the exclusion rate.",
+      "Cost per successful call with the real retry policy, walked from recorded reruns, and prompt caching measured rather than assumed. A wrong action (a cancelled booking) is not a retry.",
+      "Guardrails beyond the prompt: validate against the canonical schema at the boundary; idempotency keys on side-effecting tools so a retry after a timeout cannot act twice; actionable error text (the page predicts, but does not show, that it reduces identical retries).",
+      "Rollout: shadow-grade the new presentation on live traffic with no side effects, then canary with per-category alerts, pin model versions and re-run the suite on every change."
+    ],
+    "pitfalls": [
+      "Treating repetitions as independent and reporting a Wilson interval over all calls.",
+      "Grading against the schema the model was shown, so the loose arm is forgiven.",
+      "Turning strict mode on and calling a zero malformed rate a model improvement.",
+      "Claiming results beyond structurally checkable single calls, or quoting a prediction as a finding."
+    ]
+  },
+  "lab": {
+    "goal": "See offline that the category depends on the rendering, that the interval depends on how failures split across scenarios, and that correlated failures break the retry formula.",
+    "setup": [
+      "Work in a scratch directory outside the repo. Run every script as `env -u OPENAI_API_KEY -u ANTHROPIC_API_KEY PYTHONPATH=<repo> <repo>/.venv/bin/python -B lab.py`, so no key reaches the process.",
+      "Never use `uv run` (it re-syncs the environment) and install nothing. Read `toolcall/README.md`, \"How values are compared\", first."
+    ],
+    "steps": [
+      "Grade by hand, then by machine. Build the 12 responses of the boundary-cases table with `toolcall.responses.openai_call`, `openai_text` and `toolcall.providers.openai_parse` (`tests/test_toolcall_grader.py` has the calls). Write your predicted category first, then call `toolcall.grader.grade`.",
+      "Same call, two renderings. Load `toolcall/data/tools` and `toolcall/data/scenarios` (`load_library`, `load_scenarios`). For `weather-forecast-lisbon` grade `get_current_weather` with location Lisbon using `toolcall.formulation.tool_names(scenario, library, \"low\")`, then `\"high\"`.",
+      "Clustering. Build two datasets of 20 scenarios × 20 reruns with 80 failures each: spread (0 to 7 per scenario) and concentrated (4 scenarios fail 20 of 20, 16 fail 0). Call `toolcall.effects.wilson(80, 400)`, `cluster_bootstrap(rates, average, iterations=10000, seed=1)` and `toolcall.budget.icc`.",
+      "Sweep ρ. For ρ in 0.3, 0.5, 0.61, 0.7 and 0.9 print `toolcall.budget.reps_for(rho, 5, 20)` and `effective_n(30, n, rho)` for n = 5, 13 and 20.",
+      "Retry walk. In plain Python make 30 scenarios × 21 reruns at an assumed failure rate of 0.3, once independent and once with 9 scenarios that always fail. Cut each scenario into groups of three, spend until the first success, and divide spend by wins.",
+      "Dry run on the shipped suite (stub, NOT DATA): `scripts/a3_diagnose.py --tools toolcall/data/tools --scenarios toolcall/data/scenarios --dry-run --reps 3 --store <scratch>/dry.jsonl`. Only the fact that it loads, renders and grades matters."
+    ],
+    "metrics": [
+      "Predicted against graded category, for the 12 responses.",
+      "The category of one call in the low and the high rendering.",
+      "Wilson interval, bootstrap interval and ICC for each dataset.",
+      "N the rule picks, and effective size, for each ρ.",
+      "Calls per success and share of groups that succeed, independent and always-fail."
+    ],
+    "expected": "1: the table. 2: `MALFORMED` (not in context) in the low cell, `WRONG_TOOL` (confusable) in the high cell. 3: Wilson 0.164 to 0.242 for both; bootstrap about 0.16 to 0.24 spread, 0.05 to 0.40 concentrated; ICC about 0.004 against 1.0. 4: N = 20, 19, 13, 9, 5; effective size at ρ = 0.9 is 32.6 at N = 5, 33.1 at N = 20. 5: about 1.43 calls per success, 97% of groups succeeding, when independent (seed-dependent); 2.29 and 70% when 9 scenarios always fail. 6: 147 graded calls.",
+    "demonstrates": "The category is a function of the rendering plus one canonical schema; the interval is a function of how failures cluster; retry economics follow the clustering. None of it needs a model call.",
+    "cost": "none",
+    "note": "Zero spend: no API key is in the environment and no step makes a model call. The dry run's shares are planted by a stub and say nothing about any model; do not copy them anywhere."
+  },
+  "cards": [
+    {
+      "tag": "taxonomy",
+      "front": "Order the six categories by grader precedence.",
+      "back": "`MALFORMED`, `SPURIOUS`, `MISSING`, `WRONG_TOOL`, `WRONG_PARAMS`, `CORRECT`. The first rule that applies wins."
+    },
+    {
+      "tag": "taxonomy",
+      "front": "Which three outcomes are excluded before any rate, and how are they reported?",
+      "back": "`API_ERROR`, `REFUSED` and `TRUNCATED`: counted per cell and never graded; a cell where they together exceed 2% of its calls is flagged."
+    },
+    {
+      "tag": "taxonomy",
+      "front": "No call at all where a call was expected. Category?",
+      "back": "`MISSING`, never `MALFORMED`. A call written as text is graded the same way (flagged, not a call)."
+    },
+    {
+      "tag": "taxonomy",
+      "front": "What does each failure category point at?",
+      "back": "`MALFORMED`: schema strictness, output format. `SPURIOUS`: description scoping, when not to call. `MISSING`: discoverability, richer descriptions. `WRONG_TOOL`: disambiguation, fewer tools. `WRONG_PARAMS`: typing strictness, parameter naming (toolcall README)."
+    },
+    {
+      "tag": "taxonomy",
+      "front": "Name the three kinds of `WRONG_TOOL` the grader records.",
+      "back": "confusable (a look-alike written for the scenario), filler (another tool in the 20), and low_set (one of the scenario's own tools that is not acceptable). The amendment names two."
+    },
+    {
+      "tag": "canonical",
+      "front": "\"3\" is sent for an integer parameter. Category and rule?",
+      "back": "`MALFORMED`, rule R4: a number sent as a string is a type error, so structural. 3.0 for an integer is accepted under R3 when it has no fractional part."
+    },
+    {
+      "tag": "canonical",
+      "front": "An enum value outside the set, or a pattern miss. Category?",
+      "back": "`WRONG_PARAMS`: value-level, not structural. A key the schema does not define is also `WRONG_PARAMS` (R7)."
+    },
+    {
+      "tag": "canonical",
+      "front": "A null for an optional parameter, and a null for a required one?",
+      "back": "R5: null for an optional parameter equals omitting it; null for a required one counts as the parameter missing, so `MALFORMED`."
+    },
+    {
+      "tag": "cells",
+      "front": "What does the high-count cell contain?",
+      "back": "Exactly 20 tools: the scenario's own 2 to 4, its 4 to 6 look-alikes (4 or 5 in the current suite), and filler from its own domain first, then others."
+    },
+    {
+      "tag": "cells",
+      "front": "What does a loose schema keep in required?",
+      "back": "Only the tool's first required parameter; strict renders enums, patterns, every required parameter and additionalProperties: false."
+    },
+    {
+      "tag": "cells",
+      "front": "Why is provider strict mode off in all eight cells?",
+      "back": "It would make `MALFORMED` nearly impossible by construction and test the decoder, not the model. One labelled exploratory slice turns it on."
+    },
+    {
+      "tag": "cluster",
+      "front": "Effective sample size, and what it approaches.",
+      "back": "S·N / (1 + (N − 1)ρ), approaching S/ρ as N grows. Another repetition buys almost nothing at high ρ, so the information is in the scenarios."
+    },
+    {
+      "tag": "cluster",
+      "front": "The N rule.",
+      "back": "The smallest N reaching 95% of S/ρ: N ≥ 19(1 − ρ)/ρ, between a floor of 5 and a cap of 20 (toolcall/budget.py)."
+    },
+    {
+      "tag": "cluster",
+      "front": "Wilson interval for 0 failures in 20 reruns of one scenario?",
+      "back": "0% to 16.1% (toolcall.effects.wilson(0, 20)); the normal approximation would give a zero-width interval. Wilson is used only within one scenario."
+    },
+    {
+      "tag": "contrasts",
+      "front": "A main effect, in words. Is the interaction halved here?",
+      "back": "High-level rate minus low-level rate, averaged over the other two factors, in points. The interaction is the effect at the other factor's high level minus its effect at the low level: not halved. Say which convention you mean."
+    },
+    {
+      "tag": "hypotheses",
+      "front": "H4's floor rule.",
+      "back": "If the opaque arm's identical-retry rate is under 5%, report H4 as not testable at this rate. It counts neither as support nor refutation, and Holm runs over the other four."
+    },
+    {
+      "tag": "hypotheses",
+      "front": "Holm's thresholds over five tests, and the smallest bootstrap p.",
+      "back": "0.01, 0.0125, 0.0167, 0.025, 0.05. With B draws the smallest p is 1/(B + 1), so B must be at least 99 to reject at 0.01."
+    },
+    {
+      "tag": "recovery",
+      "front": "Why does H4 count only persistent error kinds?",
+      "back": "After a rejection an identical retry is a loop; after a timeout it is the right move if the call is idempotent. Counting both would blur the pathology."
+    },
+    {
+      "tag": "recovery",
+      "front": "How does a conversation end when all attempts are used?",
+      "back": "As `budget_exhausted`: neither `gave_up` nor `hallucinated_success`. `identical_retry` is decided on the first action after the error only."
+    },
+    {
+      "tag": "costsuccess",
+      "front": "Why not c / (1 − f) for a retry policy?",
+      "back": "It assumes independent retries. If a failing scenario fails again it understates the cost; the study walks recorded reruns in order."
+    },
+    {
+      "tag": "selection",
+      "front": "Why can the pilot not report ρ near 0.9?",
+      "back": "The band keeps baseline rates between 0.10 and 0.90 over 10 reruns, which caps the intra-scenario correlation near 0.61."
+    },
+    {
+      "tag": "pipeline",
+      "front": "Draw the pipeline from a scenario file to the verdicts. Mark where calls multiply and where the bootstrap resamples.",
+      "back": "Scenario → renderer (8 bodies) → model, N reps per cell → provider-side exclusions → grader against the canonical schema → per-scenario rates → cell rates and 2³ contrasts → bootstrap over scenarios → H1 to H5 with Holm. Calls multiply before the grader; the bootstrap resamples whole scenarios.",
+      "draw": true
+    },
+    {
+      "tag": "recovery",
+      "front": "Draw one recovery conversation with an opaque error and an identical retry, ending in a give-up.",
+      "back": "Harness sends the request; the model calls the tool; the mock rejects with an opaque error; the harness marks it injected and keeps the failing call key; the model repeats the call (identical retry); rejected again; the model answers in text that discloses failure: `gave_up`.",
+      "draw": true
+    },
+    {
+      "tag": "cluster",
+      "front": "Draw two datasets with the same 80 failures in 400 calls that give very different intervals.",
+      "back": "Spread: 0 to 7 failures in each of 20 scenarios, interval about 16% to 24%. Concentrated: 4 scenarios fail every rerun, 16 never, interval about 5% to 40%. Wilson on 80 / 400 is the same for both.",
+      "draw": true
+    }
+  ],
+  "schedule": [
+    {
+      "when": "Day 1",
+      "test": "Cards 1 to 12 and drills 1 to 3 aloud. Draw the pipeline from memory. Prerequisite check."
+    },
+    {
+      "when": "Day 3",
+      "test": "Lab steps 1 to 4. Estimation 1 on paper. Cards 13 to 17. Explain drill 5 aloud in two minutes using the two datasets."
+    },
+    {
+      "when": "Day 7",
+      "test": "Draw the recovery sequence and the two datasets. Drills 4 and 6 to 8. Estimation 2 by hand, then lab step 5."
+    },
+    {
+      "when": "Day 21",
+      "test": "The 30-second pitch cold. Drills 9 to 12. Estimation 1 with fresh numbers. The design scenario in 15 minutes. Cards 18 to 24."
+    },
+    {
+      "when": "After results",
+      "test": "Redraw the pipeline with the real numbers on it, then re-read what the page said was predicted."
+    }
+  ],
+  "calculator": {
+    "title": "Design effect and the N rule",
+    "note": "What-ifs, not measurements: no ρ has been measured. Formulas: the page's effective-size concept (normal approximation for the half-width) and toolcall/budget.py (95% of the limit, floor 5, cap 20).",
+    "inputs": [
+      {
+        "id": "S",
+        "label": "Scenarios, S",
+        "value": 20,
+        "min": 2,
+        "max": 60,
+        "step": 1
+      },
+      {
+        "id": "N",
+        "label": "Repetitions, N",
+        "value": 20,
+        "min": 1,
+        "max": 40,
+        "step": 1
+      },
+      {
+        "id": "rho",
+        "label": "Correlation ρ between reruns",
+        "value": 0.6,
+        "min": 0.05,
+        "max": 1,
+        "step": 0.05
+      },
+      {
+        "id": "p",
+        "label": "Pooled failure rate",
+        "value": 0.2,
+        "min": 0.05,
+        "max": 0.95,
+        "step": 0.05
+      }
+    ],
+    "outputs": [
+      {
+        "label": "Design effect",
+        "expr": "1 + (N - 1) * rho",
+        "digits": 1
+      },
+      {
+        "label": "Effective size",
+        "expr": "S * N / (1 + (N - 1) * rho)",
+        "digits": 1
+      },
+      {
+        "label": "95% half-width",
+        "unit": "points",
+        "expr": "100 * 1.96 * sqrt(p * (1 - p) / (S * N)) * sqrt(1 + (N - 1) * rho)",
+        "digits": 1
+      },
+      {
+        "label": "N the sizing rule picks",
+        "expr": "max(5, min(20, ceil(0.95 * (1 - rho) / ((1 - 0.95) * rho))))",
+        "digits": 0
+      }
+    ]
+  },
+  "assumed_numbers": [
+    {
+      "value": "S = 20, N = 20, ρ = 0.6, rate 0.2",
+      "why": "The calculator's starting what-ifs: the page's constructed 20 × 20 cell with 20% failing, and a ρ near the band's cap. Not measurements."
+    },
+    {
+      "value": "30, 20, 26, 16, 50, 40, 34, 24 (%)",
+      "why": "ILLUSTRATIVE cell failure rates for estimation 2, invented to show the arithmetic. Not data and not predictions."
+    },
+    {
+      "value": "20 to 10 and 40 to 20 (%)",
+      "why": "ILLUSTRATIVE terse-to-rich failure rates at low and high count, for the scale example in estimation 2."
+    },
+    {
+      "value": "f = 0.3, 9 of 30 scenarios always fail",
+      "why": "The page's illustrative retry assumption, reused in the drill and lab step 5. Not a measurement."
+    },
+    {
+      "value": "1.645",
+      "why": "The standard normal value for a 90% two-sided interval; used only for the rough H2 equivalence bound in drill 8."
+    }
+  ],
+  "derived_numbers": [
+    {
+      "value": "12.67",
+      "how": "19 x (1 - 0.6) / 0.6 = 12.667, the N the sizing rule gives at rho = 0.6 before rounding up to 13."
+    },
+    {
+      "value": "0.0001",
+      "how": "1 / 10,001 = 0.0000999, the smallest add-one bootstrap p at B = 10,000 draws."
+    },
+    {
+      "value": "6.0",
+      "how": "0.02 x sqrt(24) / 1.645 = 0.0596: a normal-approximation bound on the strictness contrast's SD, in points, at S = 24."
+    },
+    {
+      "value": "6.7",
+      "how": "0.02 x sqrt(30) / 1.645 = 0.0666, the same bound at S = 30."
+    },
+    {
+      "value": "16.1",
+      "how": "toolcall.effects.wilson(0, 20) upper end = 0.1611, run offline."
+    },
+    {
+      "value": "33.1",
+      "how": "30 x 20 / (1 + 19 x 0.9) = 600 / 18.1 = 33.15, effective size at N = 20, rho = 0.9, S = 30."
+    },
+    {
+      "value": "148",
+      "how": "50 + 40 + 34 + 24: the four illustrative high-count rates (estimation 2)."
+    },
+    {
+      "value": "140",
+      "how": "30 + 20 + 50 + 40: the four illustrative terse-cell rates (estimation 2)."
+    },
+    {
+      "value": "108",
+      "how": "30 + 20 + 34 + 24 (estimation 2, interaction check)."
+    },
+    {
+      "value": "132",
+      "how": "26 + 16 + 50 + 40 (estimation 2, interaction check)."
+    },
+    {
+      "value": "0.004",
+      "how": "toolcall.budget.icc on the spread dataset (0 to 7 failures in each of 20 scenarios of 20 reruns), run offline: 0.004."
+    }
+  ]
+}
