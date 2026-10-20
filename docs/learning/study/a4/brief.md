@@ -388,7 +388,7 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
 ### Hot rule and floors
 
 - Axis: Peak load = Zipf share × 1 GPU × 5 (bursty) or 1 (spread); the spread row spans s 0.6 to 2.0 and no model is hot. Hot above 0.7: pinned = ceil(load / 0.7) per hot model. Dedicate = pinned + rest; floor = pinned + half the rest, paired.
-- Read it as: Spread never makes a model hot; co-locate sized exactly at its floor everywhere, so only swap's size came from the SLO search.
+- Read it as: Spread never makes a model hot; co-locate searched but landed exactly on its floor everywhere, so only swap's size moved off a rule-given value.
 
 | GPUs | Peak load (top, 2nd) | Pinned | Dedicate | Floor (co-locate) | Sized (swap, co-locate) |
 |---|---|---|---|---|---|
@@ -397,13 +397,13 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
 | bursty 1.25 | 1.84, 0.774 [arithmetic] | 3 + 2 = 5 [arithmetic] | 23 [arithmetic] | 14 [arithmetic] | 12, 14 [simulated] |
 | bursty 1.5 | 2.30, 0.814 [arithmetic] | 4 + 2 = 6 [arithmetic] | 24 [arithmetic] | 15 [arithmetic] | 13, 15 [simulated] |
 | bursty 2.0 | 3.13, 0.783 [arithmetic] | 5 + 2 = 7 [arithmetic] | 25 [arithmetic] | 16 [arithmetic] | 13, 16 [simulated] |
-| spread, any s | 0.16 to 0.63 [arithmetic] | 0 [arithmetic] | 20 [arithmetic] | 10 [arithmetic] | 13 to 18, 10 [simulated] |
+| spread, any s | 0.16 to 0.63, 0.10 to 0.16 [arithmetic] | 0 [arithmetic] | 20 [arithmetic] | 10 [arithmetic] | 13 to 18, 10 [simulated] |
 
 - So: see decision `sizing`
 
 ### Search ranges
 
-- Axis: At s = 1.0. Whisker: sizes searched (not a confidence interval). Dot: where it stopped.
+- Axis: At s = 1.0. Whisker: the ladder the search may climb (not a confidence interval). Dot: the first size that met the SLO. Sizes come from the simulator that failed its gate.
 - Read it as: Both ladders end at dedicate's placement, so dedicating can at best tie.
 - Dedicate, bursty: 21 GPUs (interval 21 to 21)
 - Swap, bursty: 10 GPUs (interval 3 to 21)
@@ -427,8 +427,8 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
 
 ### Memory: one engine, two
 
-- Axis: Card 23.52 GiB. Fixed: budget minus KV cache, the weights (P1: weights) among it. Pin give-up: (64,976 − 55,104 tokens) × 114,688 B, per engine. Subtractions, not measurements.
-- Read it as: Unpinned, two warm engines failed in graph capture: the first held 11.84 GiB (budget 10.58), the second 11.16, the worker 0.5; 15 MiB were free when the second's graph capture asked for 20 MiB more. The pin (6,319,767,552 bytes of KV, 3,444 blocks) gives up about 1 GiB each. A memory fraction budgets one engine; it does not partition the card.
+- Axis: Card 23.52 GiB. Fixed: budget minus KV cache, the weights (P1: weights) among it. Pin give-up: (64,976 − 55,104 tokens) × 114,688 B. Bar 2 totals both engines; pin give-up is 1.054 GiB each. Subtractions, not measurements.
+- Read it as: Unpinned, two warm engines failed in graph capture: the first held 11.84 GiB (budget 10.58), the second 11.16, the worker 0.5; 15 MiB were free when the second's graph capture asked for 20 MiB more. The pin (6,319,767,552 bytes of KV, 3,444 blocks) gives up about 1 GiB each. A memory fraction appears to budget one engine rather than partition the card (inferred; the 1.26 GiB over budget was not itemised).
 - One engine, 0.92 of the card: Fixed 3.6445, KV cache 17.9939, Outside budgets 1.8816 (GiB)
 - Two engines, 0.45 each, KV pinned: Fixed 7.2876, KV cache 11.7715, Pin give-up 2.1089, Outside budgets 2.352 (GiB)
 - So: see decision `model`
@@ -464,7 +464,7 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
 
 ### Pool thrash numbers
 
-- Axis: At the sized swap fleet. Hit rate: arrivals that found their model resident. Seconds between swaps, per pool GPU: pool × 3,600 / swaps per hour. A swap takes 37.8 s (median).
+- Axis: At the sized swap fleet. Hit rate: arrivals that found their model resident, over all arrivals, pinned models included (bursty: about 0.75 for the pool's own models). Seconds between swaps, per pool GPU: pool × 3,600 / swaps per hour. A swap takes 37.8 s (median).
 - Read it as: Same shares, different timing: a spread pool starts a swap every 43 s per GPU, a bursty pool every 298 s.
 
 | swap pool | Hit rate | Swaps per hour | Seconds between swaps |
@@ -489,7 +489,7 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
 ### What the gate covered
 
 - Axis: Against the one-GPU, three-tenant, 900 s replay.
-- Read it as: Only the first two rows were replayed; every fleet count rests on rows the gate did not reach.
+- Read it as: Only the first two rows were replayed; every simulated SLO result rests on rows the gate did not reach.
 
 | gate | What the gate showed |
 |---|---|
@@ -530,7 +530,7 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
 - Q: Why trust a simulator that failed its gate?
   A: For GPU counts, I don't: the gate failed at its one point (one GPU, three tenants, swapping only), the fleets are 10 to 25 GPUs, and co-location had two held-out cells, one missed. The ordering is wide, about twice, but I did not test whether the model's error leaves it unchanged. The measured swap, slowdown and KV split stand.
 - Q: Why is dedicating never cheapest?
-  A: Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). Only swap's count came from the SLO search (see How it works). The simulated margin is the point: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs.
+  A: Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). Only swap's count came from the SLO search (see How it works). The simulated margin is the point: co-locate's p99 of about 2 to 6 s met the 75.6 s SLO at half of dedicate's 20 GPUs.
 - Q: What would change the winner?
   A: Arrival timing (only two regimes built); the SLO (twice a swap favours swapping, and the sweep ran at one SLO); interference (exploratory: four times the busy-neighbour latency loses co-location the bursty regime, eight the spread one); model size (a 1.7B result).
 - Q: Why did the gate fail?
@@ -555,7 +555,7 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
 - Q: Splitting memory halves each engine's share. Why does its KV cache shrink 3.1 times?
   A: About 2.6 times is a fixed cost, roughly 3.6 GiB outside the KV cache at either budget, which comes off the smaller budget first. The other 1.18 is the pin to the compiled engine's 55,104 tokens, which lets two graph captures fit: 168,464 to 55,104 tokens, 82 to 26 requests.
 - Q: A busy neighbour makes a model about twice as slow. Why does co-locating still halve the simulated spread fleet?
-  A: SLO headroom, not low load: 3 to 6 s against 75.6 s. In the exploratory run it held at the worst reading of the unmeasured range.
+  A: SLO headroom, not low load: about 2 to 6 s against 75.6 s. In the exploratory run it held at the worst reading of the unmeasured range.
 - Q: Why can dedicating at best tie under this sizing rule?
   A: Swap and co-locate search only up to dedicate's size, where their layouts become dedicate's and serve identically, so dedicating can tie but never win. The simulated margin is the point.
 - Q: The gate charged 37.8 s per swap; the replay pod's swaps took about 25 s. Why does charging 25 s not rescue the gate?

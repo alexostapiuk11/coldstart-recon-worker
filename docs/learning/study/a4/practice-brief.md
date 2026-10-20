@@ -8,7 +8,7 @@ Paste this whole file into an AI chat. The last section is the prompt that makes
 
 - Derive 21, 12 and 10 GPUs at the reference point from the hot rule and pairing, and price them ($850.43 a tenant a month for dedicate).
 - Draw one against two vLLM engines on a 24 GB card with GiB labels, and compute each KV ceiling from 114,688 bytes a token.
-- Explain with numbers why equal shares give a thrashing spread pool (hit rate 0.00) and a calm bursty one (0.82).
+- Explain with numbers why equal shares give a thrashing spread pool (hit rate 0.00) and a calm bursty one (0.82, pinned included).
 - Say which claims are measured, simulated or untested, what the gate covered, and why recalibrating the swap time would not pass it.
 - Argue a placement for a new workload from swap time, slowdown, KV ceiling and SLO, and name what you would measure first.
 
@@ -44,7 +44,7 @@ KEY steps:
 2. Peak load = share × 1 GPU × 5: 1.39 and 0.695. Only model 1 is hot: ceil(1.39 / 0.7) = ceil(1.985) = 2 pinned GPUs. That leaves 19 tail models.
 3. Dedicate = 2 + 19 = 21. Co-locate floor = 2 + ceil(19 / 2) = 2 + 10 = 12 (9 pairs and 1 single). Swap = 2 + the simulated pool of 8 = 10; its search floor would be 3.
 4. One GPU-month = 1.1095 × 730 = $809.935.
-5. Monthly cost = GPUs × 809.935: $17,008.64, $8,099.35 and $9,719.22. Per tenant (divide by 20): $850.43, $404.97 and $485.96. Dedicate minus swap = 11 × 809.935 = $8,909.29 (the post prints $8,909.28 from the unrounded rate).
+5. Monthly cost = GPUs × 809.935: $17,008.64, $8,099.35 and $9,719.22. Per tenant (divide by 20): $850.43, $404.97 and $485.96. Dedicate minus swap = 11 × 809.935 = $8,909.29 (8,909.285 exactly; the post prints $8,909.28, rounding down).
 6. Output tokens a month = 8.8946 × 256 × 3,600 × 730 = 5,984 million. Dollars per million: 17,008.64 / 5,984 = $2.84; 8,099.35 / 5,984 = $1.35; 9,719.22 / 5,984 = $1.62.
 7. Load per GPU = 1 / GPUs: 4.8%, 10% and 8.3%.
 
@@ -63,7 +63,7 @@ KEY steps:
 5. Ratios: budget 0.92 / 0.45 = 2.04; KV 168,464 / 64,976 = 2.6 (the fixed cost); 168,464 / 55,104 = 3.1; the pin 64,976 / 55,104 = 1.18.
 6. Ceilings at 2,048 tokens: 168,464 / 2,048 = 82; 64,976 / 2,048 = 31; 55,104 / 2,048 = 26 (26 to 28 were seen running).
 
-KEY answer: Fixed cost about 3.64 GiB; predicted 64,970 warm split tokens (logged 64,976); pinned 55,104; ceilings 82, 31 and 26. A fraction budgets one engine, so two engines need the pin to fit.
+KEY answer: Fixed cost about 3.64 GiB; predicted 64,970 warm split tokens (logged 64,976); pinned 55,104; ceilings 82, 31 and 26. A fraction appears to budget one engine rather than partition the card (inferred); the pin is what was tried and it fit.
 
 ## Deep-dive drills
 
@@ -90,7 +90,7 @@ RED FLAG: "Dedicating lost because it wastes GPUs." That states the result witho
 ### Drill 4 of 12
 
 Q: Co-locate sat exactly at its pairing floor at every evaluable point. What did the simulator add?
-KEY: Its counts are arithmetic: pinned GPUs plus half the rest, paired (10 spread; 12, 14, 15, 16 bursty). The simulator only showed that the fully paired fleet meets the 75.6 s SLO, at a p99 of about 3 to 6 s. The uncertainty is whether pairing passes under real interference, not how many GPUs. The exploratory x4 run is where co-locate left its floor.
+KEY: Its counts are arithmetic: pinned GPUs plus half the rest, paired (10 spread; 12, 14, 15, 16 bursty). The simulator only showed that the fully paired fleet meets the 75.6 s SLO, at a p99 of about 2 to 6 s. The uncertainty is whether pairing passes under real interference, not how many GPUs. The exploratory x4 run is where co-locate left its floor.
 RED FLAG: Presenting 12 as a fine-grained optimisation result.
 
 ### Drill 5 of 12
@@ -102,19 +102,19 @@ RED FLAG: "KV halves because memory halves", or "3.1 times because of the weight
 ### Drill 6 of 12
 
 Q: Why did two warm engines at 0.45 each run out of memory when 0.45 + 0.45 leaves room?
-KEY: A fraction budgets one engine; it does not partition the card. Both engines hit the compile cache, so each took about 64,900 KV tokens. The first held 11.84 GiB against a 10.58 GiB budget, the second 11.16, the worker 0.5: 15 MiB free when the second's graph capture asked for 20 MiB. Pinning KV to 55,104 tokens (6,319,767,552 bytes) gave about 1 GiB back each.
-RED FLAG: "The two budgets add to 90%, so it fits." Memory outside the budgets (contexts, graphs) collides.
+KEY: A fraction appears to budget one engine rather than partition the card (inferred; the 1.26 GiB over budget was not itemised). Both engines hit the compile cache, so each took about 64,900 KV tokens. The first held 11.84 GiB against a 10.58 GiB budget, the second 11.16, the worker 0.5: 15 MiB free when the second's graph capture asked for 20 MiB. Pinning KV to 55,104 tokens (6,319,767,552 bytes) gave about 1 GiB back each.
+RED FLAG: "The two budgets add to 90%, so it fits." Memory outside the budgets (likely contexts and graphs; not measured) collides.
 
 ### Drill 7 of 12
 
 Q: Why does a busy neighbour cost about 2.3 times even with one request in flight, and what would you measure?
 KEY: Measured: 2.95 s against 1.27 s at own concurrency 1 with a neighbour at 16, 2.0 to 2.4 times at every load. The mechanism was not measured. Hypothesis only: the engines contend for one GPU's compute and bandwidth, a share of the device that does not depend on your own load; the KV pin keeps their memory apart. Analogy: two pods with no CPU limits on one node. Next: profile both processes at own 1 with neighbour 0, 1 to 15, 16.
-RED FLAG: "They compete for KV memory" (it is pinned and separate), or stating the contention story as measured.
+RED FLAG: "They compete for KV memory" (KV capacity is pinned and separate; bandwidth is another matter), or stating the contention story as measured.
 
 ### Drill 8 of 12
 
 Q: Same per-model shares, yet swap wins when bursty and loses when spread. Show it with numbers.
-KEY: Simulated, s = 1.0. Spread, pool 13: hit rate 0.00, 1,094.8 swaps an hour, a swap start every 42.7 s per pool GPU against a 37.8 s median swap. Bursty, pool 8: hit 0.82, 96.5 an hour, every 298.5 s. The pool schedules again right after each swap, so a waiting model evicts the LRU serving GPU at once; a 120 s burst spreads one swap over many requests. Analogy: cache thrash.
+KEY: Simulated, s = 1.0. Spread, pool 13: hit rate 0.00, 1,094.8 swaps an hour, a swap start every 42.7 s per pool GPU against a 37.8 s median swap. Bursty, pool 8: hit 0.82 over all arrivals, pinned model included (about 0.75 for the pool alone), 96.5 an hour, every 298.5 s. The pool schedules again right after each swap, so a waiting model evicts the LRU serving GPU at once; a 120 s burst spreads one swap over many requests. Analogy: cache thrash.
 RED FLAG: "Bursty is lower load." Shares and load are identical by construction; only timing differs.
 
 ### Drill 9 of 12
@@ -126,7 +126,7 @@ RED FLAG: "The SLO was picked to make swap win." It was picked blind, but it doe
 ### Drill 10 of 12
 
 Q: Charged 37.8 s per swap the simulator is too slow; charged about 25 s it is too fast. What does that imply?
-KEY: No fixed stall fits. Charged 38 s, 2 of 13 bins agree (largest miss 69.2 s); at 28 s, 6; at 25 s, 2 (10.4 s, too fast); each repeat judged on its own swap time still misses 12 of 13. The model has no term for what a swap costs the requests around it (not measured). A calibrated re-run would not pass; measure that cost on one pod.
+KEY: No fixed stall fits. Charged 38 s, 2 of 13 bins agree (largest miss 69.2 s; the gate's own run at 37.8 s had 3 of 13 and 67.8 s, so a rounded charge moves a bin); at 28 s, 6; at 25 s, 2 (10.4 s, too fast); each repeat judged on its own swap time still misses 12 of 13. The model has no term for what a swap costs the requests around it (not measured). A calibrated re-run would not pass; measure that cost on one pod.
 RED FLAG: "Calibrate the swap time and re-run the gate." That is a forking path, and it still fails.
 
 ### Drill 11 of 12
@@ -189,12 +189,12 @@ Record:
 - Sized M per strategy at each SLO multiple
 - Pinned GPUs and the dedicate and co-locate sizes at hot fraction 0.7 and 0.69
 
-KEY expected result: Predictions to check, not facts. Step 2: spread hit rate near 0 until the pool nears the number of tail models, bursty hit rate rising from small M and near 0.8 by the sized pool of 8. Step 3 reproduces the registered sizes. Step 4: swap's M should rise as the multiple falls and fall as it rises, while co-locate and dedicate stay put (floor and fixed). Step 5: pinned GPUs 2 at 0.7 and 5 at 0.69; dedicate 21 then 23, swap's ladder 3 to 21 then 6 to 23, co-locate's 12 to 21 then 14 to 23.
+KEY expected result: Predictions to check, not facts. Step 2: spread hit rate near 0 until the pool nears the number of tail models, bursty hit rate from the pinned share (0.28) to 0.82 at M = 10 (pool 8; 0.65 at M = 8). Step 3 reproduces the registered sizes. Step 4: swap's M should rise as the multiple falls and fall as it rises, while co-locate and dedicate stay put. Step 5: pinned GPUs 2 at 0.7 and 5 at 0.69; dedicate 21 then 23, swap's ladder 3 to 21 then 6 to 23, co-locate's 12 to 21 then 14 to 23.
 KEY what it shows: Which counts are arithmetic and which come from the SLO search, how fragile swap's win is to the SLO choice, and thrash as a number (hit rate).
 
 ## Calculator
 
-Hot rule and fleet sizes Enter the top two models' peak loads: share × 1 GPU × 5 bursty, × 1 spread (s = 1.0 bursty: 1.39 and 0.695; s = 2.0: 3.13 and 0.783). Valid while the third model is not hot. Dedicate and the floor are arithmetic; swap's size comes from the simulator.
+Hot rule and fleet sizes Top two models' peak loads: share × 1 GPU × 5 bursty, × 1 spread (s = 1.0 bursty: 1.39 and 0.695; s = 2.0: 3.13 and 0.783). Valid while the third is not hot. A load exactly at the threshold is not hot in the rule (strict >) but is pinned here. Dedicate and floor are arithmetic; swap is simulated.
 
 Inputs (default, range):
 
@@ -228,10 +228,10 @@ Outputs at the defaults:
 - [kv] What part of the 3.1 times KV shrink is fixed cost, and what part is the pin? -> KEY: The fixed cost (about 3.6 GiB outside the KV cache) gives 2.6 times (168,464 / 64,976). Pinning both engines to the compiled engine's 55,104 gives the other 1.18.
 - [kv] Why did two warm engines at 0.45 each fail? -> KEY: The first held 11.84 GiB (budget 10.58), the second 11.16, the worker 0.5. 15 MiB were free when graph capture asked for 20 MiB.
 - [interference] Busy-neighbour slowdown range, and the value at own concurrency 1? -> KEY: 2.0 to 2.4 times at every measured load; at own 1, 2.95 / 1.27 = 2.3 times.
-- [interference] Why does co-locating still halve the spread fleet? -> KEY: SLO headroom: its latency is about 3 to 6 s against 75.6 s. Exploratory: four times the penalty still wins spread by one GPU (12 against 13) and loses bursty (20 against 10).
+- [interference] Why does co-locating still halve the spread fleet? -> KEY: SLO headroom: its latency is about 2 to 6 s against 75.6 s. Exploratory: four times the penalty still wins spread by one GPU (12 against 13) and loses bursty (20 against 10).
 - [swap] Swap median, and its biggest stage? -> KEY: 37.8 s. Process start, imports and the health check take 27.8 s (74%); weight load only 2.2 s.
 - [swap] Sleep mode: switch time, and why it was never simulated? -> KEY: 5.0 s median over 8 repeats. The host memory a sleeping engine holds was not measured, so it could not be priced. The card read 2,069 MiB asleep against 20,081 MiB awake.
-- [lru] Simulated hit rate and swaps an hour, spread against bursty at s = 1.0? -> KEY: Spread (pool 13): 0.00 and 1,094.8. Bursty (pool 8): 0.82 and 96.5.
+- [lru] Simulated hit rate and swaps an hour, spread against bursty at s = 1.0? -> KEY: Spread (pool 13): 0.00 and 1,094.8. Bursty (pool 8): 0.82 over all arrivals, pinned included (pool alone about 0.75), and 96.5.
 - [slo] Why does an SLO of twice a swap favour swapping? -> KEY: A swap fits inside the budget: even a spread pool with hit rate 0.0 met it, worst decile 74.3 s against 75.6 s (simulated).
 - [slo] What does sizing on the aggregate p99 pick, and what breaks? -> KEY: Swap at 9 GPUs; deciles 1 and 2 sit at 87.7 and 77.2 s against 75.6 s. Per-decile sizing needs 10.
 - [gate] The gate's pass rule? -> KEY: At least 10 judged 30 s bins and at most half missing, band edges widened by 0.001 s; the predicted swap count within the real range, plus or minus 1.
@@ -260,7 +260,7 @@ Not from the study page's sources:
 - 17008.64: worked out, 21 GPUs x $809.935 a GPU-month = $17,008.635 (analysis.json cost 17,008.64 for dedicate).
 - 8099.35: worked out, 10 GPUs x $809.935 = $8,099.35 (swap).
 - 9719.22: worked out, 12 GPUs x $809.935 = $9,719.22 (co-locate).
-- 8909.29: worked out, 11 x $809.935 = $8,909.285; the post prints $8,909.28 from the unrounded rate.
+- 8909.29: worked out, 11 x $809.935 = $8,909.285 exactly; the post prints $8,909.28, rounding down.
 - 5984: worked out, 8.8946 requests a second x 256 output tokens x 3,600 s x 730 h = 5,984.0 million output tokens a month.
 - 17.99: worked out, 168,464 tokens x 114,688 B / 2^30 = 17.99 GiB of KV in the lone engine.
 - 3.64: worked out, Fixed cost outside the KV cache: 21.64 - 17.99 = 3.64 GiB (the unit derives it as about 3.6).
@@ -272,6 +272,9 @@ Not from the study page's sources:
 - 2.04: worked out, 0.92 / 0.45 = 2.04, the ratio of the two budgets.
 - 75.55: worked out, 2 x the median swap 37.775 s = 75.55 s (the unit rounds it to 75.6; analysis.json slo_seconds = 75.5504).
 - 37.78: worked out, Median swap 37.775 s (data/a4/analysis.json validation.swap_median_s), the unit's 37.8.
+- 1.26: worked out, The first engine's 11.84 GiB less its 10.58 GiB budget = 1.256 GiB, to two decimals.
+- 0.75: worked out, (0.8203 - 0.282) / (1 - 0.282) = 0.750: the bursty hit rate with the pinned top model's 0.282 share removed. An estimate, not a stored field.
+- 8909.285: worked out, 11 x $809.935 = $8,909.285 exactly (1.1095 x 730 = 809.935); the post prints $8,909.28.
 
 ## Drill mode (paste this to an AI chat)
 

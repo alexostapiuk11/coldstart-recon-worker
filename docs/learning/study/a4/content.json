@@ -1332,7 +1332,7 @@
           ],
           [
             {
-              "text": "0.16 to 0.63",
+              "text": "0.16\u00a0to\u00a00.63, 0.10\u00a0to\u00a00.16",
               "status": "observed"
             },
             {
@@ -1365,7 +1365,7 @@
         ]
       },
       "axis": "Peak load = Zipf share × 1 GPU × 5 (bursty) or 1 (spread); the spread row spans s 0.6 to 2.0 and no model is hot. Hot above 0.7: pinned = ceil(load / 0.7) per hot model. Dedicate = pinned + rest; floor = pinned + half the rest, paired.",
-      "read_as": "Spread never makes a model hot; co-locate sized exactly at its floor everywhere, so only swap's size came from the SLO search.",
+      "read_as": "Spread never makes a model hot; co-locate searched but landed exactly on its floor everywhere, so only swap's size moved off a rule-given value.",
       "so": [
         "sizing"
       ]
@@ -1415,7 +1415,7 @@
           }
         ]
       },
-      "axis": "At s = 1.0. Whisker: sizes searched (not a confidence interval). Dot: where it stopped.",
+      "axis": "At s = 1.0. Whisker: the ladder the search may climb (not a confidence interval). Dot: the first size that met the SLO. Sizes come from the simulator that failed its gate.",
       "read_as": "Both ladders end at dedicate's placement, so dedicating can at best tie.",
       "so": [
         "sizing"
@@ -1588,8 +1588,8 @@
           "Pin give-up"
         ]
       },
-      "axis": "Card 23.52 GiB. Fixed: budget minus KV cache, the [weights](p1:weights) among it. Pin give-up: (64,976 − 55,104 tokens) × 114,688 B, per engine. Subtractions, not measurements.",
-      "read_as": "Unpinned, two warm engines failed in graph capture: the first held 11.84 GiB (budget 10.58), the second 11.16, the worker 0.5; 15 MiB were free when the second's graph capture asked for 20 MiB more. The pin (6,319,767,552 bytes of KV, 3,444 blocks) gives up about 1 GiB each. A memory fraction budgets one engine; it does not partition the card.",
+      "axis": "Card 23.52 GiB. Fixed: budget minus KV cache, the [weights](p1:weights) among it. Pin give-up: (64,976 − 55,104 tokens) × 114,688 B. Bar 2 totals both engines; pin give-up is 1.054 GiB each. Subtractions, not measurements.",
+      "read_as": "Unpinned, two warm engines failed in graph capture: the first held 11.84 GiB (budget 10.58), the second 11.16, the worker 0.5; 15 MiB were free when the second's graph capture asked for 20 MiB more. The pin (6,319,767,552 bytes of KV, 3,444 blocks) gives up about 1 GiB each. A memory fraction appears to budget one engine rather than partition the card (inferred; the 1.26 GiB over budget was not itemised).",
       "so": [
         "model"
       ]
@@ -1968,7 +1968,7 @@
           }
         ]
       },
-      "axis": "At the sized swap fleet. Hit rate: arrivals that found their model resident. Seconds between swaps, per pool GPU: pool × 3,600 / swaps per hour. A swap takes 37.8 s (median).",
+      "axis": "At the sized swap fleet. Hit rate: arrivals that found their model resident, over all arrivals, pinned models included (bursty: about 0.75 for the pool's own models). Seconds between swaps, per pool GPU: pool × 3,600 / swaps per hour. A swap takes 37.8 s (median).",
       "read_as": "Same shares, different timing: a spread pool starts a swap every 43 s per GPU, a bursty pool every 298 s.",
       "so": [
         "regimes"
@@ -2250,7 +2250,7 @@
         ]
       },
       "axis": "Against the one-GPU, three-tenant, 900 s replay.",
-      "read_as": "Only the first two rows were replayed; every fleet count rests on rows the gate did not reach.",
+      "read_as": "Only the first two rows were replayed; every simulated SLO result rests on rows the gate did not reach.",
       "so": [
         "gate"
       ]
@@ -2387,7 +2387,7 @@
       },
       {
         "q": "Why is dedicating never cheapest?",
-        "a": "Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). Only swap's count came from the SLO search (see How it works). The simulated margin is the point: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs."
+        "a": "Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). Only swap's count came from the SLO search (see How it works). The simulated margin is the point: co-locate's p99 of about 2 to 6 s met the 75.6 s SLO at half of dedicate's 20 GPUs."
       },
       {
         "q": "What would change the winner?",
@@ -2431,7 +2431,7 @@
     },
     {
       "q": "A busy neighbour makes a model about twice as slow. Why does co-locating still halve the simulated spread fleet?",
-      "a": "SLO headroom, not low load: 3 to 6 s against 75.6 s. In the exploratory run it held at the worst reading of the unmeasured range."
+      "a": "SLO headroom, not low load: about 2 to 6 s against 75.6 s. In the exploratory run it held at the worst reading of the unmeasured range."
     },
     {
       "q": "Why can dedicating at best tie under this sizing rule?",
@@ -3099,7 +3099,7 @@
     },
     {
       "value": "0.82",
-      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].strategies.swap.hit_rate = 0.8203, to two decimals (hit = an arrival whose model was resident and admitting, placement/sim.py)."
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].strategies.swap.hit_rate = 0.8203, to two decimals (hit = an arrival whose model was resident and admitting, placement/sim.py; over all arrivals, the pinned top model included)."
     },
     {
       "value": "42.7",
@@ -3116,7 +3116,10 @@
     {
       "value": "298",
       "how": "298.5 s (see 298.5), rounded in the text."
-    }
+    },
+    {"value": "1.054", "how": "1.0544 GiB (see 2.1089), the pin's give-up per engine, to three decimals."},
+    {"value": "1.26", "how": "The first engine's 11.84 GiB less its 10.58 GiB budget (0.45 x 23.52 GiB = 10.584) = 1.256 GiB, to two decimals (docs/experiment-a4.md, amendment on the KV pin)."},
+    {"value": "0.75", "how": "The pool's own hit rate, derived: (0.8203 - 0.282) / (1 - 0.282) = 0.750, where 0.282 is the pinned top model's share of bursty arrivals at s = 1.0 (Zipf share 0.278; a 30-trace recomputation gave 0.281, and the cached swap outcomes floor at 0.282 with the pool at M = 3). An estimate, not a stored field."}
   ],
   "links": {
     "p1": "https://claude.ai/artifact/ERS8Z3tRWUkSD4131zgwzY",
