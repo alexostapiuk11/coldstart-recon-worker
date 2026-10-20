@@ -1,0 +1,369 @@
+{
+  "unit": "a6",
+  "title": "A6 practice: duplicate-payment defenses",
+  "minutes": 35,
+  "objectives": [
+    "Draw the two commit gaps (source to Kafka, ledger to Kafka) and place N, K, I and O+I on them as predictions.",
+    "For F4-svc, F4-con-t, F5 and F6, say which stack is predicted to lose or duplicate, at which gap, and by what mechanism.",
+    "Walk K's commit-window kill through the abort and the redelivery, and say why the ledger has two applies and payments-applied one.",
+    "Classify an extra apply as consumer-side, producer-side or unattributable from its (partition, offset) and the topic readback.",
+    "Compute the one-sided 95% zero bound for N trials, and say why the trial, not the payment, is the unit.",
+    "Say what the passed detection gate does not show, and which statements on the page are predictions rather than results."
+  ],
+  "prereq_check": [
+    {
+      "q": "A consumer commits its Postgres transaction, then its Kafka offset, and is SIGKILLed between the two. Which records come back after the restart, and why?",
+      "a": "Everything from the last committed offset, which includes the batch already in the ledger. Progress is recorded only after the Postgres commit, so the old offset still stands and the batch is delivered again.",
+      "review": "p3:offsets"
+    },
+    {
+      "q": "An idempotent producer retries a send after a timeout. Later the whole process restarts and sends the same payment again. Which of the two extra copies can the broker drop?",
+      "a": "Only the in-session retry. Idempotence works within one producer session; the restarted process is a new session, so its copy is new to the broker. The same holds for a relay re-sending.",
+      "review": "p3:idempotence"
+    },
+    {
+      "q": "0 anomalies in 10 targeted trials: what per-trial probability can you exclude at one-sided 95%?",
+      "a": "Anything above about 0.259, from 1 − 0.05^(1/10). The rule of three, 3/10, gives 0.3, just above it. The trial is the unit; the payments inside one trial share its fault.",
+      "review": "zerobound"
+    }
+  ],
+  "drills": [
+    {
+      "q": "Why is exactly-once delivery the wrong goal, and what do you build instead?",
+      "a": "Over a network that drops acknowledgements, delivery is at-least-once or at-most-once. You build exactly-once effect: make a repeat harmless at the sink, with an id assigned at the origin and checked in the same transaction as the state change. Then you measure that it holds under faults rather than assume it.",
+      "red_flag": "Turn on Kafka exactly-once and you have it end to end."
+    },
+    {
+      "q": "Your consumer commits Postgres and then the offset. Why that order, and what does the reverse do?",
+      "a": "Postgres first turns a crash between the two into a duplicate, which a key can absorb. Offset first turns it into a loss: progress says done, the ledger never got the batch, and nothing downstream can repair that. Prefer the failure you can neutralise. The unit argues the reverse by reasoning; it is not measured.",
+      "red_flag": "The order doesn't matter if you retry."
+    },
+    {
+      "q": "Why isn't a Kafka offset a good idempotency key?",
+      "a": "It names a log position, not a payment. A producer-side re-send, such as an outbox relay's, lands at a new offset, and an offset key treats it as new. An id assigned at the origin is identical on every copy. This is reasoning from the spec; relay re-sends are not measured here.",
+      "red_flag": "Offsets are unique, so they dedupe."
+    },
+    {
+      "q": "K is killed after its Postgres commit and before commitTransaction. Walk me through recovery.",
+      "a": "The broker holds an open transaction with pending payments-applied records and pending offsets. On restart, initTransactions on the same transactional.id aborts it; transaction.timeout.ms (60 s default) would if the process never returned. The committed offset is still the old one, so the batch is redelivered and the Postgres commit runs again; the first one stands. Output once at read_committed, ledger twice. H1 predicts this; no K trial has run.",
+      "red_flag": "The Kafka transaction rolls back the Postgres write."
+    },
+    {
+      "q": "A zombie consumer wakes with a batch in hand. Which mechanism rejects it, where, and does that stop the duplicate?",
+      "a": "Generation fencing, at the offset commit: the coordinator refuses a commit from an old generation. On N, reconnaissance saw CommitFailedException about 0.1 s after the zombie's db_commit in all 17 F5 trials; KIP-447 gave K's TxnOffsetCommit the same check. The Postgres write has already happened. Epoch fencing does not help: the consumer that took the partitions has its own transactional.id. Only a check inside the ledger transaction, the key, can stop it (H2 predicts that).",
+      "red_flag": "Fencing stops the zombie from writing."
+    },
+    {
+      "q": "F6: the ledger COMMIT reaches Postgres, the reply is lost, and the client's socket times out. What happens in N and in I?",
+      "a": "The consumer cannot tell whether the commit happened. Crash-only exits without committing the offset, so the batch is redelivered. N applies it twice. In I the key row committed with the first attempt, so the replay conflicts and is skipped (H2 predicts that; not run). It is the Two Generals problem at the database boundary; an idempotent apply is the clean answer short of reading state back.",
+      "red_flag": "The commit failed, so nothing was written."
+    },
+    {
+      "q": "Stack I: two consumers, the zombie and the new owner, apply the same payment_id at READ COMMITTED. Can both apply it?",
+      "a": "No. INSERT ... ON CONFLICT DO NOTHING on the unique key makes the second inserter wait for the first transaction to finish. If the first commits, the second sees the conflict, gets no row back and skips the balance update; if it aborts, the second proceeds. Putting the key insert and the balance update in one transaction is what makes this safe. This is standard Postgres behaviour; confirm it on your version.",
+      "red_flag": "Check the processed table first and insert in a separate step, or say only SERIALIZABLE works."
+    },
+    {
+      "q": "The detection gate passed. What does it not tell you?",
+      "a": "Both positive controls ran on N only, so nothing yet shows K, I or O+I duplicating or holding under faults. Gate trials are not campaign data. Five trials ran under host contention; the pass holds without them (8 and 9 positives, 19 clean negatives against a literal 20 of 20), and that is disclosed. Each campaign trial also needs its own manipulation check.",
+      "red_flag": "The harness is validated, so a zero for I means it is safe."
+    },
+    {
+      "q": "Why random-time cells and targeted cells?",
+      "a": "Targeted cells ask whether a defense can break at all: the fault lands in its weakest window, 10 trials, and 0 of 10 bounds the per-trial probability below 0.259. Random cells ask how often under realistic timing: 30 trials, and 0 of 30 bounds it below 0.095. A random zero alone is weak because narrow windows are rarely hit; a targeted hit alone says nothing about rate.",
+      "red_flag": "More random trials is always better."
+    },
+    {
+      "q": "H5 predicts K duplicates more often than N under random kills. Why, and what could make it inconclusive?",
+      "a": "A random kill duplicates only if it lands between the ledger COMMIT returning and Kafka progress committing. K's window holds the output sends, sendOffsetsToTransaction and commitTransaction, and an earlier-environment recon run saw about two-thirds of K's transactions wait about 100 ms on CONCURRENT_TRANSACTIONS. So H5 predicts K's duty cycle exceeds N's. It is inconclusive if the paired interval on p_K − p_N includes 0; with 30 blocks only a large difference resolves, and an exact McNemar test needs at least 6 discordant blocks all one way for p below 0.05.",
+      "red_flag": "Transactions are strictly safer, so K cannot duplicate more than N."
+    },
+    {
+      "q": "Design question: would storing offsets in Postgres, in the same transaction as the apply, make O+I unnecessary?",
+      "a": "No. It closes gap C as the key does, by making offset and apply atomic, but it dedupes by (partition, offset), so a relay re-send at a new offset slips past it, and it does nothing for gap P: a payment never published is still lost. You would still want an outbox for the loss and an origin key for producer-side duplicates. The unit calls offsets in Postgres correct but unmeasured.",
+      "red_flag": "Offsets in the database give exactly-once end to end."
+    }
+  ],
+  "estimation": [
+    {
+      "title": "How many clean trials bound a failure rate below 1%?",
+      "problem": "A cell shows 0 anomalies in N trials for one stack. How large must N be for the one-sided 95% upper bound on the per-trial failure probability to fall below 1%, and how does that compare with the campaign's 30-trial random cells?",
+      "steps": [
+        "The bound is 1 − 0.05^(1/N). Set it to 0.01: 0.05^(1/N) = 0.99.",
+        "Take logs: (1/N) × ln 0.05 = ln 0.99, so N = ln 0.05 ÷ ln 0.99.",
+        "ln 0.05 is about −2.9957 and ln 0.99 about −0.01005, so N is about 298.07. Round up: 299 trials.",
+        "The rule of three, 3/N = 0.01, gives N = 300, just above the exact 299 (the approximation sits slightly above the exact bound).",
+        "A random cell has 30 trials per stack: 0 of 30 bounds the rate below 0.095. 299 trials is about ten times as many (299 ÷ 30 = 9.97)."
+      ],
+      "answer": "About 299 clean trials (300 by the rule of three), roughly ten times a 30-trial random cell. A clean cell bounds a failure rate; it never shows a defense is safe in general."
+    },
+    {
+      "title": "What can 30 paired blocks resolve under McNemar?",
+      "problem": "For N vs K in one cell, b is the number of blocks where only K duplicated and c where only N did. With the exact two-sided McNemar test on the discordant blocks, how many discordant blocks, all in one direction, give p below 0.05? What about a mixed split such as 8 and 2?",
+      "steps": [
+        "Only discordant blocks count. With n = b + c of them and no real difference, each is a fair coin.",
+        "Exact two-sided p = 2 × P(X ≤ min(b, c)), with X binomial(n, 0.5).",
+        "All one way: (5, 0) gives 2 × 0.5^5 = 0.0625, above 0.05; (6, 0) gives 2 × 0.5^6 = 0.03125, below it.",
+        "A mixed split needs more: (8, 2) has n = 10 and P(X ≤ 2) = (1 + 10 + 45) ÷ 1024, so p = 112 ÷ 1024 = 0.109.",
+        "So at least 6 discordant blocks, all one way, are needed; with 30 blocks per contrast cell only a large difference can resolve."
+      ],
+      "answer": "6 discordant blocks all in one direction (p = 0.03125); 5 gives 0.0625 and an 8-to-2 split 0.109. This is arithmetic on hypothetical counts, not a prediction of what the campaign will show."
+    }
+  ],
+  "scenario": {
+    "prompt": "You own the ledger for a payments company. An API service records each payment in Postgres, and it must be applied exactly once to balances in a separate ledger database fed through Kafka. Design it, then say how you would convince yourself that it holds under failure.",
+    "outline": [
+      "Identity: an id assigned at the origin (the client, or an Idempotency-Key from the API caller), carried in every event. Store the request fingerprint with the key and reject a reused key with different parameters.",
+      "Producer side: a transactional outbox, so the event row commits with the payment; a relay (CDC or a polling publisher) publishes at least once. Say so, and say whether the relay's producer is idempotent (Connect's default is off unless set; the spec records this for Kafka 4.3).",
+      "Consumer side: insert the id into a unique processed table and update balances in one database transaction (ON CONFLICT DO NOTHING), commit the database before the offset, use atomic increments in a fixed lock order. Offsets in the same transaction are optional.",
+      "Why not Kafka exactly-once alone: it covers Kafka-to-Kafka work and Postgres is not a participant; two-phase commit with external participants (KIP-939) had not shipped as of October 2026, per the spec.",
+      "Failure handling: one recovery path (crash-only, resume from the last committed offset). Name what stays out of scope: ordering rules such as overdraft checks make order part of the invariant and need per-account sequencing.",
+      "Proof: reconcile per account against the source, never against what the consumer wrote; keep an append-only apply log with (partition, offset) to attribute anomalies; inject real faults at hooks and at random times; run positive and negative controls first; report bounds, not 'zero bugs'.",
+      "In production, watch: dedupe hits (the defense fired), outbox lag, unreconciled accounts. These are suggestions, not measured in the unit."
+    ],
+    "pitfalls": [
+      "Creating the key downstream of the origin, or checking it in a separate transaction from the balance update: the key then fails silently.",
+      "Using the Kafka offset as the idempotency key: a relay re-send lands at a new offset.",
+      "A unique 'applied' table instead of an append-only log: it hides the very duplicates you need to see.",
+      "Pooling payments into a per-payment rate, or reading a zero in 30 trials as 'safe': the trial is the unit and a zero is a bound.",
+      "Claiming transactions give end-to-end exactly-once because the output topic looks right."
+    ]
+  },
+  "lab": {
+    "goal": "See gap P produce a loss and gap C produce duplicates, see a key absorb them, and see an offset key miss a relay re-send, on a toy pipeline you build yourself.",
+    "setup": [
+      "Run only when no campaign process exists (`pgrep -fl \"campaign run\"` prints nothing) and no campaign or cost session is scheduled; the campaign uses this laptop and host contention is one of its void rules.",
+      "Work in a new directory outside ~/projects/ledger-faults, with its own compose project name, non-default host ports and its own volumes. Never reference the harness's images, networks, volumes, runs/ or code.",
+      "A single-node Kafka in KRaft mode and a Postgres, from public images; record the versions you use (the campaign pinned Kafka 4.3.1 and Postgres 17).",
+      "A small consumer in a language whose Kafka client supports transactions, with modes N, K and I chosen by an environment variable. Check the client's documentation for the exact transaction calls; they are not verified here.",
+      "Schema: accounts, apply_log(payment_id, partition, offset) with no unique key, and processed(payment_id primary key). A producer script writes deterministic payment ids.",
+      "Hooks by environment variable: a sleep after the ledger commit (gap C) and, in a tiny dual-write service, a sleep after the source commit (gap P)."
+    ],
+    "steps": [
+      "Gap C on N: produce 1,000 payments, arm the hook for the third batch, kill -9 the consumer during the sleep, restart, and group apply_log by payment_id for counts above one.",
+      "Same on I: expect no duplicates, and log the skipped inserts (the ON CONFLICT misses).",
+      "Same on K: read payments-applied once with isolation.level=read_committed and once with read_uncommitted, and compare with apply_log.",
+      "Gap P: in the dual-write service, kill during the sleep after the source commit. Expect the row in the source and no record in the topic.",
+      "Switch to a polling outbox: insert the outbox row in the payment's transaction, publish, then mark it sent; crash between publish and mark. Expect a duplicate at a new offset.",
+      "Run a variant consumer keyed on (partition, offset) against that duplicate, then one keyed on payment_id, and compare.",
+      "Optional: instrument the time between the ledger commit and the Kafka progress commit in N and K, run each at the unit's recon rate (200/s for 120 s) with no faults, then kill at random times and count the runs with a duplicate."
+    ],
+    "metrics": [
+      "Duplicates and losses per run, and the (partition, offset) of each extra apply.",
+      "The count of payment_ids at each offset in the topic readback.",
+      "For the optional step: the share of running time spent in the commit window per mode, and the share of random-kill runs with a duplicate."
+    ],
+    "expected": "By the documented semantics, steps 1, 3, 4 and 5 should show a duplicate or a loss, step 2 and the payment_id variant in step 6 should not, and the offset-keyed variant should apply the re-send. In the optional step, K's window should be the wider only if your broker shows the same CONCURRENT_TRANSACTIONS back-off the unit's recon saw; that depends on version and configuration, so record both. Your toy may differ.",
+    "demonstrates": "Every column of the boundary map and every row of the attribution table, on a system small enough to read in an afternoon, with no dependence on the sealed campaign.",
+    "cost": "local",
+    "note": "Never run this while a campaign process exists. This build did not run it."
+  },
+  "cards": [
+    {
+      "tag": "model",
+      "front": "Name the two gaps where payment anomalies are born.",
+      "back": "Source COMMIT to Kafka ack (producer side: a crash loses the payment) and ledger COMMIT to Kafka progress commit (consumer side: a crash redelivers the batch and applies it again)."
+    },
+    {
+      "tag": "model",
+      "front": "Which gap does the outbox close, and what can it add?",
+      "back": "Gap P: the event row commits with the payment. The relay publishes at least once, so a re-send can land at a new offset."
+    },
+    {
+      "tag": "model",
+      "front": "Which gap does the sink key close, and what can it not fix?",
+      "back": "Gap C, and a relay re-send, because the key travels with the payment (H2 predicts this). It cannot fix a loss: a payment never published never reaches the sink."
+    },
+    {
+      "tag": "K",
+      "front": "Why can't a Kafka transaction prevent a ledger duplicate?",
+      "back": "Postgres is not a participant. The ledger commit stands when K's transaction aborts and the batch is redelivered. H1 predicts this; no K trial has run."
+    },
+    {
+      "tag": "K",
+      "front": "Draw it: K killed after its Postgres commit, before commitTransaction, through to the second apply.",
+      "back": "Poll; beginTransaction (client-local); Postgres COMMIT; send and sendOffsetsToTransaction (open); SIGKILL; restart, initTransactions aborts; old offset; same batch again; Postgres COMMIT again; commitTransaction. Output once, ledger twice.",
+      "draw": true
+    },
+    {
+      "tag": "K",
+      "front": "beginTransaction(): when does the broker first learn of the transaction?",
+      "back": "At the first send. beginTransaction is client-local, which is why the first draft's hook, before any Kafka work, ran N's code path."
+    },
+    {
+      "tag": "K",
+      "front": "What aborts K's open transaction after a crash?",
+      "back": "The restarted producer's initTransactions on the same transactional.id, or transaction.timeout.ms (60 s default) if it never returns."
+    },
+    {
+      "tag": "fencing",
+      "front": "Generation fencing vs epoch fencing: who issues each token?",
+      "back": "The group coordinator issues the generation; the transaction coordinator issues the producer epoch for a transactional.id."
+    },
+    {
+      "tag": "fencing",
+      "front": "Draw it: the F5 zombie on N, from the pause to CommitFailedException.",
+      "back": "Pause A with its batch; no heartbeat; the coordinator moves its partitions to B (generation 2); B applies the batch; A unpauses and writes its held batch; A's offset commit is refused; A exits and restarts.",
+      "draw": true
+    },
+    {
+      "tag": "fencing",
+      "front": "Does fencing stop the zombie's ledger write?",
+      "back": "No. The refusal comes at the offset commit, after the Postgres commit. Only a check inside the ledger transaction, the key, can stop the write (H2)."
+    },
+    {
+      "tag": "attribution",
+      "front": "An extra apply at the same (partition, offset): born where?",
+      "back": "The consumer side: a redelivery."
+    },
+    {
+      "tag": "attribution",
+      "front": "An extra apply at a different offset of the same payment: born where?",
+      "back": "The producer side: a topic duplicate passed through."
+    },
+    {
+      "tag": "attribution",
+      "front": "A payment is in the source and absent from the topic: what is it, and where was it born?",
+      "back": "A loss with a topic gap, on the producer side."
+    },
+    {
+      "tag": "model",
+      "front": "Draw it: the pipeline with its two gaps, and where each of the four stacks sits.",
+      "back": "Client, service, source database, Kafka, consumer, ledger database. Gap P between the source commit and the Kafka ack; gap C between the ledger commit and the progress commit. Outbox on P, key on C, K beside C with its window predicted wider (H5).",
+      "draw": true
+    },
+    {
+      "tag": "model",
+      "front": "Draw it: the life of one payment, with the loss exit and the duplicate exit.",
+      "back": "Source commit; published; applied; Kafka progress committed. Loss exit: after the source commit, before the publish. Duplicate exit: after the apply, before the progress commit. With a key, the repeat is skipped.",
+      "draw": true
+    },
+    {
+      "tag": "key",
+      "front": "The two ways an idempotency key silently fails.",
+      "back": "It is created downstream of the origin, or the check and the write are in separate transactions."
+    },
+    {
+      "tag": "key",
+      "front": "Why not dedupe by Kafka offset?",
+      "back": "A re-send lands at a new offset, so an offset key treats it as new. Only an id assigned at the origin is identical on every copy."
+    },
+    {
+      "tag": "stats",
+      "front": "0 anomalies in 30 trials, and in 10: the one-sided 95% bounds?",
+      "back": "0.095 and 0.259; the rule of three gives 0.1 and 0.3."
+    },
+    {
+      "tag": "stats",
+      "front": "Why is the trial, not the payment, the unit?",
+      "back": "Payments in one trial share one fault, so they are not independent and are never pooled."
+    },
+    {
+      "tag": "stats",
+      "front": "How many discordant blocks, all one way, give an exact two-sided McNemar p below 0.05?",
+      "back": "6: p = 2 × 0.5^6 = 0.03125. 5 gives 0.0625."
+    },
+    {
+      "tag": "H5",
+      "front": "Commit-window duty cycle: the definition and the prediction.",
+      "back": "The share of running time between the ledger COMMIT returning and Kafka progress committing. H5 predicts K's exceeds N's, so random kills duplicate K more often."
+    },
+    {
+      "tag": "gate",
+      "front": "What did the passed detection gate not show?",
+      "back": "Anything about K, I or O+I under faults: both positive controls ran on N only. It also does not count in the campaign."
+    },
+    {
+      "tag": "F6",
+      "front": "A lost COMMIT reply: what happens in N and in I?",
+      "back": "The outcome is unknown, so crash-only exits and the batch is redelivered. N applies it twice; I skips it on the key conflict (H2 predicts that)."
+    },
+    {
+      "tag": "trust",
+      "front": "What came before the pre-registration tag, and what is the disclosed exception?",
+      "back": "Reconnaissance A and B, frozen into the pre-registration and not results. One recon rule (C-R, cap refusals) was set after seeing its data, and is disclosed."
+    }
+  ],
+  "schedule": [
+    {
+      "when": "Day 1, after the study page",
+      "test": "Draw the two gaps and the life of one payment from memory; do the prerequisite check; the model and K cards. Pass: all four stacks placed on the gaps in a minute."
+    },
+    {
+      "when": "Day 3",
+      "test": "Draw K's commit-window kill and the F5 zombie; drills 1 to 6 aloud; the fencing, attribution and key cards. Pass: you never say a transaction rolls back Postgres, and you name the fencing correctly."
+    },
+    {
+      "when": "Day 7",
+      "test": "Say the 2-minute version once, recorded; both estimations from scratch; drills 7 to 11. Pass: the numbers are right and every prediction is called a prediction."
+    },
+    {
+      "when": "Day 21",
+      "test": "The design scenario as a 25-minute mock with a skeptical interviewer; all the cards. Pass: you state limits without being asked."
+    },
+    {
+      "when": "After the campaign ends",
+      "test": "Replace 'predicted' with the result per cell in your own boundary map, then redo Day 7. Pass: you can say which bets lost."
+    }
+  ],
+  "derived_numbers": [
+    {
+      "value": "298.07",
+      "how": "ln 0.05 ÷ ln 0.99 = −2.9957 ÷ −0.01005; the bound 1 − 0.05^(1/N) equals 0.01 there."
+    },
+    {
+      "value": "2.9957",
+      "how": "−ln 0.05, to four decimals."
+    },
+    {
+      "value": "0.01005",
+      "how": "−ln 0.99, to five decimals."
+    },
+    {
+      "value": "299",
+      "how": "298.07 rounded up to a whole trial."
+    },
+    {
+      "value": "300",
+      "how": "3 ÷ 0.01, the rule of three at a 1% bound."
+    },
+    {
+      "value": "0.01",
+      "how": "the 1% bound written as a probability."
+    },
+    {
+      "value": "0.99",
+      "how": "1 − 0.01."
+    },
+    {
+      "value": "9.97",
+      "how": "299 ÷ 30."
+    },
+    {
+      "value": "0.03125",
+      "how": "2 × 0.5^6 = 2 ÷ 64: exact two-sided McNemar p for 6 discordant blocks, all one way."
+    },
+    {
+      "value": "0.0625",
+      "how": "2 × 0.5^5 = 2 ÷ 32: the same for 5 blocks."
+    },
+    {
+      "value": "1024",
+      "how": "2^10: the outcomes of 10 fair coin flips (8 + 2 discordant blocks)."
+    },
+    {
+      "value": "112",
+      "how": "2 × (1 + 10 + 45): twice the number of outcomes with at most 2 of 10 on one side."
+    },
+    {
+      "value": "0.109",
+      "how": "112 ÷ 1024 = 0.109375, rounded: exact two-sided p for an 8-to-2 split."
+    }
+  ],
+  "assumed_numbers": [
+    {
+      "value": "1,000 payments in the lab",
+      "why": "An arbitrary lab size, chosen so the third batch is well past the start; any similar number works."
+    }
+  ]
+}

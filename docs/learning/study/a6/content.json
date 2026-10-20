@@ -47,14 +47,14 @@
     {
       "id": "stacks",
       "short": "Four stacks, three contrasts",
-      "term": "The four stacks and their contrasts",
+      "term": "Four stacks, three contrasts",
       "plain": "Same client, topic, two consumers, schema and failure policy; only the defense differs. **N**: dual write, [at-least-once](p3:atleast) consumer. **K**: dual write, consumer offsets inside a Kafka transaction. **I**: dual write, key checked in the ledger transaction. **O+I**: outbox relayed by Debezium, plus the key. **N→K**, **N→I** and **I→O+I** each add one defense. Every producer is idempotent; O+I's needs a config override."
     },
     {
       "id": "cells",
       "short": "Nine cells, two timings",
-      "term": "The fault matrix: nine cells, two timings",
-      "plain": "Six faults plus a no-fault control (F0). Broker kill (F1) and pause (F2) can stress both sides; a producer blackhole (F3) and a service kill right after its source commit (F4-svc) the producer side; a random consumer kill (F4-con-r), a kill in the commit window (F4-con-t), a [zombie](p3:groups) (F5) and a lost `COMMIT` reply (F6) the consumer side. **Random-time** cells (F1–F3, F4-con-r; 30 trials per stack, as for F0) ask how often; **targeted** cells (a code hook; 10 trials) ask whether."
+      "term": "Nine cells, two timings",
+      "plain": "Six faults plus a no-fault control (F0); the design matrix names them and the boundary map shows which gap each tests. F5 is a [zombie](p3:groups) consumer. **Random-time** cells (F1–F3, F4-con-r; 30 trials per stack, as for F0) ask how often; **targeted** cells (a code hook; 10 trials) ask whether."
     },
     {
       "id": "window",
@@ -65,113 +65,220 @@
     {
       "id": "blocks",
       "short": "Paired blocks, McNemar",
-      "term": "Paired blocks, Newcombe and McNemar",
+      "term": "Paired blocks, McNemar",
       "plain": "A **block** is one cell and one seed run on all four stacks in random order: the same fault schedule and payment stream. A void trial voids its whole block, re-run with a new seed, so analysed blocks stay [paired](p2:pairing). For N vs K, the exact McNemar test uses only blocks where exactly one of the two had a duplicate (**discordant**); Newcombe's paired interval (method 10), over all the cell's blocks, gives a plausible range for the difference. Two contrasts are confirmatory: N vs K in F4-con-r (H5) and in F1+F2 (H4b)."
     },
     {
       "id": "zerobound",
       "short": "What zero in N trials claims",
-      "term": "The zero bound and the rule of three",
-      "plain": "The trial is the unit: payments in one trial share a fault and are never pooled. If 0 of N trials show an anomaly, the per-trial probability is below 1 − 0.05^(1/N), one-sided 95%: 0.095 at N = 30, 0.259 at N = 10. The **rule of three**, about 3/N, approximates it."
+      "term": "Zero bound, rule of three",
+      "plain": "The trial is the unit: payments in one trial share a fault and are never pooled. If 0 of N trials show an anomaly, the per-trial probability is below 1 − 0.05^(1/N), one-sided 95%. The **rule of three**, about 3/N, approximates it."
     },
     {
       "id": "detgate",
       "short": "The detection gate",
-      "term": "The detection gate, as run here",
-      "plain": "Run after the pre-registration tag, before the campaign, and not counted in it: the checker on synthetic histories with every anomaly class planted; two [positive controls](p3:controls) on **N only** (a commit-window kill must give a duplicate, a kill after the source commit a loss, each in at least 8 of 10 trials); a negative control of five no-fault trials per stack, all clean. All four must pass."
+      "term": "The detection gate",
+      "plain": "Run after the pre-registration tag, before the campaign, and not counted in it: the checker on synthetic histories, two [positive controls](p3:controls) on **N only**, and a negative control of five no-fault trials per stack. All four must pass; the rules are in the gate chart below."
     }
   ],
-  "walkthrough": {
-    "title": "One K batch, killed in the commit window",
-    "lead": "A prediction (H1), not a result: values illustrate one payment, from the code and pre-registration. Only N has been seen duplicating this way (in the gate); K's abort-and-recommit path has not been run.",
-    "registers": [
-      {
-        "id": "ledger",
-        "label": "Ledger rows, 1 payment"
-      },
-      {
-        "id": "offset",
-        "label": "Committed offset"
-      },
-      {
-        "id": "txn",
-        "label": "Kafka transaction"
-      },
-      {
-        "id": "out",
-        "label": "payments-applied"
-      },
-      {
-        "id": "proc",
-        "label": "Consumer K process"
-      }
-    ],
-    "steps": [
-      {
-        "say": "K polls a batch. `beginTransaction()` is client-local: the broker has heard nothing, so a kill now would leave no Kafka transaction to abort.",
-        "values": {
-          "ledger": "0",
-          "offset": "start of this batch",
-          "txn": "none at the broker",
-          "out": "nothing",
-          "proc": "running"
-        }
-      },
-      {
-        "say": "The ledger transaction commits to Postgres first. Kafka is not part of it, so this row is permanent whatever Kafka does next.",
-        "values": {
-          "ledger": "1, committed"
+  "walkthrough": [
+    {
+      "title": "One K batch, killed in the commit window",
+      "lead": "A prediction (H1), not a result: values illustrate one payment, from the code and pre-registration. Only N has been seen duplicating this way (in the gate); K's abort-and-recommit path has not been run.",
+      "registers": [
+        {
+          "id": "ledger",
+          "label": "Ledger rows, 1 payment"
         },
-        "decision": "order"
-      },
-      {
-        "say": "K sends the record and adds its offsets: open, nothing visible. In one recon run (pre-campaign), 67% and 65% of transactions retried the offset commit after ~100 ms, widening [this window](a6:window) (H5).",
-        "values": {
-          "txn": "open; records, offsets pending",
-          "out": "pending, hidden"
-        }
-      },
-      {
-        "say": "F4-con-t sends SIGKILL at `before_kafka_commit`: row committed, transaction open and never finished. Nothing in the dead process can undo the row.",
-        "values": {
-          "proc": "killed"
+        {
+          "id": "offset",
+          "label": "Committed offset"
         },
-        "decision": "crash"
-      },
-      {
-        "say": "It restarts 5 s later; `initTransactions()` on the same `transactional.id` aborts the open transaction. Had it not come back, `transaction.timeout.ms` (60 s default) would.",
-        "values": {
-          "proc": "restarted",
-          "txn": "aborted",
-          "out": "aborted, hidden"
+        {
+          "id": "txn",
+          "label": "Kafka transaction"
+        },
+        {
+          "id": "out",
+          "label": "payments-applied"
+        },
+        {
+          "id": "proc",
+          "label": "Consumer K process"
         }
-      },
-      {
-        "say": "The offsets were never committed, so the group resumes from the last committed offset and delivers the same batch again.",
-        "values": {
-          "offset": "unchanged"
+      ],
+      "steps": [
+        {
+          "say": "K polls a batch. `beginTransaction()` is client-local: the broker has heard nothing, so a kill now would leave no Kafka transaction to abort.",
+          "values": {
+            "ledger": "0",
+            "offset": "start of this batch",
+            "txn": "none at the broker",
+            "out": "nothing",
+            "proc": "running"
+          }
+        },
+        {
+          "say": "The ledger transaction commits to Postgres first. Kafka is not part of it, so this row is permanent whatever Kafka does next.",
+          "values": {
+            "ledger": "1, committed"
+          },
+          "decision": "order"
+        },
+        {
+          "say": "K sends the record and adds its offsets: open, nothing visible. In one recon run (pre-campaign), 67% and 65% of transactions retried the offset commit after ~100 ms, widening [this window](a6:window) (H5).",
+          "values": {
+            "txn": "open; records, offsets pending",
+            "out": "pending, hidden"
+          }
+        },
+        {
+          "say": "F4-con-t sends SIGKILL at `before_kafka_commit`: row committed, transaction open and never finished. Nothing in the dead process can undo the row.",
+          "values": {
+            "proc": "killed"
+          },
+          "decision": "crash"
+        },
+        {
+          "say": "It restarts 5 s later; `initTransactions()` on the same `transactional.id` aborts the open transaction. Had it not come back, `transaction.timeout.ms` (60 s default) would.",
+          "values": {
+            "proc": "restarted",
+            "txn": "aborted",
+            "out": "aborted, hidden"
+          }
+        },
+        {
+          "say": "The offsets were never committed, so the group resumes from the last committed offset and delivers the same batch again.",
+          "values": {
+            "offset": "unchanged"
+          }
+        },
+        {
+          "say": "K has no key check, so the Postgres commit runs again, and K sends the record in a new Kafka transaction. The ledger has the batch twice; Postgres was never in the aborted one.",
+          "values": {
+            "ledger": "2, same partition and offset",
+            "txn": "new one, open",
+            "out": "1 aborted, 1 pending"
+          }
+        },
+        {
+          "say": "If nothing interferes, the second `commitTransaction` succeeds: offsets move on. A `read_committed` reader sees the payment once, a `read_uncommitted` one also the aborted copy. Kafka is consistent; the ledger is not.",
+          "values": {
+            "offset": "past this batch",
+            "txn": "committed",
+            "out": "once; aborted copy in log",
+            "proc": "running"
+          }
         }
-      },
-      {
-        "say": "K has no key check, so the Postgres commit runs again, and K sends the record in a new Kafka transaction. The ledger has the batch twice; Postgres was never in the aborted one.",
-        "values": {
-          "ledger": "2, same partition and offset",
-          "txn": "new one, open",
-          "out": "1 aborted, 1 pending"
+      ],
+      "takeaway": "Output once, ledger twice: Kafka's transaction ended cleanly, but Postgres was never in it. H1 needs ledger duplicates in at least 8 of 10 F4-con-t trials (output once is reported beside it). No K result here."
+    },
+    {
+      "title": "A producer-side loss: killed after the source commit",
+      "lead": "Observed in the detection gate on stack N (`gate_prod_1`, cell F4-svc), not a campaign result. H3 predicts K and I lose too.",
+      "registers": [
+        {
+          "id": "topic",
+          "label": "Topic payments"
+        },
+        {
+          "id": "svc",
+          "label": "Payment service"
+        },
+        {
+          "id": "client",
+          "label": "Client"
         }
-      },
-      {
-        "say": "If nothing else interferes, this second `commitTransaction` succeeds: offsets move on, and a `read_committed` reader sees the payment once. Kafka is consistent; the ledger is not.",
-        "values": {
-          "offset": "past this batch",
-          "txn": "committed",
-          "out": "once",
-          "proc": "running"
+      ],
+      "steps": [
+        {
+          "say": "The client sends `p00004003`; the service commits it to the source database. The payment now exists, and the source is the authority.",
+          "values": {
+            "topic": "no record yet",
+            "svc": "running",
+            "client": "waiting"
+          }
+        },
+        {
+          "say": "The `after_source_commit` hook holds the service: committed, nothing sent. The orchestrator sees the fire 61 ms later and kills the service 424 ms after it fired.",
+          "values": {
+            "svc": "killed"
+          }
+        },
+        {
+          "say": "The send never happens. Two payments reached the source in the 240 ms around the hook and were never published: this one and one other in-flight request.",
+          "values": {
+            "topic": "never published"
+          }
+        },
+        {
+          "say": "The client saw both as `info` (timeout or reset), never `ok`. The service restarts after 5 s.",
+          "values": {
+            "client": "info, not ok",
+            "svc": "restarted"
+          }
+        },
+        {
+          "say": "The checker finds the payment in the source and not in the topic: a loss with a topic gap, born on the producer side."
         }
-      }
-    ],
-    "takeaway": "Output once, ledger twice: Kafka's transaction ended cleanly, but Postgres was never in it. H1 needs ledger duplicates in at least 8 of 10 F4-con-t trials (output once is reported beside it). No K result here."
-  },
+      ],
+      "takeaway": "Gap P: a crash between source commit and send loses the payment. H3 predicts O+I, whose outbox row is written in the source commit, loses none."
+    },
+    {
+      "title": "A zombie consumer: paused, replaced, then it writes",
+      "lead": "Observed on N in reconnaissance (all 17 F5 trials), except step 3. K and I are predictions (H1, H2).",
+      "registers": [
+        {
+          "id": "a",
+          "label": "Consumer A"
+        },
+        {
+          "id": "group",
+          "label": "Group"
+        },
+        {
+          "id": "ledger",
+          "label": "Ledger rows, 1 payment"
+        }
+      ],
+      "steps": [
+        {
+          "say": "A polls a batch; the `after_poll` hook holds it and the orchestrator runs `docker pause` on A. Batch in hand, no database work yet.",
+          "values": {
+            "a": "paused, batch held",
+            "group": "generation 1: A",
+            "ledger": "0"
+          }
+        },
+        {
+          "say": "With no heartbeat for `session.timeout.ms` (10 s), the coordinator moves A's partitions to B. In all 17 recon trials the generation went from 1 to 2 while A was paused.",
+          "values": {
+            "group": "generation 2: B"
+          }
+        },
+        {
+          "say": "B resumes from the last committed offset, gets the same batch and applies it (documented semantics; not in the recon record).",
+          "values": {
+            "ledger": "1 (B)"
+          }
+        },
+        {
+          "say": "A unpauses 5 to 20 s (seeded) past the session timeout. Its first act is the `db_commit` of its held batch; Postgres cannot tell A is stale. About 0.1 s on, its offset commit is refused with `CommitFailedException`.",
+          "values": {
+            "a": "wrote, then refused",
+            "ledger": "2 (B, then A)"
+          }
+        },
+        {
+          "say": "Crash-only: A exits and restarts into the next generation. Fencing stopped the Kafka commit, not the ledger write.",
+          "values": {
+            "a": "exited, restarted"
+          }
+        }
+      ],
+      "takeaway": "The zombie wrote, then its commit failed; the ledger holds the payment twice if B applied first. H1 predicts the same for K; H2, that I's key insert skips."
+    }
+  ],
   "views": [
     {
       "level": "context",
@@ -674,7 +781,7 @@
   "decisions": [
     {
       "id": "stacks",
-      "title": "Whole pipelines, each defense at the boundary it guards",
+      "title": "Whole pipelines, one change each",
       "problem": "The brief listed four defenses as alternatives, but the outbox guards the producer side, Kafka transactions cover only Kafka-to-Kafka work, and the key works at the sink.",
       "options": [
         "Rank the four defenses head to head",
@@ -707,7 +814,7 @@
     },
     {
       "id": "order",
-      "title": "Postgres commits first; the targeted kill hits every stack in one state",
+      "title": "Postgres first, one state at the hook",
       "problem": "A crash between the ledger commit and Kafka's progress commit is where consumer-side duplicates are born, so the order of the two commits, and where the targeted kill lands, decide what is measured.",
       "options": [
         "Commit Kafka first, then Postgres",
@@ -743,7 +850,7 @@
     },
     {
       "id": "crash",
-      "title": "One failure policy for every mode: crash-only",
+      "title": "Crash-only, every mode",
       "problem": "Outcomes in F1, F2, F5 and F6 depend on what a consumer does on an error; error handling must not become a second variable between stacks.",
       "options": [
         "Textbook in-process recovery: abort, seek, continue",
@@ -770,7 +877,7 @@
     },
     {
       "id": "faults",
-      "title": "Real faults, two timings, and a check that each one landed",
+      "title": "Real faults, checked",
       "problem": "A defense can only be judged against faults that really happen to processes and the network, and a fault that silently did nothing would produce a false zero.",
       "options": [
         "Simulate faults inside the application, as the closest prior work does",
@@ -803,7 +910,7 @@
     },
     {
       "id": "checker",
-      "title": "The source is the authority; an append-only apply log shows every apply",
+      "title": "Source as oracle, apply log",
       "problem": "To say 'applied exactly once' and 'born here', the checker needs a truth independent of the consumer and a record of each apply's `(partition, offset)`.",
       "options": [
         "A unique applied table",
@@ -836,7 +943,7 @@
     },
     {
       "id": "trust",
-      "title": "Pre-register, gate the detector, pair the stacks, never peek",
+      "title": "Pre-register, gate, pair, seal",
       "problem": "With 4 stacks × 9 cells on a noisy laptop, a result could be argued into shape afterwards, and a blind checker would give false zeros.",
       "options": [
         "Pool payments into a per-payment rate",
@@ -1002,7 +1109,7 @@
     {
       "phase": "Reconnoitre",
       "label": "Reconnaissance B: F2, F5, F6 and the checks",
-      "detail": "F2's first set stopped on an observer bug, a harness error, fixed; F5's count restarted after host-swap voids. In all 17 F5 trials, on N, the zombie wrote its held batch, then failed its offset commit. F6 kept at 10 of 10.",
+      "detail": "F2's first set stopped on an observer bug, a harness error, fixed; F5's count restarted after host-swap voids (the zombie is traced in How it works). F6 kept at 10 of 10.",
       "output": "docs/recon-part-b.md: session.timeout.ms 10 s, F2 20–60 s, F6 kept; part B frozen",
       "milestone": true,
       "when": "2026-10-10 to 10-12 (−07:00)",
@@ -1146,7 +1253,7 @@
   ],
   "results": [
     {
-      "title": "The detection gate's controls, on stack N (control, not a campaign result)",
+      "title": "Gate controls on N (not a campaign result)",
       "short": "Gate: controls passed, N only",
       "chart": {
         "type": "matrix",
@@ -1275,15 +1382,15 @@
         "legend": [
           {
             "status": "none",
-            "label": "rule fixed in advance"
+            "label": "rule"
           },
           {
             "status": "observed",
-            "label": "observed in the gate"
+            "label": "observed"
           },
           {
             "tone": "ok",
-            "label": "control passed"
+            "label": "passed"
           },
           {
             "tone": "warn",
@@ -1293,16 +1400,16 @@
         "note": "Gate passed 2026-10-12, after the prereg-v1 tag, before any campaign trial; not counted in the campaign."
       },
       "axis": "One row per control of the pre-registered gate; counts are valid trials. A positive control passes when the anomaly appears, so green here means the checker saw what it had to.",
-      "read_as": "Each control cleared its rule. Five trials had host CPU contention (thousands of cap refusals). Without them: 8 and 9 positives, 19 clean negatives; `docs/gate.md` calls that a pass, though 19 is short of the rule's literal 20 of 20.",
+      "read_as": "Each control cleared its rule. Five trials had host CPU contention (thousands of cap refusals). Without them: 8 and 9 positives, 19 clean negatives; `docs/gate.md` calls that a pass, though 19 is short of the literal 20 of 20.",
       "so": [
         "trust",
         "checker"
       ],
-      "takeaway": "On N, the harness sees a duplicate and a loss when they happen, so a campaign zero can mean something. Nothing here shows K, I or O+I under faults.",
+      "takeaway": "On N the harness sees a duplicate and a loss when they happen. Nothing here shows K, I or O+I under faults.",
       "arithmetic": "docs/gate.md: CONSUMER 10/10, PRODUCER 10/10, NEGATIVE 20/20, SYNTHETIC pass. 42 trials, 2 void and replaced. Contended: 2 consumer, 1 producer, 2 negative (one of them void)."
     },
     {
-      "title": "The design: what each stack's defense faces in each cell",
+      "title": "The design: each stack's defense, each cell",
       "short": "4 stacks × 9 cells, 760 trials",
       "chart": {
         "type": "matrix",
@@ -1531,22 +1638,147 @@
         "legend": [
           {
             "status": "none",
-            "label": "design, not a result"
+            "label": "design"
           }
         ],
-        "note": "Row sub: the fault, 'both' where it can stress both sides, and trials per stack. A block runs one cell and seed on all four stacks: 190 blocks."
+        "note": "Row sub: the fault, 'both' where it can stress both sides, and trials per stack. Every cell is design, not a result."
       },
       "axis": "Rows: the nine cells. Columns: stacks. Each cell names the guard that fault meets in that stack.",
-      "read_as": "The producer-side cells pit the dual write against the outbox; the consumer-side cells pit committed offsets, the Kafka transaction and the key against one another. F0 is the in-campaign negative control.",
+      "read_as": "F0 is the in-campaign negative control; the boundary map below says which gap each fault tests.",
       "so": [
         "stacks",
         "faults"
       ],
-      "takeaway": "Most faults aim at one boundary (F1 and F2 at both), so a nonzero cell points at the guard that missed, and the attribution rule cross-checks it.",
+      "takeaway": "A nonzero cell points at the guard that missed, and the attribution rule cross-checks it.",
       "arithmetic": "4 stacks × (5 cells × 30 + 4 cells × 10) = 760 trials; 760 ÷ 4 = 190 blocks (docs/experiment.md §4)."
     },
     {
-      "title": "Pre-registered predictions H1–H6 (results pending)",
+      "title": "Boundary map: gaps left open (predicted)",
+      "short": "Boundary map: predicted",
+      "chart": {
+        "type": "matrix",
+        "unit": "prediction",
+        "rows": [
+          {
+            "label": "N"
+          },
+          {
+            "label": "K"
+          },
+          {
+            "label": "I"
+          },
+          {
+            "label": "O+I"
+          }
+        ],
+        "cols": [
+          {
+            "label": "Gap P: source→Kafka",
+            "sub": "COMMIT to Kafka ack"
+          },
+          {
+            "label": "Gap C: ledger→Kafka",
+            "sub": "COMMIT to Kafka commit"
+          },
+          {
+            "label": "Hypotheses"
+          }
+        ],
+        "cells": [
+          [
+            {
+              "text": "a kill loses it",
+              "status": "observed",
+              "tone": "bad"
+            },
+            {
+              "text": "a kill repeats it",
+              "status": "observed",
+              "tone": "bad"
+            },
+            {
+              "text": "gate: both seen",
+              "status": "observed"
+            }
+          ],
+          [
+            {
+              "text": "same dual write",
+              "status": "predicted",
+              "tone": "bad"
+            },
+            {
+              "text": "window predicted wider",
+              "status": "predicted",
+              "tone": "bad"
+            },
+            {
+              "text": "H1, H5; H3, H4",
+              "status": "predicted"
+            }
+          ],
+          [
+            {
+              "text": "same dual write",
+              "status": "predicted",
+              "tone": "bad"
+            },
+            {
+              "text": "closed by the key",
+              "status": "predicted",
+              "tone": "ok"
+            },
+            {
+              "text": "H2; H3",
+              "status": "predicted"
+            }
+          ],
+          [
+            {
+              "text": "outbox in the commit",
+              "status": "predicted",
+              "tone": "ok"
+            },
+            {
+              "text": "closed by the key",
+              "status": "predicted",
+              "tone": "ok"
+            },
+            {
+              "text": "H2, H3",
+              "status": "predicted"
+            }
+          ]
+        ],
+        "legend": [
+          {
+            "status": "observed",
+            "label": "seen"
+          },
+          {
+            "status": "predicted",
+            "label": "predicted"
+          },
+          {
+            "tone": "bad",
+            "label": "open"
+          },
+          {
+            "tone": "ok",
+            "label": "closed"
+          }
+        ],
+        "note": "Gap P: F3, F4-svc. Gap C: F4-con-r, F4-con-t, F5, F6. F1, F2: both. Pre-registered, not results."
+      },
+      "axis": "Rows: the stacks. Columns: the two commit gaps, and the hypotheses that test them.",
+      "read_as": "A crash in gap P loses a payment; in gap C it applies again. Predicted: the outbox closes P, the key closes C, and K's transaction leaves C open (H5: wider).",
+      "so": [
+        "stacks"
+      ]
+    },
+    {
+      "title": "Predictions H1–H6 (pending)",
       "short": "Six predictions, results pending",
       "chart": {
         "type": "matrix",
@@ -1714,15 +1946,15 @@
         "legend": [
           {
             "status": "none",
-            "label": "fixed in advance"
+            "label": "fixed"
           },
           {
             "status": "predicted",
-            "label": "pre-registered prediction"
+            "label": "predicted"
           },
           {
             "status": "pending",
-            "label": "results pending"
+            "label": "pending"
           },
           {
             "tone": "bad",
@@ -1739,17 +1971,16 @@
         ],
         "note": "Pre-registered at tag prereg-v1 (2026-10-12); results pending."
       },
-      "axis": "One row per hypothesis, condensed from pre-registration §7 (verbatim from the spec). Tone is what the prediction expects; no result has been read.",
-      "read_as": "H1 and H5 bet against Kafka transactions at a Postgres sink; H2 bets on the key; H3 on the outbox; H4, the broker-death cells, is stated as uncertain, and all-zero there is publishable.",
+      "axis": "One row per hypothesis, condensed from pre-registration §7 (verbatim from the spec). Tone is what the prediction expects.",
+      "read_as": "H4 is stated as uncertain, and all-zero there is publishable. No result has been read.",
       "so": [
         "order",
         "trust"
       ],
-      "takeaway": "Every outcome is publishable, including all zeros, and each falsifier was written down before any gate or campaign trial. These are bets, not findings.",
-      "arithmetic": "Thresholds: 8 of 10 targeted trials (H1, H3); zero in every cell (H2); a paired interval on p_K − p_N that includes 0 makes H5 inconclusive; 10% on maximum rate (H6)."
+      "takeaway": "Every outcome is publishable, and each falsifier was written down before any gate or campaign trial. These are bets, not findings."
     },
     {
-      "title": "What a zero can claim (a formula, not data)",
+      "title": "What a zero claims (formula, not data)",
       "short": "Zero in 30: under 9.5% per trial",
       "chart": {
         "type": "xy",
@@ -1808,13 +2039,13 @@
         "note": "Computed from the formula; no trial data."
       },
       "axis": "x: trials in one cell for one stack. y: the one-sided 95% upper bound on that stack's per-trial failure probability when every trial is clean.",
-      "read_as": "0 of 30 bounds it below 9.5%; 0 of 10 below 26%. Cutting random cells to 20, the last item on the cut list, would weaken 0.095 to 0.139. The rule of three sits just above the exact bound.",
+      "read_as": "Cutting random cells to 20, the last item on the cut list, would weaken 0.095 to 0.139. The rule of three sits just above the exact bound.",
       "so": "trust",
       "takeaway": "A clean cell bounds a failure rate for these faults on this setup; it never says a defense is safe in general.",
       "arithmetic": "1 − 0.05^(1/N): 0.259 at 10 and 0.095 at 30 (docs/experiment.md §10); 0.139 at 20 (spec cut list); every 3/N computed here."
     },
     {
-      "title": "K's commit step in reconnaissance, a day after H5 was written (not a result)",
+      "title": "K's commit step in recon (not a result)",
       "short": "Recon: K's ~100 ms commit retry",
       "chart": {
         "type": "stacked_bars",
@@ -1857,10 +2088,212 @@
       "so": "order",
       "takeaway": "H5 predates this diagnostic (review, 2026-10-08), which found, a day later and in an earlier environment, one mechanism widening K's window. The campaign's F0 and F4-con-r trials test H5.",
       "arithmetic": "docs/recon-part-a.md: 2 vs 104 ms offset commit, 48 vs 149 ms whole step; 638 of 951 (67%) and 626 of 968 (65%) retried. Rest = step median − offset median."
+    },
+    {
+      "title": "Attribution: five observations, three birthplaces",
+      "short": "Attribution rule",
+      "chart": {
+        "type": "matrix",
+        "unit": "attribution",
+        "rows": [
+          {
+            "label": "Topic gap"
+          },
+          {
+            "label": "In topic, not applied"
+          },
+          {
+            "label": "Same offset twice"
+          },
+          {
+            "label": "New offset, same id"
+          },
+          {
+            "label": "Offset not in readback"
+          }
+        ],
+        "cols": [
+          {
+            "label": "Born at"
+          },
+          {
+            "label": "Seen in the gate"
+          }
+        ],
+        "cells": [
+          [
+            {
+              "text": "producer side: loss",
+              "status": "none"
+            },
+            {
+              "text": "p00004003 (F4-svc)",
+              "status": "observed"
+            }
+          ],
+          [
+            {
+              "text": "consumer side: loss",
+              "status": "none"
+            },
+            {
+              "text": "",
+              "status": "n/a"
+            }
+          ],
+          [
+            {
+              "text": "consumer side: redelivery",
+              "status": "none"
+            },
+            {
+              "text": "p00004001 at (1, 646)",
+              "status": "observed"
+            }
+          ],
+          [
+            {
+              "text": "producer side: topic duplicate",
+              "status": "none"
+            },
+            {
+              "text": "",
+              "status": "n/a"
+            }
+          ],
+          [
+            {
+              "text": "unattributable",
+              "status": "none"
+            },
+            {
+              "text": "",
+              "status": "n/a"
+            }
+          ]
+        ],
+        "legend": [
+          {
+            "status": "observed",
+            "label": "seen on N"
+          },
+          {
+            "status": "none",
+            "label": "rule"
+          },
+          {
+            "status": "n/a",
+            "label": "not shown"
+          }
+        ]
+      },
+      "axis": "Rows: what the checker sees. Columns: its birthplace, and whether the gate showed it.",
+      "read_as": "Same offset: the consumer side. New offset or topic gap: the producer side. A missing offset is unattributable, never guessed. A relay re-send would land at a new offset, so an offset is no key (reasoned, not measured).",
+      "so": [
+        "checker"
+      ]
+    },
+    {
+      "title": "Fencing: neither stops the ledger write",
+      "short": "Fencing: generation vs epoch",
+      "chart": {
+        "type": "matrix",
+        "unit": "fencing",
+        "rows": [
+          {
+            "label": "Issued by"
+          },
+          {
+            "label": "Rejects"
+          },
+          {
+            "label": "Seen here in"
+          },
+          {
+            "label": "Stops the duplicate?"
+          }
+        ],
+        "cols": [
+          {
+            "label": "Generation"
+          },
+          {
+            "label": "Epoch"
+          }
+        ],
+        "cells": [
+          [
+            {
+              "text": "group coordinator",
+              "status": "none"
+            },
+            {
+              "text": "transaction coordinator",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "offset commit from an old generation",
+              "status": "none"
+            },
+            {
+              "text": "an older run of the same id",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "F5 on N: commitSync refused",
+              "status": "observed"
+            },
+            {
+              "text": "F4-con-t on K: restart aborts txn",
+              "status": "predicted"
+            }
+          ],
+          [
+            {
+              "text": "No: Postgres committed first",
+              "status": "none",
+              "tone": "bad"
+            },
+            {
+              "text": "No: B has its own id",
+              "status": "none",
+              "tone": "bad"
+            }
+          ]
+        ],
+        "legend": [
+          {
+            "status": "observed",
+            "label": "seen"
+          },
+          {
+            "status": "predicted",
+            "label": "predicted"
+          },
+          {
+            "status": "none",
+            "label": "rule"
+          },
+          {
+            "tone": "bad",
+            "label": "no"
+          }
+        ],
+        "note": "KIP-447 added the generation check to K's TxnOffsetCommit."
+      },
+      "axis": "Rows: issuer, what it rejects, where seen, effect on the ledger.",
+      "read_as": "Generation fencing refuses a stale consumer's offset commit after its Postgres write. Epoch fencing guards one transactional.id against its own earlier run, so it cannot stop F5's zombie.",
+      "so": [
+        "order"
+      ]
     }
   ],
   "interview": {
-    "pitch30": "I built a fault-injection harness that asks which duplicate-payment defense holds between Kafka and a Postgres ledger: none, Kafka transactions, an idempotency key at the sink, or an outbox plus that key. Each trial kills, pauses or blackholes a real broker, process or connection, and a checker that treats the source database as the authority says whether every payment was applied exactly once and at which boundary any anomaly was born. Before the campaign, a detection gate on the naive stack showed the checker catching the duplicate a commit-window kill causes and the loss a kill after the source commit causes, 10 of 10 each. The predictions were tagged before any gate or campaign trial; the campaign's results are sealed until it ends.",
+    "pitch30": "I built a fault-injection harness that asks which duplicate-payment defense holds between Kafka and a Postgres ledger: none, Kafka transactions, an idempotency key at the sink, or an outbox plus that key. Real kills, pauses and blackholes hit each pipeline, and a checker with the source database as the authority says whether every payment was applied exactly once and where any anomaly was born. A detection gate on the naive stack caught a duplicate and a loss, 10 of 10 each. The predictions were tagged before any gate or campaign trial; the campaign's results are sealed until it ends.",
     "pitch120": "Teams say \"exactly-once\", but the usual defenses guard different boundaries: the outbox the producer side, Kafka transactions only Kafka-to-Kafka work, an idempotency key the sink. So I built four whole pipelines, each contrast adding one defense, on one laptop with public software, and a harness that injects real faults: broker kills and pauses, a producer blackhole, consumer kills at random times and at a code hook in the commit window, a zombie consumer, a lost COMMIT reply. A checker treats the source database as the authority and uses each apply's (partition, offset) to tell a redelivery from a re-send. The rules were tagged after reconnaissance and before the first gate trial, with dated amendments before the first campaign trial. H1 predicts Kafka transactions still double-post when killed after the Postgres commit. H5, the non-obvious one, predicts they make a random crash more likely to double-post, because the transaction commit widens the window between the ledger commit and Kafka's progress. A detection gate on the naive stack showed the checker sees a duplicate and a loss when they happen. The 760-trial campaign is running and I don't read its anomaly output until it ends, so today I can give you the design and the bets, not the answers.",
     "followups": [
       {
@@ -2184,6 +2617,14 @@
     {
       "file": "~/projects/ledger-faults/service/src/main/java/lf/service/PaymentHandler.java",
       "section": "// row committed; nothing sent, no reply yet"
+    },
+    {
+      "file": "~/projects/ledger-faults/docs/superpowers/specs/2026-10-08-duplicate-payment-defenses-design.md",
+      "section": "### Kafka exactly-once: design and limits"
+    },
+    {
+      "file": "~/projects/ledger-faults/consumer/src/main/java/lf/consumer/ConsumerLoop.java",
+      "section": "TRANSACTIONAL_ID_CONFIG, env.trialId() + \"-\" + env.consumerId()"
     }
   ],
   "derived_numbers": [
