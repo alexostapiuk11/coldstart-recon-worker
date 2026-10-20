@@ -54,6 +54,22 @@ Private Artifacts.
 | a6 | https://claude.ai/artifact/W6LMjByKW9fJhEXnQDuA46 |
 | a7 | https://claude.ai/artifact/6mvtEiZeGL1qtiR2ySxif5 |
 
+## Practice pages
+
+One per artifact, studied after the main page (objectives, a 3-question prerequisite check, drills with model and red-flag answers, estimation problems, a design scenario, a lab, a calculator where one fits, recall cards, a review schedule). Source: `<unit>/practice.json`; builds to `practice.html` and `practice-brief.md` (a pasteable drill-mode prompt). Private Artifacts.
+
+| unit | practice page |
+|---|---|
+| a1 | https://claude.ai/artifact/YbUUT97z9arLpf7MDypU2K |
+| a2 | https://claude.ai/artifact/7wuEZT6b9aBUKYEyMMqTXX |
+| a3 | https://claude.ai/artifact/QL6j3ZXUZohTzpAEMCRn5Y |
+| a4 | https://claude.ai/artifact/67pdogPRmNv9VqbubYopwN |
+| a5 | https://claude.ai/artifact/TLqRCwVa4Qh4MG2hWRNxta |
+| a6 | https://claude.ai/artifact/78tbSVCJRYu9uoXvTyMUBc |
+| a7 | https://claude.ai/artifact/Vjuq2cpHJTE4osELzpn2eC |
+
+The practice labs never need a paid call or a GPU; a6's lab may only be run when no campaign process exists. What was built from each learning-design review, what was skipped and why, and every number's source are in `additions-log/<unit>.md`; text cuts are in `cuts-log/<unit>.md`.
+
 The published copy is the page body only (the Artifact tool adds its own document wrapper);
 the source is `docs/learning/study/<unit>/page.html`.
 
@@ -74,3 +90,5 @@ the source is `docs/learning/study/<unit>/page.html`.
 - A3: the selection band keeps scenarios whose reruns flip, while the amendment cites near-deterministic reruns. Raised in the A3 review; unresolved until the pilot.
 - A6: results stay sealed until the campaign ends; update `a6/content.json` then.
 - Page length: units grew with the walkthroughs (about 175 to 200 KB of HTML each); trim if 45 minutes is too long.
+- Sign-off needed (observable drops or schema limits, all listed in `additions-log/`): replace a1's percentiles chart with the ECDF; cut the C4 context view (a1, a2; frees about 150 words); the schema requires exactly the four C4 levels, so a fifth view (a2's autoscaler, a6's two-gaps, a4's core model) can only replace one; a4's 11-step flow collapse (frees about 780 words); a5's amendment-saga compression and mixed-batch view.
+- Main-page words: the new charts cost more than the cuts saved in a1 (+57 visible words) and a5 (+127 excluding the map's hidden panels); a2, a3, a4, a6, a7 are at or below their earlier count. The sequence view in a1 needs about 1,160 px to draw; below that it shows its numbered list.
