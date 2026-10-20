@@ -61,6 +61,12 @@ MAX_CELL_NOTE = 80
 # unless the unit sets `decision_prefix`; results and concepts keep F and C.
 DEFAULT_DECISION_PREFIX = "D"
 TAKEN_PREFIXES = {"F": "results", "C": "concepts"}
+# The walkthrough (see _walkthrough): a step-through trace of changing state.
+MAX_WT_TITLE = 60
+MAX_WT_LINE = 220  # the lead, a step's `say`, the takeaway
+MAX_WT_VALUE = 40
+WT_REGISTERS = (2, 6)
+WT_STEPS = (3, 14)
 
 
 class ContentError(ValueError):
@@ -747,6 +753,75 @@ def _view(v, where, allowed):
                 raise ContentError(f"{where}.edges[{i}]: edge {end} is not a node id")
 
 
+def _walkthrough(c, where):
+    """Optional `walkthrough` {title, lead, registers, steps, takeaway}: a trace the page
+    shows one step at a time. `registers` are 2 to 6 {id, label (<= 22 characters)} state
+    cells; `steps` are 3 to 14 of {say (<= 220), optional values {register id: text
+    (<= 40)}, optional decision id}. The first step sets every register; a later step sets
+    only what changes and the rest carry over (see walkthrough_states)."""
+    if "walkthrough" not in c:
+        return
+    w = f"{where}.walkthrough"
+    wt = _get(c, "walkthrough", dict, where)
+    for key, limit in (("title", MAX_WT_TITLE), ("lead", MAX_WT_LINE),
+                       ("takeaway", MAX_WT_LINE)):
+        if not _get(wt, key, str, w).strip():
+            raise ContentError(f"{w}.{key} is empty")
+        if len(wt[key]) > limit:
+            raise ContentError(f"{w}.{key} longer than {limit} characters")
+    lo, hi = WT_REGISTERS
+    ids = []
+    for i, r in enumerate(_items(wt, "registers", w, at_least=lo, at_most=hi, fields=("id",))):
+        wr = f"{w}.registers[{i}]"
+        _label(r, "id", wr)
+        if r["id"] in ids:
+            raise ContentError(f"{wr}: duplicate id '{r['id']}'")
+        if r["id"] in ("sources", "links"):  # keys the link checks skip (see _cross_page)
+            raise ContentError(f"{wr}.id '{r['id']}' is reserved")
+        ids.append(r["id"])
+        _label(r, "label", wr)
+        if len(r["label"]) > MAX_LABEL:
+            raise ContentError(f"{wr}.label longer than {MAX_LABEL} characters")
+    decision_ids = {d["id"] for d in c.get("decisions", []) if isinstance(d, dict)}
+    lo, hi = WT_STEPS
+    for i, s in enumerate(_items(wt, "steps", w, at_least=lo, at_most=hi)):
+        ws = f"{w}.steps[{i}]"
+        _label(s, "say", ws)
+        if len(s["say"]) > MAX_WT_LINE:
+            raise ContentError(f"{ws}.say longer than {MAX_WT_LINE} characters")
+        if i == 0 or "values" in s:
+            values = _get(s, "values", dict, ws)
+            for rid, text in values.items():
+                if rid not in ids:
+                    raise ContentError(f"{ws}.values: '{rid}' is not a register id")
+                _label(values, rid, f"{ws}.values")
+                if len(text) > MAX_WT_VALUE:
+                    raise ContentError(f"{ws}.values.{rid} longer than {MAX_WT_VALUE} "
+                                       "characters")
+            if i == 0:
+                for rid in ids:
+                    if rid not in values:
+                        raise ContentError(f"{ws}.values: the first step must set every "
+                                           f"register; missing '{rid}'")
+        dec = _opt_str(s, "decision", ws)
+        if dec is not None and dec not in decision_ids:
+            raise ContentError(f"{ws}.decision '{dec}' is not a decision id")
+
+
+def walkthrough_states(wt: dict) -> list[list[tuple[str, str, bool]]]:
+    """Each step's state, as [(register label, value, changed)] in register order. A value a
+    step does not set carries over from the step before; `changed` is true when the value
+    differs from the step before (never on the first step, which sets the starting state)."""
+    state: dict[str, str] = {}
+    out = []
+    for i, s in enumerate(wt["steps"]):
+        before = dict(state)
+        state.update(s.get("values", {}))
+        out.append([(r["label"], state[r["id"]], i > 0 and state[r["id"]] != before[r["id"]])
+                    for r in wt["registers"]])
+    return out
+
+
 def _decision_prefix(c, where):
     """Optional `decision_prefix`: one or two ASCII letters, not the F or C that result and
     concept codes use."""
@@ -856,6 +931,7 @@ def validate(c: dict) -> None:
             _get(t, "why", str, f"{where}.concepts[{i}]")
         _items(c, "used_by", where, at_least=1)
     _decision_prefix(c, where)
+    _walkthrough(c, where)
     _flow(c, where)
     _relationships(c, where)
     _cross_page(c, where)

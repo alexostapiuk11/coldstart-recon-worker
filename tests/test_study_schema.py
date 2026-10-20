@@ -1,7 +1,12 @@
 import pytest
 
 from study.schema import ContentError, validate
-from tests.study_examples import artifact_unit, artifact_unit_with_links, prereq_unit
+from tests.study_examples import (
+    artifact_unit,
+    artifact_unit_with_links,
+    artifact_unit_with_walkthrough,
+    prereq_unit,
+)
 
 
 def test_valid_units_pass():
@@ -949,3 +954,123 @@ def test_decision_prefix_is_checked():
     u = artifact_unit()
     u["decision_prefix"] = 3
     _fails(u, r"x1\.decision_prefix: expected str")
+
+
+# ---- walkthrough ----
+
+def _wt():
+    return artifact_unit_with_walkthrough()
+
+
+def test_a_valid_walkthrough_passes_on_artifacts_and_prereqs():
+    validate(_wt())
+    u = prereq_unit()
+    u["walkthrough"] = _wt()["walkthrough"]
+    _fails(u, r"px\.walkthrough\.steps\[3\]\.decision 'd1' is not a decision id")
+    del u["walkthrough"]["steps"][3]["decision"]  # a prereq has no decisions
+    validate(u)
+    validate(artifact_unit())  # the section is optional
+
+
+def test_walkthrough_text_fields_are_bounded():
+    for field, limit in (("title", 60), ("lead", 220), ("takeaway", 220)):
+        u = _wt()
+        u["walkthrough"][field] = "x" * (limit + 1)
+        _fails(u, rf"x1\.walkthrough\.{field} longer than {limit} characters")
+        u["walkthrough"][field] = ""
+        _fails(u, rf"x1\.walkthrough\.{field} is empty")
+        del u["walkthrough"][field]
+        _fails(u, rf"x1\.walkthrough: missing '{field}'")
+
+
+def test_walkthrough_has_two_to_six_registers_with_unique_bounded_ids():
+    u = _wt()
+    u["walkthrough"]["registers"] = u["walkthrough"]["registers"][:1]
+    _fails(u, r"x1\.walkthrough\.registers: needs 2 to 6 items, has 1")
+    u = _wt()
+    u["walkthrough"]["registers"] += [{"id": f"r{i}", "label": f"R{i}"} for i in range(3)]
+    _fails(u, r"x1\.walkthrough\.registers: needs 2 to 6 items, has 7")
+    u = _wt()
+    u["walkthrough"]["registers"][1]["id"] = "bid"
+    _fails(u, r"x1\.walkthrough\.registers\[1\]: duplicate id 'bid'")
+    u = _wt()
+    u["walkthrough"]["registers"][0]["label"] = "x" * 23
+    _fails(u, r"x1\.walkthrough\.registers\[0\]\.label longer than 22 characters")
+    u = _wt()
+    del u["walkthrough"]["registers"][0]["id"]
+    _fails(u, r"x1\.walkthrough\.registers\[0\]: missing 'id'")
+    u = _wt()
+    u["walkthrough"]["registers"][0]["id"] = "links"
+    _fails(u, r"x1\.walkthrough\.registers\[0\]\.id 'links' is reserved")
+
+
+def test_walkthrough_has_three_to_fourteen_steps():
+    u = _wt()
+    u["walkthrough"]["steps"] = u["walkthrough"]["steps"][:2]
+    _fails(u, r"x1\.walkthrough\.steps: needs 3 to 14 items, has 2")
+    u = _wt()
+    u["walkthrough"]["steps"] = (u["walkthrough"]["steps"] * 3)[:15]
+    _fails(u, r"x1\.walkthrough\.steps: needs 3 to 14 items, has 15")
+    u = _wt()
+    u["walkthrough"]["steps"] = (u["walkthrough"]["steps"] * 3)[:14]
+    validate(u)
+
+
+def test_walkthrough_step_text_and_values_are_bounded():
+    u = _wt()
+    u["walkthrough"]["steps"][1]["say"] = "x" * 221
+    _fails(u, r"x1\.walkthrough\.steps\[1\]\.say longer than 220 characters")
+    u = _wt()
+    u["walkthrough"]["steps"][1]["values"]["bid"] = "x" * 41
+    _fails(u, r"x1\.walkthrough\.steps\[1\]\.values\.bid longer than 40 characters")
+    u = _wt()
+    u["walkthrough"]["steps"][1]["values"]["bid"] = " "
+    _fails(u, r"x1\.walkthrough\.steps\[1\]\.values\.bid is empty")
+    u = _wt()
+    u["walkthrough"]["steps"][1]["values"]["bid"] = 5
+    _fails(u, r"x1\.walkthrough\.steps\[1\]\.values\.bid: expected str")
+
+
+def test_walkthrough_values_name_known_registers():
+    u = _wt()
+    u["walkthrough"]["steps"][2]["values"]["spread"] = "2"
+    _fails(u, r"x1\.walkthrough\.steps\[2\]\.values: 'spread' is not a register id")
+    u = _wt()
+    u["walkthrough"]["steps"][2]["values"] = ["bid"]
+    _fails(u, r"x1\.walkthrough\.steps\[2\]\.values: expected dict")
+
+
+def test_walkthrough_first_step_sets_every_register_later_steps_may_set_none():
+    u = _wt()
+    del u["walkthrough"]["steps"][0]["values"]["fill"]
+    _fails(u, r"x1\.walkthrough\.steps\[0\]\.values: the first step must set every register; "
+              r"missing 'fill'")
+    u = _wt()
+    del u["walkthrough"]["steps"][0]["values"]
+    _fails(u, r"x1\.walkthrough\.steps\[0\]: missing 'values'")
+    u = _wt()
+    del u["walkthrough"]["steps"][2]["values"]
+    validate(u)
+
+
+def test_walkthrough_step_decision_must_be_a_decision_id():
+    u = _wt()
+    u["walkthrough"]["steps"][3]["decision"] = "nope"
+    _fails(u, r"x1\.walkthrough\.steps\[3\]\.decision 'nope' is not a decision id")
+
+
+def test_walkthrough_inline_links_are_checked_like_other_text():
+    u = _wt()
+    u["walkthrough"]["steps"][1]["say"] = "See [the term](nowhere:term)."
+    _fails(u, r"x1\.walkthrough\.steps\[1\]\.say: link to unknown unit 'nowhere'")
+    u["walkthrough"]["steps"][1]["say"] = "See [the term](x1:term)."
+    validate(u)
+    u = _wt()
+    u["walkthrough"]["lead"] = "See [it](nowhere:term)."
+    _fails(u, r"x1\.walkthrough\.lead: link to unknown unit 'nowhere'")
+
+
+def test_walkthrough_must_be_an_object():
+    u = _wt()
+    u["walkthrough"] = []
+    _fails(u, r"x1\.walkthrough: expected dict")

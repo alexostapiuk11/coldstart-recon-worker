@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from study.links import link_index, req_label, traced
 from study.map import MAP_CSS, MAP_JS, has_map, map_section
-from study.schema import flow_phases, phased, so_ids
+from study.schema import flow_phases, phased, so_ids, walkthrough_states
 from study.seq import list_below, sequence_html
 from study.svg import chart_html, diagram_html, segment_slots
 from study.text import esc, inline, plural, resolve_links, unit_url
@@ -408,6 +408,92 @@ def _concepts(c):
             f'<div class="grid cgrid">{"".join(cards)}</div></section>')
 
 
+# The walkthrough (see _walkthrough); shipped only on a page that has one. Every step is
+# in the HTML, stacked; the script hides all but one and shows the Previous / Next bar.
+WT_CSS = """
+.wt-bar{display:flex;align-items:center;gap:10px;margin:0 0 6px}
+.wt-bar[hidden]{display:none}
+.wt-count{flex:1;text-align:center;font-weight:600;font-variant-numeric:tabular-nums}
+.wt-bar button{font:inherit;font-size:15px;color:var(--fg);background:var(--card);
+border:1px solid var(--line);border-radius:8px;padding:6px 16px;min-height:40px;cursor:pointer}
+.wt-bar button:hover:not(:disabled){background:var(--soft);border-color:var(--accent)}
+.wt-bar button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.wt-bar button:disabled{opacity:.45;cursor:default}
+.wt-steps{list-style:none;margin:0;padding:0}
+.wt-step{display:grid;gap:8px 28px;padding:12px 0;border-top:1px solid var(--line)}
+.wt-step:first-child{border-top:0}.wt-step[hidden]{display:none}
+.wt-n{display:block;color:var(--muted);font-size:13px;font-weight:600;text-transform:uppercase;
+letter-spacing:.05em}
+.wt-js .wt-n{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);
+white-space:nowrap}
+.wt-say p{margin:2px 0 8px}
+.wt-state{border-collapse:separate;border-spacing:0 4px;width:100%;font-size:15px}
+.wt-state th{text-align:left;font-weight:600;color:var(--muted);font-size:13px;
+text-transform:uppercase;letter-spacing:.04em;padding:6px 10px 6px 0;width:42%;vertical-align:middle}
+.wt-state td{padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);
+font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.wt-state td.wt-changed{background:var(--soft);border-color:var(--accent);
+box-shadow:inset 4px 0 0 var(--accent);font-weight:600}
+.wt-chg{float:right;margin:2px 0 0 10px;color:var(--accent);font-size:11px;font-weight:700;
+text-transform:uppercase;letter-spacing:.06em}
+@media (min-width:900px){.wt-step{grid-template-columns:minmax(0,3fr) minmax(0,2fr);
+align-items:start}.wt-state{font-size:16px}}
+"""
+
+WT_JS = """
+for (const g of document.querySelectorAll('[data-wt]')) {
+  const steps = [...g.querySelectorAll('.wt-step')], bar = g.querySelector('.wt-bar');
+  const prev = g.querySelector('.wt-prev'), next = g.querySelector('.wt-next');
+  const count = g.querySelector('.wt-count');
+  const show = i => {
+    const at = Math.max(0, Math.min(steps.length - 1, i));
+    steps.forEach((s, j) => { s.hidden = j !== at; });
+    count.textContent = 'Step ' + (at + 1) + ' of ' + steps.length;
+    prev.disabled = at === 0; next.disabled = at === steps.length - 1;
+    // a button that just became disabled must not keep the keyboard focus
+    if (next.disabled && document.activeElement === next && !prev.disabled) prev.focus();
+    if (prev.disabled && document.activeElement === prev && !next.disabled) next.focus();
+    g.dataset.at = at;
+  };
+  prev.addEventListener('click', () => show(+g.dataset.at - 1));
+  next.addEventListener('click', () => show(+g.dataset.at + 1));
+  g.classList.add('wt-js'); bar.hidden = false; show(0);
+}
+"""
+
+
+def _walkthrough(c):
+    wt = c["walkthrough"]
+    codes = link_index(c)["dec_code"]
+    titles = {d["id"]: d["title"] for d in c.get("decisions", [])}
+    n = len(wt["steps"])
+    items = []
+    for i, (s, state) in enumerate(zip(wt["steps"], walkthrough_states(wt)), 1):
+        chip = ""
+        if s.get("decision"):
+            d = s["decision"]
+            chip = (f'<a class="fl-dec" href="#d-{esc(d)}"><b>Decision {codes[d]}</b> '
+                    f'{esc(titles[d])}</a>')
+        rows = "".join(
+            f'<tr><th scope="row">{esc(label)}</th><td class="{"wt-changed" if changed else "wt-same"}">'
+            f'<span class="wt-v">{esc(value)}</span>'
+            + ('<span class="wt-chg">changed</span>' if changed else "") + "</td></tr>"
+            for label, value, changed in state)
+        items.append(
+            f'<li class="wt-step"><div class="wt-say"><span class="wt-n">Step {i} of {n}</span>'
+            f'<p>{inline(s["say"])}</p>{chip}</div>'
+            f'<table class="wt-state" aria-label="State after step {i}"><tbody>{rows}</tbody>'
+            "</table></li>")
+    bar = ('<div class="wt-bar" hidden><button type="button" class="wt-prev">Previous</button>'
+           f'<span class="wt-count">Step 1 of {n}</span>'
+           '<button type="button" class="wt-next">Next</button></div>')
+    return (f'<section id="walkthrough"><h2>How it works</h2><h3>{esc(wt["title"])}</h3>'
+            f'<p class="why">{inline(wt["lead"])}</p><div class="card" data-wt>{bar}'
+            f'<ol class="wt-steps" aria-live="polite" aria-atomic="true">{"".join(items)}</ol>'
+            f'</div><div class="callout"><b>Takeaway.</b> {inline(wt["takeaway"])}</div>'
+            "</section>")
+
+
 def _requirements(c):
     if not traced(c):
         reqs = "".join(f'<div class="card"><b>{inline(r["text"])}</b>'
@@ -631,6 +717,8 @@ def render_page(c: dict) -> str:
 
     if c.get("concepts"):
         add("concepts", "Concepts", _concepts(c))
+    if c.get("walkthrough"):
+        add("walkthrough", "How it works", _walkthrough(c))
     if art:
         add("why", "Requirements", _requirements(c))
     if c.get("views"):
@@ -659,6 +747,8 @@ def render_page(c: dict) -> str:
     css, js = (CSS + MAP_CSS, JS + MAP_JS) if has_map(c) else (CSS, JS)
     if _sequences(c):
         css += seq_css(_sequences(c))
+    if c.get("walkthrough"):
+        css, js = css + WT_CSS, js + WT_JS
     if any(r["chart"]["type"] == "matrix" for r in c.get("results", [])):
         css += MATRIX_CSS
     if art:

@@ -297,3 +297,42 @@ def matrix_chart(**extra) -> dict:
                    {"tone": "bad", "label": "anomaly expected"}],
         "note": "Pre-registered 2026-10-12; results pending.",
     }, **extra))
+
+
+def walkthrough_block() -> dict:
+    """A `walkthrough` for artifact_unit(): a tiny order book, five steps over four
+    registers. Step 1 sets every register; step 3 fills against the best bid; step 5
+    restates a value that has not changed (so it must not be highlighted). Step 4 names
+    decision d1 (a decision id artifact_unit() and artifact_unit_with_links() both have)."""
+    return copy.deepcopy({
+        "title": "A limit order meets the book",
+        "lead": "Watch the best bid, the best ask and the last fill change as three orders arrive.",
+        "registers": [
+            {"id": "bid", "label": "Best bid"},
+            {"id": "ask", "label": "Best ask"},
+            {"id": "orders", "label": "Resting orders"},
+            {"id": "fill", "label": "Last fill"},
+        ],
+        "steps": [
+            {"say": "The book holds a buy at 99 and a sell at 101. Nothing has traded yet.",
+             "values": {"bid": "99 x 5", "ask": "101 x 4", "orders": "2", "fill": "none"}},
+            {"say": "A buy of 3 at 100 arrives. It is below the best ask, so it rests and "
+                    "becomes the best bid.",
+             "values": {"bid": "100 x 3", "orders": "3"}},
+            {"say": "A sell of 2 at 99 crosses the best bid and fills against it.",
+             "values": {"bid": "100 x 1", "fill": "2 at 100"}},
+            {"say": "A sell of 1 at 100 takes the last of that bid; the older buy is best again.",
+             "values": {"bid": "99 x 5", "orders": "2", "fill": "1 at 100"},
+             "decision": "d1"},
+            {"say": "Nothing else crosses: the book is quiet.",
+             "values": {"orders": "2"}},
+        ],
+        "takeaway": "A resting order only changes the book; a crossing order changes the book "
+                    "and the fill.",
+    })
+
+
+def artifact_unit_with_walkthrough() -> dict:
+    u = artifact_unit()
+    u["walkthrough"] = walkthrough_block()
+    return u

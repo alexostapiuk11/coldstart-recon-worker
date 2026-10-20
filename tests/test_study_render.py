@@ -2587,3 +2587,166 @@ def test_c4_tab_numbers_follow_the_tab_position_not_the_level():
 def test_long_source_paths_may_wrap_anywhere():
     css = render_page(artifact_unit()).split("<style>")[1].split("</style>")[0]
     assert re.search(r"details\.src code\{[^}]*overflow-wrap:anywhere", css)
+
+
+# ---- walkthrough ("How it works") ----
+
+from tests.study_examples import artifact_unit_with_walkthrough, walkthrough_block
+
+
+def _wt_page(**top):
+    u = artifact_unit_with_walkthrough()
+    u.update(top)
+    return render_page(u)
+
+
+def _wt_steps(page):
+    """The inner html of each walkthrough step."""
+    body = page.split('<section id="walkthrough">')[1].split("</section>")[0]
+    return re.findall(r'<li class="wt-step"[^>]*>(.*?)</li>', body, re.DOTALL)
+
+
+def _wt_cells(step):
+    """(register label, value, changed) for each row of a step's state table."""
+    return [(m.group(1), m.group(3), "wt-changed" in m.group(2)) for m in re.finditer(
+        r'<th scope="row">([^<]*)</th><td class="([^"]*)"><span class="wt-v">([^<]*)</span>',
+        step)]
+
+
+def test_walkthrough_is_absent_without_content_and_ships_no_css_or_js():
+    page = render_page(artifact_unit())
+    for marker in ('id="walkthrough"', "How it works", ".wt-", "data-wt", "wt-prev"):
+        assert marker not in page, marker
+
+
+def test_walkthrough_sits_right_after_concepts_with_its_own_pill():
+    page = _wt_page()
+    ids = re.findall(r'<section id="([\w-]+)"', page)
+    assert ids == ["concepts", "walkthrough", "why", "views", "decisions", "flow", "results",
+                   "interview", "recall", "sources"]
+    assert '<a href="#walkthrough">How it works</a>' in page
+    u = artifact_unit_with_walkthrough()
+    del u["concepts"]
+    ids = re.findall(r'<section id="([\w-]+)"', render_page(u))
+    assert ids[0] == "walkthrough"
+
+
+def test_walkthrough_shows_title_lead_and_takeaway():
+    wt = walkthrough_block()
+    sec = _wt_page().split('<section id="walkthrough">')[1].split("</section>")[0]
+    assert "<h2>How it works</h2>" in sec
+    assert f"<h3>{wt['title']}</h3>" in sec and wt["lead"] in sec
+    assert f"<b>Takeaway.</b> {wt['takeaway']}" in sec
+
+
+def test_every_step_is_in_the_html_stacked_so_it_reads_without_js():
+    wt = walkthrough_block()
+    steps = _wt_steps(_wt_page())
+    assert len(steps) == len(wt["steps"]) == 5
+    for i, (html_, s) in enumerate(zip(steps, wt["steps"]), 1):
+        assert f"Step {i} of 5" in html_ and s["say"] in html_
+    assert not re.search(r'<li class="wt-step"[^>]*hidden', _wt_page())  # JS hides, not HTML
+
+
+def test_state_table_carries_unset_registers_over_and_marks_only_what_changed():
+    cells = [_wt_cells(s) for s in _wt_steps(_wt_page())]
+    assert cells[0] == [("Best bid", "99 x 5", False), ("Best ask", "101 x 4", False),
+                        ("Resting orders", "2", False), ("Last fill", "none", False)]
+    # step 2 sets bid and orders; ask and fill carry over
+    assert cells[1] == [("Best bid", "100 x 3", True), ("Best ask", "101 x 4", False),
+                        ("Resting orders", "3", True), ("Last fill", "none", False)]
+    assert cells[2] == [("Best bid", "100 x 1", True), ("Best ask", "101 x 4", False),
+                        ("Resting orders", "3", False), ("Last fill", "2 at 100", True)]
+    # step 5 restates orders = 2, which has not changed: not highlighted
+    assert cells[4] == [("Best bid", "99 x 5", False), ("Best ask", "101 x 4", False),
+                        ("Resting orders", "2", False), ("Last fill", "1 at 100", False)]
+
+
+def test_a_changed_cell_says_so_in_words_not_colour_alone():
+    step2 = _wt_steps(_wt_page())[1]
+    assert step2.count('<span class="wt-chg">changed</span>') == 2
+    assert '<span class="wt-chg">' not in _wt_steps(_wt_page())[0]
+
+
+def test_walkthrough_controls_are_buttons_hidden_until_js_runs_and_text_is_live():
+    page = _wt_page()
+    sec = page.split('<section id="walkthrough">')[1].split("</section>")[0]
+    assert '<div class="wt-bar" hidden>' in sec
+    assert '<button type="button" class="wt-prev">Previous</button>' in sec
+    assert '<button type="button" class="wt-next">Next</button>' in sec
+    assert '<span class="wt-count">Step 1 of 5</span>' in sec
+    assert 'aria-live="polite"' in sec and "data-wt" in sec
+    assert "data-wt" in page.split("<script>")[1]  # the script drives it
+    css = page.split("<style>")[1].split("</style>")[0]
+    for rule in (".wt-state", ".wt-changed", ".wt-bar[hidden]", ".wt-step[hidden]",
+                 "@media (min-width:900px){.wt-step"):
+        assert rule in css, rule
+
+
+def test_walkthrough_uses_theme_tokens_only():
+    css = _wt_page().split("<style>")[1].split("</style>")[0]
+    wt_rules = "".join(ln for ln in css.splitlines() if ln.startswith(".wt-"))
+    assert wt_rules and "#" not in wt_rules and "rgb" not in wt_rules
+
+
+def test_walkthrough_step_decision_is_a_chip_to_the_decision_card():
+    steps = _wt_steps(_wt_page())
+    assert 'href="#d-d1"' in steps[3] and "Decision D2</b> Decision 1" in steps[3]
+    assert not any("fl-dec" in s for i, s in enumerate(steps) if i != 3)
+    assert "Decision K2</b>" in _wt_steps(_wt_page(decision_prefix="K"))[3]
+
+
+def test_walkthrough_say_links_resolve_and_text_is_escaped():
+    u = artifact_unit_with_walkthrough()
+    u["concepts"][0]["id"] = "term"
+    u["walkthrough"]["steps"][1]["say"] = "A <b>buy</b> uses the [term](x1:term)."
+    u["walkthrough"]["steps"][2]["values"]["fill"] = "<i>2</i>"
+    steps = _wt_steps(render_page(u))
+    assert '&lt;b&gt;buy&lt;/b&gt; uses the <a href="#c-term">term</a>.' in steps[1]
+    assert "&lt;i&gt;2&lt;/i&gt;" in steps[2] and "<i>" not in steps[2]
+
+
+def test_walkthrough_brief_is_a_table_with_a_row_per_step_after_the_concepts():
+    wt = walkthrough_block()
+    brief = render_brief(artifact_unit_with_walkthrough())
+    heads = re.findall(r"^## (.+)$", brief, re.MULTILINE)
+    assert heads.index("How it works") == heads.index("Need to know first") + 1
+    sec = brief.split("## How it works")[1].split("\n## ")[0]
+    assert wt["lead"] in sec and f"**Takeaway:** {wt['takeaway']}" in sec
+    rows = [ln for ln in sec.splitlines() if ln.startswith("|")]
+    assert rows[0] == "| Step | What happens | Best bid | Best ask | Resting orders | Last fill |"
+    assert rows[1] == "|---|---|---|---|---|---|"
+    assert len(rows) == 2 + 5
+    assert rows[2] == ("| 1 | The book holds a buy at 99 and a sell at 101. Nothing has traded "
+                       "yet. | 99 x 5 | 101 x 4 | 2 | none |")
+    # a changed value is bold; a carried-over one is plain
+    assert rows[3].endswith("| **100 x 3** | 101 x 4 | **3** | none |")
+    assert rows[6].endswith("| 99 x 5 | 101 x 4 | 2 | 1 at 100 |")
+    assert "Bold cells changed in that step." in sec
+    # the step that names a decision says which
+    assert "(Decision: Decision 1)" in rows[5]
+
+
+def test_walkthrough_brief_resolves_links_and_escapes_pipes():
+    u = artifact_unit_with_walkthrough()
+    u["concepts"][0]["id"] = "term"
+    u["walkthrough"]["steps"][1]["say"] = "Uses the [term](x1:term)."
+    u["walkthrough"]["steps"][1]["values"]["bid"] = "a|b"
+    sec = render_brief(u).split("## How it works")[1]
+    assert "| 2 | Uses the term. | **a\\|b** |" in sec
+
+
+def test_walkthrough_numbers_are_traced_like_other_text(tmp_path):
+    src = _write(tmp_path, "post.md", "# Title\nprice 101 and 100 and 99.5\n")
+    u = artifact_unit_with_walkthrough()
+    u["results"] = []
+    u["sources"] = [{"file": src, "section": "Title"}]
+    wt = u["walkthrough"]
+    wt["title"], wt["lead"], wt["takeaway"] = "Order 1234", "A fill at 22.75.", "Total 5,678."
+    wt["steps"][1]["say"] = "A buy of 4.5 at 100 arrives."
+    wt["steps"][2]["values"]["fill"] = "9,001 at 100"
+    wt["registers"][0]["label"] = "Bid 77.7"
+    assert sorted(untraced_numbers(u)) == sorted(
+        ["1234", "22.75", "5678", "4.5", "9001", "77.7"])
+    u["derived_numbers"] = [{"value": "4.5", "how": "invented"}]
+    assert "4.5" not in untraced_numbers(u)

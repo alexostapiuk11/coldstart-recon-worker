@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from study.matrix import cell_text, cell_words, words
-from study.schema import flow_phases, merged_segments, phased, so_ids
+from study.schema import flow_phases, merged_segments, phased, so_ids, walkthrough_states
 from study.seq import numbered, step_line
 from study.text import plural, resolve_links
 
@@ -212,6 +212,25 @@ def _matrix_lines(ch):
     return out
 
 
+def _walkthrough_lines(c):
+    """'## How it works': the lead, one table with a row per step (its text, then the state
+    of every register after it; a value that changed in that step is bold), the takeaway."""
+    wt = c["walkthrough"]
+    titles = {d["id"]: d["title"] for d in c.get("decisions", [])}
+
+    def cell(text):
+        return text.replace("|", "\\|")
+
+    out = ["## How it works", "", wt["lead"], "",
+           "| " + " | ".join(["Step", "What happens"] + [cell(r["label"]) for r in wt["registers"]])
+           + " |", "|" + "---|" * (len(wt["registers"]) + 2)]
+    for n, (s, state) in enumerate(zip(wt["steps"], walkthrough_states(wt)), 1):
+        say = s["say"] + (f" (Decision: {titles[s['decision']]})" if s.get("decision") else "")
+        vals = [cell(f"**{v}**" if changed else v) for _, v, changed in state]
+        out.append("| " + " | ".join([str(n), cell(say)] + vals) + " |")
+    return out + ["", "Bold cells changed in that step.", "", f"**Takeaway:** {wt['takeaway']}", ""]
+
+
 def _bullets(items):
     return "\n".join(f"- {i}" for i in items)
 
@@ -243,6 +262,8 @@ def render_brief(c: dict) -> str:
                 line += f" Why it matters: {t['why']}"
             out.append(line)
         out.append("")
+    if c.get("walkthrough"):
+        out += _walkthrough_lines(c)
     if c.get("views"):
         out += ["## System views (C4)" if c["kind"] == "artifact" else "## Views", ""]
         for v in c["views"]:
