@@ -28,7 +28,7 @@
       "id": "R4",
       "short": "Rules fixed before the campaign",
       "text": "Commit H1 to H6 with thresholds and decision rules, plus exclusion, stopping and headline rules, before the first campaign fork.",
-      "why": "Six of eight verdicts came out fails or mixed; only a timestamped [pre-registration](p2:prereg) shows they were not chosen after the data."
+      "why": "Six of eight verdicts came out fails or mixed; only a timestamped [pre-registration](p2:prereg) shows they were not chosen after the campaign's data."
     },
     {
       "id": "R5",
@@ -54,19 +54,19 @@
       "id": "hdr",
       "short": "p99.99 and its samples",
       "term": "HdrHistogram and what a p99.99 rests on",
-      "plain": "[p99.99](p2:percentiles): the latency 99.99% of messages stay at or under. **HdrHistogram** keeps 3 significant digits over a huge range and merges without loss. A percentile is reported only with at least 100 samples above it: 2,000,000 messages leave 200 above p99.99, so p99.999 and the maximum never are."
+      "plain": "[p99.99](p2:percentiles): the latency 99.99% of messages stay at or under. **HdrHistogram** keeps 3 significant digits over a huge range and merges without loss. A percentile is reported only with at least 100 samples above it: 2,000,000 messages leave 200 above p99.99 but 20 above p99.999, so this study reports nothing past p99.99."
     },
     {
       "id": "ring",
       "short": "Ring, queue, spin, park",
       "term": "The Disruptor ring, the queue, and wait strategies",
-      "plain": "**Ring buffer**: a preallocated array with sequence counters; one producer and one consumer allocate nothing; with busy-spin they take no lock (the blocking strategy enters a monitor per publish). `ArrayBlockingQueue`: one lock; a thread that finds it held enqueues a node (allocates) and parks. **Wait strategy**: what an idle consumer does, **busy-spin** (poll in a loop, burning a core) or **park** (sleep until woken)."
+      "plain": "**Ring buffer**: a preallocated array with sequence counters; one producer and one consumer allocate nothing; with busy-spin they take no lock (the blocking strategy enters a monitor per publish). `ArrayBlockingQueue`: one lock for both ends; a thread that must wait (lock held, or an empty queue in the park arm) enqueues a wait node (allocates) and parks. **Wait strategy**: what an idle consumer does, **busy-spin** (poll in a loop, burning a core) or **park** (sleep until woken)."
     },
     {
       "id": "fsync",
       "short": "Page cache, fdatasync, group commit",
       "term": "Page-cache write, fdatasync, group commit",
-      "plain": "`write` lands in the **page cache**: it survives a killed JVM, not a power loss. `fdatasync` returns once data is on stable storage; a drive with a volatile write cache must flush first (these report none, VWC 0). **D0** no journal; **D1** page-cache write, response not gated; **D2** group commit: up to 4,096 entries per `fdatasync`; **D3** one `fdatasync` per order."
+      "plain": "`write` lands in the **page cache**: it survives a killed JVM, not a kernel crash or power loss. `fdatasync` returns once data is on stable storage; a drive with a volatile write cache must flush first (these report none, VWC 0). **D0** no journal; **D1** page-cache write, response not gated; **D2** group commit: up to 4,096 entries per `fdatasync`; **D3** one `fdatasync` per order."
     },
     {
       "id": "safepoint",
@@ -88,101 +88,6 @@
     }
   ],
   "views": [
-    {
-      "level": "context",
-      "title": "Who and what the study touches",
-      "caption": "The laptop builds and tests, never produces data. Three rented hosts run the campaign; each host's second NVMe drive holds only the journal.",
-      "nodes": [
-        {
-          "id": "laptop",
-          "label": "Laptop",
-          "sub": "build and tests; never data",
-          "kind": "system",
-          "col": 0,
-          "row": 0
-        },
-        {
-          "id": "prior",
-          "label": "Prior art",
-          "sub": "LMAX, Tene, Yoon",
-          "kind": "store",
-          "col": 1,
-          "row": 0
-        },
-        {
-          "id": "author",
-          "label": "Author",
-          "sub": "designs, pre-registers",
-          "kind": "person",
-          "col": 0,
-          "row": 1
-        },
-        {
-          "id": "study",
-          "label": "Matching-engine tail",
-          "sub": "Java pipeline, Python analysis",
-          "kind": "focus",
-          "col": 1,
-          "row": 1
-        },
-        {
-          "id": "reader",
-          "label": "Reader",
-          "sub": "platform, trading-firm engineers",
-          "kind": "person",
-          "col": 2,
-          "row": 1
-        },
-        {
-          "id": "vultr",
-          "label": "Vultr bare metal ×3",
-          "sub": "EPYC 4245P, six cores",
-          "kind": "external",
-          "col": 1,
-          "row": 2
-        },
-        {
-          "id": "drive",
-          "label": "Journal NVMe drive",
-          "sub": "one per host; VWC 0",
-          "kind": "store",
-          "col": 2,
-          "row": 2
-        }
-      ],
-      "edges": [
-        {
-          "from": "author",
-          "to": "study",
-          "label": "designs, runs"
-        },
-        {
-          "from": "study",
-          "to": "reader",
-          "label": "post + data"
-        },
-        {
-          "from": "laptop",
-          "to": "study",
-          "label": "tested code"
-        },
-        {
-          "from": "prior",
-          "to": "study",
-          "label": "methods credited"
-        },
-        {
-          "from": "study",
-          "to": "vultr",
-          "label": "840 forks"
-        },
-        {
-          "from": "vultr",
-          "to": "drive",
-          "label": "write, fdatasync"
-        }
-      ]
-    },
     {
       "level": "container",
       "title": "One fork: five threads, three swapped channels",
@@ -534,6 +439,101 @@
           "label": "after the window"
         }
       ]
+    },
+    {
+      "level": "context",
+      "title": "Who and what the study touches",
+      "caption": "The laptop builds and tests, never produces data. Three rented hosts run the campaign; each host's second NVMe drive holds only the journal.",
+      "nodes": [
+        {
+          "id": "laptop",
+          "label": "Laptop",
+          "sub": "build and tests; never data",
+          "kind": "system",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "id": "prior",
+          "label": "Prior art",
+          "sub": "LMAX, Tene, Yoon",
+          "kind": "store",
+          "col": 1,
+          "row": 0
+        },
+        {
+          "id": "author",
+          "label": "Author",
+          "sub": "designs, pre-registers",
+          "kind": "person",
+          "col": 0,
+          "row": 1
+        },
+        {
+          "id": "study",
+          "label": "Matching-engine tail",
+          "sub": "Java pipeline, Python analysis",
+          "kind": "focus",
+          "col": 1,
+          "row": 1
+        },
+        {
+          "id": "reader",
+          "label": "Reader",
+          "sub": "platform, trading-firm engineers",
+          "kind": "person",
+          "col": 2,
+          "row": 1
+        },
+        {
+          "id": "vultr",
+          "label": "Vultr bare metal ×3",
+          "sub": "EPYC 4245P, six cores",
+          "kind": "external",
+          "col": 1,
+          "row": 2
+        },
+        {
+          "id": "drive",
+          "label": "Journal NVMe drive",
+          "sub": "one per host; VWC 0",
+          "kind": "store",
+          "col": 2,
+          "row": 2
+        }
+      ],
+      "edges": [
+        {
+          "from": "author",
+          "to": "study",
+          "label": "designs, runs"
+        },
+        {
+          "from": "study",
+          "to": "reader",
+          "label": "post + data"
+        },
+        {
+          "from": "laptop",
+          "to": "study",
+          "label": "tested code"
+        },
+        {
+          "from": "prior",
+          "to": "study",
+          "label": "methods credited"
+        },
+        {
+          "from": "study",
+          "to": "vultr",
+          "label": "840 forks"
+        },
+        {
+          "from": "vultr",
+          "to": "drive",
+          "label": "write, fdatasync"
+        }
+      ]
     }
   ],
   "decisions": [
@@ -615,7 +615,7 @@
         "A 2×2: `ArrayBlockingQueue` or Disruptor ring, each parking or spinning, same slots and capacity (4,096), at three rates"
       ],
       "chosen": "A 2×2: `ArrayBlockingQueue` or Disruptor ring, each parking or spinning, same slots and capacity (4,096), at three rates",
-      "why": "Only a 2×2 splits the gap. **Structure includes its lock**: the queue's lock parks and allocates under contention even in the spin arm, so that is measured per thread, not removed. E2 stays at ring + busy-spin whatever E1 shows.",
+      "why": "Only a 2×2 splits the gap. **Structure includes its lock**: the queue's lock and wait nodes allocate, and a waiting thread parks, even in the spin arm when two threads collide, so that is measured per thread, not removed. E2 stays at ring + busy-spin whatever E1 shows.",
       "cost": "The park arms differ by construction: a ring + park producer facing a full ring sleeps about 50 µs of timer slack; a queue + park producer is signalled. One queue tested. Spinning keeps three of six cores busy: $0.205/h per host.",
       "why_short": "Only a 2×2 can split the 2011 ring-versus-queue gap into structure and waiting; the queue's lock counts as structure.",
       "cost_short": "The park arms differ in more than structure; one queue tested; spinning costs three cores per host.",
@@ -633,7 +633,7 @@
         },
         {
           "concept": "safepoint",
-          "because": "The queue allocates under contention, so its arms meet G1 pauses."
+          "because": "The queue allocates wait nodes, so its arms meet G1 pauses."
         }
       ]
     },
@@ -647,7 +647,7 @@
         "D0 to D3 at 5,000, 20,000 and 100,000/s; D3's ceiling stated as arithmetic; a recon rule for slow drives"
       ],
       "chosen": "D0 to D3 at 5,000, 20,000 and 100,000/s; D3's ceiling stated as arithmetic; a recon rule for slow drives",
-      "why": "The senior review found one rate set left D3 saturated at every hypothesis rate. By arithmetic, 1 ÷ fio's median put D3's ceiling near 68,200/s, between 20,000 and 100,000. A pre-written journal makes `fdatasync` flush data, not allocation metadata.",
+      "why": "The senior review found one rate set left D3 saturated at every hypothesis rate. By arithmetic, 1 ÷ fio's median put D3's ceiling, an upper bound, near 68,200/s, between 20,000 and 100,000. A pre-written journal makes `fdatasync` flush data, not allocation metadata.",
       "cost": "Sizes are drive-specific. Saturated D3 forks sustained 23,929–23,979/s, 35% of the arithmetic, and the pipeline's median sync (23.5 µs) sat above fio's 14.7 µs, unexplained. NVMe interrupts land on the journaler's core. Power loss untested.",
       "why_short": "Rates where D3 can stay unsaturated make the durability hypotheses testable; D3's limit is arithmetic, not a hypothesis.",
       "cost_short": "Drive-specific sizes; D3 reached only 35% of the arithmetic ceiling, unexplained; power loss untested.",
@@ -790,7 +790,7 @@
       "phase": "Build offline",
       "label": "Amendment 1, before any host",
       "detail": "Plan 1 showed the design silent or wrong in places: the tail's tie rule, the busy period, the queue + spin lock-park row, timeouts. Hypotheses unchanged.",
-      "output": "a dated [amendment](p2:amendment) approved with no data collected, so nothing in it is post hoc",
+      "output": "a dated [amendment](p2:amendment) approved before any host was rented; laptop runs, which are not data, prompted it",
       "when": "2026-10-09 (−07:00)",
       "evidence": [
         {
@@ -967,7 +967,7 @@
       "short": "Sync on the path: it is the tail",
       "chart": {
         "type": "stacked_bars",
-        "unit": "% of tail messages",
+        "unit": "% of tail messages, first credited cause",
         "highlight": [
           "Durability wait",
           "Matcher path"
@@ -1035,12 +1035,12 @@
         ]
       },
       "axis": "Host h1, ring + busy-spin, 20,000/s, about 2,000 tail messages per level over 10 forks. Each message goes to its first credited cause in a fixed order, for the figure only; h2 and h3 look the same.",
-      "read_as": "No sync on the path: the match stage and its queue are the tail. A sync on the path: durability wait is all of it. At D3, arrival burst was also credited on 100%, a tie the bars hide.",
+      "read_as": "No sync on the path: the match stage and its queue are the tail. A sync on the path: durability wait is all of it. At D3 and 20,000/s, arrival burst was also credited on 100%, a tie the bars hide.",
       "so": [
         "attr",
         "e2"
       ],
-      "takeaway": "Which stage owns the tail flips with durability. H1 fails: the matcher path, queue wait included, is 56.7%–60.5% of a tail message's latency at D0 and D1 (pooled medians).",
+      "takeaway": "Which stage owns the tail flips with durability. H1 fails on time, not count: the matcher path is 56.7%–60.5% of a tail message's latency at D0 and D1 (pooled medians); the bars count messages.",
       "arithmetic": "results-a7.md §8.2 as percent. Non-exclusive matcher-path credit at D0 and D1: 89.1%–93.1%. Engine service alone: 35.1%–45.1% of a 1.39 µs tail."
     },
     {
@@ -1223,22 +1223,170 @@
       "title": "Every pre-registered verdict, as it came out",
       "short": "Four fail, two mixed, two hold",
       "chart": {
-        "type": "bars",
+        "type": "matrix",
         "unit": "verdicts",
-        "items": [
+        "rows": [
           {
-            "label": "fails: H1, H2, H3a, H6b",
-            "value": 4
+            "label": "H1",
+            "sub": "matching is small"
           },
           {
-            "label": "mixed: H5, H6a",
-            "value": 2
+            "label": "H2",
+            "sub": "waiting beats structure"
           },
           {
-            "label": "holds: H3b, H4",
-            "value": 2
+            "label": "H3a",
+            "sub": "group commit near D1"
+          },
+          {
+            "label": "H3b",
+            "sub": "per-order sync is costly"
+          },
+          {
+            "label": "H4",
+            "sub": "the launch is the unit"
+          },
+          {
+            "label": "H5",
+            "sub": "hosts differ more at D2"
+          },
+          {
+            "label": "H6a",
+            "sub": "durability wait leads"
+          },
+          {
+            "label": "H6b",
+            "sub": "no cause over half"
           }
-        ]
+        ],
+        "cols": [
+          {
+            "label": "Predicted"
+          },
+          {
+            "label": "Came out"
+          }
+        ],
+        "cells": [
+          [
+            {
+              "text": "under 10.0% of latency, every cell",
+              "status": "predicted"
+            },
+            {
+              "text": "fails: 56.7%–60.5% at D0, D1",
+              "status": "observed",
+              "tone": "bad",
+              "note": "service only 35.1%–45.1%; 0.127%–0.393% at D2 and D3"
+            }
+          ],
+          [
+            {
+              "text": "wait moves p99.99 more, every rate",
+              "status": "predicted"
+            },
+            {
+              "text": "fails: D +0.257, −0.095, −5.957",
+              "status": "observed",
+              "tone": "bad",
+              "note": "holds at 10,000/s, mixed at 100,000/s, fails at 500,000/s"
+            }
+          ],
+          [
+            {
+              "text": "D2 within 2.00× of D1",
+              "status": "predicted"
+            },
+            {
+              "text": "fails: 44.9× and 52.0×",
+              "status": "observed",
+              "tone": "bad",
+              "note": "at 5,000/s and 20,000/s"
+            }
+          ],
+          [
+            {
+              "text": "D3 over 10.0× D1, lowest rate",
+              "status": "predicted"
+            },
+            {
+              "text": "holds: 65.0×",
+              "status": "observed",
+              "tone": "ok",
+              "note": "at 5,000/s"
+            }
+          ],
+          [
+            {
+              "text": "launch spread over 2.00× run error",
+              "status": "predicted"
+            },
+            {
+              "text": "holds: 5.64×, 8.90×, 5.87×",
+              "status": "observed",
+              "tone": "ok",
+              "note": "h1, h2, h3"
+            }
+          ],
+          [
+            {
+              "text": "between-host share larger at D2",
+              "status": "predicted"
+            },
+            {
+              "text": "mixed: 0.00323%–9.07%",
+              "status": "observed",
+              "tone": "warn",
+              "note": "range at every level and rate"
+            }
+          ],
+          [
+            {
+              "text": "credited most at D2 and D3",
+              "status": "predicted"
+            },
+            {
+              "text": "mixed: 9 of 12 pairs met",
+              "status": "observed",
+              "tone": "warn",
+              "note": "the three misses are ties with arrival burst"
+            }
+          ],
+          [
+            {
+              "text": "none credited over half, D0, D1",
+              "status": "predicted"
+            },
+            {
+              "text": "fails: met in 0 of 12 pairs",
+              "status": "observed",
+              "tone": "bad"
+            }
+          ]
+        ],
+        "legend": [
+          {
+            "status": "predicted",
+            "label": "pre-registered prediction"
+          },
+          {
+            "status": "observed",
+            "label": "observed"
+          },
+          {
+            "tone": "bad",
+            "label": "fails"
+          },
+          {
+            "tone": "warn",
+            "label": "mixed"
+          },
+          {
+            "tone": "ok",
+            "label": "holds"
+          }
+        ],
+        "note": "Four fail, two mixed, two hold."
       },
       "axis": "Eight verdicts (H3 and H6 have two parts), each by its pre-registered rule. Default: holds if the pooled interval supports it and all hosts agree; fails if it contradicts it; else mixed.",
       "read_as": "Fails: H1, H2 (holds, mixed, fails by rate), H3a, H6b (0 of 12 pairs). Mixed: H5; H6a (9 of 12, misses tied with arrival burst). Holds: H3b, H4.",
@@ -1286,11 +1434,10 @@
         "x_label": "offered rate, messages/s",
         "y_label": "messages per window",
         "x_log": true,
-        "y_from_zero": true,
         "series": [
           {
-            "name": "delayed by the window's G1 pauses (arithmetic)",
-            "style": "line",
+            "name": "due during G1 pauses (arithmetic)",
+            "style": "points",
             "points": [
               {
                 "x": 10000,
@@ -1308,7 +1455,7 @@
           },
           {
             "name": "p99.99 rank: 0.01% of the window",
-            "style": "line",
+            "style": "points",
             "points": [
               {
                 "x": 10000,
@@ -1325,7 +1472,8 @@
             ]
           }
         ],
-        "note": "Arithmetic, not measurement: rate × pause length × pauses, per window. Changes no verdict."
+        "note": "Arithmetic, not measurement: rate × pause length × pauses, per window. It counts only messages due during the pauses, so it is a floor. Changes no verdict.",
+        "y_log": true
       },
       "axis": "E1's queue arms. Counted after the analysis: every in-window safepoint there was a G1 allocation pause, median 2.49–2.68 ms; the ring arms had none.",
       "read_as": "A p99.99 registers a pause once the messages it delays outnumber 0.01% of the window: not at 10,000/s, nearly at 100,000/s, far past at 500,000/s. Measured: queue + park over 100 µs in 0, 9 and 30 of 30 launches.",
@@ -1340,7 +1488,7 @@
     "followups": [
       {
         "q": "Your queue's millisecond tail at 500,000/s: is that the queue, or your one-GC-thread collector setup?",
-        "a": "Both. The allocation is structural: the queue's lock makes a contending thread enqueue a node and park, while the ring arms' stages allocated nothing. The pause length is partly configuration: one G1 thread on a core shared with the OS and JIT. The breakdown is post hoc (every queue-arm safepoint a G1 allocation pause, medians 2.49 to 2.68 ms). A better-tuned JVM was not tested."
+        "a": "Both. The allocation is structural: the queue's lock and wait nodes allocate (a thread that finds the lock held, or an empty queue in the park arm, enqueues a node and parks), while the ring arms' stages allocated nothing. The pause length is partly configuration: one G1 thread on a core shared with the OS and JIT. The breakdown is post hoc (every queue-arm safepoint a G1 allocation pause, medians 2.49 to 2.68 ms). A better-tuned JVM was not tested."
       },
       {
         "q": "Why `ArrayBlockingQueue` at all? Does \"ring beats queue\" still mean anything?",
@@ -1348,7 +1496,7 @@
       },
       {
         "q": "Your drives sync in about 15 µs. What does that tell me about my hardware, and what did you test about power loss?",
-        "a": "Only the direction transfers. These drives report no volatile write cache; one published measurement: 1,643 µs on a consumer drive with a write-back cache, 24 µs on an enterprise one. Check the write-cache bit. Power loss was not tested: the crash check kills the JVM, which tests process-crash safety only, and at D1 a pass is timing."
+        "a": "Only the direction transfers. fio's isolated sync median was about 15 µs on drives that report no volatile write cache, but inside the pipeline the median sync took 23.5 µs, for reasons not separated. One published measurement: 1,643 µs on a consumer drive with a write-back cache, 24 µs on an enterprise one. Check the write-cache bit. Power loss was not tested: the crash check kills the JVM, which tests process-crash safety only, and at D1 a pass is timing."
       },
       {
         "q": "The workload is synthetic, Poisson and thin. Which conclusions move with real order flow?",
@@ -1360,7 +1508,7 @@
       },
       {
         "q": "How do you know the rules came before the data?",
-        "a": "The hypotheses are in the design approved 2026-10-08, before any host was rented; amendment 1 changed definitions with no data collected. Reconnaissance's single forks on h1 (not data) had shown D2's and D3's tails and D3 saturating near 23,900/s; the pre-registration records this, hypotheses unchanged. Tag 18:24:42Z on 2026-10-10, first campaign fork 18:28:23Z, no amendment since."
+        "a": "The hypotheses and their thresholds are in the design approved 2026-10-08, before any host was rented. Amendment 1 changed definitions, not hypotheses, before any host ran; laptop runs (not data) prompted it. Reconnaissance's single forks on h1 (not data) had shown D2's p99.99 at 71,416 ns against D1's 1,417 ns and D3 saturating near 23,900/s; H3a (within 2.00×) was kept, and the pre-registration records this. Tag 18:24:42Z on 2026-10-10, first campaign fork 18:28:23Z, no amendment since."
       }
     ],
     "limits": "Three hosts of one server type and one provider, identical journal drives: n = 3. Synthetic workload, thin books, Poisson arrivals, no fills. In-process, no network. One JDK and one collector (G1, one GC thread); one queue. Process crash tested, not power loss. D3's arithmetic is not a measurement (35% reached). Coarse money: three rates, the median launch; a 1.00× tax means invisible to the grid. Attribution floor: the residual, sentinel blind spots, lower-bound nulls, uncredited handshakes; a pause can also count as a gap. Stamp cost and synchronous logs not netted out. The GC breakdown is post hoc."
@@ -1384,15 +1532,15 @@
     },
     {
       "q": "Why does a 2.68 ms G1 pause at 10,000/s not show in the queue + park arm's 6.13 µs p99.99?",
-      "a": "A p99.99 sees a pause only if the messages it delays outnumber 0.01% of the window: about 27 against a rank of 200 in 2,000,000 messages (arithmetic, not measurement)."
+      "a": "A p99.99 sees a pause only if the messages it delays outnumber 0.01% of the window: about 27 due during the pause (a floor: the backlog adds more) against a rank of 200 in 2,000,000 messages (arithmetic, not measurement)."
     },
     {
       "q": "Why is \"group commit costs 52×\" not a property of group commit?",
-      "a": "It is this setup at 20,000/s: a tiny ungated tail (1.39 µs) against 72.1 µs, on drives that sync in about 15 µs with no volatile cache. The direction transfers; the size does not."
+      "a": "It is this setup at 20,000/s: a tiny ungated tail (1.39 µs) against 72.1 µs. fio measured an isolated sync at about 15 µs on drives with no volatile cache, but inside the pipeline the median sync took 23.5 µs, and a D2 message can wait for the sync in flight and then for its own batch's. The direction transfers; the size does not."
     },
     {
       "q": "Why did D3 saturate at 100,000/s, and why was that never a hypothesis?",
-      "a": "One `fdatasync` per order: 1 ÷ 14.7 µs is about 68,200/s, and the pipeline sustained about 23,900/s. Arithmetic decided it and reconnaissance had seen it, so it was a stated prediction and the cell left every test."
+      "a": "One `fdatasync` per order: 1 ÷ fio's median sync (14,656 ns on h1) is about 68,200/s, an upper bound that ignores the write and the hand-offs, and the pipeline sustained about 23,900/s. The arithmetic and reconnaissance both pointed there, so it was a stated prediction, not a hypothesis, and the cell left every test."
     },
     {
       "q": "A tail message overlaps a safepoint. When is the safepoint credited, and why not on overlap alone?",
