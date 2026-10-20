@@ -83,7 +83,7 @@
   ],
   "walkthrough": {
     "title": "One K batch, killed in the commit window",
-    "lead": "A prediction (H1), not a result. Values illustrate the mechanism for one payment, from the code and the pre-registration; only stack N has been seen doing this, in the gate.",
+    "lead": "A prediction (H1), not a result: values illustrate one payment, from the code and pre-registration. Only N has been seen duplicating this way (in the gate); K's abort-and-recommit path has not been run.",
     "registers": [
       {
         "id": "ledger",
@@ -125,7 +125,7 @@
         "decision": "order"
       },
       {
-        "say": "K sends the `payments-applied` record and adds its offsets to the transaction. Open, nothing visible. In recon, about two-thirds of commits then waited ~100 ms, widening [this window](a6:window) (H5).",
+        "say": "K sends the record and adds its offsets: open, nothing visible. In one recon run (pre-campaign), 67% and 65% of transactions retried the offset commit after ~100 ms, widening [this window](a6:window) (H5).",
         "values": {
           "txn": "open; records, offsets pending",
           "out": "pending, hidden"
@@ -149,11 +149,11 @@
       {
         "say": "The offsets were never committed, so the group resumes from the last committed offset and delivers the same batch again.",
         "values": {
-          "offset": "same: batch redelivered"
+          "offset": "unchanged"
         }
       },
       {
-        "say": "K has no key check, so the Postgres commit runs again in a new transaction. The batch is in the ledger twice; Postgres was never in the one that aborted.",
+        "say": "K has no key check, so the Postgres commit runs again, and K sends the record in a new Kafka transaction. The ledger has the batch twice; Postgres was never in the aborted one.",
         "values": {
           "ledger": "2, same partition and offset",
           "txn": "new one, open",
@@ -161,7 +161,7 @@
         }
       },
       {
-        "say": "This second `commitTransaction` succeeds: offsets move on, and a `read_committed` reader sees the payment once. Kafka is consistent; the ledger is not.",
+        "say": "If nothing else interferes, this second `commitTransaction` succeeds: offsets move on, and a `read_committed` reader sees the payment once. Kafka is consistent; the ledger is not.",
         "values": {
           "offset": "past this batch",
           "txn": "committed",
@@ -170,7 +170,7 @@
         }
       }
     ],
-    "takeaway": "Output once, ledger twice: Kafka's transaction ended cleanly, but Postgres was never in it. H1 predicts this in at least 8 of 10 F4-con-t trials; this page reports no K result."
+    "takeaway": "Output once, ledger twice: Kafka's transaction ended cleanly, but Postgres was never in it. H1 needs ledger duplicates in at least 8 of 10 F4-con-t trials (output once is reported beside it). No K result here."
   },
   "views": [
     {
