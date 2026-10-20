@@ -1,0 +1,2065 @@
+{
+  "id": "a3",
+  "kind": "artifact",
+  "title": "Which tool-calling failures tool presentation moves",
+  "short_title": "Tool-Calling Failure Modes",
+  "minutes": 45,
+  "question": "**No data yet: no campaign has run, and no result is shown. This page shows the question, the instrument, the predictions and the controls only.** Hold one model fixed and change only how its tools are presented: 2 to 4 tools or 20 with look-alikes, terse or rich descriptions, loose or strict schemas. Which kind of failure moves: a call that is not valid, a call nobody asked for, a missing call, the wrong tool, or the wrong arguments? And what does each presentation cost per [successful call](a3:costsuccess)? 49 candidate scenarios in seven public or synthetic domains, graded by rule with no LLM judge. The sources disagree in one place (see the [known contradiction](a3:contradiction)); this page follows the amendment that governs.",
+  "requirements": [
+    {
+      "id": "R1",
+      "short": "One model, eight renderings",
+      "text": "Every scenario is rendered in all eight cells (tool count × description richness × schema strictness), and the renderings differ only in the factor being manipulated.",
+      "why": "Otherwise a difference cannot be pinned on presentation. It is the same single-variable discipline the other artifacts apply to their arms."
+    },
+    {
+      "id": "R2",
+      "short": "Grade by rule, against one contract",
+      "text": "Every response is graded by an ordered procedure into exactly one of six categories, against each tool's single canonical schema, with a versioned normalizer. No LLM judge.",
+      "why": "A judge adds its own variance to the quantity under study, and a harness that answers differently twice cannot be adopted. Each category points at a different fix."
+    },
+    {
+      "id": "R3",
+      "short": "The scenario is the unit",
+      "text": "Rates are averaged per scenario, intervals resample whole scenarios, and the number of repetitions is sized from the pilot's intra-scenario correlation.",
+      "why": "Reruns of a scenario the model finds confusing fail for the same reason each time. Treating calls as independent makes intervals far too narrow and manufactures significance."
+    },
+    {
+      "id": "R4",
+      "short": "Recovery: does the model loop?",
+      "text": "After an injected tool error, measure whether the model repeats the failing call unchanged, with the error message either actionable or opaque.",
+      "why": "Repeating a failing call verbatim turns one error into a token-burning loop; an actionable message should prevent it. It is a mechanism-level prediction that gets tested, not asserted."
+    },
+    {
+      "id": "R5",
+      "short": "Rules and spend fixed before data",
+      "text": "Hypotheses, band, grading and floors are committed before the pilot; the scenario count, repetitions, included scenarios and approved spend before any campaign call. No paid call runs without a stated call count and cost.",
+      "why": "N depends on what the pilot measures, git timestamps must show the order, and the portfolio's spend rule is made mechanical by a guard."
+    },
+    {
+      "id": "R6",
+      "short": "Public or synthetic only",
+      "text": "Every scenario, tool and schema is public (a BFCL seed) or authored in neutral domains; nothing derives from the author's employer. A scan of the data files fails the tests unless the author has signed off each hit.",
+      "why": "The author's confidentiality boundary. The scan cannot read intent, so a pre-publish check by the author remains.",
+      "unlinked_reason": "A constraint on every decision, enforced by a data-file scan and the author's sign-offs (amendment §6), not the outcome of a choice among options."
+    }
+  ],
+  "concepts": [
+    {
+      "id": "taxonomy",
+      "short": "Six categories, first match wins",
+      "term": "Six categories, and the first rule that applies wins",
+      "plain": "The model executes nothing: it emits a structured request (a tool, JSON arguments) and the harness decides what to do with it, so every failure is a property of that request and needs no judgment about meaning. Provider errors, refusals and truncations are excluded first and counted per cell. Then: `MALFORMED` (not a valid call to a tool that was shown: unparseable, a tool not in context, a required key missing, a wrong JSON type), `SPURIOUS` (a call where none was expected), `MISSING` (no call where one was), `WRONG_TOOL`, `WRONG_PARAMS` (a wrong value, enum or pattern miss, or an unknown key), `CORRECT`. The category depends on what was rendered: a call to `get_current_weather` is `MALFORMED` in a cell that shows two other tools and `WRONG_TOOL` in the 20-tool cell that shows it.",
+      "analogy": "The model is a client sending an RPC, the harness a gateway validating it: parse, then schema, then routing, then business rules. The order is part of the contract, as a 400 is decided before a 404."
+    },
+    {
+      "id": "cells",
+      "short": "Eight cells",
+      "term": "The eight cells",
+      "plain": "Count: the scenario's own 2 to 4 tools, or exactly 20 (those, 4 to 6 look-alikes written for the scenario, and filler from its own domain first, then others). Richness: terse one-liners or rich descriptions. Strictness: loose types (only the first required parameter in `required`) or strict enums, patterns and every required key. Baseline: low, terse, loose. Rich text may state a constraint in words that a strict schema states in structure, so richness and strictness overlap.",
+      "analogy": "A configuration matrix in which each axis changes one thing and the system prompt is one fixed text in every cell, like a deploy matrix that differs only in the flag under test."
+    },
+    {
+      "id": "canonical",
+      "short": "Schema content, one canonical schema",
+      "term": "Strictness is schema content, and every call is graded against one canonical schema",
+      "plain": "Each tool has one canonical schema, its strict form, and every call in every cell is graded against it, whatever the model was shown. A loose schema is charged for constraints it never showed: that is the measurement of what loose costs, not a bug. Provider strict mode (constrained decoding) is off in all eight cells, because it would make `MALFORMED` nearly impossible by construction and test the API, not the model; one exploratory slice turns it on.",
+      "analogy": "Contract testing: a consumer's request is validated against the provider's real contract, not the subset the docs showed. And a type system that makes invalid states unrepresentable versus documentation plus a validator at the edge: this study asks whether the model reads the documentation."
+    },
+    {
+      "id": "cluster",
+      "short": "The scenario is the unit",
+      "term": "The unit of independent variation is the scenario",
+      "plain": "N reruns of one scenario carry between one and N scenarios' worth of information, set by the intra-scenario correlation ρ. S scenarios × N repetitions have effective size S·N / (1 + (N − 1)ρ), which approaches S/ρ however many repetitions are added. Intervals resample whole scenarios; Wilson intervals are used only within one scenario.",
+      "analogy": "A flaky test failing 20 times in CI is one bug with 20 symptoms. A dashboard counting failures counts symptoms; the bootstrap over scenarios counts bugs."
+    },
+    {
+      "id": "contrasts",
+      "short": "Main effects and interactions",
+      "term": "Main effects, interactions and the scale",
+      "plain": "A main effect is the high-level rate minus the low-level rate, averaged over the other two factors, in percentage points. An interaction is one factor's effect at the other's high level minus its effect at the low level: the difference, as the code computes it, not that difference halved. Say which convention you mean. The scale is fixed in advance because an interaction on the percentage-point scale can vanish on a ratio scale.",
+      "analogy": "An ablation table where you ask not only whether a component helps, but whether it helps more on a large cluster than on a small one."
+    },
+    {
+      "id": "band",
+      "short": "The baseline band",
+      "term": "The baseline band, and what it selects",
+      "plain": "Every candidate runs 10 times at the baseline cell and is included if its correct rate falls in a band, proposed as 0.10 to 0.90 and frozen at step 1. It picks where the instrument has resolution: scenarios a model always passes could hide a real effect. Every candidate and decision is published, and excluded ones stay in the repository. One reading the sources do not state: a rate strictly between 0 and 1 means the reruns disagreed, so the band also selects for flipping; how many candidates survive is what the pilot measures.",
+      "analogy": "Sizing a load test: choose a load at which the system sometimes fails, because a load at which nothing ever fails cannot show which change helps."
+    },
+    {
+      "id": "recovery",
+      "short": "Recovery and the identical retry",
+      "term": "Recovery, and the identical retry",
+      "plain": "A mock service rejects a call as the scenario says (an invalid parameter, a contradicting result, a timeout or a malformed payload) in one of two formats: actionable (names the parameter, says what to do) or opaque (`Error: invalid request.`). Up to three attempts follow. Identical retry: the first action after the error repeats the failing call unchanged. For a rejection that is a loop; for a timeout it is the right move, so H4 counts the persistent kinds only. A conversation ends as `recovered`, `gave_up` (stopped calling, no success claim; includes asking the user), `hallucinated_success` (stopped calling, a success-shaped message with no disclosed failure: a pattern proxy with known misses), or `budget_exhausted` (rejected at the third attempt, neither of the other two).",
+      "analogy": "HTTP semantics: a 400 with a field error must not be retried unchanged, a 504 may be if the call is idempotent. An agent retrying a non-idempotent call after a timeout meets the duplicate-payment problem of artifact 6."
+    },
+    {
+      "id": "costsuccess",
+      "short": "Cost per successful call",
+      "term": "Cost per successful call, and the retry walk",
+      "plain": "All spend, failed attempts included, divided by correct calls. A retry policy of up to three attempts is costed by walking each scenario's recorded reruns in order, not with c / (1 − f), which assumes each retry is an independent draw. If a failing scenario fails again, the formula understates the cost: in a worked example with f = 0.3 and a cap of 3, the formula and independent failures give 1.43 calls per success, and 2.29 if the failing 30% of scenarios always fail.",
+      "analogy": "Capacity planning for retries: independent failures make retries cheap, but a poison message that fails every time makes every retry pure cost."
+    },
+    {
+      "id": "contradiction",
+      "short": "Known contradiction in the sources",
+      "term": "Known contradiction in the sources: the August learning guide against the amendment",
+      "plain": "The August design's learning guide (§9b) and its definition of done (§10) predate the amendment that governs the design. Module 4 teaches \"20 scenarios × 20 repetitions = 400 observations\"; the amendment sets at least 24 scenarios and N from the pilot's ρ. Module 5 and §10 present Wilson intervals for reported proportions; the amendment allows Wilson only within one scenario. Module 6 teaches temperature-0 nondeterminism as the headline (August H5); the amendment withdraws it and cites near-deterministic reruns. The amendment says it governs, and its supersession list (§11) replaces §5's Wilson-on-cell-rates and the ~20-scenario count, but does not name §9b's modules 4 and 5 or §10's Wilson item. **This page follows the amendment.**",
+      "analogy": "A runbook that predates an incident-driven change to the design: where the two disagree, the later, approved document is the one to follow, and the stale one is a known trap."
+    }
+  ],
+  "walkthrough": {
+    "title": "One recovery conversation: opaque error, identical retry",
+    "lead": "A prediction (H4), not a result: no model has produced it. It follows the committed code on `weather-forecast-lisbon`, baseline cell, opaque format; each state is what `recovery.converse` would record.",
+    "registers": [
+      {
+        "id": "emit",
+        "label": "Model's latest turn"
+      },
+      {
+        "id": "grade",
+        "label": "Grader, first call"
+      },
+      {
+        "id": "svc",
+        "label": "Mock service reply"
+      },
+      {
+        "id": "retry",
+        "label": "identical_retry"
+      },
+      {
+        "id": "end",
+        "label": "Conversation record"
+      }
+    ],
+    "steps": [
+      {
+        "say": "The user asks for Lisbon's weather over the next three days. The cell shows two tools, terse and loose: `get_forecast` and `get_air_quality`. The scenario has an `invalid_parameter` rule on `location`.",
+        "values": {
+          "emit": "waiting for the first turn",
+          "grade": "not graded yet",
+          "svc": "no call yet",
+          "retry": "undecided",
+          "end": "not injected yet"
+        }
+      },
+      {
+        "say": "The model calls `get_forecast` with location \"Lisbon\" and days 3 (illustrative). Turn 0 is graded as a single-turn answer first: a shown tool, every required key, an acceptable value.",
+        "values": {
+          "emit": "get_forecast(Lisbon, days 3)",
+          "grade": "CORRECT (a bare city is allowed)"
+        },
+        "decision": "grader"
+      },
+      {
+        "say": "The mock service has its own rule: only \"city, country\" is accepted. This call matches no accepted recovery call, so it is rejected and the conversation counts as injected. The failing call's key is kept.",
+        "values": {
+          "svc": "rejected: \"Error: invalid request.\"",
+          "end": "injected: yes"
+        },
+        "decision": "recovery"
+      },
+      {
+        "say": "The harness appends the model's raw output and the error, marked as an error, and asks again. The opaque text names no parameter and says nothing about what to change.",
+        "values": {
+          "emit": "asked again, up to 3 attempts"
+        }
+      },
+      {
+        "say": "H4's bet: the model repeats the call unchanged. The harness compares the normalized call with the failing one and records identical_retry, decided on this first action after the error only.",
+        "values": {
+          "emit": "get_forecast(Lisbon, days 3) again",
+          "svc": "rejected again, same text",
+          "retry": "true: same call as the failing one"
+        },
+        "decision": "recovery"
+      },
+      {
+        "say": "The model stops calling and answers in text. The text discloses a failure, so the code does not count it as a claim of success: the conversation ends as a give-up, not a hallucinated success.",
+        "values": {
+          "emit": "text: failure disclosed",
+          "svc": "no call, no reply",
+          "end": "gave_up: yes; recovered: no"
+        }
+      }
+    ],
+    "takeaway": "Single-turn CORRECT, conversation failed: two separate measures. In the actionable arm the error names `location` and an example; H4 predicts fewer identical retries there. Not observed."
+  },
+  "views": [
+    {
+      "level": "context",
+      "title": "Who and what the experiment touches",
+      "caption": "A deterministic harness, `toolcall/`, with no GPU. It reuses the portfolio's `harness/` loop and stores and imports nothing from another artifact; a test enforces that. The pre-registration is not yet committed, no model API has been called for data, and no result store exists.",
+      "nodes": [
+        {
+          "id": "author",
+          "label": "Author",
+          "sub": "writes scenarios, runs, decides",
+          "kind": "person",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "id": "prior",
+          "label": "Prior art",
+          "sub": "Guo 2026, Noise Floor Audit, BFCL",
+          "kind": "store",
+          "col": 1,
+          "row": 0
+        },
+        {
+          "id": "prereg",
+          "label": "Pre-registration",
+          "sub": "step 1 not yet committed",
+          "kind": "store",
+          "col": 2,
+          "row": 0
+        },
+        {
+          "id": "shared",
+          "label": "Shared harness/",
+          "sub": "campaign loop, stores, statistics",
+          "kind": "external",
+          "col": 0,
+          "row": 1
+        },
+        {
+          "id": "tc",
+          "label": "toolcall harness",
+          "sub": "49 candidates × 8 cells; a rule-based grader",
+          "kind": "focus",
+          "col": 1,
+          "row": 1
+        },
+        {
+          "id": "reader",
+          "label": "Reader",
+          "sub": "agent engineers; their own tools",
+          "kind": "person",
+          "col": 2,
+          "row": 1
+        },
+        {
+          "id": "api",
+          "label": "Model APIs",
+          "sub": "OpenAI, Anthropic; no data calls yet",
+          "kind": "external",
+          "col": 0,
+          "row": 2
+        },
+        {
+          "id": "bfcl",
+          "label": "BFCL seed",
+          "sub": "14 entries, Apache 2.0, pinned commit",
+          "kind": "store",
+          "col": 1,
+          "row": 2
+        },
+        {
+          "id": "stores",
+          "label": "Result stores",
+          "sub": "JSONL records; none yet",
+          "kind": "store",
+          "col": 2,
+          "row": 2
+        }
+      ],
+      "edges": [
+        {
+          "from": "author",
+          "to": "tc",
+          "label": "authors, runs"
+        },
+        {
+          "from": "prior",
+          "to": "tc",
+          "label": "gap it fills"
+        },
+        {
+          "from": "prereg",
+          "to": "tc",
+          "label": "fixes the rules"
+        },
+        {
+          "from": "tc",
+          "to": "reader",
+          "label": "diagnostic on their tools"
+        },
+        {
+          "from": "tc",
+          "to": "api",
+          "label": "paid calls"
+        },
+        {
+          "from": "bfcl",
+          "to": "tc",
+          "label": "seeds 14 scenarios"
+        },
+        {
+          "from": "shared",
+          "to": "tc",
+          "label": "loop, stores, stats"
+        },
+        {
+          "from": "tc",
+          "to": "stores",
+          "label": "writes"
+        }
+      ]
+    },
+    {
+      "level": "container",
+      "title": "The parts of the harness",
+      "caption": "Plain-data scenarios feed a renderer that makes eight request bodies per scenario. The runner schedules the calls behind a spend guard that writes each call's worst case to a ledger before the call. A recovery conversation is a separate multi-turn loop. Everything after the grader is pure functions over stored records.",
+      "nodes": [
+        {
+          "id": "files",
+          "label": "Scenario + tool files",
+          "sub": "49 scenarios, 7 domain libraries",
+          "kind": "store",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "id": "render",
+          "label": "Renderer",
+          "sub": "one scenario into 8 request bodies",
+          "kind": "system",
+          "col": 1,
+          "row": 0
+        },
+        {
+          "id": "runner",
+          "label": "Runner + spend guard",
+          "sub": "schedule; approval; ledger",
+          "kind": "focus",
+          "col": 2,
+          "row": 0
+        },
+        {
+          "id": "clients",
+          "label": "Provider clients",
+          "sub": "OpenAI Responses, Anthropic Messages",
+          "kind": "external",
+          "col": 3,
+          "row": 0
+        },
+        {
+          "id": "ledger",
+          "label": "Spend ledger",
+          "sub": "reserve before, settle after",
+          "kind": "store",
+          "col": 1,
+          "row": 1
+        },
+        {
+          "id": "rec",
+          "label": "Recovery loop",
+          "sub": "mock service, 2 error formats",
+          "kind": "system",
+          "col": 2,
+          "row": 1
+        },
+        {
+          "id": "grader",
+          "label": "Grader",
+          "sub": "normalizer v1; canonical schema",
+          "kind": "system",
+          "col": 3,
+          "row": 1
+        },
+        {
+          "id": "figs",
+          "label": "Figures + numbers",
+          "sub": "four figures; a numbers block",
+          "kind": "system",
+          "col": 1,
+          "row": 2
+        },
+        {
+          "id": "analysis",
+          "label": "Analysis",
+          "sub": "contrasts, bootstrap, H1 to H5, cost",
+          "kind": "system",
+          "col": 2,
+          "row": 2
+        },
+        {
+          "id": "recs",
+          "label": "Call records",
+          "sub": "request, response, grade; JSONL",
+          "kind": "store",
+          "col": 3,
+          "row": 2
+        }
+      ],
+      "edges": [
+        {
+          "from": "files",
+          "to": "render",
+          "label": "tools, scenario"
+        },
+        {
+          "from": "render",
+          "to": "runner",
+          "label": "8 bodies"
+        },
+        {
+          "from": "runner",
+          "to": "clients",
+          "label": "post"
+        },
+        {
+          "from": "runner",
+          "to": "ledger",
+          "label": "reserve, settle"
+        },
+        {
+          "from": "runner",
+          "to": "rec",
+          "label": "recovery cells"
+        },
+        {
+          "from": "clients",
+          "to": "grader",
+          "label": "parsed call"
+        },
+        {
+          "from": "rec",
+          "to": "grader",
+          "label": "first call"
+        },
+        {
+          "from": "grader",
+          "to": "recs",
+          "label": "graded record"
+        },
+        {
+          "from": "recs",
+          "to": "analysis",
+          "label": "per-scenario rates"
+        },
+        {
+          "from": "analysis",
+          "to": "figs",
+          "label": "one JSON file"
+        }
+      ]
+    },
+    {
+      "level": "component",
+      "title": "Inside the grader: the ordered rules",
+      "caption": "One response, one category, the first rule that applies. A provider-side outcome is excluded before any rate. The same normalizer and canonical schema serve every cell, and a tool that was not rendered fails the structure check.",
+      "nodes": [
+        {
+          "id": "prov",
+          "label": "0. Provider side",
+          "sub": "error, refusal, cap hit: excluded, counted",
+          "kind": "external",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "id": "struct",
+          "label": "1. Structure",
+          "sub": "invalid call to a shown tool: MALFORMED",
+          "kind": "focus",
+          "col": 1,
+          "row": 0
+        },
+        {
+          "id": "spur",
+          "label": "2. Call, none expected",
+          "sub": "any valid call: SPURIOUS",
+          "kind": "system",
+          "col": 2,
+          "row": 0
+        },
+        {
+          "id": "miss",
+          "label": "3. No call made",
+          "sub": "answered without it: MISSING",
+          "kind": "system",
+          "col": 3,
+          "row": 0
+        },
+        {
+          "id": "norm",
+          "label": "Normalizer v1",
+          "sub": "rules R1 to R10; canonical schema",
+          "kind": "external",
+          "col": 1,
+          "row": 1
+        },
+        {
+          "id": "args",
+          "label": "5. Arguments",
+          "sub": "match no acceptable call: WRONG_PARAMS",
+          "kind": "system",
+          "col": 2,
+          "row": 1
+        },
+        {
+          "id": "tool",
+          "label": "4. Tool",
+          "sub": "not an acceptable tool: WRONG_TOOL",
+          "kind": "system",
+          "col": 3,
+          "row": 1
+        },
+        {
+          "id": "rec",
+          "label": "Grade record",
+          "sub": "category, detail, flags, rules version",
+          "kind": "store",
+          "col": 1,
+          "row": 2
+        },
+        {
+          "id": "ok",
+          "label": "CORRECT",
+          "sub": "every check passed",
+          "kind": "system",
+          "col": 2,
+          "row": 2
+        }
+      ],
+      "edges": [
+        {
+          "from": "prov",
+          "to": "struct",
+          "label": "not excluded"
+        },
+        {
+          "from": "struct",
+          "to": "spur",
+          "label": "a valid call"
+        },
+        {
+          "from": "spur",
+          "to": "miss",
+          "label": "or no call at all"
+        },
+        {
+          "from": "miss",
+          "to": "tool",
+          "label": "a call was made"
+        },
+        {
+          "from": "tool",
+          "to": "args",
+          "label": "acceptable tool"
+        },
+        {
+          "from": "args",
+          "to": "ok",
+          "label": "values match"
+        },
+        {
+          "from": "ok",
+          "to": "rec",
+          "label": "recorded"
+        },
+        {
+          "from": "norm",
+          "to": "struct",
+          "label": "conformance"
+        },
+        {
+          "from": "norm",
+          "to": "args",
+          "label": "value matching"
+        }
+      ]
+    },
+    {
+      "level": "dynamic",
+      "style": "sequence",
+      "title": "One recovery conversation, opaque error (predicted, not observed)",
+      "caption": "Scenario `weather-forecast-lisbon`, kind `invalid_parameter` on `location`, baseline cell. The ordering is what `recovery.converse` and the mock service do in code; the model's replies are what H4 predicts, not something any model has done. With an actionable message the second call would name the country, and H4 predicts a recovery.",
+      "participants": [
+        {
+          "id": "h",
+          "label": "Harness",
+          "sub": "recovery.converse",
+          "kind": "system"
+        },
+        {
+          "id": "m",
+          "label": "Model",
+          "sub": "baseline cell",
+          "kind": "focus"
+        },
+        {
+          "id": "t",
+          "label": "Mock service",
+          "sub": "invalid_parameter, opaque",
+          "kind": "external"
+        }
+      ],
+      "steps": [
+        {
+          "from": "h",
+          "to": "m",
+          "label": "user message + 2 rendered tools",
+          "text": "Lisbon, next three days"
+        },
+        {
+          "from": "m",
+          "to": "h",
+          "kind": "reply",
+          "label": "get_forecast(\"Lisbon\", days=3)"
+        },
+        {
+          "from": "h",
+          "to": "t",
+          "label": "attempt 0"
+        },
+        {
+          "from": "t",
+          "to": "h",
+          "kind": "fault",
+          "label": "Error: invalid request.",
+          "text": "opaque: names no parameter"
+        },
+        {
+          "from": "h",
+          "kind": "note",
+          "label": "injected = true; failing call key kept"
+        },
+        {
+          "from": "h",
+          "to": "m",
+          "label": "tool result, is_error = true"
+        },
+        {
+          "from": "m",
+          "to": "h",
+          "kind": "reply",
+          "label": "get_forecast(\"Lisbon\", days=3)",
+          "mark": "duplicate",
+          "badge": "identical retry"
+        },
+        {
+          "from": "h",
+          "to": "t",
+          "label": "attempt 1"
+        },
+        {
+          "from": "t",
+          "to": "h",
+          "kind": "fault",
+          "label": "Error: invalid request."
+        },
+        {
+          "from": "h",
+          "to": "m",
+          "label": "tool result, is_error = true"
+        },
+        {
+          "from": "m",
+          "to": "h",
+          "kind": "reply",
+          "label": "text: could not retrieve the forecast"
+        },
+        {
+          "from": "h",
+          "kind": "note",
+          "label": "recovered false; gave_up true",
+          "text": "the text discloses failure"
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "factorial",
+      "short": "Vary presentation, cross the factors",
+      "title": "Vary the presentation, hold the model fixed, cross the factors",
+      "problem": "Benchmarks vary the model and hold the prompt fixed. The question an engineer faces every time a tool is added is how to present the tools. The plausible finding is an interaction: rich descriptions matter little with three tools and a great deal with twenty look-alikes.",
+      "options": [
+        "Rank models on tool calling, as the leaderboards do",
+        "Change one factor at a time",
+        "A 2×2×2 factorial over tool count, description richness and schema strictness, one model carrying it"
+      ],
+      "chosen": "A 2×2×2 factorial over tool count, description richness and schema strictness, one model carrying it",
+      "why": "Changing one factor at a time reports two bland main effects and misses the interaction, which is the plausible finding. Holding the model fixed answers a decision made on every new tool, not once. The amendment also found single factors already studied, and no published work that crosses the factors, uses plausible look-alikes or breaks effects down by failure category (moderate confidence).",
+      "cost": "Eight cells per scenario, and a second and third model only on the best and worst cells. H1 is a replication of Guo et al. under a stricter design, not a first. The novelty claim reaches only as far as that search did.",
+      "why_short": "One factor at a time would miss the interaction; holding the model fixed answers a decision made on every new tool.",
+      "cost_short": "Eight cells per scenario; H1 replicates Guo et al.; the novelty claim is only as wide as a moderate-confidence search.",
+      "serves": [
+        {
+          "req": "R1",
+          "because": "Eight renderings of one scenario differ only in the manipulated factor."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "cells",
+          "because": "The eight cells are this decision in table form."
+        },
+        {
+          "concept": "contrasts",
+          "because": "The interaction between richness and count is the finding the design looks for."
+        }
+      ]
+    },
+    {
+      "id": "content",
+      "short": "Strictness is schema content",
+      "title": "Strictness is schema content; constrained decoding stays off",
+      "problem": "Read literally, the August strict arm would let a provider's strict mode do the work, making the malformed category nearly impossible by construction. That would test the API, not the model.",
+      "options": [
+        "The strict arm is the provider's strict mode, as the August design read it",
+        "The strict arm is the schema the model sees, with decoding unconstrained in all eight cells",
+        "Schema content in all eight cells, plus one exploratory slice with strict mode on"
+      ],
+      "chosen": "Schema content in all eight cells, plus one exploratory slice with strict mode on",
+      "why": "The question is whether the model reads the schema, not whether the decoder enforces it. High strictness renders enums, patterns and a full required list; low strictness renders loose types. The slice answers the practitioner's question, \"if I turn strict mode on, which failures are left?\", and is labelled exploratory in those words.",
+      "cost": "The slice's schemas differ from the factorial's: OpenAI's strict mode rewrites optional parameters into unions with null. The provider guarantees come from documentation the amendment read, not re-checked here. \"Strict\" in this study never means a vendor flag.",
+      "why_short": "The question is whether the model reads the schema, not whether the decoder enforces it; one exploratory slice turns strict mode on.",
+      "cost_short": "The exploratory slice's schemas differ (null unions); the vendors' guarantees are the amendment's reading of their docs.",
+      "serves": [
+        {
+          "req": "R1",
+          "because": "Only the schema content differs between the strictness levels; decoding is the same in every cell."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "canonical",
+          "because": "Strictness as content, with decoding off, is this decision."
+        },
+        {
+          "concept": "cells",
+          "because": "Strictness is the third axis of the eight cells."
+        }
+      ]
+    },
+    {
+      "id": "grader",
+      "short": "Rules, one canonical schema",
+      "title": "Grade by rule, against one canonical schema",
+      "problem": "A grader needs a fixed standard. An LLM judge superimposes its own variance on the model's, and grading against whatever schema was rendered would let the instrument create the failures it measures.",
+      "options": [
+        "An LLM judge",
+        "Ordered rules, checking conformance against the schema the model was shown",
+        "Ordered rules, checking every call against one canonical strict schema per tool"
+      ],
+      "chosen": "Ordered rules, checking every call against one canonical strict schema per tool",
+      "why": "A judge's variance would contaminate the quantity under study, and a harness that answers differently twice is not something anyone builds on. Grading against the rendered schema would give the strict arm more ways to be `MALFORMED`, so strictness would look like it causes the failures it constrains. Structure is checked first, then value, so one wrong value is scored alike in every cell.",
+      "cost": "Only scenarios whose correct calls can be listed in advance qualify, so it measures structurally checkable calls, a subset of agent correctness. A loose cell can be marked wrong for a constraint it never showed, by design. The normalizer silently sets results, so its rules are versioned and a change is breaking. A \"check first\" call is graded `WRONG_TOOL`, because grading is single-turn.",
+      "why_short": "A judge adds variance, and grading against the rendered schema would make strictness appear to cause the failures it constrains.",
+      "cost_short": "Only enumerable, structurally checkable calls; a loose cell can be marked wrong for an unseen constraint, by design.",
+      "serves": [
+        {
+          "req": "R2",
+          "because": "Rules and one canonical schema give the same answer twice and score a value alike in every cell."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "taxonomy",
+          "because": "The ordered rules are the taxonomy, each category a property of the emitted call."
+        },
+        {
+          "concept": "canonical",
+          "because": "The canonical schema is the standard."
+        }
+      ]
+    },
+    {
+      "id": "unit",
+      "short": "Scenario is the unit; S and N together",
+      "title": "The scenario is the unit; scenarios and repetitions are sized together",
+      "problem": "Reruns of a scenario are correlated, so the count of calls overstates the information. The August design had scenarios shrink before repetitions and used Wilson intervals on proportions, both resting on rerun variance being the headline.",
+      "options": [
+        "About 20 scenarios with many repetitions, scenarios shrinking first, Wilson intervals on cell proportions (August)",
+        "N from the pilot's ρ at 95% of the S/ρ limit with a floor of 5, at least 24 scenarios, a bootstrap over scenarios, Wilson only within one scenario (amendment)"
+      ],
+      "chosen": "N from the pilot's ρ at 95% of the S/ρ limit with a floor of 5, at least 24 scenarios, a bootstrap over scenarios, Wilson only within one scenario (amendment)",
+      "why": "With near-deterministic reruns an extra repetition adds almost nothing to a cell rate's interval; the information is in the scenarios. A Wilson interval over all S·N calls treats them as independent, the error the clustering exists to prevent. If the budget binds, N drops to its floor before S drops.",
+      "cost": "Authoring time, not money, limits S. With 10 pilot repetitions and the band, the realised ρ is at most about 0.61, so N is at least 13. The premise (near-deterministic reruns) is the Noise Floor Audit's, read by the amendment on abstracts and not checked here.",
+      "why_short": "With near-deterministic reruns the information is in the scenarios, and Wilson over all calls treats them as independent.",
+      "cost_short": "Authoring time limits S; the band caps ρ near 0.61 so N is 13 or more; the near-deterministic premise is a cited abstract.",
+      "serves": [
+        {
+          "req": "R3",
+          "because": "Rates average per scenario, intervals resample scenarios, and N comes from the measured ρ."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "cluster",
+          "because": "The effective-size argument is this decision."
+        },
+        {
+          "concept": "costsuccess",
+          "because": "The same argument applies to money: a retry walk over recorded reruns, not the independent formula."
+        },
+        {
+          "concept": "contradiction",
+          "because": "This decision reverses what the August guide teaches in modules 4 and 5."
+        }
+      ]
+    },
+    {
+      "id": "recovery",
+      "short": "Recovery, floor rule, 20+ scenarios",
+      "title": "Keep the recovery sub-design, with a floor rule and at least 20 scenarios",
+      "problem": "Whether an actionable error stops the model repeating a failing call is a clean mechanism-level prediction. But prior work reports that identical repeats are rare, so H4 may have nothing to measure, and the bootstrap needs enough scenarios to give a verdict.",
+      "options": [
+        "H4 unconditional, as the August design had it",
+        "H4 with a pre-registered floor: if the opaque arm's identical-retry rate is under 5%, report it as not testable",
+        "Eight recovery scenarios, the amendment's first plan"
+      ],
+      "chosen": "H4 with a pre-registered floor: if the opaque arm's identical-retry rate is under 5%, report it as not testable; and at least 20 recovery scenarios",
+      "why": "The floor keeps a floor effect from reading as support or as refutation; Gumaan and Kraishan are the reason it exists. Eight scenarios could never yield a verdict, because the harness refuses a bootstrap over fewer than 20. Recovery scenarios are call scenarios with a recovery block added, so the extra authoring is small.",
+      "cost": "The estimate for recovery rose from about $5.43 to at most about $14. H4 may end as not testable. `hallucinated_success` is a regex proxy with known misses. A wrong first call can never recover under a transient error, so recovery is also reported given a correct first call.",
+      "why_short": "The floor keeps a floor effect from reading as evidence, and fewer than 20 scenarios could never give a bootstrap verdict.",
+      "cost_short": "Recovery's estimate rose to at most about $14; H4 may be not testable; hallucinated_success is a regex proxy with known misses.",
+      "serves": [
+        {
+          "req": "R4",
+          "because": "The conversation, the two message formats and the floor rule are the measurement."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "recovery",
+          "because": "The mock service and the identical retry are this decision."
+        }
+      ]
+    },
+    {
+      "id": "rules",
+      "short": "Two dated pre-registration steps",
+      "title": "Pre-register in two dated steps, behind a spend guard",
+      "problem": "N depends on what the pilot measures, so not everything can be committed before the pilot. But every rule that does not depend on the pilot should be written down before it, and a paid run needs a hard rule.",
+      "options": [
+        "One step: everything committed before the pilot, as the August design said",
+        "Two dated steps: rules before the pilot; the scenario count, repetitions, included list and approved spend after it and before any campaign call"
+      ],
+      "chosen": "Two dated steps: rules before the pilot; the scenario count, repetitions, included list and approved spend after it and before any campaign call",
+      "why": "The pilot is itself a paid run and N depends on it; artifact 4 did the same. Post-hoc changes are numbered, dated amendments, never edits. The values are to be held as code, with a test that fails if the document and the code disagree (the record exists; the values file comes with step 1). The spend guard refuses to start without an approved amount that covers the estimate plus headroom, and reserves each call's worst case in a ledger before the call.",
+      "cost": "Step 1 is not yet committed: until it is, the hypotheses exist only in the approved amendment and are not frozen. Plan 1's review changed four statistical details before any registration was committed (amendment §14 items 8 to 11). The guard's per-call bound is conservative, so metered spend over-counts failures; billed against metered spend is reconciled before publication.",
+      "why_short": "N depends on the pilot, so rules go in before it and S, N and spend after it; a ledger guard makes the spend rule mechanical.",
+      "cost_short": "Step 1 is not yet committed, so H1 to H5 are not frozen; plan 1's review changed four statistical details before registration.",
+      "serves": [
+        {
+          "req": "R5",
+          "because": "Each step is committed before the data it governs, and the guard refuses a paid phase without a covering approval."
+        }
+      ],
+      "uses": [
+        {
+          "concept": "band",
+          "because": "The selection rule is a step-1 value; its survival rate is what the pilot measures."
+        }
+      ]
+    }
+  ],
+  "flow": [
+    {
+      "phase": "Design",
+      "label": "August design: factorial, six categories, no LLM judge",
+      "detail": "The question set as the engineer's own variable, how tools are presented, with the model held fixed; five hypotheses; a learning guide (§9b) added two days later.",
+      "output": "an approved design spec with H1 to H5 and a §9b learning guide",
+      "milestone": true,
+      "when": "2026-08-17 to 08-19 (−07:00)",
+      "evidence": [
+        {
+          "commit": "33c16c1",
+          "note": "design spec"
+        },
+        {
+          "commit": "a5d1a49",
+          "note": "learning guide §9b added"
+        }
+      ],
+      "decision": "factorial"
+    },
+    {
+      "phase": "Design",
+      "label": "Amendment: re-check against prior art and the house process",
+      "detail": "Two of three headline claims had prior art, current Claude models refuse a temperature parameter, and strict modes make one category impossible by construction. Twelve decisions signed off in chat the same day; three plans written.",
+      "output": "an approved amendment that governs where it conflicts, and three plans",
+      "milestone": true,
+      "when": "2026-10-08 17:27 (−07:00)",
+      "evidence": [
+        {
+          "commit": "7849925",
+          "note": "amendment approved"
+        },
+        {
+          "commit": "01bfd12",
+          "note": "the three plans"
+        }
+      ],
+      "decision": "content"
+    },
+    {
+      "phase": "Build offline",
+      "label": "Package, data model, eight renderings",
+      "detail": "Tools, normalizer v1 and scenarios as validated plain data; a renderer tested to change only the manipulated factor; tests that the package imports no other artifact.",
+      "output": "toolcall/: tools, scenarios, normalizer v1, 8 renderings",
+      "when": "2026-10-09 (−07:00)",
+      "evidence": [
+        {
+          "commit": "3b380c8",
+          "note": "package and boundary tests"
+        },
+        {
+          "commit": "3f00794",
+          "note": "tools, normalizer, scenarios"
+        },
+        {
+          "commit": "d85826e",
+          "note": "the eight cells"
+        }
+      ],
+      "decision": "content"
+    },
+    {
+      "phase": "Build offline",
+      "label": "The grader, with hand-labelled cases",
+      "detail": "The ordered procedure, canonical-schema conformance, and a hand-labelled case for every category and every precedence boundary. Review then fixed pathological arguments and provider error states.",
+      "output": "grader.py and 21 hand-labelled cases, all passing offline",
+      "milestone": true,
+      "when": "2026-10-09 16:12 (−07:00)",
+      "evidence": [
+        {
+          "commit": "b77b366",
+          "note": "grader, hand-labelled cases"
+        },
+        {
+          "commit": "ce9b618",
+          "note": "provider errors are API_ERROR"
+        },
+        {
+          "commit": "4844e16",
+          "note": "pathological arguments; rule R10"
+        }
+      ],
+      "decision": "grader"
+    },
+    {
+      "phase": "Build offline",
+      "label": "Spend guard, mock service, recovery loop, stub",
+      "detail": "Pinned prices, a guard that reserves each call's worst case before the call, mock replies in two formats, call and recovery records, every paid phase behind one runner, and a stub model with planted effects so the analysis can be tested for recovering what was put in.",
+      "output": "recovery.converse, a spend ledger, a stub marked NOT DATA",
+      "when": "2026-10-09 (−07:00)",
+      "evidence": [
+        {
+          "commit": "261f61d",
+          "note": "prices, guard, mock tools, recovery"
+        },
+        {
+          "commit": "7284b53",
+          "note": "records, campaign, stub"
+        },
+        {
+          "commit": "cc5c731",
+          "note": "one runner for every paid phase"
+        }
+      ],
+      "decision": "recovery"
+    },
+    {
+      "phase": "Build offline",
+      "label": "Statistics: contrasts, bootstrap, cost, H1 to H5",
+      "detail": "Wilson intervals, 2³ contrasts, a bootstrap over scenarios, Holm; cost per success from recorded order, the ICC and the rule for N; the five tests. Review changed four statistical details before anything was registered.",
+      "output": "effects, costs, budget, hypotheses; amendment §14 items 8 to 11",
+      "milestone": true,
+      "when": "2026-10-09 (−07:00)",
+      "evidence": [
+        {
+          "commit": "1193733",
+          "note": "Wilson, contrasts, bootstrap, Holm"
+        },
+        {
+          "commit": "a2f177a",
+          "note": "cost per success, ICC, N rule"
+        },
+        {
+          "commit": "7e1d95a",
+          "note": "H1 to H5 and the analysis"
+        },
+        {
+          "commit": "dd49557",
+          "note": "amendment §14 items 8 to 11"
+        }
+      ],
+      "decision": "unit"
+    },
+    {
+      "phase": "Build offline",
+      "label": "The scenario suite and the BFCL seed",
+      "detail": "Domain libraries and scenarios authored in batches, each reviewed by the author; 14 BFCL entries at a pinned commit under Apache 2.0; six recovery blocks added so H4 keeps 20 scenarios after the band.",
+      "output": "49 candidates (35 authored, 14 BFCL); 38 with recovery, 31 persistent",
+      "when": "2026-10-09 to 10-10 (−07:00)",
+      "evidence": [
+        {
+          "commit": "8f997f3",
+          "note": "BFCL provenance; §14 item 1 signed off"
+        },
+        {
+          "commit": "0e8632d",
+          "note": "first worked domains and data tests"
+        },
+        {
+          "commit": "3816801",
+          "note": "six persistent recovery blocks"
+        }
+      ],
+      "decision": "recovery"
+    },
+    {
+      "phase": "Build offline",
+      "label": "Merge: the offline core on main",
+      "detail": "Plan 1 ran task by task with a spec review and a code-quality review each; the deviations log records every approved change. Plan 1 spends nothing. No campaign data and no spend record are committed.",
+      "output": "main holds toolcall/, the suite and the three plans; no results",
+      "milestone": true,
+      "when": "2026-10-10 14:27 (−07:00)",
+      "evidence": [
+        {
+          "commit": "88d11a2",
+          "note": "merge of artifact-3-plan-1"
+        },
+        {
+          "commit": "1151a9b",
+          "note": "deviations log"
+        }
+      ]
+    },
+    {
+      "phase": "Pilot (pending)",
+      "label": "Smoke check: one call per pinned model",
+      "detail": "Confirm each pinned snapshot accepts the registered settings (temperature 0 with reasoning off, for the primary) and record what the provider actually answers. Needs the author's explicit yes with a call count and cost.",
+      "output": "not yet: a recorded real answer per provider",
+      "when": "pending"
+    },
+    {
+      "phase": "Pilot (pending)",
+      "label": "Pre-registration step 1, then the pilot",
+      "detail": "Step 1 fixes H1 to H5 with their estimands, the band, the baseline cell, floors, models, seed and the floor rule. The pilot runs every candidate 10 times at the baseline cell, and 10 candidates in all eight cells 5 times. Pilot data is never campaign data.",
+      "output": "not yet: docs/experiment-a3.md step 1; a pilot store",
+      "when": "pending",
+      "decision": "rules"
+    },
+    {
+      "phase": "Campaign (pending)",
+      "label": "Step 2, then the campaign",
+      "detail": "Step 2 fixes the included scenarios, S, N, the measured cost per call and the approved spend before any campaign call. Then the factorial, recovery, the cross-model slices and the exploratory strict-mode slice, each behind a stated yes.",
+      "output": "not yet: the step-2 commit and the campaign stores",
+      "when": "pending"
+    },
+    {
+      "phase": "Campaign (pending)",
+      "label": "Analysis, figures and post",
+      "detail": "One analysis file; four figures and the post's numbers generated from it; the post publishes after the posts of artifacts 2 and 4.",
+      "output": "not yet: analysis.json, four figures, the post",
+      "when": "pending"
+    }
+  ],
+  "results": [
+    {
+      "title": "What the suite is made of (an instrument fact, not a result)",
+      "short": "49 candidates, every mode targeted",
+      "chart": {
+        "type": "stacked_bars",
+        "unit": "scenarios",
+        "show_totals": true,
+        "bars": [
+          {
+            "label": "calendar",
+            "segments": [
+              {
+                "name": "MALFORMED",
+                "value": 1
+              },
+              {
+                "name": "SPURIOUS",
+                "value": 1
+              },
+              {
+                "name": "MISSING",
+                "value": 1
+              },
+              {
+                "name": "WRONG_TOOL",
+                "value": 2
+              },
+              {
+                "name": "WRONG_PARAMS",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "label": "files",
+            "segments": [
+              {
+                "name": "MALFORMED",
+                "value": 2
+              },
+              {
+                "name": "SPURIOUS",
+                "value": 1
+              },
+              {
+                "name": "MISSING",
+                "value": 1
+              },
+              {
+                "name": "WRONG_TOOL",
+                "value": 1
+              },
+              {
+                "name": "WRONG_PARAMS",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "label": "library",
+            "segments": [
+              {
+                "name": "MALFORMED",
+                "value": 2
+              },
+              {
+                "name": "SPURIOUS",
+                "value": 1
+              },
+              {
+                "name": "MISSING",
+                "value": 1
+              },
+              {
+                "name": "WRONG_TOOL",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "label": "retail_orders",
+            "segments": [
+              {
+                "name": "MALFORMED",
+                "value": 2
+              },
+              {
+                "name": "SPURIOUS",
+                "value": 1
+              },
+              {
+                "name": "MISSING",
+                "value": 1
+              },
+              {
+                "name": "WRONG_TOOL",
+                "value": 2
+              },
+              {
+                "name": "WRONG_PARAMS",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "label": "travel",
+            "segments": [
+              {
+                "name": "MALFORMED",
+                "value": 1
+              },
+              {
+                "name": "SPURIOUS",
+                "value": 1
+              },
+              {
+                "name": "MISSING",
+                "value": 1
+              },
+              {
+                "name": "WRONG_TOOL",
+                "value": 1
+              },
+              {
+                "name": "WRONG_PARAMS",
+                "value": 3
+              }
+            ]
+          },
+          {
+            "label": "units",
+            "segments": [
+              {
+                "name": "MISSING",
+                "value": 4
+              },
+              {
+                "name": "WRONG_PARAMS",
+                "value": 3
+              }
+            ]
+          },
+          {
+            "label": "weather",
+            "segments": [
+              {
+                "name": "MALFORMED",
+                "value": 1
+              },
+              {
+                "name": "SPURIOUS",
+                "value": 1
+              },
+              {
+                "name": "MISSING",
+                "value": 2
+              },
+              {
+                "name": "WRONG_TOOL",
+                "value": 3
+              },
+              {
+                "name": "WRONG_PARAMS",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      },
+      "axis": "Candidate scenarios per domain, split by the failure mode each was written to provoke (its `target_failure_mode`). Read from the committed data files.",
+      "read_as": "Every failure mode is targeted, and `units` has no tool-choice or no-call scenario. 14 of the 49 start from BFCL entries, all from its simple Python category, so all six no-call scenarios are authored. 38 carry a recovery block, 31 of them with persistent error kinds.",
+      "so": [
+        "grader",
+        "recovery"
+      ],
+      "takeaway": "49 candidates with every failure mode targeted: the make-up of the instrument, not a finding.",
+      "arithmetic": "Counts of toolcall/data/scenarios/*.json by domain and target_failure_mode: 49 = 35 authored + 14 BFCL (BFCL-SOURCE.md); 38 recovery, 31 persistent (deviations log)."
+    },
+    {
+      "title": "The grader on hand-labelled boundary cases (a control, not a result)",
+      "short": "Grader controls: boundaries hold",
+      "chart": {
+        "type": "matrix",
+        "unit": "hand-labelled cases",
+        "rows": [
+          {
+            "label": "Hallucinated tool",
+            "sub": "name not in context"
+          },
+          {
+            "label": "Required key missing",
+            "sub": "a call, one key omitted"
+          },
+          {
+            "label": "Wrong JSON type",
+            "sub": "\"2\" for an integer"
+          },
+          {
+            "label": "Enum outside the set",
+            "sub": "a value error"
+          },
+          {
+            "label": "Pattern miss",
+            "sub": "a value error"
+          },
+          {
+            "label": "Call, none expected",
+            "sub": "a well-formed call"
+          },
+          {
+            "label": "Right-looking args",
+            "sub": "a different, shown tool"
+          },
+          {
+            "label": "Call written in text",
+            "sub": "no call block"
+          }
+        ],
+        "cols": [
+          {
+            "label": "Response"
+          },
+          {
+            "label": "Graded as"
+          },
+          {
+            "label": "Why"
+          }
+        ],
+        "cells": [
+          [
+            {
+              "text": "search_flights_v2 (not shown)",
+              "status": "none"
+            },
+            {
+              "text": "MALFORMED",
+              "status": "observed",
+              "tone": "ok"
+            },
+            {
+              "text": "a tool not shown is structural",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "destination left out",
+              "status": "none"
+            },
+            {
+              "text": "MALFORMED",
+              "status": "observed",
+              "tone": "ok"
+            },
+            {
+              "text": "structure before value",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "passengers: \"2\"",
+              "status": "none"
+            },
+            {
+              "text": "MALFORMED",
+              "status": "observed",
+              "tone": "ok"
+            },
+            {
+              "text": "R4: a number as a string",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "cabin: \"first\"",
+              "status": "none"
+            },
+            {
+              "text": "WRONG_PARAMS",
+              "status": "observed",
+              "tone": "ok"
+            },
+            {
+              "text": "value, not structure",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "origin: \"New York\"",
+              "status": "none"
+            },
+            {
+              "text": "WRONG_PARAMS",
+              "status": "observed",
+              "tone": "ok"
+            },
+            {
+              "text": "value, not structure",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "search_flights on small talk",
+              "status": "none"
+            },
+            {
+              "text": "SPURIOUS",
+              "status": "observed",
+              "tone": "ok"
+            },
+            {
+              "text": "any valid call",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "search_trains, same args",
+              "status": "none"
+            },
+            {
+              "text": "WRONG_TOOL",
+              "status": "observed",
+              "tone": "ok"
+            },
+            {
+              "text": "tool before params",
+              "status": "none"
+            }
+          ],
+          [
+            {
+              "text": "search_flights(...) as text",
+              "status": "none"
+            },
+            {
+              "text": "MISSING",
+              "status": "observed",
+              "tone": "ok"
+            },
+            {
+              "text": "text is not a call",
+              "status": "none"
+            }
+          ]
+        ],
+        "legend": [
+          {
+            "status": "none",
+            "label": "the case as written"
+          },
+          {
+            "status": "observed",
+            "label": "observed in the offline tests"
+          },
+          {
+            "tone": "ok",
+            "label": "test passes"
+          }
+        ],
+        "note": "From `tests/test_toolcall_grader.py`, a synthetic flight suite. The grader's tests ran offline for this page: 1104 toolcall tests passed, no model called. A control of the grader, not a statement about any model."
+      },
+      "axis": "One row per precedence boundary the test file labels by hand; the first rule that applies wins.",
+      "read_as": "Each boundary resolves the way the ordered procedure says: structure beats value, a wrong tool beats wrong params, and provider outcomes come first. This shows the instrument can place a response; it says nothing about how often any model errs.",
+      "so": [
+        "grader"
+      ],
+      "takeaway": "The grader places a response where its rules say, boundary by boundary. A control of the instrument, not a result.",
+      "arithmetic": "tests/test_toolcall_grader.py: 21 labelled cases covering all six categories and two exclusions; `pytest -k toolcall` 2026-10-19: 1104 passed, 3452 deselected."
+    },
+    {
+      "title": "Hypotheses H1 to H5 as the approved amendment words them (not yet frozen; results pending)",
+      "short": "Five bets, none yet frozen or tested",
+      "chart": {
+        "type": "matrix",
+        "unit": "hypothesis",
+        "rows": [
+          {
+            "label": "H1 richness × count",
+            "sub": "interaction on failure rate"
+          },
+          {
+            "label": "H2 strictness",
+            "sub": "MALFORMED+WRONG_PARAMS"
+          },
+          {
+            "label": "H3 count → WRONG_TOOL",
+            "sub": "main effect, 3-part test"
+          },
+          {
+            "label": "H4 error format",
+            "sub": "opaque − actionable"
+          },
+          {
+            "label": "H5 count vs reruns",
+            "sub": "|count| − |A/A contrast|"
+          }
+        ],
+        "cols": [
+          {
+            "label": "Predicted"
+          },
+          {
+            "label": "Not supported if"
+          },
+          {
+            "label": "Result"
+          }
+        ],
+        "cells": [
+          [
+            {
+              "text": "negative: rich helps more at 20",
+              "status": "predicted",
+              "tone": "ok",
+              "note": "replication of Guo et al.; failure = share not CORRECT"
+            },
+            {
+              "text": "Holm does not reject it",
+              "status": "none"
+            },
+            {
+              "text": "pending",
+              "status": "pending"
+            }
+          ],
+          [
+            {
+              "text": "negative; WRONG_TOOL within ±δ₂",
+              "status": "predicted",
+              "tone": "ok",
+              "note": "equivalence: 90% interval inside ±δ₂, proposed 2 pp"
+            },
+            {
+              "text": "either part fails",
+              "status": "none"
+            },
+            {
+              "text": "pending",
+              "status": "pending"
+            }
+          ],
+          [
+            {
+              "text": "positive, above the others",
+              "status": "predicted",
+              "tone": "bad",
+              "note": "larger than |richness| and |strictness| on WRONG_TOOL"
+            },
+            {
+              "text": "any of 3 one-sided p too big",
+              "status": "none"
+            },
+            {
+              "text": "pending",
+              "status": "pending"
+            }
+          ],
+          [
+            {
+              "text": "positive: more identical retries",
+              "status": "predicted",
+              "tone": "warn",
+              "note": "persistent kinds, injected, paired in cells; floor: opaque under 5%"
+            },
+            {
+              "text": "Holm does not reject; or not testable",
+              "status": "none"
+            },
+            {
+              "text": "pending",
+              "status": "pending"
+            }
+          ],
+          [
+            {
+              "text": "positive, and count effect ≠ 0",
+              "status": "predicted",
+              "tone": "neutral",
+              "note": "A/A: odd against even repetitions of identical cells"
+            },
+            {
+              "text": "either part's p too big",
+              "status": "none"
+            },
+            {
+              "text": "pending",
+              "status": "pending"
+            }
+          ]
+        ],
+        "legend": [
+          {
+            "status": "none",
+            "label": "as worded in the amendment"
+          },
+          {
+            "status": "predicted",
+            "label": "prediction"
+          },
+          {
+            "status": "pending",
+            "label": "results pending"
+          },
+          {
+            "tone": "ok",
+            "label": "fewer failures expected"
+          },
+          {
+            "tone": "bad",
+            "label": "more failures expected"
+          },
+          {
+            "tone": "warn",
+            "label": "may not be testable"
+          }
+        ],
+        "note": "Wording from amendment §2, tests from §4f and §14 item 8. Frozen only when pre-registration step 1 is committed; it is not. One-sided cluster-bootstrap p-values, 10,000 draws, Holm at 0.05."
+      },
+      "axis": "One row per hypothesis. Tone is what the prediction expects; no model has been run.",
+      "read_as": "H1 bets that rich descriptions help more at 20 tools than at 3. H2 bets that strictness moves malformed and wrong-value calls and leaves tool choice within a small margin. H3 bets that count drives wrong-tool calls most. H4 bets that an opaque error gets more identical retries, if the floor lets it be tested. H5 bets that count moves results more than rerun noise does.",
+      "so": [
+        "factorial",
+        "recovery",
+        "rules"
+      ],
+      "takeaway": "Five bets on which failure moves, each with its losing condition written down. None is frozen in git yet, and none has an outcome.",
+      "arithmetic": "Holm over the five at 0.05: thresholds 0.01, 0.0125, 0.0167, 0.025, 0.05 (0.05 / 5, / 4, / 3, / 2, / 1); over four if H4 is not testable."
+    },
+    {
+      "title": "Same 80 failures in 400 calls, two splits across scenarios (constructed, not data)",
+      "short": "Same calls, a 4-times wider interval",
+      "chart": {
+        "type": "interval",
+        "unit": "% of calls failing",
+        "zero_label": "no failures",
+        "rows": [
+          {
+            "label": "Wilson over all 400 calls (both datasets)",
+            "estimate": 20,
+            "low": 16.4,
+            "high": 24.2
+          },
+          {
+            "label": "Scenario bootstrap: failures spread",
+            "estimate": 20,
+            "low": 16,
+            "high": 24
+          },
+          {
+            "label": "Scenario bootstrap: failures concentrated",
+            "estimate": 20,
+            "low": 5,
+            "high": 40
+          }
+        ]
+      },
+      "axis": "Constructed to show the arithmetic: 20 scenarios × 20 repetitions, 80 failures in both datasets. Spread: 0 to 7 failures per scenario. Concentrated: four scenarios fail every repetition and sixteen never fail. 95% intervals.",
+      "read_as": "The pooled rate is 20% in both and the Wilson interval on 400 calls is identical, because it sees only 80 and 400. Resampling scenarios leaves the spread dataset near ±4 points and widens the concentrated one to 5 to 40: its effective size is about 20 scenarios, not about 400 calls.",
+      "so": [
+        "unit"
+      ],
+      "takeaway": "Counting calls would call the two datasets equally certain; counting scenarios tells them apart.",
+      "arithmetic": "Computed offline with toolcall.effects: wilson(80, 400) = 0.164 to 0.242; cluster_bootstrap, 10,000 draws, seed 1: 0.16 to 0.24 and 0.05 to 0.40. Constructed counts, not data."
+    }
+  ],
+  "interview": {
+    "pitch30": "I'm testing whether the way you present tools to an LLM changes which failures you get, holding the model fixed: two to four tools or twenty with look-alikes, terse or rich descriptions, loose or strict schemas. A rule-based grader, not an LLM judge, puts every response into one of six categories, and the intervals resample scenarios rather than calls, because a scenario that confuses the model does so on every rerun. The harness, a 49-scenario suite and the grader's tests are built and merged; the predictions are in an approved design but not yet frozen in a pre-registration, and no campaign has run, so I can give you the design and the bets, not results.",
+    "pitch120": "Tool-calling benchmarks rank models with the prompt held fixed. I asked the question an engineer faces every time they add a tool: holding the model fixed, does how I present my tools change which failures I get? Each scenario is a plain data file: a user message, the two to four tools it needs, four to six look-alike tools written for it, and the exact calls that count as correct. A renderer produces eight versions: few tools or twenty, terse or rich descriptions, loose or strict schemas. It is a factorial because the plausible finding is an interaction: rich descriptions should matter more with twenty look-alikes than with three tools. The grader puts each response into one of six categories by ordered rules, always against one canonical strict schema, so a loose schema's cost shows up instead of being forgiven. Provider strict mode stays off in all eight cells, because constrained decoding would make malformed calls nearly impossible by construction and I would be testing the decoder. The statistics follow from one idea: reruns of a confusing scenario are correlated, so I average per scenario, bootstrap over scenarios, and size the repetitions from the pilot's correlation. I also convert everything to cost per successful call, walking the recorded reruns rather than using the textbook retry formula. What exists is the offline core, a 49-scenario suite, and tests against a stub; what does not is any model result. The five hypotheses are worded in an approved design and get frozen in a committed pre-registration before the pilot runs.",
+    "followups": [
+      {
+        "q": "Tool-calling benchmarks already exist. What is new here?",
+        "a": "They vary the model and hold the prompt fixed; this holds the model fixed and varies the presentation. The literature has since covered single factors and rerun noise: the amendment names Guo et al. as the closest work to H1, so H1 is framed as a replication under a stricter design, and the Noise Floor Audit as the closest to H5, pointing the other way. What the search found no one publishing, at moderate confidence, is a balanced factorial with plausible look-alikes, broken down by failure category and converted to cost per successful call. I claim that only as far as that search went, and none of it has produced a result yet."
+      },
+      {
+        "q": "400 calls in a cell: why is the interval not based on 400?",
+        "a": "Reruns of one scenario are correlated, so the effective size is S·N / (1 + (N − 1)ρ), between S and S·N. Take two constructed datasets with the same 80 failures in 400 calls. If the failures are spread over the scenarios the interval is near ±4 points; if four scenarios fail every time and sixteen never do, resampling scenarios gives 5 to 40, while a Wilson interval on 400 calls gives the same narrow answer for both. So I resample whole scenarios and use Wilson only within one scenario."
+      },
+      {
+        "q": "You grade a loose-schema call against a schema the model never saw. Isn't that unfair?",
+        "a": "It is the measurement: what a loose schema costs is exactly the constraints the model was not told. Grading against the rendered schema would give the strict arm more ways to fail, so strictness would look like it causes the failures it constrains, a confound the instrument would create. The README says so, and rich descriptions can state a constraint in words, which is part of the richness-by-strictness interaction."
+      },
+      {
+        "q": "Provider strict mode is on and the malformed rate is zero. What have you learned about the model?",
+        "a": "Almost nothing about its structural ability, because constrained decoding guarantees a conforming call except on a refusal, a truncation or enum capitalisation (the vendors' claim as the amendment read it, not re-checked here). What remains informative is the wrong tool, value-level wrong parameters, missing calls and spurious calls. That is why strict mode is off in the eight cells and run as one labelled exploratory slice."
+      },
+      {
+        "q": "The amendment expects near-deterministic reruns, yet your band wants scenarios with a 10 to 90% baseline pass rate. How can both hold?",
+        "a": "The sources do not resolve it; this is a reading, not a finding. A rate strictly between 0 and 1 over 10 reruns means those reruns disagreed, so the band selects for flipping. The amendment lists few survivors as a risk and answers it by authoring more candidates before step 2, and does not widen the band after the pilot. If reruns barely flip, authoring more may not help, and I would say so. The pilot's survival rate is the measurement, so this is pending. The deviations log notes one consequence already: the band caps the realised ρ near 0.61, so N is at least 13."
+      },
+      {
+        "q": "Why not cost a retry policy as c / (1 − f)?",
+        "a": "That formula assumes each retry is an independent draw. With near-deterministic reruns a scenario that fails tends to fail again, so it understates what retries cost; in a worked example with f = 0.3 and a cap of 3, 1.43 calls per success becomes 2.29 if the failing 30% of scenarios always fail. The study walks each scenario's recorded reruns in order. It is the scenario-as-unit argument expressed in money."
+      }
+    ],
+    "limits": "No results exist: no hypothesis has an outcome and no cost per successful call has been measured. The hypotheses are worded in the approved amendment and are frozen only when pre-registration step 1 is committed; it has not been, and no pilot or campaign records are committed. When results exist they will hold for the pinned model snapshots on their run dates, each at the provider's most deterministic available setting (which may be the provider default, recorded as a deviation), for structurally checkable single-call scenarios in seven public or synthetic domains, one call per turn, and a suite chosen by a baseline band. A \"check first\" call is graded `WRONG_TOOL` because grading is single-turn; `hallucinated_success` is a regex proxy with known misses; the high-count filler is partly cross-domain. The prior-work table is cited from abstracts the amendment's author read and is not re-read here. The sources contradict each other in one place (the August learning guide against the amendment) and this page follows the amendment. A later revision of the pilot plan is uncommitted and is not used here."
+  },
+  "recall": [
+    {
+      "q": "A model emits `get_current_weather` in a cell that shows only `get_forecast` and `get_air_quality`. Which category? And if the cell shows 20 tools including it?",
+      "a": "`MALFORMED`: a tool that was not shown is structural. In the 20-tool cell the same call is `WRONG_TOOL` (a confusable). The category depends on what was rendered, by design."
+    },
+    {
+      "q": "The user only says thanks, so no call is expected, and the model calls a shown tool with a required argument missing. Category?",
+      "a": "`MALFORMED`. Structure is checked before `SPURIOUS`, so the ordered rules decide it, not the intent."
+    },
+    {
+      "q": "Why is a loose-cell call graded against the strict schema?",
+      "a": "That is the measurement of what a loose schema costs. Grading against the rendered schema would give the strict arm more ways to fail and make strictness look harmful, a confound the instrument would create."
+    },
+    {
+      "q": "Which three outcomes are excluded before any rate is computed?",
+      "a": "`API_ERROR`, `REFUSED` and `TRUNCATED`. Each is counted per cell, and a cell where they together exceed 2% of its calls is flagged."
+    },
+    {
+      "q": "Why is provider strict mode off in all eight cells?",
+      "a": "It would make `MALFORMED` nearly impossible by construction and test the decoder, not the model. One labelled exploratory slice turns it on."
+    },
+    {
+      "q": "What is the effective sample size, and what does it approach?",
+      "a": "S·N / (1 + (N − 1)ρ), approaching S/ρ as N grows. At high ρ another repetition buys almost nothing, so the information is in the scenarios."
+    },
+    {
+      "q": "At ρ = 0.9 and 30 scenarios, what does going from 5 to 40 repetitions buy?",
+      "a": "Almost nothing: effective size rises from 32.6 to 33.2 (the amendment's example). Spend on scenarios, not reruns. The band caps the pilot's ρ near 0.61, so the rule for N lands at 13 or more."
+    },
+    {
+      "q": "Where are Wilson intervals used in this design?",
+      "a": "Only within one scenario, where the repetitions are the unit. Cell rates and effects use a bootstrap that resamples whole scenarios."
+    },
+    {
+      "q": "How is an interaction computed here, and what should you say about the convention?",
+      "a": "One factor's effect at the other's high level minus its effect at the low level, on the percentage-point scale. Say that it is the difference and not halved, and that the scale was fixed before the data."
+    },
+    {
+      "q": "Why does H4 count only the persistent error kinds?",
+      "a": "After a rejection an identical retry is a loop, but after a timeout it is the right move if the call is idempotent. Counting both would blur the pathology H4 tests."
+    },
+    {
+      "q": "What is H4's floor rule?",
+      "a": "If the opaque arm's identical-retry rate has a point estimate under 5%, H4 is reported as not testable at this rate. It counts neither as support nor as refutation, and Holm runs over the other four."
+    },
+    {
+      "q": "A conversation ends with the model stopping and saying it could not retrieve the forecast. How is it recorded?",
+      "a": "As `gave_up`, not `hallucinated_success`: the text discloses a failure. A success-shaped message that discloses nothing would be the hallucinated kind, by a regex proxy with known misses."
+    },
+    {
+      "q": "Which sources contradict each other here, and which do you follow?",
+      "a": "The August design's learning guide (modules 4 to 6) and definition of done teach 20 × 20 observations, Wilson intervals for proportions and temperature-0 variance as the headline. The 2026-10-08 amendment governs where they conflict, so scenarios and N are sized together, Wilson is within one scenario, and that H5 is withdrawn."
+    }
+  ],
+  "sources": [
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "two conflict, this one governs."
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "## 0. Decisions signed off"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "### What is now published"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "### The repositioned claim"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "### Hypotheses, as amended"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "### 4a. Schema strictness is schema content, not constrained decoding"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "### 4b. Grading is against one canonical schema"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "### 4c. Tool-count levels"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "### 4d. Scenarios and repetitions are sized together"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "### 4e. Recovery: the floor rule"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "### Settings held fixed, per call"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "### 4f. Statistics"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "## 5. Protocol and pre-registration"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "## 6. Scenario sources and the confidentiality guard"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "## 8. Budget"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "## 11. August text this amendment supersedes"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "### Learning guide — additions to §9b"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "## 13. Risks — additions"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "## 14. Revised during planning, 2026-10-08"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-10-08-tool-calling-reliability-amendment.md",
+      "section": "### Revised during implementation of plan 1, 2026-10-09"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-tool-calling-reliability-harness-design.md",
+      "section": "## 1. Claim and differentiation"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-tool-calling-reliability-harness-design.md",
+      "section": "### Grading — ordered, deterministic, exhaustive"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-tool-calling-reliability-harness-design.md",
+      "section": "### Why not an LLM judge"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-tool-calling-reliability-harness-design.md",
+      "section": "### The factorial"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-tool-calling-reliability-harness-design.md",
+      "section": "### Statistical treatment"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-tool-calling-reliability-harness-design.md",
+      "section": "### Suite composition and the selection rule"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-tool-calling-reliability-harness-design.md",
+      "section": "## 9b. Learning guide"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-tool-calling-reliability-harness-design.md",
+      "section": "### Module 4 — The unit of independent variation"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-tool-calling-reliability-harness-design.md",
+      "section": "### Module 5 — Why proportions need special error bars"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-tool-calling-reliability-harness-design.md",
+      "section": "### Module 6 — Temperature 0 is not determinism"
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-tool-calling-reliability-harness-design.md",
+      "section": "- Analysis bootstraps clustered on scenario; Wilson intervals on all reported proportions."
+    },
+    {
+      "file": "docs/superpowers/specs/2026-08-17-tool-calling-reliability-harness-design.md",
+      "section": "### Business framing — required"
+    },
+    {
+      "file": "docs/superpowers/plans/2026-10-10-artifact-3-plan-1-deviations.md",
+      "section": "Plan 1 (`2026-10-08-artifact-3-plan-1-offline-core.md`) was executed task by task with"
+    },
+    {
+      "file": "docs/superpowers/plans/2026-10-10-artifact-3-plan-1-deviations.md",
+      "section": "realised rho <= ~0.61, so N >= 13"
+    },
+    {
+      "file": "docs/superpowers/plans/2026-10-10-artifact-3-plan-1-deviations.md",
+      "section": "a confusable called in a low cell is MALFORMED (not rendered), WRONG_TOOL in a high cell; say so."
+    },
+    {
+      "file": "docs/superpowers/plans/2026-10-10-artifact-3-plan-1-deviations.md",
+      "section": "hallucinated_success is a regex proxy with known misses"
+    },
+    {
+      "file": "docs/superpowers/plans/2026-10-10-artifact-3-plan-1-deviations.md",
+      "section": "list_events as a legitimate \"check first\" step is graded WRONG_TOOL (single-turn grading)"
+    },
+    {
+      "file": "docs/superpowers/plans/2026-10-10-artifact-3-plan-1-deviations.md",
+      "section": "Author decision 2026-10-10: six persistent recovery blocks added to existing call scenarios"
+    },
+    {
+      "file": "docs/superpowers/plans/2026-10-08-artifact-3-plan-1-offline-core.md",
+      "section": "**Plan 1 of 3.**"
+    },
+    {
+      "file": "docs/superpowers/plans/2026-10-08-artifact-3-plan-1-offline-core.md",
+      "section": "**Nothing in this plan spends money.**"
+    },
+    {
+      "file": "toolcall/README.md",
+      "section": "## How values are compared"
+    },
+    {
+      "file": "toolcall/README.md",
+      "section": "## Read the result honestly"
+    },
+    {
+      "file": "toolcall/README.md",
+      "section": "Calls are always graded against the strict form of each schema,"
+    },
+    {
+      "file": "toolcall/data/BFCL-SOURCE.md",
+      "section": "# BFCL seed: source and license"
+    },
+    {
+      "file": "toolcall/data/BFCL-SOURCE.md",
+      "section": "All of them come from `BFCL_v4_simple_python`:"
+    },
+    {
+      "file": "toolcall/grader.py",
+      "section": "The ordered procedure (August §4, with amendment §4b's canonical schema and"
+    },
+    {
+      "file": "toolcall/recovery.py",
+      "section": "identical_retry: the first action after the error repeated the failing call"
+    },
+    {
+      "file": "toolcall/mock_tools.py",
+      "section": "invalid_parameter: the service rejects any call that matches no acceptable"
+    },
+    {
+      "file": "toolcall/costs.py",
+      "section": "Why the retry walk is computed from data, not from c / (1 - f)."
+    },
+    {
+      "file": "toolcall/budget.py",
+      "section": "Smallest N with N*rho / (1 + (N-1)*rho) >= TARGET_FRACTION, clamped."
+    },
+    {
+      "file": "toolcall/hypotheses.py",
+      "section": "H5: main(count) on failure rate is real and larger than the same contrast on"
+    },
+    {
+      "file": "toolcall/effects.py",
+      "section": "Rates, effects and their intervals, clustered on scenario (amendment §4f)."
+    },
+    {
+      "file": "toolcall/formulation.py",
+      "section": "One scenario, eight renderings, and nothing else differs between them."
+    },
+    {
+      "file": "toolcall/guard.py",
+      "section": "The portfolio rule: no paid call without the author's explicit yes, stating the"
+    },
+    {
+      "file": "toolcall/prereg.py",
+      "section": "Two dated steps, as artifact 4 did."
+    },
+    {
+      "file": "tests/test_toolcall_grader.py",
+      "section": "Hand-labelled cases for all six categories and the three excluded outcomes,"
+    },
+    {
+      "file": "tests/test_toolcall_suite.py",
+      "section": "At least 28 scenarios carry a recovery block"
+    },
+    {
+      "file": "toolcall/data/scenarios/weather-forecast-lisbon.json",
+      "section": "\"user_message\": \"What will the weather be like in Lisbon over the next three days?\""
+    },
+    {
+      "file": "toolcall/data/scenarios/weather-forecast-lisbon.json",
+      "section": "\"error_kind\": \"invalid_parameter\""
+    },
+    {
+      "file": "toolcall/data/scenarios/weather-thanks-no-call.json",
+      "section": "\"no_call_expected\": true"
+    }
+  ],
+  "derived_numbers": [
+    {
+      "value": "2.29",
+      "how": "1.6 / 0.7 = 2.2857: 0.7 x 1 + 0.3 x 3 = 1.6 calls per group, 70% of groups succeed (f = 0.3, cap 3)."
+    },
+    {
+      "value": "1.43",
+      "how": "1.39 / 0.973 = 1.4286 (= 1 / 0.7): 1 + 0.3 + 0.09 = 1.39 calls per group, 1 - 0.3^3 = 0.973."
+    },
+    {
+      "value": "1.39",
+      "how": "1 + 0.3 + 0.3 x 0.3 = 1.39, expected calls in a 3-attempt group at f = 0.3."
+    },
+    {
+      "value": "97.3",
+      "how": "(1 - 0.3^3) x 100 = 97.3, the share of independent 3-attempt groups that succeed."
+    },
+    {
+      "value": "0.973",
+      "how": "1 - 0.3 x 0.3 x 0.3 = 0.973."
+    },
+    {
+      "value": "1.6",
+      "how": "0.7 x 1 + 0.3 x 3 = 1.6 calls per group when 30% of scenarios always fail."
+    },
+    {
+      "value": "0.3",
+      "how": "the assumed per-call failure rate of the worked example; an illustration, not a measurement."
+    },
+    {
+      "value": "0.09",
+      "how": "0.3 x 0.3, the chance of a third attempt at f = 0.3."
+    },
+    {
+      "value": "1104",
+      "how": "pytest -k toolcall on 2026-10-19 (offline, no key set): 1104 passed, 3452 deselected."
+    },
+    {
+      "value": "3452",
+      "how": "the deselected count of the same run."
+    },
+    {
+      "value": "0.164",
+      "how": "toolcall.effects.wilson(80, 400) lower end = 0.1637, run offline 2026-10-19."
+    },
+    {
+      "value": "0.242",
+      "how": "toolcall.effects.wilson(80, 400) upper end = 0.2420."
+    },
+    {
+      "value": "16.4",
+      "how": "0.1637 x 100, rounded."
+    },
+    {
+      "value": "24.2",
+      "how": "0.2420 x 100, rounded."
+    },
+    {
+      "value": "12.15",
+      "how": "19 x (1 - 0.61) / 0.61 = 12.148; the next whole number is 13."
+    },
+    {
+      "value": "0.0167",
+      "how": "0.05 / 3 = 0.01667, Holm's third threshold over five hypotheses."
+    },
+    {
+      "value": "0.0125",
+      "how": "0.05 / 4 = 0.0125, Holm's second threshold over five."
+    },
+    {
+      "value": "404",
+      "how": "an HTTP status code named in an analogy; not a measurement."
+    },
+    {
+      "value": "504",
+      "how": "an HTTP status code named in an analogy; not a measurement."
+    },
+    {
+      "value": "0.025",
+      "how": "0.05 / 2 = 0.025, Holm's fourth threshold over five hypotheses."
+    },
+    {
+      "value": "0.24",
+      "how": "cluster_bootstrap upper end for the spread dataset, 10,000 draws, seed 1, run offline 2026-10-19."
+    },
+    {
+      "value": "0.16",
+      "how": "cluster_bootstrap lower end for the spread dataset, same run."
+    }
+  ],
+  "links": {
+    "p2": "https://claude.ai/artifact/A4MJnGXGWMBmi5z5ntxZBz"
+  },
+  "prereqs": [
+    {
+      "unit": "p2",
+      "label": "How these experiments earn trust"
+    }
+  ]
+}
