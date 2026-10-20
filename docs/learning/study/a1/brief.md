@@ -382,7 +382,7 @@ Milestones: 4. Build against the captures; test it end to end (2026-08-28); 5. P
 ### KV cache left for serving, by arm
 
 - Axis: KV cache tokens vLLM allocated at startup, same card and flags in every arm.
-- Read it as: C keeps 20.3 % more KV cache: one more full-length (8192-token) request served at once, 5 instead of 4. The engine log's peak activation (1.18 GiB cold, 0.19 GiB warm) is where the difference shows up: see How it works. Registered ahead as H5, though reconnaissance had logged both values once.
+- Read it as: C keeps 20.3 % more KV cache. It shows up in the engine log's peak activation (1.18 GiB cold, 0.19 GiB warm); the subtraction is in How it works. Registered ahead as H5, though reconnaissance had logged both values once.
 - How it is computed: 43,040 / 8,192 = 5.25 and 35,792 / 8,192 = 4.37 full-length requests; the code keeps whole requests (rounds down), so 5 against 4. 43,040 / 35,792 = 1.203, so 20.3 % more.
 - A: 35792 tokens
 - B: 35792 tokens
@@ -431,7 +431,7 @@ Milestones: 4. Build against the captures; test it end to end (2026-08-28); 5. P
 - Q: Why is a failed run never retried in place?
   A: A retry quietly swaps slow or unlucky runs for faster ones, flattering the distribution. Failures are their own rows, counted per arm.
 - Q: Why does the warm compile cache leave more KV cache?
-  A: The KV cache is sized from what is left after the weights and the profiling pass's peak. A cold compile gives a higher peak (1.18 vs 0.19 GiB), so less is left, for the replica's whole life. The registered cause (H5): the compiler's memory is still resident during profiling.
+  A: The KV cache is sized from what is left after the weights and the profiling pass's peak. A cold compile gives a higher peak (1.18 vs 0.19 GiB), so less is left. The registered cause (H5): the compiler's memory is still resident during profiling.
 
 Sources: see the page
 

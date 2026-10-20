@@ -1321,10 +1321,10 @@
         ]
       },
       "axis": "KV cache tokens vLLM allocated at startup, same card and flags in every arm.",
-      "read_as": "C keeps 20.3 % more KV cache: one more full-length (8192-token) request served at once, 5 instead of 4. The engine log's peak activation (1.18 GiB cold, 0.19 GiB warm) is where the difference shows up: see How it works. Registered ahead as H5, though reconnaissance had logged both values once.",
+      "read_as": "C keeps 20.3 % more KV cache. It shows up in the engine log's peak activation (1.18 GiB cold, 0.19 GiB warm); the subtraction is in How it works. Registered ahead as H5, though reconnaissance had logged both values once.",
       "short": "KV cache left for serving",
       "so": "arms",
-      "takeaway": "B and C differ only in the compile cache, yet C gets 20.3 % more KV cache: one more full-length request at a time, for the replica's whole life.",
+      "takeaway": "B and C differ only in the compile cache, yet C gets 20.3 % more KV cache: one more full-length (8192-token) request at a time.",
       "arithmetic": "43,040 / 8,192 = 5.25 and 35,792 / 8,192 = 4.37 full-length requests; the code keeps whole requests (rounds down), so 5 against 4. 43,040 / 35,792 = 1.203, so 20.3 % more."
     }
   ],
@@ -1394,7 +1394,7 @@
     },
     {
       "q": "Why does the warm compile cache leave more KV cache?",
-      "a": "The KV cache is sized from what is left after the weights and the profiling pass's peak. A cold compile gives a higher peak (1.18 vs 0.19 GiB), so less is left, for the replica's whole life. The registered cause (H5): the compiler's memory is still resident during profiling."
+      "a": "The KV cache is sized from what is left after the weights and the profiling pass's peak. A cold compile gives a higher peak (1.18 vs 0.19 GiB), so less is left. The registered cause (H5): the compiler's memory is still resident during profiling."
     }
   ],
   "sources": [
