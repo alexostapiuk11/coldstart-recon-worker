@@ -400,16 +400,16 @@ Milestones: 4. Pre-register the rules (2026-10-05 00:29 (−07:00)); 5. Prime th
 
 - Axis: Measured from the startup log (docs/recon-a5.md), budget 0.80 of 23.52 GiB; 'derived' segments are subtractions.
 - Read it as: Each slot's 79 MiB comes out of the KV cache. CUDA graphs (1.28 GiB) sit outside the budget, which fits the 0.92 default running out of memory.
-- How it is computed: KV = 18.81 − 7.55 − 0.44 − N × 0.0771. Left over = 23.52 − 18.81 − 1.28 = 3.43.
-- 1 slot: Base weights (derived) 7.55, Adapter slots 0.08, Runtime + activation (derived) 0.44, KV cache 10.74, CUDA graphs (outside budget) 1.28, Left over (derived) 3.43 (GiB)
-- 8 slots: Base weights (derived) 7.55, Adapter slots 0.62, Runtime + activation (derived) 0.44, KV cache 10.2, CUDA graphs (outside budget) 1.28, Left over (derived) 3.43 (GiB)
-- 64 slots: Base weights (derived) 7.55, Adapter slots 4.94, Runtime + activation (derived) 0.44, KV cache 5.89, CUDA graphs (outside budget) 1.28, Left over (derived) 3.42 (GiB)
+- How it is computed: KV = 18.81 − 7.55 − 0.44 − N × 0.0771. Not claimed by the engine = 23.52 − 18.81 − 1.28 = 3.43; it includes about 0.5 GiB held by another process (22.64 of 23.52 GiB free at startup).
+- 1 slot: Base weights (derived) 7.55, Adapter slots 0.08, Runtime + activation (derived) 0.44, KV cache 10.74, CUDA graphs (outside budget) 1.28, Not claimed by the engine (derived) 3.43 (GiB)
+- 8 slots: Base weights (derived) 7.55, Adapter slots 0.62, Runtime + activation (derived) 0.44, KV cache 10.2, CUDA graphs (outside budget) 1.28, Not claimed by the engine (derived) 3.43 (GiB)
+- 64 slots: Base weights (derived) 7.55, Adapter slots 4.94, Runtime + activation (derived) 0.44, KV cache 5.89, CUDA graphs (outside budget) 1.28, Not claimed by the engine (derived) 3.42 (GiB)
 - So: see decision `memory`
 
 ### KV capacity falls with slots, never binds
 
 - Axis: Measured: the KV cache size vLLM logs at startup, budget 0.80 of the 24 GB card.
-- Read it as: About 45% of the cache goes by 64 slots, yet it still holds 1,339 of these short requests against the 64 in flight: memory cannot slow this load. At an 8,192-token context it holds 9 at 8 slots, which gives the memory bound. The fall is a straight line, about 561 tokens per slot (79 MiB), not an accelerating cliff.
+- Read it as: About 45% of the cache goes by 64 slots, yet it still holds 1,339 of these short requests against the 64 in flight: memory cannot slow this load. At an 8,192-token context it holds 9 at 8 slots, which gives the memory bound. The fall is close to a straight line (the 32-slot point is 369 tokens, 0.6%, off the 1-to-64 chord), about 561 tokens per slot (79 MiB), not an accelerating cliff.
 - How it is computed: 42,864 / 32 (two 16-token blocks per 29-token request) = 1,339; analysis.json's own field still divides by 29 (1,478). Memory bound = unfloored throughput bound × 9 / 64 = 1,784.6 × 9 / 64 = 250.96, rounded down: 250.
 - Axes: x is adapters registered (GPU slots); y is KV cache capacity (tokens)
 - KV cache at startup: 1: 78208, 2: 77744, 4: 76496, 8: 74288, 16: 69968, 32: 60448, 64: 42864

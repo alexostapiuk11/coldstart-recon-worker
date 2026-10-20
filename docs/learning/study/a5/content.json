@@ -1352,7 +1352,7 @@
                 "value": 1.28
               },
               {
-                "name": "Left over (derived)",
+                "name": "Not claimed by the engine (derived)",
                 "value": 3.43
               }
             ]
@@ -1381,7 +1381,7 @@
                 "value": 1.28
               },
               {
-                "name": "Left over (derived)",
+                "name": "Not claimed by the engine (derived)",
                 "value": 3.43
               }
             ]
@@ -1410,7 +1410,7 @@
                 "value": 1.28
               },
               {
-                "name": "Left over (derived)",
+                "name": "Not claimed by the engine (derived)",
                 "value": 3.42
               }
             ]
@@ -1425,7 +1425,7 @@
       "read_as": "Each slot's 79 MiB comes out of the KV cache. CUDA graphs (1.28 GiB) sit outside the budget, which fits the 0.92 default running out of memory.",
       "so": "memory",
       "takeaway": "Slots are paid from the KV cache; graphs sit outside the budget.",
-      "arithmetic": "KV = 18.81 − 7.55 − 0.44 − N × 0.0771. Left over = 23.52 − 18.81 − 1.28 = 3.43."
+      "arithmetic": "KV = 18.81 − 7.55 − 0.44 − N × 0.0771. Not claimed by the engine = 23.52 − 18.81 − 1.28 = 3.43; it includes about 0.5 GiB held by another process (22.64 of 23.52 GiB free at startup)."
     },
     {
       "title": "KV capacity falls with slots, never binds",
@@ -1481,7 +1481,7 @@
         "note": "Every start at a point reported the same value, so there is no interval."
       },
       "axis": "Measured: the KV cache size vLLM logs at startup, budget 0.80 of the 24 GB card.",
-      "read_as": "About 45% of the cache goes by 64 slots, yet it still holds 1,339 of these short requests against the 64 in flight: memory cannot slow this load. At an 8,192-token context it holds 9 at 8 slots, which gives the memory bound. The fall is a straight line, about 561 tokens per slot (79 MiB), not an accelerating cliff.",
+      "read_as": "About 45% of the cache goes by 64 slots, yet it still holds 1,339 of these short requests against the 64 in flight: memory cannot slow this load. At an 8,192-token context it holds 9 at 8 slots, which gives the memory bound. The fall is close to a straight line (the 32-slot point is 369 tokens, 0.6%, off the 1-to-64 chord), about 561 tokens per slot (79 MiB), not an accelerating cliff.",
       "so": [
         "memory",
         "knee"
@@ -2036,6 +2036,10 @@
     {
       "value": "4.94",
       "how": "64 × 79.0 MiB / 1,024 = 4.94 GiB; 7.55 + 4.94 = 12.49, the 64-slot 'Model loading took'."
+    },
+    {
+      "value": "369",
+      "how": "78,208 - 31 x 561.016 = 60,816.5 expected at 32 slots on the 1-to-64 chord; logged 60,448 (data/a5/analysis.json sweep.points[n_slots=32].memory.kv_tokens); difference 368.5, 0.6% of 60,448."
     }
   ],
   "links": {

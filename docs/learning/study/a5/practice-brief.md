@@ -23,8 +23,8 @@ If missed, review: KV cache (P1: kvcache)
 
 ### Check 2
 
-Q: Why does decoding 64 requests together take only a little longer per step than decoding one?
-KEY: A decode step reads every weight from GPU memory once, whatever the batch size, so a bigger batch is nearly free throughput until compute or KV memory runs out. That is the batching the adapters then break up.
+Q: Why does decoding 64 requests together take only a little longer per step than decoding one (general GPU behaviour, not measured in this repo)?
+KEY: A decode step reads every weight from GPU memory once, whatever the batch size, so, while decode is memory-bound, a bigger batch adds little time per step (general GPU behaviour, not measured in this repo). That is the batching the adapters then break up.
 If missed, review: Continuous batching (P1: batching)
 
 ### Check 3
@@ -43,12 +43,12 @@ KEY steps:
 
 1. Budget = 0.80 × 23.52 = 18.81 GiB (the logged figure).
 2. Fixed memory: base weights 7.55 GiB plus runtime and activation 0.44 GiB, both derived, = 7.99 GiB. Left for slots plus KV: 18.81 − 7.99 = 10.82 GiB.
-3. One 8,192-token context at 144 KiB a token = 8,192 × 144 / 1,048,576 = 1.125 GiB. Slots may use 10.82 − 1.125 = 9.70 GiB.
-4. Rank 16: 9.70 / 0.0771 GiB per slot = 125.8, so 125 slots.
-5. Rank 64 (assumption: slot memory scales linearly with rank; the 1.254 overhead factor is measured at rank 16 only): 4 × 79 = 316 MiB = 0.31 GiB per slot, 9.70 / 0.31 = 31 slots. Theory alone (4 × 63 = 252 MiB) gives 39.
-6. Sanity check: 64 slots at rank 64 would need about 19.7 GiB (4 × 4.94), more than the 10.82 GiB available; the harness amendment's theory figure is 15.8 GiB. Either way they do not fit.
+3. One 8,192-token context at 144 KiB a token = 8,192 × 144 / 1,048,576 = 1.125 GiB. Slots may use 10.82 − 1.125 = 9.695 GiB (about 9.70).
+4. Rank 16: 9.695 / 0.0771 GiB per slot = 125.7, so 125 slots.
+5. Rank 64 (assumption: slot memory scales linearly with rank; the 1.254 overhead factor is measured at rank 16 only): 4 × 79 = 316 MiB = 0.31 GiB per slot, 9.695 / 0.31 = 31 slots. Theory alone (4 × 63 = 252 MiB) gives 39.
+6. Sanity check: 64 slots at rank 64 would need about 19.75 GiB (4 × 4.94), more than the 10.82 GiB available; the harness amendment's theory figure is 15.8 GiB. Either way they do not fit.
 
-KEY answer: 125 slots at rank 16 (measured per-slot cost). About 31 at rank 64, an assumption: rank scaling of the overhead was not measured.
+KEY answer: 125 slots at rank 16 (extrapolated beyond the 64 slots measured; memory only, not throughput). About 31 at rank 64, an assumption: rank scaling of the overhead was not measured.
 
 ### Estimate 2: The memory bound if requests are 2,048 tokens, not 8,192
 
@@ -83,7 +83,7 @@ RED FLAG: "`max_loras` is the total number of adapters the server can serve."
 ### Drill 3 of 12
 
 Q: Why does KV capacity fall as slots are added, and is the fall linear?
-KEY: vLLM sizes the KV cache from what is left of its memory budget after weights, slot buffers and runtime memory, so each slot's 79 MiB buffer removes about 561 tokens. Measured: 78,208 tokens at 1 slot and 42,864 at 64, 45% fewer; (78,208 − 42,864) / 63 = 561. The fall is a straight line. It only looks like a cliff on a log slot axis.
+KEY: vLLM sizes the KV cache from what is left of its memory budget after weights, slot buffers and runtime memory, so each slot's 79 MiB buffer removes about 561 tokens. Measured: 78,208 tokens at 1 slot and 42,864 at 64, 45% fewer; (78,208 − 42,864) / 63 = 561. The fall is close to a straight line (the 32-slot point is 369 tokens, 0.6%, off the 1-to-64 chord). It only looks like a cliff on a log slot axis.
 RED FLAG: "It accelerates past 16 slots."
 
 ### Drill 4 of 12
@@ -95,7 +95,7 @@ RED FLAG: "Less KV means preemption, so it is part of the slowdown."
 ### Drill 5 of 12
 
 Q: Why does a batch spanning 64 adapters cost more than one sharing an adapter, and how sure are you?
-KEY: Mechanism, consistent with the data and not measured (vLLM 0.27.1 source reading): the base weights are read once for every request, while each distinct adapter needs its own small multiply over only its requests, with its own weights read (about 63 MiB each, 3.9 GiB for 64, in theory). Measured: spread costs 1,290 tokens/s more than concentrated at 64, in the same starts. How that splits between extra bytes, tiny multiplies and launches was not measured.
+KEY: Mechanism, consistent with the data and not measured (vLLM 0.27.1 source reading): the base weights are read once per step for all requests, while each distinct adapter needs its own small multiply over only its requests, with its own weights read (about 63 MiB each, 3.9 GiB for 64, in theory). Measured: spread costs 1,290 tokens/s more than concentrated at 64, in the same starts. How that splits between extra bytes, tiny multiplies and launches was not measured.
 RED FLAG: "Adapters are swapped in and out" (nothing swaps here), "it is memory", or stating the kernel mechanism as a measurement.
 
 ### Drill 6 of 12
@@ -107,7 +107,7 @@ RED FLAG: "KV capacity fell 45%, so it is memory", or claiming the launch grid e
 ### Drill 7 of 12
 
 Q: Why run both regimes inside every server start rather than sweeping configurations?
-KEY: Slot count and in-batch cap are one knob, so configuration cannot hold registered fixed while active changes; traffic can. Pairing inside a start cancels start-to-start variation (host, compile, allocator), so the heterogeneity interval is tight ([−1,309, −1,274]). The slot cost compares different starts and is wider ([−486, −425]).
+KEY: Slot count and in-batch cap are one knob, so configuration cannot hold registered fixed while active changes; traffic can. Pairing inside a start cancels start-to-start variation, so the heterogeneity interval is tight ([−1,309, −1,274]). The slot cost compares different starts and is wider ([−486, −425]).
 RED FLAG: "Set `max_loras` to 1 and register 64 adapters." With a larger `max_cpu_loras` that is the swapped mode, a different experiment.
 
 ### Drill 8 of 12
@@ -131,7 +131,7 @@ RED FLAG: "Random weights are fine because LoRA weights do not matter."
 ### Drill 11 of 12
 
 Q: The 8-to-16 loss is 10.7% with interval [9.2%, 11.5%]. Defend the knee rule.
-KEY: The rule was fixed before the data: the first doubling whose point estimate exceeds τ = 10%. Requiring the interval to clear τ would move the knee to 16 to 32 and double tenants on a noisy drop; the point rule errs toward fewer tenants, the cautious side for capacity. Report both: if the crossing is noise the slot bound is 16 and cost per tenant is $50.62.
+KEY: The rule and tau were committed before the first measured run (tau was signed off after reconnaissance): the first doubling whose point estimate exceeds τ = 10%. Requiring the interval to clear τ would move the knee to 16 to 32 and double tenants on a noisy drop; the point rule errs toward fewer tenants, the cautious side for capacity. Report both: if the crossing is noise the slot bound is 16 and cost per tenant is $50.62.
 RED FLAG: "10.7 is above 10, so it is proven."
 
 ### Drill 12 of 12
@@ -166,7 +166,7 @@ KEY pitfalls:
 
 Cost: runs on your machine
 Goal: Re-derive the published knee, tenants and cost from the raw data with no GPU, then change the rule (τ, context length) and watch the answer move.
-Note: No GPU or paid call. A GPU follow-up (about one GPU-hour) could vary concurrency at 64 slots; it is only described here, not run, and its predicted result is untested.
+Note: No GPU or paid call. A GPU follow-up (cost not estimated here) could vary concurrency at 64 slots; it is only described here, not run, and its predicted result is untested.
 
 Setup:
 
@@ -175,7 +175,7 @@ Setup:
 
 Steps:
 
-1. .venv/bin/python scripts/a5_analyse.py --require-a4 --out scratch/a5-analysis.json, then cmp scratch/a5-analysis.json data/a5/analysis.json.
+1. mkdir -p scratch, then .venv/bin/python scripts/a5_analyse.py --require-a4 --out scratch/a5-analysis.json, then cmp scratch/a5-analysis.json data/a5/analysis.json.
 2. In a Python session read the campaign store as multilora/analysis.py does and call multilora.knee.knee on the spread throughput per N at tau = 0.08, 0.10 and 0.12.
 3. For each tau note the knee interval, the slots below it, and whether the crossing is resolved (the doubling's `resolved` flag); also apply the rule that needs the interval to clear tau.
 4. Call multilora.economics.tenants_per_gpu with max_concurrency 36 (a 2,048-token context) instead of 9, and read the three bounds.
@@ -188,12 +188,12 @@ Record:
 - Memory bound at 2,048 and at 8,192 tokens
 - Cost per tenant at each slot bound
 
-KEY expected result: cmp prints nothing. Tau 0.10: knee 8 to 16, slot bound 8, the 16 crossing unresolved; the interval rule gives 16 to 32. Tau 0.08: knee 8 to 16, and the 16 crossing is resolved. Tau 0.12: knee 16 to 32, slot bound 16, $50.62. At 2,048 tokens the memory bound is 1,003, still above the slot bound. KV is a straight line on linear axes.
+KEY expected result: cmp prints nothing. Tau 0.10: knee 8 to 16, slot bound 8, the 16 crossing unresolved; the interval rule gives 16 to 32. Tau 0.08: knee 8 to 16, and the 16 crossing is resolved. Tau 0.12: knee 16 to 32, slot bound 16, $50.62. At 2,048 tokens the memory bound is 1,003, still above the slot bound. KV is close to a straight line on linear axes.
 KEY what it shows: The headline is a function of a rule fixed in advance; every published number re-derives from committed data; slot memory is linear in slots.
 
 ## Calculator
 
-Slot capacity: rank, slots, budget, context Constants: 57,344 = in + out over seven projections, 36 layers, 23.52 GiB card, 144 KiB per KV token. At rank 16, 8 slots it is within 0.1% of the logged 74,288 tokens. Other ranks and the 1.254 factor (measured at rank 16 only) are assumptions. Negative KV means no fit. No throughput is predicted.
+Slot capacity: rank, slots, budget, context Fitted to the 1-slot and 64-slot logs: 7.99 GiB and the 1.254 factor (rank 16 only), so the 8-slot match is interpolation, not an independent check. Above utilisation 0.80 the runtime figure changes (recon-a5.md, the 0.85 table); 0.92 ran out of memory (CUDA graphs). Negative KV: no fit.
 
 Inputs (default, range):
 
@@ -219,7 +219,7 @@ Outputs at the defaults:
 - [adapter] Size of a rank-16 adapter on all seven Qwen3-4B projections? -> KEY: 917,504 numbers a layer, 33,030,144 in all: 63 MiB at 2 bytes (computed). The measured slot took 79 MiB; the 16 MiB gap is unexplained.
 - [slots] What does max_loras set in vLLM 0.27.1? -> KEY: The number of GPU slot buffers (allocated used or not) and the cap on distinct adapters per batch.
 - [slots] What do max_cpu_loras and max_lora_rank add? -> KEY: max_cpu_loras: a host-memory tier of adapters copied into a slot on demand (here equal to N, nothing swaps). max_lora_rank: the width every slot is padded to (16).
-- [memory] KV tokens lost per slot, and in MiB? -> KEY: About 561 tokens, 79 MiB; linear in the slot count.
+- [memory] KV tokens lost per slot, and in MiB? -> KEY: About 561 tokens, 79 MiB; close to linear in the slot count.
 - [memory] KV capacity at 1 slot and at 64 slots? -> KEY: 78,208 and 42,864 tokens, 45% fewer.
 - [memory] What sits outside the 0.80 budget, and what happened at the 0.92 default? -> KEY: CUDA graphs, 1.28 GiB, captured after KV is sized. At 0.92 both probes ran out of memory (one in sampler warm-up, one in graph capture).
 - [memory] Why can KV not slow this benchmark? -> KEY: 64 requests use about 2,048 tokens of 42,864 (4.8%); the scheduler never waits for blocks.
@@ -255,12 +255,12 @@ Not from the study page's sources:
 - 2,048: A shorter context chosen for the what-if estimate and the lab; the measured request shape is 29 tokens.
 - 316 MiB, 0.31 GiB: 4 × 79 MiB for rank 64, assuming slot memory scales linearly with rank. The 1.254 factor was measured at rank 16 only.
 - 252 MiB, 39 slots: Theory only: 4 × 63 MiB, and 9.70 GiB / 0.246 GiB.
-- 19.7 GiB: 64 × 316 MiB for rank 64 at 64 slots, under the same scaling assumption.
+- about 19.75 GiB: 64 × 316 MiB for rank 64 at 64 slots, under the same scaling assumption.
 - 7.99: worked out, 7.55 + 0.44: base weights plus runtime and activation, both derived in the unit's derived_numbers.
 - 10.82: worked out, 18.81 − 7.99.
 - 1.125: worked out, 8,192 × 144 / 1,048,576 GiB: one 8,192-token context at 144 KiB a token.
 - 9.70: worked out, 10.82 − 1.125 = 9.695.
-- 125.8: worked out, 9.695 / 0.0771 = 125.7, floored to 125 slots.
+- 125.7: worked out, 9.695 / 0.0771 = 125.7, floored to 125 slots.
 - 1.254: worked out, 79.0 / 63.0: measured slot size over theory, at rank 16 only.
 - 36.27: worked out, 74,288 / 2,048 = 36.27; floored to 36.
 - 7.306: worked out, 64 × 0.11416.
@@ -279,6 +279,8 @@ Not from the study page's sources:
 - 9.07: worked out, 74,288 / 8,192 = 9.07.
 - 4.8: worked out, 2,048 / 42,864 = 4.8%.
 - 0.246: worked out, 252 MiB / 1,024 = 0.246 GiB.
+- 369: worked out, 78,208 - 31 x 561.016 = 60,816.5 expected at 32 slots on the 1-to-64 chord; logged 60,448 (data/a5/analysis.json sweep.points[n_slots=32].memory.kv_tokens); difference 368.5, 0.6% of 60,448.
+- 9.695: worked out, 10.82 - 1.125 = 9.695 GiB, shown as 9.70 in the steps.
 
 ## Drill mode (paste this to an AI chat)
 
