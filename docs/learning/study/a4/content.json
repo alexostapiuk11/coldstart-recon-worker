@@ -293,7 +293,7 @@
     {
       "level": "component",
       "title": "Inside the simulator (placement/)",
-      "caption": "Every fleet size of every strategy runs the same 30 traces (common random numbers), so strategies differ only in placement. Sizing then picks, per strategy, the smallest fleet whose every decile meets the SLO; swap and co-locate search only up to dedicate's size.",
+      "caption": "Every fleet size of every strategy runs the same 30 traces (common random numbers), so strategies differ only in placement. Sizing then picks, per strategy, the smallest fleet whose every decile meets the SLO.",
       "nodes": [
         {
           "id": "traffic",
@@ -552,7 +552,7 @@
         "One hot-model rule for all three; the smallest fleet whose every decile meets the SLO; bursty sizing on ON-period load"
       ],
       "chosen": "One hot-model rule for all three; the smallest fleet whose every decile meets the SLO; bursty sizing on ON-period load",
-      "why": "Hot models get pinned GPUs in every strategy, so strategies differ only in how the rest are placed. The aggregate p99 is mostly popular models' requests: in the simulator an aggregate rule gives swap 9 GPUs, not 10, at the reference point and leaves the two hottest deciles over the SLO (see How it works). On average load, a placeholder sweep left every bursty strategy dominated; the owner chose ON-period load.",
+      "why": "Hot models get pinned GPUs in every strategy, so strategies differ only in how the rest are placed. The aggregate p99 is mostly popular models' requests, so it passes fleets that fail the hottest tenants (swap 9 GPUs, not 10; see How it works). On average load, a placeholder sweep left every bursty strategy dominated; the owner chose ON-period load.",
       "why_short": "Hot models are pinned alike in all three, and a fleet passes only if every decile meets the SLO: the aggregate hides the hottest tenants.",
       "cost": "Swap needs one GPU more at the reference point. Swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie. Bursty s = 0.6 is not evaluable: a decile had too few requests for a p99.",
       "cost_short": "Swap needs a GPU more; dedicating can at best tie by construction; bursty s = 0.6 is not evaluable.",
@@ -1126,7 +1126,7 @@
         "note": "SIMULATED, FAILED VALIDATION. Bursty s = 0.6 is not evaluable: some decile had too few requests for a p99 in some run."
       },
       "axis": "Simulated by a model that failed its gate. Swap's point is the smallest pool whose every popularity decile meets the 75.6 s p99 SLO, over 30 runs. Dedicate's is fixed by the hot-model rule (pinned GPUs plus one per other model). Co-locate's is its pairing floor (pinned GPUs plus half the rest, paired), where the SLO held at every evaluable point.",
-      "read_as": "In each regime one strategy is cheapest at every evaluable skew: co-locate when spread, swap when bursty. Only swap's line was moved by the SLO search; dedicate's and co-locate's are hot-rule and pairing arithmetic, and co-locate never left its floor. Dedicating, which can at best tie by construction, needs about twice the cheapest. Spread swap's peak at s = 1.25 was not diagnosed.",
+      "read_as": "In each regime one strategy is cheapest at every evaluable skew: co-locate when spread, swap when bursty. Dedicating, which can at best tie by construction, needs about twice the cheapest. Spread swap's peak at s = 1.25 was not diagnosed.",
       "so": [
         "sizing",
         "regimes"
@@ -1869,7 +1869,7 @@
       },
       {
         "q": "Why is dedicating never cheapest?",
-        "a": "Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). Co-locate also sat at its pairing floor at every evaluable point, so only swap's count came from the SLO search (see How it works). The simulated margin is the point: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs."
+        "a": "Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). Only swap's count came from the SLO search (see How it works). The simulated margin is the point: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs."
       },
       {
         "q": "What would change the winner?",
@@ -1901,7 +1901,7 @@
     },
     {
       "q": "At the reference point, what does sizing on the aggregate p99 get wrong?",
-      "a": "In the simulator it picks 9 GPUs for swap, and the two hottest deciles breach (87.7 and 77.2 s against 75.6 s); per-decile sizing needs 10. R2."
+      "a": "In the simulator it picks 9 GPUs for swap, and the two hottest deciles breach the SLO; per-decile sizing needs 10 (numbers in How it works). R2."
     },
     {
       "q": "Which cold-start stages does a swap skip, and what does it still pay?",

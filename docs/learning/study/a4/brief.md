@@ -90,7 +90,7 @@ The laptop submits one job at a time; the worker runs a cell, swap, sleep switch
 
 ### Inside the simulator (placement/) (component)
 
-Every fleet size of every strategy runs the same 30 traces (common random numbers), so strategies differ only in placement. Sizing then picks, per strategy, the smallest fleet whose every decile meets the SLO; swap and co-locate search only up to dedicate's size.
+Every fleet size of every strategy runs the same 30 traces (common random numbers), so strategies differ only in placement. Sizing then picks, per strategy, the smallest fleet whose every decile meets the SLO.
 
 - **Traffic generator**: Zipf labels; spread or bursty
 - **Placement families**: hot rule, then fleets by GPU count
@@ -160,7 +160,7 @@ The gate replayed this path on one GPU, where the victim is trivial: LRU choice 
 
 **Chosen:** One hot-model rule for all three; the smallest fleet whose every decile meets the SLO; bursty sizing on ON-period load
 
-**Why:** Hot models get pinned GPUs in every strategy, so strategies differ only in how the rest are placed. The aggregate p99 is mostly popular models' requests: in the simulator an aggregate rule gives swap 9 GPUs, not 10, at the reference point and leaves the two hottest deciles over the SLO (see How it works). On average load, a placeholder sweep left every bursty strategy dominated; the owner chose ON-period load.
+**Why:** Hot models get pinned GPUs in every strategy, so strategies differ only in how the rest are placed. The aggregate p99 is mostly popular models' requests, so it passes fleets that fail the hottest tenants (swap 9 GPUs, not 10; see How it works). On average load, a placeholder sweep left every bursty strategy dominated; the owner chose ON-period load.
 
 **Cost:** Swap needs one GPU more at the reference point. Swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie. Bursty s = 0.6 is not evaluable: a decile had too few requests for a p99.
 
@@ -355,7 +355,7 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
 ### UNVALIDATED: GPUs each strategy needs, by skew and regime
 
 - Axis: Simulated by a model that failed its gate. Swap's point is the smallest pool whose every popularity decile meets the 75.6 s p99 SLO, over 30 runs. Dedicate's is fixed by the hot-model rule (pinned GPUs plus one per other model). Co-locate's is its pairing floor (pinned GPUs plus half the rest, paired), where the SLO held at every evaluable point.
-- Read it as: In each regime one strategy is cheapest at every evaluable skew: co-locate when spread, swap when bursty. Only swap's line was moved by the SLO search; dedicate's and co-locate's are hot-rule and pairing arithmetic, and co-locate never left its floor. Dedicating, which can at best tie by construction, needs about twice the cheapest. Spread swap's peak at s = 1.25 was not diagnosed.
+- Read it as: In each regime one strategy is cheapest at every evaluable skew: co-locate when spread, swap when bursty. Dedicating, which can at best tie by construction, needs about twice the cheapest. Spread swap's peak at s = 1.25 was not diagnosed.
 - How it is computed: Reference point, bursty s = 1.0: 21, 10, 12 GPUs. One GPU-month = $1.1095 × 730 h = $809.935; 21 × 809.935 / 20 tenants = $850.43; dedicate costs $8,909.28 a month more than swap.
 - Axes: x is Zipf skew s; y is GPUs to meet the SLO in every decile (GPUs)
 - spread: dedicate: 0.6: 20, 0.8: 20, 1.0: 20, 1.25: 20, 1.5: 20, 2.0: 20
@@ -447,7 +447,7 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
 - Q: Why trust a simulator that failed its gate?
   A: For GPU counts, I don't: the gate failed at its one point (one GPU, three tenants, swapping only), the fleets are 10 to 25 GPUs, and co-location had two held-out cells, one missed. The ordering is wide, about twice, but I did not test whether the model's error leaves it unchanged. The measured swap, slowdown and KV split stand.
 - Q: Why is dedicating never cheapest?
-  A: Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). Co-locate also sat at its pairing floor at every evaluable point, so only swap's count came from the SLO search (see How it works). The simulated margin is the point: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs.
+  A: Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). Only swap's count came from the SLO search (see How it works). The simulated margin is the point: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs.
 - Q: What would change the winner?
   A: Arrival timing (only two regimes built); the SLO (twice a swap favours swapping, and the sweep ran at one SLO); interference (exploratory: four times the busy-neighbour latency loses co-location the bursty regime, eight the spread one); model size (a 1.7B result).
 - Q: Why did the gate fail?
@@ -466,7 +466,7 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
 - Q: Spread and bursty traffic give each model the same share. What differs, and what does it change?
   A: Timing. In a burst one swap-in serves many requests; scattered, a model is loaded, evicted and loaded again (design module 4). Simulated: swap cheapest when bursty, co-locate when spread.
 - Q: At the reference point, what does sizing on the aggregate p99 get wrong?
-  A: In the simulator it picks 9 GPUs for swap, and the two hottest deciles breach (87.7 and 77.2 s against 75.6 s); per-decile sizing needs 10. R2.
+  A: In the simulator it picks 9 GPUs for swap, and the two hottest deciles breach the SLO; per-decile sizing needs 10 (numbers in How it works). R2.
 - Q: Which cold-start stages does a swap skip, and what does it still pay?
   A: It skips platform scheduling and compiling (a cache hit). It re-pays process start, imports and the health check, 27.8 of 37.8 s.
 - Q: Splitting memory halves each engine's share. Why does its KV cache shrink 3.1 times?
