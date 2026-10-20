@@ -49,7 +49,7 @@
       "id": "adapter",
       "short": "LoRA adapter and rank",
       "term": "LoRA adapter and its rank",
-      "plain": "A fine-tune stored as two small matrices added beside each of seven projections in every layer, instead of a whole new model: megabytes, not gigabytes, so one base model can host many. **Rank** (16 here) is the matrices' width. vLLM computes every adapter at the slot's buffer rank, so the work is set by shape, not by the numbers inside."
+      "plain": "A fine-tune stored as two small matrices added beside each of seven projections in every layer, instead of a whole new model: each slot's buffers took 79 MiB here (measured), against 7.63 GiB for the loaded model at 1 slot, so one base model can host many. **Rank** (16 here) is the matrices' width. vLLM computes every adapter at the slot's buffer rank, so the work is set by shape, not by the numbers inside."
     },
     {
       "id": "slots",
@@ -61,7 +61,7 @@
       "id": "twocosts",
       "short": "Two costs, one subtraction each",
       "term": "Heterogeneity cost and registered-slot cost",
-      "plain": "**Concentrated** regime: all load on one adapter. **Spread**: round-robin over all N. **Heterogeneity cost** at N = spread minus concentrated, in the same start. **Registered-slot cost** = concentrated at N minus concentrated at 1 slot, across starts: what slots cost when one adapter still carries all the load."
+      "plain": "**Concentrated** regime: all load on one adapter. **Spread**: round-robin over all N. **Heterogeneity cost** at N = spread minus concentrated, in the same start. **Registered-slot cost** = concentrated at N minus concentrated at 1 slot, across starts: what slots cost when one adapter still carries all the load. At 64 slots: concentrated 3,127 and spread 1,835 tokens/s, so the heterogeneity cost is about −1,290 (the median of the paired gaps); concentrated 3,127 against 3,577 at 1 slot, so the registered-slot cost is −450."
     },
     {
       "id": "knee",
@@ -533,9 +533,9 @@
       ],
       "chosen": "Run both regimes in every start: one adapter, then all N round-robin, in a shuffled order",
       "why": "Same slots, memory and start; only how many adapters the batch mixes differs, so spread minus concentrated is a difference inside one start, and start-to-start variation cancels out of it. Swapping is the resident-versus-swapped mode the design put out of scope. Random assignment of 64 requests over 64 adapters reaches about 40.6 distinct on average; round-robin keeps up to min(N, 64) in flight.",
-      "cost": "The registered-slot cost compares different starts, against 1 slot. The check that the regimes differed reads vLLM's running-adapters gauge once a second: a sample of scheduler state, not a count per batch. By vLLM's source the gauge may add cost to the spread regime; 24 control starts with it off put gauge-on minus gauge-off at +17 tokens/s [−19, +57]: no cost detected, at most about 19 tokens/s.",
+      "cost": "The registered-slot cost compares different starts, against 1 slot. The check that the regimes differed reads vLLM's running-adapters gauge once a second: a sample of scheduler state, not a count per batch. By vLLM 0.27.1's source the gauge may add cost to the spread regime; 24 control starts with it off put gauge-on minus gauge-off at +17 tokens/s [−19, +57]: no cost detected. A gauge cost would show as negative, so it is at most about 19 tokens/s (the post quotes the symmetric bound, 57).",
       "why_short": "vLLM's one knob cannot separate the two counts; traffic can, with slots, memory and the start held fixed.",
-      "cost_short": "The slot cost is compared across starts; the manipulation check is a once-a-second sample; the gauge adds a small cost.",
+      "cost_short": "The slot cost is compared across starts; the check is a once-a-second sample; the gauge's cost is bounded (about 19 tokens/s), not zero.",
       "short": "Split by traffic, in one start",
       "serves": [
         {
@@ -568,7 +568,7 @@
         "Three parts: heterogeneity cost, registered-slot cost, and memory as a capacity ceiling"
       ],
       "chosen": "Three parts: heterogeneity cost, registered-slot cost, and memory as a capacity ceiling",
-      "why": "64 requests in flight need about 2,048 tokens of KV against at least 42,864, so the scheduler never waits for memory and its effect on latency is zero by construction. The LoRA kernels launch `max_loras + 1` slices whatever the batch holds (65 at 64 slots, 2 at 1), so the one-adapter slope is named the registered-slot cost, never memory. Memory becomes tenants instead, through Little's law.",
+      "why": "64 requests in flight need about 2,048 tokens of KV against at least 42,864, so the scheduler never waits for memory and its effect on latency is zero by construction. The LoRA kernels launch `max_loras + 1` slices whatever the batch holds (65 at 64 slots, 2 at 1; read from the vLLM 0.27.1 source, may differ in other versions), so the one-adapter slope is named the registered-slot cost, never memory. Memory becomes tenants instead, through Little's law.",
       "cost": "The diagnostic ran out of GPU memory during CUDA-graph capture at 64 slots, at budgets 0.85 and 0.80: it asked for 4.5 times as many graphs. It was cut before the first measured run and H4 withdrawn, so −450 tokens/s stays unsplit between the launch grid, host-side bookkeeping or anything else that scales with slots.",
       "why_short": "KV never fills at this request shape, and the slot cost is kernel overhead, so calling either one memory would mislabel it.",
       "cost_short": "The diagnostic that would split the slot cost ran out of memory and was cut; −450 tokens/s stays unsplit.",
@@ -639,9 +639,9 @@
         "144 starts in a fresh store (Amendment 1), then replace exactly the 52 lost starts (Amendment 3)"
       ],
       "chosen": "144 starts in a fresh store (Amendment 1), then replace exactly the 52 lost starts (Amendment 3)",
-      "why": "The pilot showed noise, not bias: no drift by phase position, real and synthetic phases a few milliseconds apart. Scaling the pilot's interval widths by the square root of the count, 144 scheduled starts (about 139 usable) were estimated to narrow the resolution check enough, with no guarantee; an earlier 72-start sizing had left that check out. The 52 losses died before serving a request (CUDA Error 804, driver 570.195.03), so replacing them restores the size Amendment 1 fixed rather than choosing a new one.",
+      "why": "The pilot showed noise and no evidence of bias: no drift by phase position, real and synthetic phases a few milliseconds apart. Scaling the pilot's interval widths by the square root of the count, 144 scheduled starts (about 139 usable) were estimated to narrow the resolution check enough, with no guarantee; an earlier 72-start sizing had left that check out. The 52 losses died before serving a request (CUDA Error 804, driver 570.195.03), so replacing them restores the size Amendment 1 fixed rather than choosing a new one.",
       "cost": "Both amendments were written after a verdict, in response to it. Amendment 1 had said an inconclusive larger gate meant the August fallback, with no third run under it; Amendment 3 extended the second run instead, decided after seeing the 88-start result. The final TTFT resolution check passes by 0.05 points and sits above zero: the second real phase's TTFT p50 ran about 2% higher than the first's, an order effect not investigated.",
-      "why_short": "Both misses were noise and a host fault, not adapter bias; more starts, then exact replacements, restored the size fixed beforehand.",
+      "why_short": "Neither miss showed adapter bias: noise, then a host fault shrank the gate; more starts, then exact replacements, restored its fixed size.",
       "cost_short": "Two data-dependent extensions, disclosed; the final check passes by 0.05 points with an uninvestigated order effect.",
       "short": "Enlarge, then replace",
       "serves": [
@@ -679,7 +679,7 @@
       "serves": [
         {
           "req": "R3",
-          "because": "The curve and rule (harness amendment) and τ (pre-registration, after reconnaissance) were committed before the first measured run, so the headline count could not be chosen afterwards."
+          "because": "The curve and rule (harness amendment) and τ (pre-registration, after reconnaissance) were committed before the first measured run, so the rule was not chosen after seeing the sweep."
         },
         {
           "req": "R4",
@@ -929,7 +929,7 @@
   "results": [
     {
       "title": "Throughput as adapters are added: one active, or all",
-      "short": "Spreading load halves throughput",
+      "short": "Spread over 64: half the throughput",
       "chart": {
         "type": "xy",
         "unit": "tokens/s",
@@ -1033,12 +1033,12 @@
             ]
           }
         ],
-        "note": "Whiskers: 95% bootstrap interval of the median across 23 or 24 starts. Single starts scatter more widely than the whiskers."
+        "note": "Whiskers: 95% bootstrap interval of the median across 23 or 24 starts, a plausible range for the true median. Single starts scatter more widely than the whiskers."
       },
       "axis": "Measured: Qwen3-4B on one RTX 4090, 64 requests in flight, 13 prompt and 16 output tokens. Each point is a median over server starts; both lines come from the same starts.",
       "read_as": "The gap between the lines at each N is the heterogeneity cost; the top line's own fall is the registered-slot cost. Spread TTFT p95 rose from 108 to 141 ms, far inside the 1 s SLO: all 64 served.",
       "so": "regimes",
-      "takeaway": "Holding 64 adapters but using one costs about an eighth of throughput; using all 64 at once costs about half.",
+      "takeaway": "Holding 64 adapters but using one costs about an eighth of throughput; using all 64 at once costs about half, both against one adapter on one slot.",
       "arithmetic": "Concentrated 3,577 → 3,127 tokens/s (−450, 12.6%); spread 3,568 → 1,835, about half. Every point is a median of per-start throughput: successful output tokens over total phase time."
     },
     {
@@ -1140,7 +1140,7 @@
         "right_label": "gained"
       },
       "axis": "Measured, 95% bootstrap intervals of the median. Heterogeneity: paired within each of 24 starts. Registered-slot: concentrated at 64 slots against at 1 slot, across starts. Gauge: the heterogeneity cost with the gauge on minus 24 control starts with stats logging off.",
-      "read_as": "The two costs' intervals are far apart, so H2 holds: the batch's mix costs more than the slots. The gauge's interval straddles zero; a gauge cost would show as negative, and the interval allows at most about 19 tokens/s of one (57 either way) against the 1,290.",
+      "read_as": "The two costs' intervals are far apart, so H2 holds: the batch's mix costs more than the slots. The gauge's interval straddles zero; a gauge cost would show as negative, and the interval allows a gauge cost of at most about 19 tokens/s (the post quotes the symmetric bound, 57) against the 1,290.",
       "so": [
         "regimes",
         "memory"
@@ -1219,7 +1219,7 @@
         "unit": "tokens",
         "x_label": "adapters registered (GPU slots)",
         "y_label": "KV cache capacity",
-        "x_log": true,
+        "x_log": false,
         "y_from_zero": true,
         "series": [
           {
@@ -1265,12 +1265,12 @@
         "note": "Every start at a point reported the same value, so there is no interval."
       },
       "axis": "Measured: the KV cache size vLLM logs at startup, memory budget 0.80 of the 24 GB card. Each slot's weight buffers take memory the cache would otherwise hold.",
-      "read_as": "About 45% of the cache goes by 64 slots, yet it still holds 1,339 of these short requests against the 64 in flight: memory cannot slow this load. At an 8,192-token context it holds 9 at 8 slots, which gives the memory bound.",
+      "read_as": "About 45% of the cache goes by 64 slots, yet it still holds 1,339 of these short requests against the 64 in flight: memory cannot slow this load. At an 8,192-token context it holds 9 at 8 slots, which gives the memory bound. The fall is a straight line, about 561 tokens per slot (79 MiB), not an accelerating cliff.",
       "so": [
         "memory",
         "knee"
       ],
-      "takeaway": "Adapters cost memory, but at this shape memory is capacity, not speed. Tenant bounds at 8 slots: 8 by slots, 250 by memory, 1,784 by throughput; slots bind.",
+      "takeaway": "Adapters cost memory, but at this shape memory is capacity, not speed. Tenant bounds at 8 slots: 8 by slots (a floor: every adapter resident), 250 by memory, 1,784 by throughput; slots bind.",
       "arithmetic": "42,864 / 32 (two 16-token blocks per 29-token request) = 1,339; analysis.json's own field still divides by 29 (1,478). Memory bound = unfloored throughput bound × 9 / 64 = 1,784.6 × 9 / 64 = 250.96, rounded down: 250."
     },
     {
@@ -1289,7 +1289,7 @@
             "value": 404.97
           },
           {
-            "label": "adapter, 8 tenants (upper bound)",
+            "label": "adapter, upper bound (8-tenant floor)",
             "value": 101.24
           }
         ]
@@ -1302,8 +1302,8 @@
     }
   ],
   "interview": {
-    "pitch30": "I measured how many customers' LoRA fine-tunes one GPU can serve on a shared base model, and found the cost is mostly how many share a batch, not how many you load. I split the two by running every server start with the load on one adapter and spread over all of them; at the top of the sweep, mixing cost about three times what holding the adapters did. By a knee rule fixed in advance that gives 8 tenants per GPU, a lower bound. Synthetic adapters were licensed by a pre-registered gate that needed two disclosed extensions before it could pass.",
-    "pitch120": "Products that give each customer a fine-tune serve them as LoRA adapters on one base model, and people ask how many adapters fit. That mixes two costs: adapters held in GPU slots, and adapters active in the same batch. In vLLM one setting sets both, so I separated them by traffic: every server start ran its load on a single adapter and round-robin over all registered ones, two phases each in shuffled order, so the gap is paired inside the start. I swept 1 to 64 adapters on Qwen3-4B on one RTX 4090, 24 starts per point. The adapters were synthetic, which I only used after a pre-registered equivalence gate against 4 real ones. That gate came back inconclusive twice, once from phase-to-phase noise and once after a bad host killed 52 starts, and I extended it through two post-hoc amendments, disclosed as such, until it passed. At 64 adapters, mixing cost 1,290 tokens a second against 450 for holding the slots. KV capacity fell 45% but never bound at this request shape. By the knee rule's point estimates, each doubling past 8 co-active adapters costs over a tenth of throughput, though the first crossing is unresolved: 8 tenants per GPU, about $101 a month each as an upper bound. The comparison with whole-model serving leans on artifact 4's simulator, which failed its validation, so I don't present those bars as findings.",
+    "pitch30": "I measured how many customers' LoRA fine-tunes one GPU can serve on a shared base model, and found the cost is mostly how many share a batch, not how many you load. I split the two by running every server start with the load on one adapter and spread over all of them; at the top of the sweep, mixing cost about three times what holding the adapters did. By a knee rule fixed in advance, past about 8 adapters active in the same batch each doubling costs over a tenth of throughput. That makes 8 a floor on tenants per GPU with every adapter resident, not a capacity claim: real counts depend on how often customers overlap, which I didn't measure. Synthetic adapters were licensed by a pre-registered gate that needed two disclosed extensions before it could pass.",
+    "pitch120": "Products that give each customer a fine-tune serve them as LoRA adapters on one base model, and people ask how many adapters fit. That mixes two costs: adapters held in GPU slots, and adapters active in the same batch. In vLLM one setting sets both, so I separated them by traffic: every server start ran its load on a single adapter and round-robin over all registered ones, two phases each in shuffled order, so the gap is paired inside the start. I swept 1 to 64 adapters on Qwen3-4B on one RTX 4090, 24 scheduled starts per point. The adapters were synthetic, which I only used after a pre-registered equivalence gate against 4 real ones. That gate came back inconclusive twice, once from phase-to-phase noise and once after a bad host killed 52 starts, and I extended it through two post-hoc amendments, disclosed as such, until it passed. At 64 adapters, mixing cost 1,290 tokens a second against 450 for holding the slots. KV capacity fell 45% but never bound at this request shape. By the knee rule's point estimates, each doubling past 8 adapters active in the same batch costs over a tenth of throughput, though the first crossing is unresolved. That makes 8 a floor on tenants per GPU with every adapter resident, at about $101 a month each as an upper bound; how many customers share a batch in real traffic, I didn't measure. The comparison with whole-model serving leans on artifact 4's simulator, which failed its validation, so I don't present those bars as findings.",
     "followups": [
       {
         "q": "Why synthetic adapters, and what does that license?",
@@ -1318,8 +1318,8 @@
         "a": "Dedicated and swapped come from artifact 4's simulator, which failed its pre-registered validation at exactly this operating point: 10 of 13 bins outside the band of three real repeats, 1 of 2 held-out cells passed. Its swap cost fits no single value, so the swapped bar's error direction is unknown; dedicated was never tested by the gate. The bars also cross model sizes, Qwen3-1.7B against 4B. Only the adapter bar rests on a measurement, and it is an upper bound."
       },
       {
-        "q": "Is 8 tenants per GPU robust?",
-        "a": "Not fully, and the post says so next to the headline. The 8-to-16 doubling loses 10.7%, interval 9.2% to 11.5%: the point crosses 10%, the interval does not clear it. If that is noise the bound is 16 and the cost per tenant halves; the rule was registered to err toward fewer. And 8 is a lower bound anyway: only all-resident adapters were run, while vLLM can hold more in CPU memory and swap them into slots."
+        "q": "Can I say one GPU serves 8 customers?",
+        "a": "Not as a capacity claim, and the post says so next to the headline. The 8 counts adapters active in the same batch at 64 in flight, all resident, so it is a floor on tenants; real counts depend on how often customers overlap, which wasn't measured. Even as a floor it is not firm: the 8-to-16 doubling loses 10.7%, interval 9.2% to 11.5%, so the point crosses 10% and the interval does not clear it. If that is noise the bound is 16 and the cost per tenant halves; the rule was registered to err toward fewer. And only all-resident adapters were run, while vLLM can hold more in CPU memory and swap them into slots."
       },
       {
         "q": "If memory isn't the cost, why does KV capacity fall 45%?",
@@ -1330,7 +1330,7 @@
         "a": "Build the failure-streak stop before the first paid run: without it, one bad host consumed 52 gate starts. Size the gate for its resolution check, not only its main interval: an earlier 72-start sizing left the check out, and the pilot's 24 could not resolve ±5% through phase-to-phase TTFT noise. Then the sequels the post names: rank as a variable, and resident versus swapped adapters, which turns the lower bound on tenants into a measurement."
       }
     ],
-    "limits": "One base model (Qwen3-4B), one RTX 4090, rank 16 on seven projections, one short request shape (13 prompt + 16 output tokens at 64 in flight), vLLM 0.27.1, whose source the launch-grid and gauge explanations were read from: the numbers do not transfer, and the knee elsewhere is unmeasured. All adapters resident in GPU slots, so tenants are a lower bound and the adapter cost an upper bound. The registered-slot cost is unsplit (the diagnostic ran out of memory; H4 withdrawn). The gate tested one point (8 slots), was extended twice after its result was seen, and its TTFT resolution check passes by 0.05 points with an uninvestigated order effect. The knee's first crossing is unresolved. The regime check samples the scheduler once a second. All 191 campaign starts ran on one host, so host-to-host variation is not in the intervals. 55 gate starts and 1 campaign start failed and 4 gate starts were excluded as cold, all counted. The dedicated and swapped costs come from artifact 4's simulator, which failed validation, on a smaller model; the rate is one billing sample."
+    "limits": "**Do not say \"8 customers per GPU\".** The 8 counts adapters active in the same batch at 64 in flight with every adapter resident: a floor on tenants, not a capacity claim. One base model (Qwen3-4B), one RTX 4090, rank 16 on seven projections, one short request shape (13 prompt + 16 output tokens at 64 in flight), vLLM 0.27.1, whose source the launch-grid and gauge explanations were read from (this repo's reading, not re-checked elsewhere; other versions may differ): the numbers do not transfer, and the knee elsewhere is unmeasured. All adapters resident in GPU slots, so tenants are a lower bound and the adapter cost an upper bound. The registered-slot cost is unsplit (the diagnostic ran out of memory; H4 withdrawn). The gate tested one point (8 slots), was extended twice after its result was seen, and its TTFT resolution check passes by 0.05 points with an uninvestigated order effect. The knee's first crossing is unresolved. The regime check samples the scheduler once a second. All 191 campaign starts ran on one host, so host-to-host variation is not in the intervals. 55 gate starts and 1 campaign start failed and 4 gate starts were excluded as cold, all counted. The dedicated and swapped costs come from artifact 4's simulator, which failed validation, on a smaller model; the rate is one billing sample."
   },
   "recall": [
     {
@@ -1343,7 +1343,7 @@
     },
     {
       "q": "Why does the one-adapter regime slow down too as slots grow, and why is that not memory?",
-      "a": "One known slot-proportional cost: the LoRA kernels launch `max_loras + 1` slices whatever the batch holds; empty slots' slices exit early but are launched (65 at 64 slots, 2 at 1). KV never binds at 29-token requests, so memory cannot be it. How much the launch grid explains is unmeasured: the diagnostic was cut."
+      "a": "One known slot-proportional cost: the LoRA kernels launch `max_loras + 1` slices whatever the batch holds; empty slots' slices exit early but are launched (65 at 64 slots, 2 at 1), as read from the vLLM 0.27.1 source; other versions may differ. KV never binds at 29-token requests, so memory cannot be it. How much the launch grid explains is unmeasured: the diagnostic was cut."
     },
     {
       "q": "Why is the heterogeneity cost paired within a start, and the registered-slot cost not?",
