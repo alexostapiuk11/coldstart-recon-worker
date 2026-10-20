@@ -33,7 +33,7 @@
     {
       "id": "R5",
       "short": "Rules first; trust only after a gate",
-      "text": "Fix every rule before the data it governs, with dated [amendments](p2:amendment); trust the simulator only if it reproduces a real replay, and publish a miss.",
+      "text": "Fix the rules before the data is analysed, and record any later change as a dated [amendment](p2:amendment); trust the simulator only if it reproduces a real replay, and publish a miss.",
       "why": "Fleet numbers are a model's; only a test fixed in advance separates a finding from model error ([a failed gate is a result](p2:failed))."
     },
     {
@@ -48,7 +48,7 @@
       "id": "zipf",
       "short": "Zipf skew and hot models",
       "term": "Zipf skew, and hot models",
-      "plain": "The k-th most popular of 20 models gets a share proportional to 1 / k to the power s. At **s = 2.0** the hottest model carries about 62.7% (a scope-amendment estimate). Total load: one GPU's measured throughput, 8.89 requests per second. A model above 0.7 of a GPU is **hot** and gets pinned GPUs in every strategy."
+      "plain": "The k-th most popular of 20 models gets a share proportional to 1 / k to the power s. At **s = 2.0** the hottest model carries 62.7% of requests (1 divided by 1.596, the sum of 1 / k² over the 20 models). Total load: one GPU's measured throughput, 8.89 requests per second. A model above 0.7 of a GPU is **hot** and gets pinned GPUs in every strategy. Spread arrivals never reach that: even at s = 2.0 the hottest model needs 0.627 of a GPU, so no model is hot there."
     },
     {
       "id": "regimes",
@@ -66,7 +66,7 @@
       "id": "coloc",
       "short": "Co-location and the KV split",
       "term": "Co-location and the KV split",
-      "plain": "Two engines on one card, 45% of its memory each. The [KV cache](p1:kvcache) falls from **168,464** tokens alone to **55,104** (pinned): 82 requests of 2,048 tokens at once, against 26. It shrinks 3.1 times while the memory share shrinks 2.0 times, because the [weights](p1:weights) and graph buffers come out of the smaller budget first."
+      "plain": "Two vLLM 0.27.1 engines on one card, 45% of its memory each. The [KV cache](p1:kvcache) falls from **168,464** tokens alone to **55,104** (pinned): room for 82 full-length requests of 2,048 tokens, against 26 (26 to 28 were seen running). It shrinks 3.1 times while the memory share shrinks 2.0 times. About 2.6 times is a fixed cost: roughly 3.6 GiB sits outside the KV cache (the [weights](p1:weights) among it) at either budget, so it comes off the smaller budget first; an unpinned split engine that hit the compile cache held 64,976 tokens. The other 1.18 is the pin: both engines were held to the compiled engine's 55,104, about 1 GiB of KV less each, so that two engines' CUDA-graph capture fit on the card."
     },
     {
       "id": "slo",
@@ -514,12 +514,12 @@
       "problem": "The question is about fleets of 10 to 25 GPUs and 20 models; the August design planned to extend artifact 2's simulator.",
       "options": [
         "Extend artifact 2's simulator with a model dimension (the August design)",
-        "Assume co-located models each get half the GPU",
+        "Assume co-located models each get half the throughput",
         "A new loop with GPU identity: route by residency, swap by LRU, serve every request; swap, interference and KV split measured"
       ],
       "chosen": "A new loop with GPU identity: route by residency, swap by LRU, serve every request; swap, interference and KV split measured",
-      "why": "Artifact 2's loop has no replica identity, and placement is exactly which GPU holds which model; changing it would also change artifact 2's code mid-experiment. The half-the-GPU guess is \"almost certainly wrong in both directions\" (design), so it was measured. Every request is served, because dropping unfinished ones would drop the cold-tail requests stuck behind swaps.",
-      "why_short": "Artifact 2's loop has no GPU identity, and placement is which GPU holds which model; the half-a-GPU guess had to be measured.",
+      "why": "Artifact 2's loop has no replica identity, and placement is exactly which GPU holds which model; changing it would also change artifact 2's code mid-experiment. The half-the-throughput guess is \"almost certainly wrong in both directions\" (design), so it was measured. Every request is served, because dropping unfinished ones would drop the cold-tail requests stuck behind swaps.",
+      "why_short": "Artifact 2's loop has no GPU identity, and placement is which GPU holds which model; the half-the-throughput guess had to be measured.",
       "cost": "A new loop to build. Service time is frozen at dispatch, capacity is the top measured concurrency, and neighbour load between 0 and 16 is interpolated, not measured.",
       "cost_short": "A new loop to build; service time frozen at dispatch; neighbour load 1 to 15 interpolated, not measured.",
       "short": "New simulator, measured inputs",
@@ -624,7 +624,7 @@
         "Qwen3-4B, falling back to Qwen3-1.7B, by a go/no-go fixed before reconnaissance; a request long enough that the split's KV binds"
       ],
       "chosen": "Qwen3-4B, falling back to Qwen3-1.7B, by a go/no-go fixed before reconnaissance; a request long enough that the split's KV binds",
-      "why": "A different card would confound strategy with hardware. Pass: both engines healthy at 45% of memory, each with at least 16,384 KV tokens. The 4B pair left 9,456 and 9,520; the 1.7B pair passed. The shape rule chose 1,792 input and 256 output tokens: 26 requests fit a split engine, 82 a lone one.",
+      "why": "A different card would confound strategy with hardware. Pass: both engines healthy at 45% of memory, each with at least 16,384 KV tokens. The 4B pair left 9,456 and 9,520; the 1.7B pair passed. The shape rule chose 1,792 input and 256 output tokens: a split engine has room for 26 full-length requests, a lone one for 82.",
       "why_short": "Two 8B models do not fit one card, and a short request never fills the KV cache; a go/no-go fixed in advance picked the size.",
       "cost": "A small-model result (3.8 GiB of weights); swap and co-location costs scale with size. Two warm engines did not fit at 45% each, so their KV was pinned to 55,104 tokens by a signed amendment.",
       "cost_short": "A small-model result, and the pair's KV had to be pinned by an amendment to fit at all.",
@@ -657,7 +657,7 @@
       "chosen": "A screen over 3 loads × 3 SLO multiples of the swap median that scores how many strategies each grid point tells apart, never which is cheaper",
       "why": "A count of distinct fleet sizes cannot favour a strategy. Ties went to the earlier candidate: one GPU of load and twice the swap median, 75.6 s with the measured swaps. The screen's data was committed before the values it set.",
       "why_short": "Counting how many strategies a point tells apart cannot favour one; the placeholder SLO was shorter than a swap.",
-      "cost": "Twice a swap absorbs a swap, which favours swapping: at the reference point the simulated swap fleet delivers about 45 s p99, the others 4 to 5 s. The measured sweep ran at this one SLO, and the screen ran on placeholder engines.",
+      "cost": "Twice a swap absorbs a swap, which favours swapping: at the reference point the simulated swap fleet delivers about 45 s p99, the others 4 to 5 s. The measured sweep ran at this one SLO, and the screen ran on placeholder engines. At twice a swap even the simulated spread swap pool at s = 1.0, which never finds a model resident (hit rate 0.0), meets the SLO: its worst decile is 74.3 s against 75.6.",
       "cost_short": "Twice a swap favours swapping, and the measured sweep ran at that one SLO.",
       "short": "Ranking-blind load and SLO",
       "serves": [
@@ -686,7 +686,6 @@
       "title": "Hold the simulator to a one-GPU replay; publish the miss",
       "problem": "Fleet numbers mean something only if the simulator reproduces a real system; the design scaled artifact 2's gate down to one GPU.",
       "options": [
-        "Trust the simulator because its inputs are measured",
         "Draw each predicted swap from the measured distribution",
         "After the failure, re-validate with the swap time calibrated",
         "Three real replays of one 900 s bursty trace; predict with the median measured swap; publish whatever the verdict"
@@ -1126,8 +1125,8 @@
         ],
         "note": "SIMULATED, FAILED VALIDATION. Bursty s = 0.6 is not evaluable: some decile had too few requests for a p99 in some run."
       },
-      "axis": "Simulated by a model that failed its gate. Each point: the smallest fleet whose every popularity decile meets the 75.6 s p99 SLO, over 30 runs.",
-      "read_as": "In each regime one strategy is cheapest at every evaluable skew: co-locate when spread, swap when bursty. Dedicating, which can at best tie by construction, needs about twice the cheapest. Spread swap's peak at s = 1.25 was not diagnosed.",
+      "axis": "Simulated by a model that failed its gate. Swap's point is the smallest pool whose every popularity decile meets the 75.6 s p99 SLO, over 30 runs. Dedicate's is fixed by the hot-model rule (pinned GPUs plus one per other model). Co-locate's is its pairing floor (pinned GPUs plus half the rest, paired), where the SLO held at every evaluable point.",
+      "read_as": "In each regime one strategy is cheapest at every evaluable skew: co-locate when spread, swap when bursty. Only swap's line was moved by the SLO search; dedicate's and co-locate's are hot-rule and pairing arithmetic, and co-locate never left its floor. The offered load is one GPU's worth, so those two counts follow from how many models a GPU holds, not from throughput. Dedicating, which can at best tie by construction, needs about twice the cheapest. Spread swap's peak at s = 1.25 was not diagnosed.",
       "so": [
         "sizing",
         "regimes"
@@ -1436,16 +1435,16 @@
             "label": "KV ceiling, alone"
           }
         ],
-        "note": "Held-out cells: own 24 with neighbour 48 (passed), own 48 with neighbour 24 (missed)."
+        "note": "Held-out cells: own 24 with neighbour 48 (passed), own 48 with neighbour 24 (missed, above the split ceiling of 26). A cell passes if the prediction is inside its repeats' range or within 10% of their median."
       },
       "axis": "Measured on RunPod: median latency of 1,792 + 256-token requests, 3 or more runs per point. Split: two engines at 45% of memory, KV pinned to 55,104 tokens.",
-      "read_as": "A busy neighbour makes a model 2.0 to 2.4 times slower at every load, even one request; 32 and 64 match because the neighbour sits at its ceiling. An idle neighbour costs nothing up to 32.",
+      "read_as": "A busy neighbour makes a model 2.0 to 2.4 times slower at every load, even one request; 32 and 64 match because the neighbour sits at its ceiling. An idle neighbour costs nothing up to 32; at 64 the split engine is slower even alone (8.63 against 7.66 s), probably queueing behind its ceiling of 26.",
       "so": [
         "newsim",
         "model"
       ],
       "takeaway": "Next to a busy neighbour a model does slightly worse than half a card, and holds under a third of the requests it could alone.",
-      "arithmetic": "Own 1: 2.95 / 1.27 = 2.3. KV: 168,464 / 2,048 = 82 requests alone, 55,104 / 2,048 = 26 split; 168,464 / 55,104 = 3.1 while the memory share falls 2.0 times."
+      "arithmetic": "Own 1: 2.95 / 1.27 = 2.3. KV: 168,464 / 2,048 = 82 alone, 55,104 / 2,048 = 26 split; 168,464 / 55,104 = 3.1 = 2.6 (168,464 / 64,976, fixed cost) × 1.18 (64,976 / 55,104, the pin)."
     },
     {
       "title": "Measured: where a 37.8 s swap goes",
@@ -1540,7 +1539,7 @@
         ]
       },
       "axis": "Median seconds per stage. Swap: 16 warm swaps of Qwen3-1.7B. Cold start: artifact 1's arm C [cold start](p1:coldstart) (Qwen3-8B), a reference, not a baseline.",
-      "read_as": "A swap skips platform scheduling and compiling (a cache hit) but re-pays process start, imports and the health check: 27.8 of 37.8 s. Artifact 1's launch segment also holds process start.",
+      "read_as": "A swap skips platform scheduling and compiling (a cache hit) but re-pays process start, imports and the health check: 27.8 of 37.8 s. Artifact 1's launch segment is not a weight download: 16.7 of its 21.3 s is server start-up before the model-loading line (arm C medians), which a swap also pays.",
       "so": "newsim",
       "takeaway": "For a model this small, a swap is about as long as artifact 1's 8B cold start: process start dominates. Sleep mode (5.0 s) was never simulated.",
       "arithmetic": "Stage medians: 0.8 + 0.04 + 27.8 + 2.2 + 6.8 + 0.3 = 37.94 s, not the 37.8 s median swap (medians do not add). Cold start: 4.8 + 21.3 + 8.6 + 4.1 + 0.3 = 39.1 s."
@@ -1870,7 +1869,7 @@
       },
       {
         "q": "Why is dedicating never cheapest?",
-        "a": "Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). The simulated margin is the point: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs."
+        "a": "Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). Co-locate also sat at its pairing floor, half the tail models paired, at every evaluable point, so only swap's count came from the SLO search. The simulated margin is the point: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs."
       },
       {
         "q": "What would change the winner?",
@@ -1910,7 +1909,7 @@
     },
     {
       "q": "Splitting memory halves each engine's share. Why does its KV cache shrink 3.1 times?",
-      "a": "Weights and graph buffers are fixed and come out of the smaller budget first: 168,464 to 55,104 tokens, 82 to 26 requests."
+      "a": "About 2.6 times is a fixed cost, roughly 3.6 GiB outside the KV cache at either budget, which comes off the smaller budget first. The other 1.18 is the pin to the compiled engine's 55,104 tokens, which lets two graph captures fit: 168,464 to 55,104 tokens, 82 to 26 requests."
     },
     {
       "q": "A busy neighbour makes a model about twice as slow. Why does co-locating still halve the simulated spread fleet?",
@@ -2427,6 +2426,34 @@
     {
       "value": "13.0",
       "how": "Artifact 1 arm C: engine init 8.6 + health 4.1 + first request 0.3 s (data/a4/analysis.json inputs.a1_reference.stages)."
+    },
+    {
+      "value": "1.596",
+      "how": "Sum of 1 / k^2 for k = 1..20 = 1.5962 (computed); the hottest model's share at s = 2.0 is 1 / 1.5962 = 0.6265, which placement/fleet.py hot_allocation compares with 0.7 of a GPU (spread peak_factor 1)."
+    },
+    {
+      "value": "0.627",
+      "how": "1 / 1.5962 = 0.6265 to three places, times offered load 1.0 GPU (data/a4/analysis.json design.offered_gpus), below hot_fraction 0.7."
+    },
+    {
+      "value": "2.6",
+      "how": "168,464 / 64,976 = 2.593 to one decimal: solo KV (docs/recon-a4.md section 7, warm compile cache) over the unpinned split engine that hit the compile cache (docs/recon-a4.md section 2, engine B)."
+    },
+    {
+      "value": "1.18",
+      "how": "64,976 / 55,104 = 1.179 to two decimals: the unpinned cache-hit split engine over the pinned (compiled engine's) KV."
+    },
+    {
+      "value": "3.6",
+      "how": "Memory outside the KV cache, by subtraction, GiB: 0.92 x 23.52 = 21.64 budget minus 168,464 x 114,688 B = 17.99 GiB KV = 3.65; 0.45 x 23.52 = 10.58 minus 64,976 x 114,688 B = 6.94 GiB = 3.64. Inputs: docs/experiment-a4.md KV-pin amendment (23.52 GiB card, 114,688 bytes of KV per token, 0.92 solo and 0.45 split)."
+    },
+    {
+      "value": "74.3",
+      "how": "data/a4/analysis.json regimes.spread.points[s=1.0].strategies.swap.decile_p99, maximum = 74.3206 s, to one decimal (swap at 13 GPUs); hit_rate there is 0.0."
+    },
+    {
+      "value": "16.7",
+      "how": "docs/post.md ('What T_weights contains'): start-up before the load line, arm C median 16.67 s, to one decimal; the launch-to-model-loaded span is 21.34 s."
     }
   ],
   "links": {
