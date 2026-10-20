@@ -22,12 +22,13 @@ page (`page.html`) and a pasteable chat brief (`brief.md`). Design:
 | p3 | Delivery guarantees and duplicate payments | 20 | `p3/page.html`, `p3/brief.md` |
 | a1 | Where a vLLM cold start goes | 45 | `a1/page.html`, `a1/brief.md` |
 | a2 | An autoscaling simulator that failed its own test | 45 | `a2/page.html`, `a2/brief.md` |
+| a3 | Tool-calling failure modes (design and predictions only) | 45 | `a3/page.html`, `a3/brief.md` |
 | a4 | Dedicate, swap or share | 45 | `a4/page.html`, `a4/brief.md` |
 | a5 | How many LoRA adapters fit on one GPU | 45 | `a5/page.html`, `a5/brief.md` |
 | a6 | Which duplicate-payment defense holds (results pending) | 45 | `a6/page.html`, `a6/brief.md` |
 | a7 | The anatomy of a matching engine's tail | 45 | `a7/page.html`, `a7/brief.md` |
 
-All eight units are built. A6 shows requirements, design, predictions and controls only: its
+All nine units are built. A3 shows the design, the grader's offline controls and five predictions only: no campaign has run, and the pre-registration is not yet committed. Units a1 to a7 (except a3's flow) have a "How it works" step-through walkthrough: one mechanism, state changing step by step. A6 shows requirements, design, predictions and controls only: its
 campaign is running and its results are sealed (`~/projects/ledger-faults`, `docs/experiment.md`
 D40). When results exist, update `a6/content.json` (the predictions grid, results and limits) and
 rebuild.
@@ -47,6 +48,7 @@ Private Artifacts.
 | p3 | https://claude.ai/artifact/HspzVnu9oRQMqUjfrWUqZL |
 | a1 | https://claude.ai/artifact/2WmMh5z8C1bcehAmMurWQe |
 | a2 | https://claude.ai/artifact/7HwprMXHbJWfYWouMhLfDR |
+| a3 | https://claude.ai/artifact/TDcKsTY981bDb24eesiUQ4 |
 | a4 | https://claude.ai/artifact/RsJ9cD9eNMWorL5EgVgrat |
 | a5 | https://claude.ai/artifact/SAgFc2UtJ4GuyyRX3ZZmu2 |
 | a6 | https://claude.ai/artifact/W6LMjByKW9fJhEXnQDuA46 |
@@ -57,8 +59,18 @@ the source is `docs/learning/study/<unit>/page.html`.
 
 ## Notes
 
+- A learning-design review of each artifact unit sits in `reviews/` (kept local, not committed). Accuracy fixes from those reviews were applied after checking each claim against sources; claims that could not be verified were left unchanged. Open items are listed at the end of this file.
+
 - `inventory-a1-explainer.md` records what the older A1 explainer does and which parts the
   new unit keeps, moves to P1, or leaves to the old page.
 - Rebuild after editing a `content.json`: `.venv/bin/python scripts/build_study.py`. A test
   fails if a page or brief is stale, if a number is not in a cited source, or if a cited
   section is missing.
+
+## Open items
+
+- A1 inventory: 8 observable drops from the older explainer need sign-off (`inventory-a1-explainer.md`).
+- Original posts still say "hours apart" for A1's campaign windows (they were 19.8 h and 17.5 h apart; `docs/post.md` Scope and `docs/experiment.md`); post-a5 line 122 words an interval loosely; A4's post has a weight-download wording issue. The units are correct; the posts are not edited.
+- A3: the selection band keeps scenarios whose reruns flip, while the amendment cites near-deterministic reruns. Raised in the A3 review; unresolved until the pilot.
+- A6: results stay sealed until the campaign ends; update `a6/content.json` then.
+- Page length: units grew with the walkthroughs (about 175 to 200 KB of HTML each); trim if 45 minutes is too long.
