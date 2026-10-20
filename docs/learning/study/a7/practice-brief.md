@@ -43,12 +43,12 @@ KEY steps:
 
 1. (a) A gated message waits for the rest of the sync in flight (0 to S), then its batch's write (0.55 µs) and its batch's whole sync (S): between S and 2S + 0.55 µs.
 2. With S from 23.5 µs (median) to 48.4 µs (p99.99): about 24 µs to 97.4 µs (2 x 48.4 + 0.55 = 97.35). Measured D2 p99.99: 72.1 µs, inside the range. A rough bracket, not a prediction.
-3. (b) Any gated reply waits for a whole sync. Even fio's 14.66 µs gives D2 / D1 >= 14.66 / 1.39 = 10.5. H3a needs under 2.00x, so a sync under 2 x 1.39 = 2.78 µs. No sync measured here is that fast. Measured ratio: 52.0x.
-4. (c) Ceiling = 1 / time per order. Fio's median gives 1 / 14.66 µs = 68,200/s, an upper bound that ignores the write and the hand-offs. Fio's mean (17.5 µs; 57,264 IOPS on h2) gives about 57,000/s.
+3. (b) Any gated reply waits for a whole sync: even fio's 14.66 µs gives D2 / D1 >= 14.66 / 1.39 = 10.5. H3a needs under 2.00x: S + 0.55 write under 2 x 1.39 = 2.78 µs, so S under 2.23 µs (2.78 if the write is ignored). No sync measured is that fast. Measured: 52.0x.
+4. (c) Ceiling = 1 / time per order. Fio's median gives 1 / 14.66 µs = 68,200/s, an overestimate: the median sits below the mean, and it ignores the write and the hand-offs. Fio's write IOPS (57,264 on h2; 1 / IOPS = 17.5 µs, a write-plus-sync cycle, not a mean sync latency) gives about 57,000/s.
 5. Measured: saturated D3 forks sustained 23,929 to 23,979/s: about 41.8 µs per order (1 / 23,929), 35% of 68,200. Why is not separated.
 6. (d) At 100,000/s the offered work is 100,000 x 41.8 µs = 4.18 s per second; even at fio's median it is 1.47. It saturates: the backlog grows by about 76,000 orders a second. Observed: saturated on all three hosts, in no test.
 
-KEY answer: D2 p99.99 between about 24 and 97 µs (measured 72.1). D2 is at least 10.5 times D1, so H3a could not hold. D3 is capped near 68,200/s by fio, reached 23,929/s, so 100,000/s saturates.
+KEY answer: D2 p99.99 between about 24 and 97 µs (measured 72.1). D2 is at least 10.5 times D1, so H3a could not hold. fio's median puts D3's ceiling near 68,200/s (an overestimate); D3 reached 23,929/s, so 100,000/s saturates.
 
 ### Estimate 2: The pause budget: how many G1 pauses reach the p99.99?
 
@@ -58,11 +58,11 @@ KEY steps:
 
 1. Arrivals are evenly spread, so a pause of length L delays about rate x L messages (a floor: the backlog after it adds more).
 2. The p99.99 rank is 0.01% of the window's messages: 0.0001 x rate x T. n pauses reach it when rate x L x n > 0.0001 x rate x T.
-3. The rate cancels: n x L > 0.0001 x T. A 60 s window needs more than 6 ms of pause in total; a 200 s window, more than 20 ms.
+3. The rate cancels in this inequality: n x L > 0.0001 x T. It still matters through n: higher rates produced more pauses per window here (1, 2, 5 to 7). A 60 s window needs more than 6 ms of pause in total; a 200 s window, more than 20 ms.
 4. At 2.5 ms: 60 s needs 3 pauses (two give 5 ms, under 6 ms); 200 s needs more than 8.
 5. Data: 10,000/s, 1 pause of 2.68 ms: about 27 vs rank 200, no. 100,000/s, 2 pauses: about 500 vs 600, short of it; 9 of 30 launches had queue + park over 100 µs. 500,000/s, 5 to 7 pauses: about 7,500 vs 3,000, yes; 30 of 30.
 
-KEY answer: A pause shows at p99.99 once total paused time exceeds 0.01% of the window: 6 ms per 60 s. Pause count and length decide it, not the rate; the ring arms had no pauses. Arithmetic and a floor; post hoc.
+KEY answer: A pause shows at p99.99 once total paused time exceeds 0.01% of the window: 6 ms per 60 s. Pause count and length decide it; higher rates produced more pauses here (1, 2, 5 to 7), so the rate acts through the count. The ring arms had no pauses. Arithmetic and a floor; post hoc.
 
 ## Deep-dive drills
 
@@ -83,13 +83,13 @@ RED FLAG: A lock per book and several matching threads, with no answer for a det
 ### Drill 3 of 12
 
 Q: Your generator waits for each response. A 10 ms stall hits at 100,000/s. What does it record, and what should it?
-KEY: It records one slow request; 1,000 were due (100,000 x 0.010 s). An open loop scores all 1,000 from their intended send times; if evenly spaced, the slowest 100 wait over 9 ms. So a closed loop can hide a tail of 1% of the messages. Bridge: wrk2's README says it measures from when each request was due and that wrk's model suffers coordinated omission.
+KEY: It records one slow request; 1,000 were due (100,000 x 0.010 s). An open loop scores all 1,000 from their intended send times; if evenly spaced, the slowest 100 wait over 9 ms. So a closed loop can hide about 1,000 messages, 1% of that second's 100,000. Bridge: wrk2's README says it measures from when each request was due and that wrk's model suffers coordinated omission.
 RED FLAG: "Run it longer" or "add client threads": still a closed loop, so a stall is still sampled once per connection.
 
 ### Drill 4 of 12
 
 Q: Ring or ArrayBlockingQueue: what actually differs, and what did the study measure?
-KEY: The ring is a preallocated array with one writer per sequence counter: publish with a release store, consume with an acquire read, counters padded against false sharing; no lock, no allocation (spec Module 7). The queue has one lock for both ends, and a thread that must wait allocates a wait node and parks. Measured: the ring arms allocated nothing; the queue + park matcher thread allocated about 32 B per voluntary context switch at 10,000/s.
+KEY: The ring is a preallocated array with one writer per sequence counter: publish with a release store, consume with an acquire read, counters padded against false sharing; with busy-spin, no lock (the blocking strategy enters a monitor per publish), no allocation (spec Module 7). The queue has one lock for both ends, and a thread that must wait allocates a wait node and parks. Measured: the ring arms allocated nothing; the queue + park matcher thread allocated about 32 B per voluntary context switch at 10,000/s.
 RED FLAG: "The ring is lock-free, so it is always faster." At 10,000/s a parking ring (5.32 µs) was slower than a spinning queue (4.08 µs).
 
 ### Drill 5 of 12
@@ -125,7 +125,7 @@ RED FLAG: "Java is slow", or blaming the queue's algorithm with no rank arithmet
 ### Drill 10 of 12
 
 Q: Fio says a sync takes 14.66 µs, so D3 should reach 68,200/s. It saturated near 23,900. What do you say?
-KEY: 1 / median is an upper bound: capacity is 1 / mean service time, and it ignores the write and the hand-offs. Fio's mean was 17.5 µs (about 57,000/s). The saturated forks took about 41.8 µs per order, 35% of the ceiling. Why the pipeline is slower than fio was not separated; interrupts on the journaler's core are a candidate, untested.
+KEY: 1 / median overestimates: capacity is 1 / mean service time, the sync's median sits below its mean, and it ignores the write and the hand-offs. Fio's 17.5 µs is 1 / its write IOPS, a write-plus-sync cycle, not a mean sync latency (about 57,000/s). The saturated forks took about 41.8 µs per order, 35% of the ceiling. Why the pipeline is slower than fio was not separated; interrupts on the journaler's core are a candidate, untested.
 RED FLAG: "Fio was wrong", or no capacity reasoning.
 
 ### Drill 11 of 12
@@ -194,7 +194,7 @@ KEY what it shows: The book's rules, that scan cost follows empty slots, and tha
 
 ## Calculator
 
-A sync time, the D2 bracket and the D3 ceiling Defaults are measured in this study (S = the median in-pipeline sync at 20,000/s, 23.5 µs). Arithmetic bounds, not a queueing model: try S = 48.4 for the slow-sync end. Measured D3 reached only 35% of the fio-based ceiling, so read the ceiling as an upper bound.
+A sync time, the D2 bracket and the D3 ceiling Defaults are measured in this study (S = the median in-pipeline sync at 20,000/s, 23.5 µs). Arithmetic bounds, not a queueing model. S = 48.4 (p99.99) gives the slow end, but a tail value overstates utilisation. D3 reached 35% of the fio-based ceiling: read it as an overestimate.
 
 Inputs (default, range):
 
@@ -225,7 +225,7 @@ Outputs at the defaults:
 - [co] 100,000/s and a 10 ms stall: closed against open? -> KEY: Closed records 1 slow request; open scores all 1,000 due, the slowest 100 over 9 ms if evenly spaced.
 - [co] [draw] Draw a closed-loop and an open-loop client across a stall. -> KEY: Closed: one request waits, nothing else is sent. Open: sends stay on the schedule and each is scored from its intended time, so the due ones pile up as slow samples.
 - [samples] How many messages before p99.99 may be reported? -> KEY: At least 100 samples above it: n x (1 - q) >= 100, so 1,000,000 messages for p99.99 and 10,000 for p99. Here 2,000,000 leave 200 above p99.99.
-- [ring] What makes a one-producer ring lock-free and allocation-free? -> KEY: Preallocated slots; one writer per sequence counter; release store to publish, acquire read to consume; counters on separate cache lines (spec Module 7).
+- [ring] What makes a one-producer ring with busy-spin lock-free and allocation-free? -> KEY: Preallocated slots; one writer per sequence counter; release store to publish, acquire read to consume; counters on separate cache lines (spec Module 7). With the blocking wait strategy, each publish enters a monitor.
 - [ring] [draw] Draw an 8-slot ring with the producer at sequence 11 and the consumer through 3. Can sequence 12 be published? (toy numbers) -> KEY: No. Sequence 12 reuses slot 4, still holding unconsumed sequence 4 (12 - 8 = 4 > 3). The producer waits: spin, or park.
 - [queue] Why does queue + park allocate even with no contention? -> KEY: A take on an empty queue waits on a condition. At 10,000/s the matcher thread allocated 62,375,392 B over 1,947,577 voluntary context switches: about 32.0 B per park, consistent with a wait node per park (JDK internals not read here).
 - [wait] Cost of parking against spinning, and the GPU bridge? -> KEY: About 1.7 µs per hop at the median at 10,000/s; spinning three of six cores is $0.205/h per host. CUDA's spin and blocking-sync device flags are the same trade (CUDA runtime docs).
@@ -234,7 +234,7 @@ Outputs at the defaults:
 - [durability] What survives what: write against fdatasync? -> KEY: write: a killed JVM, not a kernel crash or power loss. fdatasync: all three, on drives that honour it; check the volatile-write-cache bit (VWC 0 here). Kafka's default posture is the page-cache one (D1), per the post; not checked in Kafka's docs.
 - [durability] [draw] Draw one D2 message from arrival to release. -> KEY: Arrives mid-sync A; waits; journaler drains batch B, write, one fdatasync, stores durableSeq; Output, spinning on durableSeq, releases it. Up to about two syncs.
 - [durability] Why could H3a (D2 under 2.00x D1) not hold? -> KEY: A gated reply waits for a whole sync: even 14.66 µs against 1.39 µs is 10.5 times. Measured: 52.0 times. The rule was fixed at design approval and kept.
-- [capacity] D3's ceiling: formula, and what was measured? -> KEY: 1 / mean service time per order. Fio's median gave 68,200/s (an upper bound); the saturated forks sustained 23,929/s, about 41.8 µs per order.
+- [capacity] D3's ceiling: formula, and what was measured? -> KEY: 1 / mean service time per order. Fio's median gave 68,200/s (an overestimate); the saturated forks sustained 23,929/s, about 41.8 µs per order.
 - [attribution] Share against credit? -> KEY: Share: the fraction of a message's latency spent in a stage (H1). Credit: a cause covers at least 50% of the message's excess over the median, counted per message (H6).
 
 ## Review schedule
@@ -257,7 +257,7 @@ Not from the study page's sources:
 - 97.35: worked out, 2 x 48.4 + 0.55 = 97.35 microseconds.
 - 97.4: worked out, 97.35 rounded to one decimal.
 - 2.78: worked out, 2 x 1.39 = 2.78 microseconds.
-- 17.5: worked out, 1 / 57,264 IOPS = 17.46 microseconds, fio's mean (recon.md, h2).
+- 17.5: worked out, 1 / 57,264 IOPS = 17.46 microseconds: fio's write IOPS inverted, a write-plus-sync cycle, not a mean sync latency (recon.md, h2).
 - 41.8: worked out, 1 / 23,929 per second = 41.79 microseconds per order.
 - 4.18: worked out, 100,000 x 41.8 microseconds = 4.18 seconds of work per second.
 - 1.47: worked out, 100,000 x 14.66 microseconds = 1.466 seconds of work per second.
@@ -278,6 +278,7 @@ Not from the study page's sources:
 - 10,000: worked out, n x (1 - q) >= 100 with q = 0.99 gives n >= 10,000.
 - 62,375,392: worked out, results-a7.md 11.4 allocated_bytes_delta, matcher, E1-ABQ_PARK-D1-10000.
 - 1,947,577: worked out, results-a7.md 11.4 voluntary_cs_delta, matcher, E1-ABQ_PARK-D1-10000.
+- 2.23: worked out, 2 x 1.39 - 0.55 = 2.23 microseconds: the sync that would meet H3a once the batch write is counted.
 
 ## Drill mode (paste this to an AI chat)
 

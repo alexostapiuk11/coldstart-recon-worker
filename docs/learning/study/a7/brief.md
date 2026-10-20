@@ -56,7 +56,7 @@ Five made-up orders on one symbol, run through `FastEngine`: fills and scan coun
 |---|---|---|---|---|
 | 1 | Per symbol and side the book is an array of price levels (4,097: the reference price ±2,048 ticks), each a FIFO of resting orders, oldest first. Best bid and ask are tracked as indices. | 10,002 [S1 5, S2 3]; 10,004 [S3 10] | 9,999 [B1 4] | none yet |
 | 2 | seq 20: BUY B9, 10 at 10,004, crosses. It fills the oldest order at the best level first: S1 for 5, S2 for 3, at 10,002. That empties the level, so it scans up one empty slot to 10,004 and fills S3 for 2. | **10,004 [S3 8]** | 9,999 [B1 4] | **B9: 5 and 3 at 10,002; 2 at 10,004** |
-| 3 | seq 21: SELL S4, 6 at 10,004, does not cross (best bid 9,999), so it rests behind S3: price first, then time. seq 22: CANCEL S3 is found by order id and unlinked from the middle of its FIFO. | **10,004 [S4 6]** | 9,999 [B1 4] | **cancel ack: S3, 8 cancelled** |
+| 3 | seq 21: SELL S4, 6 at 10,004, rests behind S3 (no cross; best bid 9,999). seq 22: CANCEL S3, found by order id, is unlinked from the front of its FIFO (any position costs the same); the level stays non-empty: no scan. | **10,004 [S3 8, S4 6]; after cancel [S4 6]** | 9,999 [B1 4] | **cancel ack: S3, 8 cancelled** |
 | 4 | seq 23: BUY B10, 7 at 10,004. It fills S4 for 6 and empties the last ask level, so it scans up 2,044 empty slots to the band's edge and finds no asks. The 1 left rests as a bid. | **none** | **10,004 [B10 1]; 9,999 [B1 4]** | **B10: 6 at 10,004** |
 | 5 | seq 24: SELL S5, 3 at 9,999. Best bid 10,004 is above its limit, so it crosses at the resting order's price, 10,004: B10 for 1. It scans down 4 empty slots to 9,999 and fills B1 for 2. | none | **9,999 [B1 2]** | **S5: 1 at 10,004; 2 at 9,999** |
 
@@ -68,7 +68,7 @@ Bold cells changed in that step.
 
 ### One fork: five threads, three swapped channels (container)
 
-One JVM per fork, one thread per isolated core. The wire ring is fixed; E1 swaps the three `Channel`s, E2 the `Durability`. Output releases when matched and, at D2 and D3, once the durable sequence reaches the order: latency is the slower branch, not the sum. The p99.99 belongs to the match stage and its queue without a sync (1.39 µs), the sync with one (72.1 to 197 µs), G1 pauses in the queue arms at 500,000/s (2.02 to 2.16 ms).
+One JVM per fork, one thread per isolated core. The wire ring is fixed; E1 swaps the three `Channel`s, E2 the `Durability`. Output releases when matched and, at D2 and D3, once the durable sequence reaches the order: latency is the slower branch, not the sum. The p99.99 belongs to the match stage and its queue without a sync (1.39 µs), the sync with one (72.1 to 197 µs), G1 pauses (post hoc) in the queue arms at 500,000/s (2.02 to 2.16 ms).
 
 - **Generator (core 1)**: Poisson schedule, on time
 - **Gateway (core 2)**: decode, sequence, fan-out
@@ -380,7 +380,7 @@ Milestones: 1. Specify, get it reviewed, approve (2026-10-08 (−07:00)); 6. Pre
 ### Hand-off p99.99 against load
 
 - Axis: E1 at D1, 30 forks per point over three hosts. H2's D: the wait strategy's effect minus the structure's, in log p99.99; D > 0 means waiting matters more.
-- Read it as: 10,000/s: spinning 1.43 and 4.08 µs, parking 5.32 and 6.13; waiting matters more (D +0.257, holds). Ring median wait per hand-off: 0.18 µs spinning, 1.92 parking (output side 0.19, 1.90): about 1.7 µs a hop, a median, not the tail's cause. 500,000/s: the queue arms jump to milliseconds (D −5.957, fails). 100,000/s: mixed. No arm saturated.
+- Read it as: 10,000/s: spinning 1.43 and 4.08 µs, parking 5.32 and 6.13; waiting matters more (D +0.257, holds). Ring median wait per hand-off: 0.18 µs spinning, 1.92 parking (output side 0.19, 1.90): about 1.7 µs on the match and output hops (journal hop 2.2). It shifts every message, most of the park-spin p99.99 gap (median 4.23 against 0.69 µs), but it is not what makes a message slow within an arm. 500,000/s: the queue arms jump to milliseconds (D −5.957, fails). 100,000/s: mixed. No arm saturated.
 - How it is computed: Post "Ring or spin?" table; 2.16 and 2.02 ms drawn as 2,160 and 2,020 µs. D's 97.9% intervals: +0.176 to +0.282, −0.128 to +0.052, −5.996 to −5.813.
 - Axes: x is offered rate, messages/s (log scale); y is p99.99, all hosts' forks (µs); log y
 - ring + busy-spin: 10000: 1.43 (1.42 to 1.45), 100000: 1.39 (1.38 to 1.41), 500000: 1.53 (1.52 to 1.55)
@@ -437,11 +437,11 @@ Milestones: 1. Specify, get it reviewed, approve (2026-10-08 (−07:00)); 6. Pre
 ### EXPLORATORY, POST HOC: do the queue's G1 pauses reach the p99.99?
 
 - Axis: E1's queue arms. Counted after the analysis: every in-window safepoint there was a G1 allocation pause, median 2.49–2.68 ms; the ring arms had none.
-- Read it as: A p99.99 registers a pause once the messages it delays outnumber 0.01% of the window: not at 10,000/s, nearly at 100,000/s, far past at 500,000/s. Measured: queue + park over 100 µs in 0, 9 and 30 of 30 launches.
+- Read it as: A p99.99 registers a pause once the messages it delays outnumber 0.01% of the window: not at 10,000/s, nearly at 100,000/s, past (2.5x, a floor) at 500,000/s. Measured: queue + park over 100 µs in 0, 9 and 30 of 30 launches.
 - How it is computed: Due ÷ rank: 27 ÷ 200, 500 ÷ 600, 7,500 ÷ 3,000. Pauses per window, queue + park: 1, 2, 5–7. Ring arms: 0 of 180 launches over 100 µs. At 100,000 and 500,000/s, 97.2%–99.1% of the queue arms' gap time lies inside pauses.
 - Axes: x is offered rate, messages/s (log scale); y is due during pauses ÷ rank (× the p99.99 rank); log y
 - due during G1 pauses ÷ p99.99 rank (points): 10000: 0.135, 100000: 0.833, 500000: 2.5
-- Reference: a pause reaches the rank at y = 1 × the p99.99 rank
+- Reference: pauses together reach the rank at y = 1 × the p99.99 rank
 - Note: Arithmetic, not measurement: rate × pause length × pauses, per window, over the rank (0.01% of the window). It counts only messages due during the pauses, so it is a floor. Changes no verdict.
 - So: see decision `e1`
 
@@ -466,7 +466,7 @@ Milestones: 1. Specify, get it reviewed, approve (2026-10-08 (−07:00)); 6. Pre
 - Q: How do you know the rules came before the data?
   A: The hypotheses and their thresholds are in the design approved 2026-10-08, before any host was rented. Amendment 1 changed definitions, not hypotheses, before any host ran; laptop runs (not data) prompted it. Reconnaissance's single forks on h1 (not data) had shown D2's p99.99 at 71,416 ns against D1's 1,417 ns and D3 saturating near 23,900/s; H3a (within 2.00×) was kept, and the pre-registration records this. Tag 18:24:42Z on 2026-10-10, first campaign fork 18:28:23Z, no amendment since.
 
-**Limits (what I must not claim):** Three hosts of one server type and one provider, identical journal drives: n = 3. Synthetic workload, thin books, Poisson arrivals, no fills. In-process, no network. One JDK and one collector (G1, one GC thread); one queue. Process crash tested, not power loss. D3's arithmetic is not a measurement (35% reached). Coarse money: three rates, the median launch; a 1.00× tax means invisible to the grid. Attribution floor: the residual, sentinel blind spots, lower-bound nulls, uncredited handshakes; a pause can also count as a gap. Stamp cost and synchronous logs not netted out. The GC breakdown is post hoc.
+**Limits (what I must not claim):** Three hosts of one server type and one provider, identical journal drives: n = 3. Synthetic workload, thin books, Poisson arrivals, 6% of messages are marketable and trade, but latency's effect on fills is not measured. In-process, no network. One JDK and one collector (G1, one GC thread); one queue. Process crash tested, not power loss. D3's arithmetic is not a measurement (35% reached). Coarse money: three rates, the median launch; a 1.00× tax means invisible to the grid. Attribution floor: the residual, sentinel blind spots, lower-bound nulls, uncredited handshakes; a pause can also count as a gap. Stamp cost and synchronous logs not netted out. The GC breakdown is post hoc.
 
 ## Recall questions
 
