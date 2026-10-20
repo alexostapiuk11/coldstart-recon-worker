@@ -44,7 +44,7 @@ KEY steps:
 1. Utilisation reads 1.0 whenever a replica is busy, so it launches at 5, 35, ..., 305 s: 11 launches, then the cap of 12.
 2. A launch at t is billed 400 − t seconds: 395, 365, ..., 95. Their sum is 11 × 395 − 30 × (0 + 1 + ... + 10) = 4,345 − 1,650 = 2,695.
 3. Add the first replica's 400: 3,095. The cold start never enters, so every utilisation policy costs 3,095.
-4. In flight, up 16: the signal reads 128 per serving replica at 5 s and 35 s, so it launches at 5, 35, ..., 155 s (6 launches), then stops. Billed 395 + 365 + 335 + 305 + 275 + 245 = 1,920, plus 400 is 2,320, the sweep's median for up 16 with down 1, 2 or 4.
+4. In flight, up 16: the signal reads 128 per replica at 5 and 35 s, so launches come at 5, 35, ..., 155 s (6; replay: it falls to 53, 29, 21, 19 and 13 as replicas serve, so launches stop after 155 s). Billed 395 + 365 + 335 + 305 + 275 + 245 = 1,920, plus 400 is 2,320, the sweep median.
 5. Queue depth, up 4 and down 1: replica 2 runs 5 to 95 s (90), replica 3 runs 35 to 65 s (30), replica 4 runs 125 to 215 s (90), replica 5 runs 155 to 185 s (30): 240, plus 400 is 640.
 
 KEY answer: (a) 3,095, (b) 2,320, (c) 640 replica-seconds. A threshold controller's cost is how many cooldown periods its signal stays past a threshold, which is set by what the signal can see, not by the exact threshold.
@@ -84,18 +84,18 @@ RED FLAG: "One request really uses the whole GPU", or "it is a sampling bug".
 ### Drill 3 of 12
 
 Q: What does queue depth read at 90% load on this engine, and what does that do to a scale-down threshold of 0 or 1?
-KEY: About zero in the fluid picture: requests wait only once all 128 slots are running, so a queue appears past 204.4 req/s (bursty arrivals queue a little earlier). A down threshold of 0 to 1 therefore fires whenever capacity is merely enough, and removes the replica that made it enough. That is the simulated thrash in the walkthrough.
+KEY: About zero in the fluid picture: requests wait only once all 128 slots are running, so a queue appears past the measured 204.4 req/s (the simulator's capacity is 211.2; bursty arrivals queue a little below either). A down threshold of 0 to 1 therefore fires whenever capacity is merely enough, and removes the replica that made it enough. That is the simulated thrash in the walkthrough.
 RED FLAG: "Queue depth is proportional to load."
 
 ### Drill 4 of 12
 
 Q: Why can a per-serving-replica signal not fall while a new replica is starting, and why does that cost money?
-KEY: The signal divides by serving replicas. A starting replica is billed from launch but not counted, so per-replica load stays high and the controller adds one more per cooldown until enough have arrived to pull the signal under its threshold. That is why utilisation, always 1.0, climbs to the 12-replica cap.
+KEY: The signal divides by serving replicas. A starting replica is billed from launch but not counted, so per-replica load stays high and the controller adds one more per cooldown until enough have arrived to pull the signal under its threshold. Utilisation, always 1.0, climbs to the cap whatever the lag.
 RED FLAG: "Starting replicas add capacity at once, so it settles quickly."
 
 ### Drill 5 of 12
 
-Q: All 19 queue-depth policies cost 640 replica-seconds on arm C. Why?
+Q: All 19 queue-depth policies have a median cost of 640 replica-seconds on arm C. Why?
 KEY: The queue reads 0 or hundreds (196 to 2,546 in the replayed run, otherwise 0), so nearly every up threshold from 1 to 16 and down threshold from 0 to 1 makes the same moves: UP at 5 and 35 s, DOWN at 65 and 95, UP at 125 and 155, DOWN at 185 and 215. 410 of 570 replayed runs make exactly those eight; the rest add a launch. Cost is launch-time arithmetic: 400 + 240 = 640.
 RED FLAG: "The thresholds were well chosen", or "the simulator is broken".
 
@@ -126,7 +126,7 @@ RED FLAG: "To make the model pass."
 ### Drill 10 of 12
 
 Q: Attempt one missed by 14% in the median but by up to 89% in some bins. Reconcile the two.
-KEY: Near saturation, waiting time depends on arrival rate minus capacity, a small difference of two large numbers. The replay peaked at 0.98× of measured throughput and the load balancer's bursts pushed the engine past its 128 cap, so a modest speed difference can turn a backlog the simulator predicts into none. Consistent with the data, not isolated: the quiet bins missed by 14%, which host speed explains only in part.
+KEY: Near saturation, waiting time depends on arrival rate minus capacity, a small difference of two large numbers. The replay peaked at 0.98× of measured throughput and the load balancer's bursts pushed the engine past its 128 cap, so a modest speed difference can turn a backlog the simulator predicts into none. Consistent with the data, not isolated; host speed explains the 14% only in part.
 RED FLAG: "The −89% bins are outliers", or "host speed explains everything".
 
 ### Drill 11 of 12
@@ -150,9 +150,9 @@ KEY outline:
 1. Measure one replica first: a concurrency sweep for latency, throughput and the memory ceiling, on your own request shapes. The toy shape here (13-token prompts, 16 output tokens) gives 204.4 req/s per replica; yours will differ a lot.
 2. Size headroom from the dead time, not from the signal. A burst of ρ times a fleet's capacity builds a backlog for about the cold start D, with worst wait about D(1 − 1/ρ), if one new replica restores capacity (else add a cooldown per extra launch).
 3. For ρ = 1.3 that is 0.23 D, about 15 s at D = 65 s, far over a 3 s SLO. So keep warm capacity of at least 1.3× typical load, or cut D (weights on fast storage, compile caches).
-4. Scale up on requests in flight per replica, with a target taken from your own curve at the concurrency whose latency still meets the SLO with room for a burst. Never on nvidia-smi utilisation: it read 1.0 from one request.
+4. Scale up on requests in flight per replica, with a target taken from your own curve at the concurrency whose latency still meets the SLO with room for a burst. Not on nvidia-smi utilisation alone: it read 1.0 from one request.
 5. Use waiting requests only as a fast overload trigger. It reads 0 until a replica is full, so it cannot ask for capacity early, and it must not drive scale-down.
-6. Scale down slowly and asymmetrically: a window longer than a burst plus a cold start, never on an empty queue alone. This simulator removed the newest replica first, even one still starting, and paid a second cold start.
+6. Scale down slowly and asymmetrically: a window longer than a burst plus a cold start, never on an empty queue alone (untested here). This simulator removed the newest replica first, even one still starting, and paid a second cold start.
 7. Mechanics: your platform's autoscaler fed by the engine's running and waiting request counts (check metric names and defaults for your versions); minimum replicas from the headroom rule; check the load balancer's per-worker cap and routing (RunPod's default capped two workers at 17.1 req/s).
 8. Validate closed loop: replay recorded bursts against a staging fleet with the real autoscaler and record p99, replica-seconds, scale events and the host of each pod. Trust an offline simulator only after it passes a pre-registered gate, in the overload regime too.
 
@@ -174,8 +174,8 @@ Setup:
 
 - The repo on branch study-pilot. Run Python as .venv/bin/python, never uv run, which re-syncs .venv.
 - Committed inputs only: data/a2/service-curve.json and data/campaign.jsonl.
-- Write a script outside the repo (repo root on sys.path) that loads the measured curve with autoscale.measured_curve.select_curve, artifact 1's lags with autoscale.coldstart_ecdf.load_measured_lags, and the step spike with autoscale.traffic.spike_shape.
-- It builds arrivals with autoscale.arrivals.arrival_times and the sweep's seed, random.Random(autoscale.sweep._derive_seed(17, up, down, 0)), over 400 s.
+- Write a script outside the repo (repo root on sys.path): curve, _ = autoscale.measured_curve.select_curve(None, placeholder=False) (a tuple), artifact 1's lags from autoscale.coldstart_ecdf.load_measured_lags, the step spike from autoscale.traffic.spike_shape(curve, kind="step").
+- It builds arrivals with autoscale.arrivals.arrival_times and the sweep's seed, random.Random(autoscale.sweep._derive_seed(17, up, down, 0)), over 400 s. Pass thresholds as floats (16.0, not 16): the seed key is a string, so 16 draws a different trace.
 - It calls autoscale.sim.run_with_policy with Controller(up, down, 30.0, 12), evaluate_every 5.0 and lags['C'] (or 'A'), and wraps Controller.decide to log time, signal value and decision.
 
 Steps:
@@ -183,7 +183,7 @@ Steps:
 1. Trace utilisation (up 0.9, down 0.05), in flight (up 16, down 4) and queue depth (up 4, down 1) on arm C, repetition 0. Write down each action and the signal that caused it.
 2. Before reading the results, predict each run's replica_seconds from launch times (estimation problem 1).
 3. Predict each run's p99 with the fluid formula (estimation problem 2), then compare.
-4. Re-run queue depth on arm A. Explain why no mid-spike scale-down happens there.
+4. Re-run queue depth on arm A. Explain why its first scale-down (125 s) comes only after a second replica serves, and which replica it removes.
 5. Re-run queue depth on arm C for six repetitions with scale-down unreachable (down threshold −0.5, which a non-negative queue never reaches). Note cost and p99.
 6. Stretch: change the cooldown to 10 s and to 60 s, still symmetric. Predict, then observe, the effect on queue depth's thrash and on utilisation's cost (with a 10 s cooldown its 11th launch is at 105 s).
 
@@ -229,10 +229,10 @@ Outputs at the defaults:
 - [control-loop] The simulated controller in one line? -> KEY: Checks every 5 s; one replica per action; one 30 s cooldown for both directions; 1 to 12 replicas; the newest replica is removed first; starting replicas are not counted in the signal.
 - [control-loop] Why can a signal not fall during a cold start? -> KEY: It divides by serving replicas. A starting replica is billed but not counted, so per-replica load stays high.
 - [cost] Derive utilisation's 3,095 replica-seconds. -> KEY: 400 for replica 1, plus 11 launches at 5, 35, ..., 305 s: 400 + 11 × 395 − 30 × 55 = 3,095.
-- [cost] Why did every queue-depth policy cost 640 on arm C? -> KEY: Its queue reads 0 or hundreds, so thresholds barely matter: UP 5, UP 35, DOWN 65, DOWN 95, UP 125, UP 155, DOWN 185, DOWN 215 (one replayed policy).
+- [cost] Why did every queue-depth policy have a median cost of 640 on arm C? -> KEY: Its queue reads 0 or hundreds, so thresholds barely matter: UP 5, UP 35, DOWN 65, DOWN 95, UP 125, UP 155, DOWN 185, DOWN 215 (one replayed policy).
 - [dead-time] Worst wait in a step overload ρ with first relief at D? -> KEY: About D(1 − 1/ρ) plus the service time. For ρ = 1.2 and D = 44.4 s: about 8.0 s.
 - [dead-time] Simulated step p99, arm C against arm A (in flight, utilisation)? -> KEY: About 7.20 to 7.73 s against 14.44 to 15.52 s: roughly a sixth of (5 s plus the cold start), plus 0.6 s.
-- [thrash] What produced the simulated 3.96 s gap on arm C? -> KEY: Queue depth spends 640 against 2,320 to 3,095, and its scale-down on an empty queue mid-spike forces a second cold start. A rerun with scale-down off came close (exploratory, not committed).
+- [thrash] What is the simulated 3.96 s gap on arm C tied to? -> KEY: Queue depth spends 640 against 2,320 to 3,095, and its scale-down on an empty queue mid-spike forces a second cold start. A rerun with scale-down off came close (exploratory, not committed).
 - [bridge] How does this controller differ from a proportional autoscaler? -> KEY: It adds or removes exactly one replica per action under one cooldown for both directions; a proportional one computes a desired count and often times scale-down separately (check your autoscaler's defaults). The frontiers describe this controller only.
 - [gate] The miss rule, and a perfect model's chance of a miss per bin? -> KEY: A bin misses when all three repeats sit on one side of the prediction (outside their min–max) by more than 1 ms: at most 2 × (1/2)³ = 1/4.
 - [gate] The pass rule, and the false-fail rate at 10 independent bins? -> KEY: At least 10 judged bins, at most half missing: about 2% (2.5% with queue correlation, near 5% with host effects, simulated).
@@ -242,7 +242,7 @@ Outputs at the defaults:
 - [limits] Three things you must not claim. -> KEY: Any signal ranking (unvalidated simulator); behaviour in overload (gate at 0.95×, sweep at 1.20×); that RunPod's load balancer still behaves this way (probes of 2026-10-05).
 - [capacity] Replicas for 1,000 req/s at 204.4 per replica? -> KEY: 1,000 / 204.4 = 4.9, so 5 with no headroom; 6.8, so 7, at the 147.8 req/s baseline; plus warm capacity for the cold start.
 - [draw-it] [draw] Draw the autoscaling loop with its dead time; shade what was measured. -> KEY: Traffic, serving replicas, signal, controller, cold start, back to the replicas. Shade the latency curve and the cold starts; hang the gate off the replicas box.
-- [draw-it] [draw] Sketch the three signals against load, 0 to 253.4 req/s, with their grids. -> KEY: Utilisation: 1.0 from the first point. In flight: 1 to 128, grid 2 to 16 at the bottom. Queue: 0 until 204.4, then rising.
+- [draw-it] [draw] Sketch the three signals against load, 0 to 253.4 req/s, with their grids. -> KEY: Utilisation: 1.0 from the first point. In flight: 1 to 128, grid 2 to 16 at the bottom. Queue: 0 until about 204.4 (measured; the simulator's capacity is 211.2), then rising.
 - [draw-it] [draw] Draw the queue-depth thrash on arm C as a timeline. -> KEY: UP at 5 and 35 s; replica 2 serves at 44 s; DOWN at 65 and 95 s on an empty queue; the backlog rebuilds; UP at 125 and 155; the first serves near 164 s; DOWN at 185 and 215.
 
 ## Review schedule
@@ -262,7 +262,7 @@ Not from the study page's sources:
 - 15: 0.23 × 65 = 14.95 s, worked from the two assumed numbers above.
 - 0.44: worked out, Latency between 0.439 s at 64 in flight and 0.606 s at 128 (data/a2/service-curve.json), interpolated near 66 in flight: about 0.443 s.
 - 8.0: worked out, 44.4 x (1 - 1/1.2) + 0.6 = 7.4 + 0.6 = 8.0 s; with D = 44.37 and rho = 1.1998 it is 7.995 s.
-- 14.3: worked out, 86.1 / 6 = 14.35 s.
+- 14.3: worked out, 86.1 / 6 = 14.35 s; with the sweep's rho = 1.1998 it is 14.33 s, shown as 14.3.
 - 7.4: worked out, 44.4 / 6 = 7.4 s.
 - 12.1: worked out, 69 / 6 + 0.6 = 11.5 + 0.6 = 12.1 s.
 - 105: worked out, A 10 s cooldown from the first evaluation: 5 + 10 x 10 = 105 s.

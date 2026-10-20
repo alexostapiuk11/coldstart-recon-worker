@@ -985,7 +985,7 @@
     {
       "phase": "Validate on RunPod",
       "label": "Attempt one fails; host speed implicated",
-      "detail": "34 of 37 judged bins missed, the engine faster than predicted. One void repeat (a worker restarted on the old image) was re-run. A re-measurement afterwards ruled out the engine flag and found hosts differ by about the size of the miss. Host speed is a measured cause, not shown to be the whole one: attempt one's own host had about 7% lower latency at ~100 in flight, while the quiet bins missed by 14%.",
+      "detail": "34 of 37 judged bins missed, the engine faster than predicted. One void repeat (a worker restarted on the old image) was re-run. A re-measurement afterwards ruled out the engine flag and found hosts differ by about the size of the miss. Host speed is a measured cause, not shown to be the whole one: attempt one's own host had about 7% lower latency at ~100 in flight,.",
       "output": "validation-engine/verdict.json: failed; host-speed finding",
       "milestone": true,
       "when": "2026-10-05",
@@ -1255,7 +1255,7 @@
             "label": "sweep peak 1.20×"
           }
         ],
-        "note": "Waiting is arithmetic; bursty arrivals queue a little below 204.4."
+        "note": "Waiting is arithmetic on the measured 204.4; the simulator's own capacity is 211.2 (backlog 42/s). Bursty arrivals queue a little below either."
       },
       "axis": "Measured: throughput and GPU utilisation at each fixed number in flight. Dashed: traffic levels (multiples of the 211.2 req/s saturation). Waiting is arithmetic.",
       "read_as": "The sweep's spike stayed at 1.20× saturation (253.4 req/s), a regime the gate never tested. GPU utilisation reads 1.0 from the first point, 3.5 req/s or 1.7% of 204.4. In flight rises across the range, but its 2 to 16 grid is crossed by 45.5 req/s while the baseline sits near 66. Queue depth stays 0 until the replica is full.",
@@ -1991,7 +1991,7 @@
         "note": "SIMULATED, FAILED VALIDATION. The p99 axis starts near 7 s. Each signal's own frontier is one point: its cheapest policy is also its fastest. Pairs whose down threshold is not below the up threshold are skipped (3 of 20 for in flight, 1 for each other signal), hence 17, 19 and 19 policies."
       },
       "axis": "Simulated, not measured, by a model that failed its gate twice. Each dot is one policy (signal and thresholds): its median over 30 simulated step spikes with arm C's cold starts.",
-      "read_as": "Utilisation sat at the cap, 3,095: 400 for replica 1 plus 11 launches, at 5 s and every 30 s to 12 replicas. In flight pays for fewer launches as its threshold rises, from 3,095 at up 2 and 4 to 2,320 at up 16. Queue depth spent 640 in all 19 policies because its signal reads 0 or hundreds, so thresholds rarely change what it does. The budget line constrains no one, so H3's 3.96 s \"gap\" is queue depth spending 640 against 2,320–3,095. A rerun with scale-down off (exploratory, not committed) brought its p99 close to the others', which suggests the scale-down rule (see How it works) is part of the gap.",
+      "read_as": "Utilisation sat at the cap, 3,095: 400 for replica 1 plus 11 launches, at 5 s and every 30 s to 12 replicas. In flight pays for fewer launches as its threshold rises, from 3,095 at up 2 and 4 to 2,320 at up 16. Queue depth spent a median 640 in all 19 policies (410 of 570 runs cost 640; 160 cost 700 or 790) because its signal reads 0 or hundreds, so thresholds rarely change what it does. The budget line constrains no one, so H3's 3.96 s \"gap\" is queue depth spending 640 against 2,320–3,095. A rerun with scale-down off (exploratory, not committed) brought its p99 close to the others', which suggests the scale-down rule (see How it works) is part of the gap.",
       "so": "frontiers",
       "takeaway": "Even as the simulator's answer, the comparison is mostly one of spend: the budget never binds and each frontier is one point.",
       "arithmetic": "Gap = worst reached p99 − best at the budget: 11.15 − 7.20 = 3.95 s on rounded values (post: 3.96, 95% interval 3.52–4.56). Arm A's step: 0.082 s, so H3's halving fails. Cap cost: 400 + 11 × 395 − 30 × 55 = 3,095."
@@ -2023,11 +2023,11 @@
       },
       {
         "q": "How would you autoscale vLLM on Kubernetes, given what you found?",
-        "a": "What the data supports: do not scale on nvidia-smi utilisation (measured: 1.0 from one request). Scale up on requests in flight per replica with a target well above the registered 2 to 16, since one replica holds about 66 at the 147.8 req/s baseline. Keep warm capacity for one cold start: a step past what the replicas complete (204.4 req/s each) builds a backlog until the first new one serves, whatever the signal (simulated, unvalidated). Scale down slowly: the simulated queue-depth thrash came from removing a replica as soon as the queue read 0. Not tested: any real autoscaler, so I would check how Kubernetes autoscalers handle scale-down windows in their current docs, and validate closed loop, which I did not."
+        "a": "What the curve and the simulation suggest: do not scale on nvidia-smi utilisation (measured: 1.0 from one request). Scale up on requests in flight per replica, with a target above the registered 2 to 16 grid since one replica holds about 66 at the 147.8 req/s baseline; exactly where is not measured. Keep warm capacity for one cold start: a step past what the replicas complete (204.4 req/s each) builds a backlog until the first new one serves, whatever the signal (simulated, unvalidated). Scale down slowly: the simulated queue-depth thrash followed removing a replica as soon as the queue read 0 (an exploratory rerun suggests it is part of the gap). Not tested: any real autoscaler, so I would check how Kubernetes autoscalers handle scale-down windows in their current docs, and validate closed loop, which I did not."
       },
       {
         "q": "Which metric would you scale on in production?",
-        "a": "Requests in flight per replica, the one graded signal here: it rises from 1 to 128 across the range, while queue depth is 0 until a replica is full and utilisation is 1.0 from the first request. I would add waiting requests as a fast overload trigger, not as the scale-down signal. Measured: the curve and the utilisation reading. Not measured: where in-flight's threshold should sit, or how a real autoscaler behaves."
+        "a": "Requests in flight per replica, the one graded signal here: it rises from 1 to 128 across the range, while queue depth is 0 until a replica is full and utilisation is 1.0 from the first request. I would add waiting requests as a fast overload trigger, not as the scale-down signal. Measured: the curve and the utilisation reading. Not measured: where above that grid in-flight's threshold should sit, or how a real autoscaler behaves."
       },
       {
         "q": "How many replicas for 1,000 req/s?",
@@ -2600,6 +2600,14 @@
     {
       "value": "570",
       "how": "19 queue-depth policies x 30 repetitions (docs/experiment-a2.md)."
+    },
+    {
+      "value": "700",
+      "how": "Read-only replay (see 410): a queue-depth run that adds one launch beyond the eight decisions costs 700 replica-seconds; 75 of the 570 runs do, from data/a2/frontier-sweep.json sources['arm C'] cost samples."
+    },
+    {
+      "value": "790",
+      "how": "Read-only replay (see 410): the other extra-launch cost, 790 replica-seconds; 85 of the 570 runs, from data/a2/frontier-sweep.json sources['arm C'] cost samples."
     },
     {
       "value": "410",

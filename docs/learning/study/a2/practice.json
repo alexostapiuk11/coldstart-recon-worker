@@ -40,16 +40,16 @@
     },
     {
       "q": "What does queue depth read at 90% load on this engine, and what does that do to a scale-down threshold of 0 or 1?",
-      "a": "About zero in the fluid picture: requests wait only once all 128 slots are running, so a queue appears past 204.4 req/s (bursty arrivals queue a little earlier). A down threshold of 0 to 1 therefore fires whenever capacity is merely enough, and removes the replica that made it enough. That is the simulated thrash in the walkthrough.",
+      "a": "About zero in the fluid picture: requests wait only once all 128 slots are running, so a queue appears past the measured 204.4 req/s (the simulator's capacity is 211.2; bursty arrivals queue a little below either). A down threshold of 0 to 1 therefore fires whenever capacity is merely enough, and removes the replica that made it enough. That is the simulated thrash in the walkthrough.",
       "red_flag": "\"Queue depth is proportional to load.\""
     },
     {
       "q": "Why can a per-serving-replica signal not fall while a new replica is starting, and why does that cost money?",
-      "a": "The signal divides by serving replicas. A starting replica is billed from launch but not counted, so per-replica load stays high and the controller adds one more per cooldown until enough have arrived to pull the signal under its threshold. That is why utilisation, always 1.0, climbs to the 12-replica cap.",
+      "a": "The signal divides by serving replicas. A starting replica is billed from launch but not counted, so per-replica load stays high and the controller adds one more per cooldown until enough have arrived to pull the signal under its threshold. Utilisation, always 1.0, climbs to the cap whatever the lag.",
       "red_flag": "\"Starting replicas add capacity at once, so it settles quickly.\""
     },
     {
-      "q": "All 19 queue-depth policies cost 640 replica-seconds on arm C. Why?",
+      "q": "All 19 queue-depth policies have a median cost of 640 replica-seconds on arm C. Why?",
       "a": "The queue reads 0 or hundreds (196 to 2,546 in the replayed run, otherwise 0), so nearly every up threshold from 1 to 16 and down threshold from 0 to 1 makes the same moves: UP at 5 and 35 s, DOWN at 65 and 95, UP at 125 and 155, DOWN at 185 and 215. 410 of 570 replayed runs make exactly those eight; the rest add a launch. Cost is launch-time arithmetic: 400 + 240 = 640.",
       "red_flag": "\"The thresholds were well chosen\", or \"the simulator is broken\"."
     },
@@ -75,7 +75,7 @@
     },
     {
       "q": "Attempt one missed by 14% in the median but by up to 89% in some bins. Reconcile the two.",
-      "a": "Near saturation, waiting time depends on arrival rate minus capacity, a small difference of two large numbers. The replay peaked at 0.98× of measured throughput and the load balancer's bursts pushed the engine past its 128 cap, so a modest speed difference can turn a backlog the simulator predicts into none. Consistent with the data, not isolated: the quiet bins missed by 14%, which host speed explains only in part.",
+      "a": "Near saturation, waiting time depends on arrival rate minus capacity, a small difference of two large numbers. The replay peaked at 0.98× of measured throughput and the load balancer's bursts pushed the engine past its 128 cap, so a modest speed difference can turn a backlog the simulator predicts into none. Consistent with the data, not isolated; host speed explains the 14% only in part.",
       "red_flag": "\"The −89% bins are outliers\", or \"host speed explains everything\"."
     },
     {
@@ -97,7 +97,7 @@
         "Utilisation reads 1.0 whenever a replica is busy, so it launches at 5, 35, ..., 305 s: 11 launches, then the cap of 12.",
         "A launch at t is billed 400 − t seconds: 395, 365, ..., 95. Their sum is 11 × 395 − 30 × (0 + 1 + ... + 10) = 4,345 − 1,650 = 2,695.",
         "Add the first replica's 400: 3,095. The cold start never enters, so every utilisation policy costs 3,095.",
-        "In flight, up 16: the signal reads 128 per serving replica at 5 s and 35 s, so it launches at 5, 35, ..., 155 s (6 launches), then stops. Billed 395 + 365 + 335 + 305 + 275 + 245 = 1,920, plus 400 is 2,320, the sweep's median for up 16 with down 1, 2 or 4.",
+        "In flight, up 16: the signal reads 128 per replica at 5 and 35 s, so launches come at 5, 35, ..., 155 s (6; replay: it falls to 53, 29, 21, 19 and 13 as replicas serve, so launches stop after 155 s). Billed 395 + 365 + 335 + 305 + 275 + 245 = 1,920, plus 400 is 2,320, the sweep median.",
         "Queue depth, up 4 and down 1: replica 2 runs 5 to 95 s (90), replica 3 runs 35 to 65 s (30), replica 4 runs 125 to 215 s (90), replica 5 runs 155 to 185 s (30): 240, plus 400 is 640."
       ],
       "answer": "(a) 3,095, (b) 2,320, (c) 640 replica-seconds. A threshold controller's cost is how many cooldown periods its signal stays past a threshold, which is set by what the signal can see, not by the exact threshold."
@@ -123,9 +123,9 @@
       "Measure one replica first: a concurrency sweep for latency, throughput and the memory ceiling, on your own request shapes. The toy shape here (13-token prompts, 16 output tokens) gives 204.4 req/s per replica; yours will differ a lot.",
       "Size headroom from the dead time, not from the signal. A burst of ρ times a fleet's capacity builds a backlog for about the cold start D, with worst wait about D(1 − 1/ρ), if one new replica restores capacity (else add a cooldown per extra launch).",
       "For ρ = 1.3 that is 0.23 D, about 15 s at D = 65 s, far over a 3 s SLO. So keep warm capacity of at least 1.3× typical load, or cut D (weights on fast storage, compile caches).",
-      "Scale up on requests in flight per replica, with a target taken from your own curve at the concurrency whose latency still meets the SLO with room for a burst. Never on nvidia-smi utilisation: it read 1.0 from one request.",
+      "Scale up on requests in flight per replica, with a target taken from your own curve at the concurrency whose latency still meets the SLO with room for a burst. Not on nvidia-smi utilisation alone: it read 1.0 from one request.",
       "Use waiting requests only as a fast overload trigger. It reads 0 until a replica is full, so it cannot ask for capacity early, and it must not drive scale-down.",
-      "Scale down slowly and asymmetrically: a window longer than a burst plus a cold start, never on an empty queue alone. This simulator removed the newest replica first, even one still starting, and paid a second cold start.",
+      "Scale down slowly and asymmetrically: a window longer than a burst plus a cold start, never on an empty queue alone (untested here). This simulator removed the newest replica first, even one still starting, and paid a second cold start.",
       "Mechanics: your platform's autoscaler fed by the engine's running and waiting request counts (check metric names and defaults for your versions); minimum replicas from the headroom rule; check the load balancer's per-worker cap and routing (RunPod's default capped two workers at 17.1 req/s).",
       "Validate closed loop: replay recorded bursts against a staging fleet with the real autoscaler and record p99, replica-seconds, scale events and the host of each pod. Trust an offline simulator only after it passes a pre-registered gate, in the overload regime too."
     ],
@@ -142,15 +142,15 @@
     "setup": [
       "The repo on branch study-pilot. Run Python as .venv/bin/python, never uv run, which re-syncs .venv.",
       "Committed inputs only: data/a2/service-curve.json and data/campaign.jsonl.",
-      "Write a script outside the repo (repo root on sys.path) that loads the measured curve with autoscale.measured_curve.select_curve, artifact 1's lags with autoscale.coldstart_ecdf.load_measured_lags, and the step spike with autoscale.traffic.spike_shape.",
-      "It builds arrivals with autoscale.arrivals.arrival_times and the sweep's seed, random.Random(autoscale.sweep._derive_seed(17, up, down, 0)), over 400 s.",
+      "Write a script outside the repo (repo root on sys.path): curve, _ = autoscale.measured_curve.select_curve(None, placeholder=False) (a tuple), artifact 1's lags from autoscale.coldstart_ecdf.load_measured_lags, the step spike from autoscale.traffic.spike_shape(curve, kind=\"step\").",
+      "It builds arrivals with autoscale.arrivals.arrival_times and the sweep's seed, random.Random(autoscale.sweep._derive_seed(17, up, down, 0)), over 400 s. Pass thresholds as floats (16.0, not 16): the seed key is a string, so 16 draws a different trace.",
       "It calls autoscale.sim.run_with_policy with Controller(up, down, 30.0, 12), evaluate_every 5.0 and lags['C'] (or 'A'), and wraps Controller.decide to log time, signal value and decision."
     ],
     "steps": [
       "Trace utilisation (up 0.9, down 0.05), in flight (up 16, down 4) and queue depth (up 4, down 1) on arm C, repetition 0. Write down each action and the signal that caused it.",
       "Before reading the results, predict each run's replica_seconds from launch times (estimation problem 1).",
       "Predict each run's p99 with the fluid formula (estimation problem 2), then compare.",
-      "Re-run queue depth on arm A. Explain why no mid-spike scale-down happens there.",
+      "Re-run queue depth on arm A. Explain why its first scale-down (125 s) comes only after a second replica serves, and which replica it removes.",
       "Re-run queue depth on arm C for six repetitions with scale-down unreachable (down threshold −0.5, which a non-negative queue never reaches). Note cost and p99.",
       "Stretch: change the cooldown to 10 s and to 60 s, still symmetric. Predict, then observe, the effect on queue depth's thrash and on utilisation's cost (with a 10 s cooldown its 11th launch is at 105 s)."
     ],
@@ -213,7 +213,7 @@
     },
     {
       "tag": "cost",
-      "front": "Why did every queue-depth policy cost 640 on arm C?",
+      "front": "Why did every queue-depth policy have a median cost of 640 on arm C?",
       "back": "Its queue reads 0 or hundreds, so thresholds barely matter: UP 5, UP 35, DOWN 65, DOWN 95, UP 125, UP 155, DOWN 185, DOWN 215 (one replayed policy)."
     },
     {
@@ -228,7 +228,7 @@
     },
     {
       "tag": "thrash",
-      "front": "What produced the simulated 3.96 s gap on arm C?",
+      "front": "What is the simulated 3.96 s gap on arm C tied to?",
       "back": "Queue depth spends 640 against 2,320 to 3,095, and its scale-down on an empty queue mid-spike forces a second cold start. A rerun with scale-down off came close (exploratory, not committed)."
     },
     {
@@ -281,7 +281,7 @@
       "tag": "draw-it",
       "draw": true,
       "front": "Sketch the three signals against load, 0 to 253.4 req/s, with their grids.",
-      "back": "Utilisation: 1.0 from the first point. In flight: 1 to 128, grid 2 to 16 at the bottom. Queue: 0 until 204.4, then rising."
+      "back": "Utilisation: 1.0 from the first point. In flight: 1 to 128, grid 2 to 16 at the bottom. Queue: 0 until about 204.4 (measured; the simulator's capacity is 211.2), then rising."
     },
     {
       "tag": "draw-it",
@@ -425,7 +425,7 @@
     },
     {
       "value": "14.3",
-      "how": "86.1 / 6 = 14.35 s."
+      "how": "86.1 / 6 = 14.35 s; with the sweep's rho = 1.1998 it is 14.33 s, shown as 14.3."
     },
     {
       "value": "7.4",

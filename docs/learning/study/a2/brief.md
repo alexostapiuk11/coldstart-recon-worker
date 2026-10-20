@@ -327,7 +327,7 @@ Milestones: 1. Specify a gated simulator, then re-base on artifact 1 (2026-08-17
    - When: 2026-10-04 to 10-05 (−07:00)
    - Decision: `engine` Validate the engine, not the platform
    - Evidence: 68c856ce1b (probe built offline); 4bb61d9e0e (502 retry); 2d2d921e07 (one replica); 3a6a3c3f98 (engine arrivals); bfb3cbc6a4 (unjudged repeats kept)
-7. **Attempt one fails; host speed implicated** [MILESTONE]: 34 of 37 judged bins missed, the engine faster than predicted. One void repeat (a worker restarted on the old image) was re-run. A re-measurement afterwards ruled out the engine flag and found hosts differ by about the size of the miss. Host speed is a measured cause, not shown to be the whole one: attempt one's own host had about 7% lower latency at ~100 in flight, while the quiet bins missed by 14%.
+7. **Attempt one fails; host speed implicated** [MILESTONE]: 34 of 37 judged bins missed, the engine faster than predicted. One void repeat (a worker restarted on the old image) was re-run. A re-measurement afterwards ruled out the engine flag and found hosts differ by about the size of the miss. Host speed is a measured cause, not shown to be the whole one: attempt one's own host had about 7% lower latency at ~100 in flight,.
    - Output: validation-engine/verdict.json: failed; host-speed finding
    - When: 2026-10-05
    - Decision: `onefix` One disclosed fix, then publish the failure
@@ -371,7 +371,7 @@ Milestones: 1. Specify a gated simulator, then re-base on artifact 1 (2026-08-17
 - Reference: baseline 0.70× at x = 147.8
 - Reference: gate peak 0.95× at x = 200.6
 - Reference: sweep peak 1.20× at x = 253.4
-- Note: Waiting is arithmetic; bursty arrivals queue a little below 204.4.
+- Note: Waiting is arithmetic on the measured 204.4; the simulator's own capacity is 211.2 (backlog 42/s). Bursty arrivals queue a little below either.
 - So: see decision `traffic`
 
 ### The test, twice: which side the engine landed on
@@ -412,7 +412,7 @@ Milestones: 1. Specify a gated simulator, then re-base on artifact 1 (2026-08-17
 ### UNVALIDATED: what each policy spent and reached (arm C, step)
 
 - Axis: Simulated, not measured, by a model that failed its gate twice. Each dot is one policy (signal and thresholds): its median over 30 simulated step spikes with arm C's cold starts.
-- Read it as: Utilisation sat at the cap, 3,095: 400 for replica 1 plus 11 launches, at 5 s and every 30 s to 12 replicas. In flight pays for fewer launches as its threshold rises, from 3,095 at up 2 and 4 to 2,320 at up 16. Queue depth spent 640 in all 19 policies because its signal reads 0 or hundreds, so thresholds rarely change what it does. The budget line constrains no one, so H3's 3.96 s "gap" is queue depth spending 640 against 2,320–3,095. A rerun with scale-down off (exploratory, not committed) brought its p99 close to the others', which suggests the scale-down rule (see How it works) is part of the gap.
+- Read it as: Utilisation sat at the cap, 3,095: 400 for replica 1 plus 11 launches, at 5 s and every 30 s to 12 replicas. In flight pays for fewer launches as its threshold rises, from 3,095 at up 2 and 4 to 2,320 at up 16. Queue depth spent a median 640 in all 19 policies (410 of 570 runs cost 640; 160 cost 700 or 790) because its signal reads 0 or hundreds, so thresholds rarely change what it does. The budget line constrains no one, so H3's 3.96 s "gap" is queue depth spending 640 against 2,320–3,095. A rerun with scale-down off (exploratory, not committed) brought its p99 close to the others', which suggests the scale-down rule (see How it works) is part of the gap.
 - How it is computed: Gap = worst reached p99 − best at the budget: 11.15 − 7.20 = 3.95 s on rounded values (post: 3.96, 95% interval 3.52–4.56). Arm A's step: 0.082 s, so H3's halving fails. Cap cost: 400 + 11 × 395 − 30 × 55 = 3,095.
 - Axes: x is replica-seconds per spike (median of 30); y is per-run p99 latency, median of 30 (s)
 - queue depth (19): 640: 11.2, 640: 11.3, 640: 11.4 ×2, 640: 11.5 ×7, 640: 11.6 ×3, 640: 11.7 ×2, 640: 11.8, 640: 11.9, 640: 12.0
@@ -442,9 +442,9 @@ Milestones: 1. Specify a gated simulator, then re-base on artifact 1 (2026-08-17
 - Q: What would a careful reviewer flag in your own write-up?
   A: The gap's interval is called paired, but the code pairs only queue depth with in-flight at shared thresholds; utilisation runs on other traces. H3's wording says "p99-damage spread", the spec's integral over an SLO, but the analysis uses each run's p99 and no SLO exists. And the post omits the request shape (random 13-token prompts, 16 output tokens) and the absent-or-serving replica model.
 - Q: How would you autoscale vLLM on Kubernetes, given what you found?
-  A: What the data supports: do not scale on nvidia-smi utilisation (measured: 1.0 from one request). Scale up on requests in flight per replica with a target well above the registered 2 to 16, since one replica holds about 66 at the 147.8 req/s baseline. Keep warm capacity for one cold start: a step past what the replicas complete (204.4 req/s each) builds a backlog until the first new one serves, whatever the signal (simulated, unvalidated). Scale down slowly: the simulated queue-depth thrash came from removing a replica as soon as the queue read 0. Not tested: any real autoscaler, so I would check how Kubernetes autoscalers handle scale-down windows in their current docs, and validate closed loop, which I did not.
+  A: What the curve and the simulation suggest: do not scale on nvidia-smi utilisation (measured: 1.0 from one request). Scale up on requests in flight per replica, with a target above the registered 2 to 16 grid since one replica holds about 66 at the 147.8 req/s baseline; exactly where is not measured. Keep warm capacity for one cold start: a step past what the replicas complete (204.4 req/s each) builds a backlog until the first new one serves, whatever the signal (simulated, unvalidated). Scale down slowly: the simulated queue-depth thrash followed removing a replica as soon as the queue read 0 (an exploratory rerun suggests it is part of the gap). Not tested: any real autoscaler, so I would check how Kubernetes autoscalers handle scale-down windows in their current docs, and validate closed loop, which I did not.
 - Q: Which metric would you scale on in production?
-  A: Requests in flight per replica, the one graded signal here: it rises from 1 to 128 across the range, while queue depth is 0 until a replica is full and utilisation is 1.0 from the first request. I would add waiting requests as a fast overload trigger, not as the scale-down signal. Measured: the curve and the utilisation reading. Not measured: where in-flight's threshold should sit, or how a real autoscaler behaves.
+  A: Requests in flight per replica, the one graded signal here: it rises from 1 to 128 across the range, while queue depth is 0 until a replica is full and utilisation is 1.0 from the first request. I would add waiting requests as a fast overload trigger, not as the scale-down signal. Measured: the curve and the utilisation reading. Not measured: where above that grid in-flight's threshold should sit, or how a real autoscaler behaves.
 - Q: How many replicas for 1,000 req/s?
   A: Capacity first: one replica completes 204.4 req/s at 128 in flight, so 1,000 / 204.4 = 4.9, at least 5 with no headroom. At the 147.8 req/s baseline, near 66 in flight, 1,000 / 147.8 = 6.8, so 7. A burst needs warm capacity for the cold start (39.37 s or 81.07 s), because a replica launched into the burst is not there in time. Caveat: an even split is assumed (RunPod fills one worker first) and the request shape is a toy (13-token prompts, 16 output tokens); measure your own curve.
 - Q: What would you do differently?
