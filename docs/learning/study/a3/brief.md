@@ -122,7 +122,7 @@ One response, one category, the first rule that applies. A provider-side outcome
 
 ### One recovery conversation, opaque error (predicted, not observed) (dynamic)
 
-Scenario `weather-forecast-lisbon`, kind `invalid_parameter` on `location`, baseline cell. The ordering is what `recovery.converse` and the mock service do in code; the model's replies are what H4 predicts, not something any model has done. With an actionable message the second call would name the country, and H4 predicts fewer identical retries.
+The conversation from How it works, on `weather-forecast-lisbon`, baseline cell. The ordering is what `recovery.converse` and the mock service do in code; the model's replies are what H4 predicts, not something any model has done.
 
 - **Harness**: recovery.converse
 - **Model**: baseline cell
@@ -456,7 +456,7 @@ Milestones: 1. August design: factorial, six categories, no LLM judge (2026-08-1
 - Q: What is H4's floor rule?
   A: If the opaque arm's identical-retry rate has a point estimate under 5%, H4 is reported as not testable at this rate. It counts neither as support nor as refutation, and Holm runs over the other four.
 - Q: A conversation ends with the model stopping and saying it could not retrieve the forecast. How is it recorded?
-  A: As `gave_up`, not `hallucinated_success`: the text discloses a failure. A success-shaped message that discloses nothing would be the hallucinated kind, by a regex proxy with known misses.
+  A: As `gave_up` (step 6 of How it works). A success-shaped message that discloses nothing would be `hallucinated_success`, by a regex proxy with known misses.
 - Q: Which sources contradict each other here, and which do you follow?
   A: The August design's learning guide (modules 4 to 6) and definition of done teach 20 × 20 observations, Wilson intervals for proportions and temperature-0 variance as the headline. The 2026-10-08 amendment governs where they conflict, so scenarios and N are sized together, Wilson is within one scenario, and that H5 is withdrawn.
 

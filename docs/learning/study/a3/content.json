@@ -578,7 +578,7 @@
       "level": "dynamic",
       "style": "sequence",
       "title": "One recovery conversation, opaque error (predicted, not observed)",
-      "caption": "Scenario `weather-forecast-lisbon`, kind `invalid_parameter` on `location`, baseline cell. The ordering is what `recovery.converse` and the mock service do in code; the model's replies are what H4 predicts, not something any model has done. With an actionable message the second call would name the country, and H4 predicts fewer identical retries.",
+      "caption": "The conversation from How it works, on `weather-forecast-lisbon`, baseline cell. The ordering is what `recovery.converse` and the mock service do in code; the model's replies are what H4 predicts, not something any model has done.",
       "participants": [
         {
           "id": "h",
@@ -1713,7 +1713,7 @@
     },
     {
       "q": "A conversation ends with the model stopping and saying it could not retrieve the forecast. How is it recorded?",
-      "a": "As `gave_up`, not `hallucinated_success`: the text discloses a failure. A success-shaped message that discloses nothing would be the hallucinated kind, by a regex proxy with known misses."
+      "a": "As `gave_up` (step 6 of How it works). A success-shaped message that discloses nothing would be `hallucinated_success`, by a regex proxy with known misses."
     },
     {
       "q": "Which sources contradict each other here, and which do you follow?",
