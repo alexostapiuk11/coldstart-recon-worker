@@ -28,6 +28,25 @@ Read first: LLM serving on a GPU (P1), How these experiments earn trust (P2).
 - **The SLO, per popularity decile**: **SLO: p99 at most 75.6 s**, twice the median swap. A **decile** is 2 of the 20 models by popularity. Its p99 is taken in each simulated run, then the median over 30 runs. A fleet size passes only if all ten deciles meet the SLO.
 - **The validation gate, as used here**: Three tenants on **one GPU**, a 900 s bursty trace of 1,562 requests with real swaps, replayed **three times**. Per 30 s bin, the simulator's median latency must fall inside the three repeats' band. Pass: at least 10 judged bins, at most half missing, swap count within the real range ±1. Co-location gets only two **held-out** interference cells.
 
+## How it works
+
+One reference point: bursty arrivals, Zipf s = 1.0, 20 models, one GPU of load. The simulator behind these counts failed its gate. Watch which of the three counts the SLO search actually decided.
+
+| Step | What happens | Pinned hot GPUs | Tail models | Dedicate GPUs | Swap GPUs | Co-locate GPUs |
+|---|---|---|---|---|---|---|
+| 1 | Twenty models share one GPU's worth of load (8.89 req/s, one GPU's measured saturation), Zipf s = 1.0. Bursty: each model is ON about a fifth of the time, at five times its average load. No GPU is placed yet. (Decision: Two arrival regimes with the same per-model shares) | not yet | 20 | not yet | not yet | not yet |
+| 2 | The hot rule: the top model has 0.278 of the traffic, so 1.39 GPU of load while ON. Over 0.7, so it gets ceil(1.39 / 0.7) = ceil(1.985) = 2 pinned GPUs, in every strategy (derived). (Decision: One sizing rule for every strategy, judged per decile) | **2** | **19** | not yet | not yet | not yet |
+| 3 | Model 2 has 0.139 of the traffic, 0.695 GPU while ON: 0.005 under 0.7, so not hot. A 0.69 threshold would pin 5 GPUs, not 2 (derived): the rule sets this edge, not the data. The other 18 models are lower still. (Decision: One sizing rule for every strategy, judged per decile) | 2 | 19 | not yet | not yet | not yet |
+| 4 | Dedicate: the pinned GPUs plus one GPU per tail model, 2 + 19 = 21 (derived). One placement, never searched. (Decision: One sizing rule for every strategy, judged per decile) | 2 | 19 | **21 (fixed)** | not yet | not yet |
+| 5 | Swap: the pinned GPUs plus a shared LRU pool grown from 1 to 19 GPUs, so 3 to 21 in all. Sizing takes the first count where all ten popularity deciles meet the 75.6 s p99 SLO. (Decision: One sizing rule for every strategy, judged per decile) | 2 | 19 | 21 (fixed) | **search 3 to 21** | not yet |
+| 6 | At 9 GPUs the two hottest deciles sit at 87.7 and 77.2 s, over the SLO. At 10 (a pool of 8) the worst decile is 56.8 s. So the first count to pass is 10 (simulated, median of 30 runs). (Decision: One sizing rule for every strategy, judged per decile) | 2 | 19 | 21 (fixed) | **10 (first to pass)** | not yet |
+| 7 | Co-locate: pinned GPUs plus the 19 tail models paired, 9 pairs and 1 single, so 12. Un-pairing adds GPUs up to 21. The first count already passed (worst decile 6.1 s, simulated), so 12 is the pairing floor. (Decision: One sizing rule for every strategy, judged per decile) | 2 | 19 | 21 (fixed) | 10 (first to pass) | **12 (floor, passed)** |
+| 8 | Both searches end at 21, dedicate's layout, so dedicate can tie but never win. Average load over capacity: 1/21 = 4.8%, 1/10 = 10%, 1/12 = 8.3% (derived). The counts dwarf the one GPU of load: holding models drives them. | 2 | 19 | **21 (4.8% used)** | **10 (10%)** | **12 (8.3%)** |
+
+Bold cells changed in that step.
+
+**Takeaway:** Dedicate's 21 and co-locate's 12 follow from the hot rule and pairing; the simulator only showed 12 passes the SLO, at all 11 evaluable points. Only swap's 10 was moved by the search. All unvalidated.
+
 ## System views (C4)
 
 ### Who and what the study touches (context)
@@ -141,7 +160,7 @@ The gate replayed this path on one GPU, where the victim is trivial: LRU choice 
 
 **Chosen:** One hot-model rule for all three; the smallest fleet whose every decile meets the SLO; bursty sizing on ON-period load
 
-**Why:** Hot models get pinned GPUs in every strategy, so strategies differ only in how the rest are placed. The aggregate p99 is mostly popular models' requests: in the simulator an aggregate rule gives swap 9 GPUs at the reference point while the two hottest deciles sit at 87.7 and 77.2 s. On average load, a placeholder sweep left every bursty strategy dominated; the owner chose ON-period load.
+**Why:** Hot models get pinned GPUs in every strategy, so strategies differ only in how the rest are placed. The aggregate p99 is mostly popular models' requests: in the simulator an aggregate rule gives swap 9 GPUs, not 10, at the reference point and leaves the two hottest deciles over the SLO (see How it works). On average load, a placeholder sweep left every bursty strategy dominated; the owner chose ON-period load.
 
 **Cost:** Swap needs one GPU more at the reference point. Swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie. Bursty s = 0.6 is not evaluable: a decile had too few requests for a p99.
 
@@ -336,7 +355,7 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
 ### UNVALIDATED: GPUs each strategy needs, by skew and regime
 
 - Axis: Simulated by a model that failed its gate. Swap's point is the smallest pool whose every popularity decile meets the 75.6 s p99 SLO, over 30 runs. Dedicate's is fixed by the hot-model rule (pinned GPUs plus one per other model). Co-locate's is its pairing floor (pinned GPUs plus half the rest, paired), where the SLO held at every evaluable point.
-- Read it as: In each regime one strategy is cheapest at every evaluable skew: co-locate when spread, swap when bursty. Only swap's line was moved by the SLO search; dedicate's and co-locate's are hot-rule and pairing arithmetic, and co-locate never left its floor. The offered load is one GPU's worth, so those two counts follow from how many models a GPU holds, not from throughput. Dedicating, which can at best tie by construction, needs about twice the cheapest. Spread swap's peak at s = 1.25 was not diagnosed.
+- Read it as: In each regime one strategy is cheapest at every evaluable skew: co-locate when spread, swap when bursty. Only swap's line was moved by the SLO search; dedicate's and co-locate's are hot-rule and pairing arithmetic, and co-locate never left its floor. Dedicating, which can at best tie by construction, needs about twice the cheapest. Spread swap's peak at s = 1.25 was not diagnosed.
 - How it is computed: Reference point, bursty s = 1.0: 21, 10, 12 GPUs. One GPU-month = $1.1095 × 730 h = $809.935; 21 × 809.935 / 20 tenants = $850.43; dedicate costs $8,909.28 a month more than swap.
 - Axes: x is Zipf skew s; y is GPUs to meet the SLO in every decile (GPUs)
 - spread: dedicate: 0.6: 20, 0.8: 20, 1.0: 20, 1.25: 20, 1.5: 20, 2.0: 20
@@ -428,7 +447,7 @@ Milestones: 4. Pre-register step 1, then step 2's rules (2026-10-04); 6. Screen 
 - Q: Why trust a simulator that failed its gate?
   A: For GPU counts, I don't: the gate failed at its one point (one GPU, three tenants, swapping only), the fleets are 10 to 25 GPUs, and co-location had two held-out cells, one missed. The ordering is wide, about twice, but I did not test whether the model's error leaves it unchanged. The measured swap, slowdown and KV split stand.
 - Q: Why is dedicating never cheapest?
-  A: Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). Co-locate also sat at its pairing floor, half the tail models paired, at every evaluable point, so only swap's count came from the SLO search. The simulated margin is the point: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs.
+  A: Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). Co-locate also sat at its pairing floor at every evaluable point, so only swap's count came from the SLO search (see How it works). The simulated margin is the point: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs.
 - Q: What would change the winner?
   A: Arrival timing (only two regimes built); the SLO (twice a swap favours swapping, and the sweep ran at one SLO); interference (exploratory: four times the busy-neighbour latency loses co-location the bursty regime, eight the spread one); model size (a 1.7B result).
 - Q: Why did the gate fail?

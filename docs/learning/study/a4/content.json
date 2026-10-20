@@ -552,7 +552,7 @@
         "One hot-model rule for all three; the smallest fleet whose every decile meets the SLO; bursty sizing on ON-period load"
       ],
       "chosen": "One hot-model rule for all three; the smallest fleet whose every decile meets the SLO; bursty sizing on ON-period load",
-      "why": "Hot models get pinned GPUs in every strategy, so strategies differ only in how the rest are placed. The aggregate p99 is mostly popular models' requests: in the simulator an aggregate rule gives swap 9 GPUs at the reference point while the two hottest deciles sit at 87.7 and 77.2 s. On average load, a placeholder sweep left every bursty strategy dominated; the owner chose ON-period load.",
+      "why": "Hot models get pinned GPUs in every strategy, so strategies differ only in how the rest are placed. The aggregate p99 is mostly popular models' requests: in the simulator an aggregate rule gives swap 9 GPUs, not 10, at the reference point and leaves the two hottest deciles over the SLO (see How it works). On average load, a placeholder sweep left every bursty strategy dominated; the owner chose ON-period load.",
       "why_short": "Hot models are pinned alike in all three, and a fleet passes only if every decile meets the SLO: the aggregate hides the hottest tenants.",
       "cost": "Swap needs one GPU more at the reference point. Swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie. Bursty s = 0.6 is not evaluable: a decile had too few requests for a p99.",
       "cost_short": "Swap needs a GPU more; dedicating can at best tie by construction; bursty s = 0.6 is not evaluable.",
@@ -1126,7 +1126,7 @@
         "note": "SIMULATED, FAILED VALIDATION. Bursty s = 0.6 is not evaluable: some decile had too few requests for a p99 in some run."
       },
       "axis": "Simulated by a model that failed its gate. Swap's point is the smallest pool whose every popularity decile meets the 75.6 s p99 SLO, over 30 runs. Dedicate's is fixed by the hot-model rule (pinned GPUs plus one per other model). Co-locate's is its pairing floor (pinned GPUs plus half the rest, paired), where the SLO held at every evaluable point.",
-      "read_as": "In each regime one strategy is cheapest at every evaluable skew: co-locate when spread, swap when bursty. Only swap's line was moved by the SLO search; dedicate's and co-locate's are hot-rule and pairing arithmetic, and co-locate never left its floor. The offered load is one GPU's worth, so those two counts follow from how many models a GPU holds, not from throughput. Dedicating, which can at best tie by construction, needs about twice the cheapest. Spread swap's peak at s = 1.25 was not diagnosed.",
+      "read_as": "In each regime one strategy is cheapest at every evaluable skew: co-locate when spread, swap when bursty. Only swap's line was moved by the SLO search; dedicate's and co-locate's are hot-rule and pairing arithmetic, and co-locate never left its floor. Dedicating, which can at best tie by construction, needs about twice the cheapest. Spread swap's peak at s = 1.25 was not diagnosed.",
       "so": [
         "sizing",
         "regimes"
@@ -1869,7 +1869,7 @@
       },
       {
         "q": "Why is dedicating never cheapest?",
-        "a": "Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). Co-locate also sat at its pairing floor, half the tail models paired, at every evaluable point, so only swap's count came from the SLO search. The simulated margin is the point: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs."
+        "a": "Partly by construction: swap and co-locate search only up to dedicate's size, where their layouts become dedicate's, so dedicating can at best tie (scope amendment §7; the post does not say this). Co-locate also sat at its pairing floor at every evaluable point, so only swap's count came from the SLO search (see How it works). The simulated margin is the point: co-locate's 3 to 6 s latency met the 75.6 s SLO at half of dedicate's 20 GPUs."
       },
       {
         "q": "What would change the winner?",
@@ -2454,6 +2454,38 @@
     {
       "value": "16.7",
       "how": "docs/post.md ('What T_weights contains'): start-up before the load line, arm C median 16.67 s, to one decimal; the launch-to-model-loaded span is 21.34 s."
+    },
+    {
+      "value": "0.278",
+      "how": "Zipf s = 1.0 over 20 models: 1 / H, with H = sum of 1/k for k = 1..20 = 3.5977; 1/3.5977 = 0.27795 (placement/traffic.py zipf_shares)."
+    },
+    {
+      "value": "1.39",
+      "how": "0.27795 x 1 GPU offered x 5 (peak factor 1/duty, duty 0.2 in data/a4/analysis.json design) = 1.3898 GPU while ON (placement/fleet.py hot_allocation)."
+    },
+    {
+      "value": "1.985",
+      "how": "1.3898 / 0.7 hot fraction = 1.9854, so ceil gives 2 pinned GPUs (hot_allocation, run with hot_fraction 0.7)."
+    },
+    {
+      "value": "0.139",
+      "how": "Model 2's share, 1/(2 x 3.5977) = 0.13898 (zipf_shares)."
+    },
+    {
+      "value": "0.695",
+      "how": "0.13898 x 5 = 0.6949 GPU while ON (hot_allocation load, not above 0.7, so model 2 is not hot)."
+    },
+    {
+      "value": "0.005",
+      "how": "0.7 - 0.6949 = 0.0051, how far model 2's ON load sits under the hot fraction."
+    },
+    {
+      "value": "6.1",
+      "how": "data/a4/analysis.json regimes.bursty.points[s=1.0].strategies.colocate.decile_p99[0] = 6.1218 s, to one decimal (co-locate at 12 GPUs, hottest decile, the largest of the ten)."
+    },
+    {
+      "value": "8.3",
+      "how": "Average load / fleet: 1 GPU of offered load / 12 GPUs = 0.0833 = 8.3% (utilisation of capacity, derived; 1/21 = 4.8%, 1/10 = 10%)."
     }
   ],
   "links": {
@@ -2469,5 +2501,93 @@
       "unit": "p2",
       "label": "How these experiments earn trust"
     }
-  ]
+  ],
+  "walkthrough": {
+    "title": "Where 21, 10 and 12 GPUs come from",
+    "lead": "One reference point: bursty arrivals, Zipf s = 1.0, 20 models, one GPU of load. The simulator behind these counts failed its gate. Watch which of the three counts the SLO search actually decided.",
+    "registers": [
+      {
+        "id": "pinned",
+        "label": "Pinned hot GPUs"
+      },
+      {
+        "id": "tail",
+        "label": "Tail models"
+      },
+      {
+        "id": "dedicate",
+        "label": "Dedicate GPUs"
+      },
+      {
+        "id": "swap",
+        "label": "Swap GPUs"
+      },
+      {
+        "id": "coloc",
+        "label": "Co-locate GPUs"
+      }
+    ],
+    "steps": [
+      {
+        "say": "Twenty models share one GPU's worth of load (8.89 req/s, one GPU's measured saturation), Zipf s = 1.0. Bursty: each model is ON about a fifth of the time, at five times its average load. No GPU is placed yet.",
+        "values": {
+          "pinned": "not yet",
+          "tail": "20",
+          "dedicate": "not yet",
+          "swap": "not yet",
+          "coloc": "not yet"
+        },
+        "decision": "regimes"
+      },
+      {
+        "say": "The [hot rule](a4:zipf): the top model has 0.278 of the traffic, so 1.39 GPU of load while ON. Over 0.7, so it gets ceil(1.39 / 0.7) = ceil(1.985) = 2 pinned GPUs, in every strategy (derived).",
+        "values": {
+          "pinned": "2",
+          "tail": "19"
+        },
+        "decision": "sizing"
+      },
+      {
+        "say": "Model 2 has 0.139 of the traffic, 0.695 GPU while ON: 0.005 under 0.7, so not hot. A 0.69 threshold would pin 5 GPUs, not 2 (derived): the rule sets this edge, not the data. The other 18 models are lower still.",
+        "decision": "sizing"
+      },
+      {
+        "say": "Dedicate: the pinned GPUs plus one GPU per tail model, 2 + 19 = 21 (derived). One placement, never searched.",
+        "values": {
+          "dedicate": "21 (fixed)"
+        },
+        "decision": "sizing"
+      },
+      {
+        "say": "Swap: the pinned GPUs plus a shared LRU pool grown from 1 to 19 GPUs, so 3 to 21 in all. Sizing takes the first count where all ten popularity deciles meet the 75.6 s p99 [SLO](a4:slo).",
+        "values": {
+          "swap": "search 3 to 21"
+        },
+        "decision": "sizing"
+      },
+      {
+        "say": "At 9 GPUs the two hottest deciles sit at 87.7 and 77.2 s, over the SLO. At 10 (a pool of 8) the worst decile is 56.8 s. So the first count to pass is 10 (simulated, median of 30 runs).",
+        "values": {
+          "swap": "10 (first to pass)"
+        },
+        "decision": "sizing"
+      },
+      {
+        "say": "Co-locate: pinned GPUs plus the 19 tail models paired, 9 pairs and 1 single, so 12. Un-pairing adds GPUs up to 21. The first count already passed (worst decile 6.1 s, simulated), so 12 is the pairing floor.",
+        "values": {
+          "coloc": "12 (floor, passed)"
+        },
+        "decision": "sizing"
+      },
+      {
+        "say": "Both searches end at 21, dedicate's layout, so dedicate can tie but never win. Average load over capacity: 1/21 = 4.8%, 1/10 = 10%, 1/12 = 8.3% (derived). The counts dwarf the one GPU of load: holding models drives them.",
+        "values": {
+          "dedicate": "21 (4.8% used)",
+          "swap": "10 (10%)",
+          "coloc": "12 (8.3%)"
+        }
+      }
+    ],
+    "takeaway": "Dedicate's 21 and co-locate's 12 follow from the hot rule and pairing; the simulator only showed 12 passes the SLO, at all 11 evaluable points. Only swap's 10 was moved by the search. All unvalidated."
+  }
 }
