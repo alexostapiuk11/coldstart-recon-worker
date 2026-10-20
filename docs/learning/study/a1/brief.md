@@ -23,7 +23,7 @@ Read first: LLM serving on a GPU (P1), How these experiments earn trust (P2).
 - **Arms A, B and C**: Three cache set-ups. **A**: weights from the model hub, compile cache (P1: compile) cold. **B**: weights from a network volume, compile cache cold. **C**: weights from the volume, compile cache warm.
 - **Triples**: One run of each arm, in an order shuffled from a seed. 100 triples make the 300 runs, so a busy hour on the rented GPUs falls on all three arms.
 - **Contrast, and difference of contrasts**: A **contrast** is the difference of two arms' medians, with a 95% bootstrap interval (P2: interval), a plausible range for the true difference, not where a re-run would land: A minus B is the weight cache's saving, B minus C the compile cache's. Their **difference**, (A minus B) minus (B minus C), ranks the caches only if its interval excludes zero; negative favours the compile cache.
-- **Two clocks and the platform residual**: **Clock A** (laptop) brackets the whole job and sees it finish only when the laptop polls the job status, every 5 s; total cold start (P1: coldstart) is its span minus the worker-clock warmup after the first request. **Clock B** (worker) starts just before `vllm serve`. **Platform time** = total minus clock B time, the one allowed cross-clock subtraction: container and handler start, teardown and up to one 5 s poll of lag. RunPod's own queue delay was about 0.13 s (median), so this is not queueing.
+- **Two clocks and the platform residual**: **Clock A** (laptop) brackets the whole job and sees it finish only when the laptop polls the job status, every 5 s; total cold start (P1: coldstart) is its span minus the worker-clock warmup after the first request. **Clock B** (worker) starts just before `vllm serve`. **Platform time** = total minus clock B time, the one allowed cross-clock subtraction: handler start, teardown and up to one 5 s poll of lag. Clock C shows about 1 s of handler time outside clock B; container boot is not shown. RunPod's platform queue delay alone was about 0.13 s (median), so this is not queueing.
 - **Percentiles and the ECDF**: **p90** is the time 90% of runs finish within; p50 is the median. An **ECDF (P2: ecdf)** plots every run (seconds across, share finished up), so the tail stays visible.
 - **The five hypotheses**: **H1**: weight handling is over half of worker-clock time through the first request in arm A. **H2**: volume weights cut it materially. **H3**: compiling is a non-trivial part of engine start, and a warm cache cuts it. **H4**: host differences drive how far p95 sits above the median. **H5**: a warm compile cache leaves more KV cache (P1: kvcache). H1 holds only by its definition: weight handling is a median 0.58 of worker-clock time in arm A, above half in all 100 runs, but mostly server start-up; vLLM's own loading time is 17.40 s of 79.09 s, about 22%.
 - **Pre-registration**: Hypotheses, contrasts, which runs to throw out, when to stop and how to pick the headline, committed in `docs/experiment.md` before any priming or campaign run (after three paid reconnaissance captures), four days before the first retained run; later changes are dated amendments (P2: amendment) in git.
@@ -118,13 +118,13 @@ Clock A (laptop) runs from step 1 until a poll sees the result; clock B (worker)
 - **vllm serve**
 
 1. Driver -> RunPod endpoint: Submit job {arm, run id} (clock A starts)
-2. RunPod endpoint -> Handler: Boot container, start handler (queue delay about 0.13 s)
+2. RunPod endpoint -> Handler: Pick up the job, start handler (platform queue delay about 0.13 s)
 3. Handler -> Handler: Set cache paths, snapshot compile cache
 4. Handler -> Probe: Run the probe (clock B starts just before launch)
 5. Probe -> vllm serve: Launch vllm serve
 6. vllm serve -> Probe: "Model loading took" log line (weight cache acts here) [reply]
 7. Note over vllm serve: Compile (compile cache acts), profile, capture
-8. Probe -> vllm serve: Poll /health every 0.25 s until it answers
+8. Probe -> vllm serve: Poll /health every 0.25 s (from launch) (until it answers)
 9. Probe -> vllm serve: Request 1 (16 tokens) (clock B stops after the reply)
 10. Probe -> vllm serve: Requests 2 to 10 (subtracted from clock A's span)
 11. Handler -> RunPod endpoint: Job result carries marks, log, cache state
@@ -164,7 +164,7 @@ Clock A (laptop) runs from step 1 until a poll sees the result; clock B (worker)
 
 **Why:** The Python API would measure a startup path nobody deploys. Two clocks make a lying clock detectable: the implemented check compares the laptop and worker clocks and discards a run whose total leaves no room for a network round trip.
 
-**Cost:** Platform time is one residual: container and handler start, teardown and up to one 5 s poll of lag. RunPod's own queue and execution durations (clock C) are recorded but not used to split it; its queue delay was about 0.13 s (median), so the residual is not queueing. Two engine sub-phases (device init and KV allocation) are not delineated by this vLLM build, so they sit merged in an unattributed row. The log patterns are tied to vLLM 0.27.1.
+**Cost:** Platform time is one residual: handler start, teardown and up to one 5 s poll of lag. RunPod's own queue and execution durations (clock C) are recorded but not used to split it; its platform queue delay alone was about 0.13 s (median), so the residual is not queueing. Two engine sub-phases (device init and KV allocation) are not delineated by this vLLM build, so they sit merged in an unattributed row. The log patterns are tied to vLLM 0.27.1.
 
 ### Interleave the arms in random triples
 
@@ -264,7 +264,7 @@ Clock A (laptop) runs from step 1 until a poll sees the result; clock B (worker)
 **Results and the decisions they support:**
 
 - Where each arm's median cold start goes → `arms` Three arms, one variable, `clocks` Measure from outside the engine
-- Start-up before load → `arms` Three arms, one variable
+- Start-up and load, from the log → `arms` Three arms, one variable
 - How spread out the runs are → `shape` Report the shape, and what it cannot answer
 - Every run: the ECDF → `shape` Report the shape, and what it cannot answer
 - Each effect on its own → `arms` Three arms, one variable
@@ -342,7 +342,7 @@ Milestones: 4. Build against the captures; test it end to end (2026-08-28); 5. P
 
 ### Where each arm's median cold start goes
 
-- Axis: Median seconds per phase, 100 runs per arm, in clock order. A: nothing cached; B: weights cached; C: both. Platform is drawn first but includes teardown and poll lag. Unattributed: two engine sub-phases the log does not split, device initialisation (before compile) and KV allocation (after profiling), so its place here is not measured. Capture to first request: graph capture, the ready check (end of engine start until the health endpoint answers, polled every 0.25 s) and the first request (up to 16 tokens; time to first token is 0.042 s).
+- Axis: Median seconds per phase, 100 runs per arm, in clock order. A: nothing cached; B: weights cached; C: both. Platform is drawn first but includes teardown and poll lag. Unattributed: engine start the log gives no duration for; the design attributes it to device init and KV allocation, plus about 2 s after graph capture. Its place here is not measured. Capture to first request: graph capture, the ready check (end of engine start until the health endpoint answers, polled every 0.25 s) and the first request (up to 16 tokens; time to first token is 0.042 s).
 - Read it as: Start-up before load: each run's launch-to-loaded time minus vLLM's own reported load time (17.40, 4.57, 4.54 s). Dashed box on C: B's compile time.
 - How it is computed: Each segment is one phase's median over 100 runs (the last adds three medians), and medians do not add: the bars sum to 82.25, 66.07 and 38.77 s against median totals of 81.12, 65.43 and 39.37 s.
 - A: Platform 4.37, Server start-up before load 28.19, Weight load 17.4, Compile 19.01, Profiling 0.09, Unattributed 4.46, Graph capture 4.0, Ready check 4.43, First request 0.3 (s)
@@ -354,9 +354,9 @@ Milestones: 4. Build against the captures; test it end to end (2026-08-28); 5. P
 - Changed B → C: Compile cache only: compile falls 18.79 → 0.33 s; start-up before load also falls, 25.28 → 16.67 s (F2).
 - So: see decisions `arms`, `clocks`
 
-### Start-up before load
+### Start-up and load, from the log
 
-- Axis: Median gaps between four vLLM log lines, 100 runs per arm; 1 s timestamp resolution.
+- Axis: Median gaps between five log lines (four gaps), 100 runs per arm; 1 s timestamp resolution. About 6 s before the first line is not shown.
 - Read it as: C's head start is the first gap (10 s in A and B, 1 s in C), in the API server before the engine core starts. Its cause is not confirmed; a cached model-inspection result is the working guess.
 - A: Args to architecture 10, Architecture to init 9, Init to load start 3, Load start to done 17 (s)
 - B: Args to architecture 10, Architecture to init 7, Init to load start 3, Load start to done 4 (s)
@@ -376,7 +376,7 @@ Milestones: 4. Build against the captures; test it end to end (2026-08-28); 5. P
 
 ### Every run: the ECDF
 
-- Axis: Share of the 299 repeat-host runs finished by each total, in whole seconds and per cents; dashed lines: medians.
+- Axis: Share of each arm's repeat-host runs (99, 100, 100) finished by each total, in whole seconds and per cents; dashed lines: medians.
 - Read it as: The curves climb in steps about 5 s apart, as the laptop's 5 s status poll would make them: arm A's totals ranked 41 to 51 lie at 80.92–81.16 s, ranks 52 to 61 at 85.72–85.89 s, none between, and 289 of 299 clock A spans fall within 0.25 s of one 5.175 s grid.
 - Axes: x is Total cold start (s, whole seconds); y is Runs finished (%)
 - A (step): 81: 0, 81: 52, 86: 83, 91: 88, 96: 97, 101: 98, 107: 99, 112: 100
@@ -418,7 +418,7 @@ Milestones: 4. Build against the captures; test it end to end (2026-08-28); 5. P
 
 **30-second pitch:** I measured where the time goes when a vLLM server starts cold on a rented GPU, and which of two caches is worth warming: the model weights or the engine's compiled code. I ran three set-ups differing in one thing only, interleaved, a hundred times each, and split every start into phases. The compile cache saved about 10 seconds more per cold start than the weight cache, 95% interval 5.5 to 20 seconds more, and it left about 20% more KV cache for serving.
 
-**2-minute version:** Everyone talks about caching the weights, but vLLM also compiles parts of the model at startup and caches that on disk. I set up three arms that differ only in cache configuration: nothing cached, weights on a network volume, and weights plus a warm compile cache. I ran them as shuffled triples so platform drift could not pose as an arm effect, and I committed my hypotheses and rules before any campaign data. I timed the real `vllm serve` with one clock in the worker and one on my laptop, so platform start-up is a named residual, not hidden. The answer: warming the compile cache saved about 10 seconds more per cold start than caching the weights, and the interval on that difference never crossed zero. It also left about a fifth more KV cache; the registered explanation is that profiling no longer ran next to the compiler's memory, which the log fits but does not show. What it cannot tell you is anything about other hardware, or whether host placement drives the tail: every run landed on one machine, and I reported that rather than dropping the question.
+**2-minute version:** Everyone talks about caching the weights, but vLLM also compiles parts of the model at startup and caches that on disk. I set up three arms that differ only in cache configuration: nothing cached, weights on a network volume, and weights plus a warm compile cache. I ran them as shuffled triples so platform drift could not pose as an arm effect, and I committed my hypotheses and rules before any campaign data (after three reconnaissance captures). I timed the real `vllm serve` with one clock in the worker and one on my laptop, so platform start-up is a named residual, not hidden. The answer: warming the compile cache saved about 10 seconds more per cold start than caching the weights, and the interval on that difference never crossed zero. It also left about a fifth more KV cache; the registered explanation is that profiling no longer ran next to the compiler's memory, which the log fits but does not show. What it cannot tell you is anything about other hardware, or whether host placement drives the tail: every run landed on one machine, and I reported that rather than dropping the question.
 
 **Hard follow-ups:**
 
@@ -435,14 +435,14 @@ Milestones: 4. Build against the captures; test it end to end (2026-08-28); 5. P
 - Q: So should everyone warm the compile cache?
   A: It is the better buy and the more fragile one. A compile cache (P1: compile) costs nothing to store, but any change to engine version, model, hardware or flags invalidates it, so every upgrade pays the cold compile again unless warming is built into the deploy. The weight cache is a volume you rent every month whether you scale or not.
 
-**Limits (what I must not claim):** One provider, GPU model, model, engine version, region and host: the seconds do not transfer; the mechanisms do. H4 (does host placement drive the tail?) is unanswerable: all 300 runs landed on one host. Single replica, no contention. No percentile past p95. The first-touch rule that keeps the 2266.6 s run out of the ECDF (it stays in the medians) was written after seeing the data: post hoc.
+**Limits (what I must not claim):** One provider, GPU model, model, engine version, region and host: the seconds do not transfer; the mechanisms may transfer, but only this setup was measured. H4 (does host placement drive the tail?) is unanswerable: all 300 runs landed on one host. Single replica, no contention. No percentile past p95. The first-touch rule that keeps the 2266.6 s run out of the ECDF (it stays in the medians) was written after seeing the data: post hoc.
 
 ## Recall questions
 
 - Q: B and C differ only in the compile cache. Which chart segment should change, and which other one changed?
   A: Only compile should move, and it does: 18.79 to 0.33 s. The launch segment also shrank, 30.35 to 21.34 s, though vLLM's own loading time is the same in B and C (4.57 vs 4.54 s). The engine log puts the gap before the engine core starts (about 10 s in B, 1 s in C); its cause is unconfirmed.
 - Q: On the one-run view, where does clock B start, and what lands in platform time?
-  A: At step 4: the probe starts clock B just before launching `vllm serve`. Platform time is everything the laptop clock sees outside it: container and handler start before; teardown and up to one 5 s poll of lag after. RunPod's own queue delay was only about 0.13 s.
+  A: At step 4: the probe starts clock B just before launching `vllm serve`. Platform time is everything the laptop clock sees outside it: handler start before; teardown and up to one 5 s poll of lag after. RunPod's platform queue delay alone was only about 0.13 s.
 - Q: Why is arm C primed outside the campaign?
   A: Otherwise its early runs compile cold and its later runs do not, making the arm a mixture whose effect grows with run index and looks like a trend.
 - Q: Why is the compile cache checked before the engine starts, not after?

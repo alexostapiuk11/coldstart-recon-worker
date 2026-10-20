@@ -61,7 +61,7 @@
       "id": "clocks",
       "short": "Two clocks, platform residual",
       "term": "Two clocks and the platform residual",
-      "plain": "**Clock A** (laptop) brackets the whole job and sees it finish only when the laptop polls the job status, every 5 s; total [cold start](p1:coldstart) is its span minus the worker-clock warmup after the first request. **Clock B** (worker) starts just before `vllm serve`. **Platform time** = total minus clock B time, the one allowed cross-clock subtraction: container and handler start, teardown and up to one 5 s poll of lag. RunPod's own queue delay was about 0.13 s (median), so this is not queueing."
+      "plain": "**Clock A** (laptop) brackets the whole job and sees it finish only when the laptop polls the job status, every 5 s; total [cold start](p1:coldstart) is its span minus the worker-clock warmup after the first request. **Clock B** (worker) starts just before `vllm serve`. **Platform time** = total minus clock B time, the one allowed cross-clock subtraction: handler start, teardown and up to one 5 s poll of lag. Clock C shows about 1 s of handler time outside clock B; container boot is not shown. RunPod's platform queue delay alone was about 0.13 s (median), so this is not queueing."
     },
     {
       "id": "percentiles",
@@ -519,8 +519,8 @@
         {
           "from": "rp",
           "to": "hnd",
-          "label": "Boot container, start handler",
-          "text": "queue delay about 0.13 s"
+          "label": "Pick up the job, start handler",
+          "text": "platform queue delay about 0.13 s"
         },
         {
           "from": "hnd",
@@ -553,7 +553,8 @@
         {
           "from": "prb",
           "to": "vl",
-          "label": "Poll /health every 0.25 s until it answers"
+          "label": "Poll /health every 0.25 s (from launch)",
+          "text": "until it answers"
         },
         {
           "from": "prb",
@@ -637,7 +638,7 @@
       ],
       "chosen": "Run the real `vllm serve`, bracket it with a worker clock, split phases from its log, and get platform time by subtraction",
       "why": "The Python API would measure a startup path nobody deploys. Two clocks make a lying clock detectable: the implemented check compares the laptop and worker clocks and discards a run whose total leaves no room for a network round trip.",
-      "cost": "Platform time is one residual: container and handler start, teardown and up to one 5 s poll of lag. RunPod's own queue and execution durations (clock C) are recorded but not used to split it; its queue delay was about 0.13 s (median), so the residual is not queueing. Two engine sub-phases (device init and KV allocation) are not delineated by this vLLM build, so they sit merged in an unattributed row. The log patterns are tied to vLLM 0.27.1.",
+      "cost": "Platform time is one residual: handler start, teardown and up to one 5 s poll of lag. RunPod's own queue and execution durations (clock C) are recorded but not used to split it; its platform queue delay alone was about 0.13 s (median), so the residual is not queueing. Two engine sub-phases (device init and KV allocation) are not delineated by this vLLM build, so they sit merged in an unattributed row. The log patterns are tied to vLLM 0.27.1.",
       "why_short": "Timing the real `vllm serve` from outside measures the path people deploy, and a second clock lets a lying run be caught.",
       "cost_short": "Platform time is one residual (container start, teardown, poll lag), not queueing; two engine sub-phases stay merged.",
       "short": "Measure from outside the engine",
@@ -1159,19 +1160,19 @@
           "on_bar": "C"
         }
       },
-      "axis": "Median seconds per phase, 100 runs per arm, in clock order. A: nothing cached; B: weights cached; C: both. Platform is drawn first but includes teardown and poll lag. Unattributed: two engine sub-phases the log does not split, device initialisation (before compile) and KV allocation (after profiling), so its place here is not measured. Capture to first request: graph capture, the ready check (end of engine start until the health endpoint answers, polled every 0.25 s) and the first request (up to 16 tokens; time to first token is 0.042 s).",
+      "axis": "Median seconds per phase, 100 runs per arm, in clock order. A: nothing cached; B: weights cached; C: both. Platform is drawn first but includes teardown and poll lag. Unattributed: engine start the log gives no duration for; the design attributes it to device init and KV allocation, plus about 2 s after graph capture. Its place here is not measured. Capture to first request: graph capture, the ready check (end of engine start until the health endpoint answers, polled every 0.25 s) and the first request (up to 16 tokens; time to first token is 0.042 s).",
       "read_as": "Start-up before load: each run's launch-to-loaded time minus vLLM's own reported load time (17.40, 4.57, 4.54 s). Dashed box on C: B's compile time.",
       "so": [
         "arms",
         "clocks"
       ],
       "short": "Where each arm's time goes",
-      "takeaway": "Each cache shrinks the phase it acts on; C also starts up sooner than B, which it should not.",
+      "takeaway": "Each cache shrinks the phase it acts on; C also starts up sooner than B, which the design did not expect.",
       "arithmetic": "Each segment is one phase's median over 100 runs (the last adds three medians), and medians do not add: the bars sum to 82.25, 66.07 and 38.77 s against median totals of 81.12, 65.43 and 39.37 s."
     },
     {
-      "title": "Start-up before load",
-      "short": "Start-up before load",
+      "title": "Start-up and load, from the log",
+      "short": "Start-up and load, from the log",
       "chart": {
         "type": "stacked_bars",
         "unit": "s",
@@ -1242,7 +1243,7 @@
           }
         ]
       },
-      "axis": "Median gaps between four vLLM log lines, 100 runs per arm; 1 s timestamp resolution.",
+      "axis": "Median gaps between five log lines (four gaps), 100 runs per arm; 1 s timestamp resolution. About 6 s before the first line is not shown.",
       "read_as": "C's head start is the first gap (10 s in A and B, 1 s in C), in the API server before the engine core starts. Its cause is not confirmed; a cached model-inspection result is the working guess.",
       "so": "arms",
       "takeaway": "C's head start precedes the engine core; its cause is unconfirmed."
@@ -1486,7 +1487,7 @@
           }
         ]
       },
-      "axis": "Share of the 299 repeat-host runs finished by each total, in whole seconds and per cents; dashed lines: medians.",
+      "axis": "Share of each arm's repeat-host runs (99, 100, 100) finished by each total, in whole seconds and per cents; dashed lines: medians.",
       "read_as": "The curves climb in steps about 5 s apart, as the laptop's 5 s status poll would make them: arm A's totals ranked 41 to 51 lie at 80.92–81.16 s, ranks 52 to 61 at 85.72–85.89 s, none between, and 289 of 299 clock A spans fall within 0.25 s of one 5.175 s grid.",
       "so": "shape",
       "takeaway": "The 5 s stairs are the poll grid."
@@ -1574,7 +1575,7 @@
   ],
   "interview": {
     "pitch30": "I measured where the time goes when a vLLM server starts cold on a rented GPU, and which of two caches is worth warming: the model weights or the engine's compiled code. I ran three set-ups differing in one thing only, interleaved, a hundred times each, and split every start into phases. The compile cache saved about 10 seconds more per cold start than the weight cache, 95% interval 5.5 to 20 seconds more, and it left about 20% more KV cache for serving.",
-    "pitch120": "Everyone talks about caching the weights, but vLLM also compiles parts of the model at startup and caches that on disk. I set up three arms that differ only in cache configuration: nothing cached, weights on a network volume, and weights plus a warm compile cache. I ran them as shuffled triples so platform drift could not pose as an arm effect, and I committed my hypotheses and rules before any campaign data. I timed the real `vllm serve` with one clock in the worker and one on my laptop, so platform start-up is a named residual, not hidden. The answer: warming the compile cache saved about 10 seconds more per cold start than caching the weights, and the interval on that difference never crossed zero. It also left about a fifth more KV cache; the registered explanation is that profiling no longer ran next to the compiler's memory, which the log fits but does not show. What it cannot tell you is anything about other hardware, or whether host placement drives the tail: every run landed on one machine, and I reported that rather than dropping the question.",
+    "pitch120": "Everyone talks about caching the weights, but vLLM also compiles parts of the model at startup and caches that on disk. I set up three arms that differ only in cache configuration: nothing cached, weights on a network volume, and weights plus a warm compile cache. I ran them as shuffled triples so platform drift could not pose as an arm effect, and I committed my hypotheses and rules before any campaign data (after three reconnaissance captures). I timed the real `vllm serve` with one clock in the worker and one on my laptop, so platform start-up is a named residual, not hidden. The answer: warming the compile cache saved about 10 seconds more per cold start than caching the weights, and the interval on that difference never crossed zero. It also left about a fifth more KV cache; the registered explanation is that profiling no longer ran next to the compiler's memory, which the log fits but does not show. What it cannot tell you is anything about other hardware, or whether host placement drives the tail: every run landed on one machine, and I reported that rather than dropping the question.",
     "followups": [
       {
         "q": "Why three arms and not two, or four?",
@@ -1601,7 +1602,7 @@
         "a": "It is the better buy and the more fragile one. A [compile cache](p1:compile) costs nothing to store, but any change to engine version, model, hardware or flags invalidates it, so every upgrade pays the cold compile again unless warming is built into the deploy. The weight cache is a volume you rent every month whether you scale or not."
       }
     ],
-    "limits": "One provider, GPU model, model, engine version, region and host: the seconds do not transfer; the mechanisms do. H4 (does host placement drive the tail?) is unanswerable: all 300 runs landed on one host. Single replica, no contention. No percentile past p95. The first-touch rule that keeps the 2266.6 s run out of the ECDF (it stays in the medians) was written after seeing the data: post hoc."
+    "limits": "One provider, GPU model, model, engine version, region and host: the seconds do not transfer; the mechanisms may transfer, but only this setup was measured. H4 (does host placement drive the tail?) is unanswerable: all 300 runs landed on one host. Single replica, no contention. No percentile past p95. The first-touch rule that keeps the 2266.6 s run out of the ECDF (it stays in the medians) was written after seeing the data: post hoc."
   },
   "recall": [
     {
@@ -1610,7 +1611,7 @@
     },
     {
       "q": "On the one-run view, where does clock B start, and what lands in platform time?",
-      "a": "At step 4: the probe starts clock B just before launching `vllm serve`. Platform time is everything the laptop clock sees outside it: container and handler start before; teardown and up to one 5 s poll of lag after. RunPod's own queue delay was only about 0.13 s."
+      "a": "At step 4: the probe starts clock B just before launching `vllm serve`. Platform time is everything the laptop clock sees outside it: handler start before; teardown and up to one 5 s poll of lag after. RunPod's platform queue delay alone was only about 0.13 s."
     },
     {
       "q": "Why is arm C primed outside the campaign?",

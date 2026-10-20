@@ -44,7 +44,7 @@ KEY steps:
 1. Budget: 0.92 × 23.52 = 21.64 GiB.
 2. KV memory: 21.64 − 15.54 − 1.18 = 4.92 GiB cold; 21.64 − 15.54 − 0.19 = 5.91 GiB warm.
 3. Bytes per token: 2 (K and V) × 36 × 8 × 128 × 2 bytes = 147,456 B = 144 KiB (the shape is assumed).
-4. Tokens: 4.92 GiB / 144 KiB ≈ 35,826 against the log's 35,792, which is 2,237 blocks of 16 (block size assumed); 5.91 GiB gives ≈ 43,031 against 43,040. Rounding in the logged GiB explains the gap.
+4. Tokens: 4.92 GiB / 144 KiB ≈ 35,826 against the log's 35,792, which is 2,237 blocks of 16 (block size assumed); 5.91 GiB gives ≈ 43,035 against 43,040 (gap 5). Rounding in the logged GiB explains the gap.
 5. Gain: 0.99 GiB / 144 KiB ≈ 7,209 tokens against the observed 7,248. One GiB of profiling peak costs about 7,282 tokens.
 6. Requests: 35,792 / 8,192 = 4.37 → 4 and 43,040 / 8,192 = 5.25 → 5; at 2,048 tokens, 17 against 21.
 
@@ -77,7 +77,7 @@ RED FLAG: "More arms is always better", or proposing the baked image without say
 ### Drill 2 of 11
 
 Q: What is in platform time, and what is not?
-KEY: Platform time is total cold start minus the worker clock's time: container and handler start, teardown and up to one 5 s poll of lag. It is the one allowed cross-clock subtraction, a residual rather than a measured phase. RunPod's own queue delay was about 0.13 s (median), so it is not queueing.
+KEY: Platform time is total cold start minus the worker clock's time: handler start, teardown and up to one 5 s poll of lag. It is the one allowed cross-clock subtraction, a residual rather than a measured phase. RunPod's platform queue delay alone was about 0.13 s (median), so it is not queueing.
 RED FLAG: "Platform time is the queue." Or treating it as a measured phase.
 
 ### Drill 3 of 11
@@ -119,7 +119,7 @@ RED FLAG: "Noise", or "it is the compile", or "unknown" with no next step.
 ### Drill 9 of 11
 
 Q: The volume load took 4.57 s for about 16 GB. Is that the volume's throughput?
-KEY: It would be about 3.6 GB/s, high for network storage. All 300 runs landed on one host, and the first arm B run after a 19.8 h gap spent 17.45 s in vLLM's load, so a warm host cache is one possible reading, unverified. Treat 4.57 s as a warm-host figure until it is measured on fresh hosts.
+KEY: It would be about 3.6 GB/s, high for network storage (general knowledge, not measured here). All 300 runs landed on one host, and the first arm B run after a 19.8 h gap spent 17.45 s in vLLM's load, so a warm host cache is one possible reading, unverified. Treat 4.57 s as a warm-host figure until it is measured on fresh hosts.
 RED FLAG: Quoting 4.57 s as the volume's throughput for any host.
 
 ### Drill 10 of 11
@@ -142,16 +142,16 @@ KEY outline:
 
 1. Decompose before optimising: a worker clock around the engine with log-line timestamps, and a platform clock finer than a 5 s poll. Budget platform, start-up, weight load, compile, profiling, capture, ready and first token.
 2. Compile and engine caches as build artifacts: in CI, start the engine once per engine version, model revision, GPU model and flag set, and publish the cache directory versioned. Check the key at start and alert on a miss. Here a warm directory was worth about 26 s a start and 20.3% more KV cache.
-3. Weights: a volume or node-local copy beat the hub here (vLLM's load 17.40 s against 4.57 s), but 4.57 s may be a warm-host figure. Measure first reads on fresh hosts before promising it, and weigh the volume's fixed cost against scale-up frequency.
+3. Weights: a network volume beat the hub (17.40 vs 4.57 s); node-local copies were not tested. But 4.57 s may be a warm-host figure. Measure first reads on fresh hosts before promising it, and weigh the volume's fixed cost against scale-up frequency.
 4. Image distribution: the one first-touch run took 2266.6 s, far above every cache effect. Pre-pull on node join and keep the image warm; this study has one observation, not a rate.
 5. Capture and readiness: graph capture is a flat 4 s here, and skipping it (--enforce-eager) saves that per start but costs on every token after, so it suits only short-lived replicas. Gate traffic on /health, and check per engine version that warm-up finishes before it answers (true for 0.27.1 here).
-6. Capacity: report KV tokens per replica as an indicator. A cold compile cost 20.3% of it for the replica's life here.
+6. Capacity: report KV tokens per replica as an indicator. Warm cache gave 20.3% more KV cache than cold.
 7. Measure: p50 and p95 time to first token from zero, split by host warmth; cache-key miss rate after each upgrade; KV tokens per replica; and contention when many replicas start together, which this study did not test.
 8. Trade-offs: the cache matrix grows with GPU models, versions and flags, so build only what the fleet runs. A warm pool costs idle GPU-hours; compare it with the break-even arithmetic.
 
 KEY pitfalls:
 
-- Quoting this study's seconds for other GPUs, models, engine versions or providers: the seconds do not transfer, the mechanisms do.
+- Quoting this study's seconds for other GPUs, models, engine versions or providers: the seconds do not transfer; the mechanisms may transfer, but only this setup was measured.
 - Promising the weight-cache speed-up from warm-host numbers: all 300 runs used one host.
 - A compile cache with no key check, so a routine upgrade turns it cold in silence.
 - Reporting a p99 or a mean from a hundred starts per set-up.
@@ -174,7 +174,7 @@ Steps:
 2. Run .venv/bin/python scripts/weights_phase_check.py --store data/campaign.jsonl. Expect start-up before load of 28.19, 25.28 and 16.67 s beside vLLM-reported loads of 17.40, 4.57 and 4.54 s.
 3. Take each run's clock A span (t_total_job from coldstart.analysis.metrics.derive) and fold it modulo trial periods around 5 s. The period with the tightest bunching is about 5.175 s.
 4. Plot an ECDF of t_total per arm over the repeat-host runs (drop the one first-touch run). Expect stairs about 5 s apart.
-5. Call harness.stats.bootstrap_contrast_difference(a, b, c, seed=3) on t_process, then on t_total. Expect about −12.16 [−15.54, −10.74] and −10.39 [−20.30, −5.54].
+5. Call harness.stats.bootstrap_contrast_difference(a, b, c, seed=3) on t_process, then on t_total. Use all 300 runs, first-touch included. Expect about −12.16 [−15.54, −10.74] and −10.39 [−20.30, −5.54].
 6. For each run's engine log lines, take the timestamps of the non-default args line and the Resolved architecture line, and print the median gap per arm. Expect 10, 10 and 1 s.
 7. Read the Desired GPU memory utilization and Actual usage log lines, and recompute KV memory and tokens with the calculator on this page.
 
@@ -187,11 +187,11 @@ Record:
 - KV memory and tokens against the logged 4.92 and 5.91 GiB, 35,792 and 43,040 tokens
 
 KEY expected result: Everything reproduces from the committed store: identical analysis file, the three start-up figures, a poll grid near 5.175 s, a worker-clock interval about a third as wide as the laptop-clock one, a 10 s, 10 s and 1 s architecture gap, and KV numbers within rounding of the log.
-KEY what it shows: The clock's resolution sets interval width, the engine log holds more than the summary, and the memory arithmetic closes within rounding.
+KEY what it shows: The clock's resolution contributes to interval width, the engine log holds more than the summary, and the memory arithmetic closes within rounding.
 
 ## Calculator
 
-KV cache capacity Defaults are arm B's logged values (cold compile); set the peak to 0.19 for arm C. Card, utilisation, fixed memory and peak come from the engine log. Bytes per token and request length are assumptions, listed below.
+KV cache capacity Defaults are arm B's logged values (cold compile) and give 35,814 tokens; a 0.19 peak (arm C) gives 43,023. The log line also reports 0.56 GiB of CUDA graph memory, left out here. Bytes per token and request length are assumptions, listed below.
 
 Inputs (default, range):
 
@@ -211,7 +211,7 @@ Outputs at the defaults:
 
 ## Recall cards
 
-- [phases] List one cold start's phases in clock order. -> KEY: Platform, start-up before load, weight load, compile, profiling, unattributed engine start (device initialisation and KV allocation, not split by the log), graph capture, ready check, first request.
+- [phases] List one cold start's phases in clock order. -> KEY: Platform, start-up before load, weight load, compile, profiling, unattributed engine start (the log gives no duration for it; the design attributes it to device initialisation and KV allocation, plus about 2 s after graph capture), graph capture, ready check, first request.
 - [phases] Median start-up before load and vLLM-reported load, per arm? -> KEY: A: 28.19 s and 17.40 s. B: 25.28 s and 4.57 s. C: 16.67 s and 4.54 s.
 - [caches] What did the weight cache (A to B) shrink? -> KEY: vLLM's load, 17.40 → 4.57 s. Start-up before load barely moved, 28.19 → 25.28 s, and compile stayed near 19 s.
 - [caches] What did the warm cache directory (B to C) shrink? -> KEY: Compile, 18.79 → 0.33 s, and start-up before load, 25.28 → 16.67 s. vLLM's load did not change.
@@ -222,14 +222,14 @@ Outputs at the defaults:
 - [memory] Whole 8,192-token requests held, cold against warm? And at 2,048 tokens? -> KEY: 4 against 5 (4.37 and 5.25); 17 against 21 (17.48 and 21.02).
 - [clocks] Where does clock B start and stop? -> KEY: From just before vllm serve is launched to the end of the first request. Requests 2 to 10 are the warm-up tail, subtracted from clock A's span.
 - [clocks] What sets clock A's resolution? -> KEY: The 5 s status poll: spans repeat on a grid of about 5.175 s, 289 of 299 within 0.25 s of it.
-- [clocks] What is platform time, and what is it not? -> KEY: Total minus clock B time: container and handler start, teardown, up to one poll of lag. Not queueing: RunPod's queue delay was about 0.13 s.
+- [clocks] What is platform time, and what is it not? -> KEY: Total minus clock B time: handler start, teardown, up to one poll of lag. Not queueing: RunPod's platform queue delay alone was about 0.13 s.
 - [stats] The headline difference and its interval? -> KEY: −10.39 s, 95% [−20.30, −5.54] on total cold start: the compile cache saves more.
 - [stats] The same difference on the worker clock? -> KEY: −12.16 s [−15.54, −10.74]: exploratory, with no poll lag and platform time left out.
 - [stats] Why is B − C's interval, 25.97 to 31.01 around 26.07, lopsided? -> KEY: B's runs ranked 41 to 56 sit at 65.35 to 65.80 s and rank 57 is 70.29 s: a resample can lift B's median into the 70 s cluster, but not far below.
 - [stats] If the difference's interval ran from −20 to +3 s, what could you claim? -> KEY: Each cache's own saving, but not the ranking, which needs an interval that excludes zero.
 - [design] Why prime arm C outside the campaign? -> KEY: Otherwise its early runs compile cold and later ones do not: a mixture that looks like a trend.
 - [design] Why check the cache state before the engine starts? -> KEY: A cold compile creates the directory as it finishes, so checked afterwards every cold run would look warm.
-- [design] What was fixed before the campaign, and what was added after? -> KEY: Before: hypotheses, contrasts, exclusion and stopping rules, the headline rule. After, as dated amendments: the first-touch rule (post hoc) and the H4 scoping.
+- [design] What was fixed before the campaign, and what was added after? -> KEY: Before: hypotheses, contrasts, exclusion and stopping rules, the headline rule. After, as dated amendments, among others (image re-pins, window-spacing note): the first-touch rule (post hoc) and the H4 scoping.
 - [limits] Three things this study cannot tell you. -> KEY: Other GPUs, models, engine versions or providers; contention with many replicas at once; whether host placement drives the tail (all runs on one host).
 - [ops] What invalidates a compile cache, and what is the platform fix? -> KEY: A change of engine version, model, hardware or flags. Warm it in the deploy pipeline, keyed per combination.
 - [draw it: phases] [draw] Draw it: the time-ordered bar for arms B and C, naming which block each cache shrinks. -> KEY: Left to right: platform, start-up before load, weight load, compile, profiling, unattributed, capture to first request. The weight cache shrinks the load block; the warm cache directory shrinks compile and start-up.
@@ -254,7 +254,11 @@ Not from the study page's sources:
 - 147,456: worked out, 2 (K and V) x 36 layers x 8 KV heads x 128 head dim x 2 bytes, from the assumed shape.
 - 144: worked out, 147,456 B / 1,024 = 144 KiB per token.
 - 35,826: worked out, 4.92 GiB x 2^30 B / 147,456 B per token = 35,826.2.
-- 43,031: worked out, 5.91 GiB x 2^30 B / 147,456 B per token = 43,031.5.
+- 43,035: worked out, 5.91 GiB x 2^30 B / 147,456 B per token = 43,035.3.
+- 35,814: worked out, (23.52 x 0.92 - 15.54 - 1.18) = 4.9184 GiB x 2^20 KiB / 144 KiB per token = 35,814.7, floored: the calculator defaults.
+- 43,023: worked out, (23.52 x 0.92 - 15.54 - 0.19) = 5.9084 GiB x 2^20 KiB / 144 KiB per token = 43,023.7, floored: the calculator with the peak at 0.19.
+- 0.56: worked out, GiB of CUDA graph memory in the engine log line 'Graph capturing finished in 4 secs, took 0.56 GiB' (data/campaign.jsonl, run 0).
+- one in ten: worked out, 9.7% of the headline bootstrap's 10,000 resamples (974; seed 3) put arm B's median in the 70 s cluster, which needs fewer than 50 of 100 draws from its 56 low runs; binomial P(X <= 49), n = 100, p = 0.56, is 9.55%.
 - 7,209: worked out, 0.99 GiB x 2^30 B / 147,456 B per token = 7,208.97.
 - 7,282: worked out, 2^30 B / 147,456 B per token = 7,281.8: tokens one GiB of profiling peak costs.
 - 2,237: worked out, 35,792 / 16 = 2,237 blocks, exact.
