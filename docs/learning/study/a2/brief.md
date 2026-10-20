@@ -28,6 +28,26 @@ Read first: LLM serving on a GPU (P1), How these experiments earn trust (P2).
 - **The miss rule**: Per 10 s bin, each real repeat's residual is its p50 minus its own prediction. A bin **misses** when all three residuals sit on one side by more than 1 ms. With no bias each repeat is a coin flip, so a perfect model misses at most 2 × (1/2)³ = 1/4 of bins. **Pass:** at least 10 judged bins, at most half missing.
 - **Host speed**: Rented GPUs of one model are not equally fast, and RunPod picks the host. Every other host measured had 4 to 18% lower latency than the curve's, more at high load: about the size of the gate's misses (14% and 13%). A measured cause, not shown to be the whole one.
 
+## How it works
+
+One replayed run: queue-depth policy (up 4, down 1), arm C step spike, repetition 0 of the committed sweep. Simulated by a model that failed its gate twice, not measured.
+
+| Step | What happens | Time (s) | Serving replicas | Starting (billed) | Queue per serving | Controller action |
+|---|---|---|---|---|---|---|
+| 1 | Spike: 253.4 req/s from t = 0 to 190 s, but one replica completes about 211.2 (Little's Law). Every 5 s the controller reads waiting requests per serving replica: up at 4 or more, down at 1 or less. (Decision: One controller, a grid per signal, frontiers) | 0 | 1 | 0 | 0 | hold: nothing queued yet |
+| 2 | t = 5: the queue is 196 per replica, so UP one replica, billed from launch. It serves after a cold start (P1: coldstart) drawn from arm C's runs (median 39.37 s); this draw is 39.4 s. | **5** | 1 | **1** | **196** | **UP: launch replica 2** |
+| 3 | t = 10 to 30: the queue grows (374 at t = 10), but one 30 s cooldown after any action, up or down, holds the fleet. At t = 35 it is 1,416 and replica 2 is still starting: UP again, replica 3. | **35** | 1 | **2** | **1,416** | **UP: launch replica 3** |
+| 4 | t = 44.4 (5 + 39.4): replica 2 starts serving. Two replicas complete up to 2 × 211.2 = 422.4 req/s against 253.4 arriving, so the backlog drains. | **44.4** | **2** | **1** | **draining** | **none (not an evaluation)** |
+| 5 | t = 65: queue 0 (requests wait only once all 128 slots per replica are full), so DOWN. The newest replica goes first: replica 3, still starting, billed for 30 s and never served. | **65** | 2 | **0** | **0** | **DOWN: remove replica 3** |
+| 6 | t = 95: queue still 0, cooldown over: DOWN to one replica, with the spike still on at 253.4 req/s. A queue of 0 means enough capacity, and this rule removes the replica that made it enough. | **95** | **1** | 0 | 0 | **DOWN: remove replica 2** |
+| 7 | The backlog rebuilds: t = 125, queue 1,274, UP; t = 155, queue 2,546, UP. The first serves at about 164 s, some 69 s after the scale-down: a second cold start under overload. | **155** | 1 | **2** | **2,546** | **UP at 125 and at 155** |
+| 8 | t = 185: queue 0, so DOWN removes replica 5, still starting. t = 215, spike over (it ended at 190 s): queue 0, DOWN to one replica. | **215** | 1 | **0** | **0** | **DOWN at 185 and at 215** |
+| 9 | Cost: 400 for replica 1 plus 90 + 30 + 90 + 30 = 240 for the four launched: 640 replica-seconds; p99 11.73 s. Of 19 × 30 = 570 replayed queue-depth runs, 410 make these exact moves; all scale down before 190 s. (Decision: One controller, a grid per signal, frontiers) | **400** | 1 | 0 | 0 | **end of window** |
+
+Bold cells changed in that step.
+
+**Takeaway:** In this simulator a queue of 0 means enough capacity, so queue depth scales down mid-spike and pays a second cold start: cheap at 640, slower at 11.15 s against 7.20 s. Real autoscalers were not tested.
+
 ## System views (C4)
 
 ### Who and what the study touches (context)
@@ -390,7 +410,7 @@ Milestones: 1. Specify a gated simulator, then re-base on artifact 1 (2026-08-17
 ### UNVALIDATED: what each policy spent and reached (arm C, step)
 
 - Axis: Simulated, not measured, by a model that failed its gate twice. Each dot is one policy (signal and thresholds): its median over 30 simulated step spikes with arm C's cold starts.
-- Read it as: All 19 queue-depth policies spent 640 replica-seconds and all 19 utilisation policies sat at the cap, 3,095; within each, only p99 differs. The budget line constrains no one, so H3's 3.96 s "gap" is queue depth spending 640 against 2,320–3,095. Queue depth is cheap because the simulated controller scales back down once the backlog clears; a read-only rerun with scale-down switched off (exploratory, not committed) brought its p99 close to the others', so the gap mostly reflects the scale-down rule, not the scale-up signal.
+- Read it as: All 19 queue-depth policies spent 640 replica-seconds and all 19 utilisation policies sat at the cap, 3,095; within each, only p99 differs. The budget line constrains no one, so H3's 3.96 s "gap" is queue depth spending 640 against 2,320–3,095. Queue depth is cheap because it scales down once the backlog clears (see the walkthrough); a rerun with scale-down off (exploratory, not committed) brought its p99 close to the others', so the gap mostly reflects the scale-down rule.
 - How it is computed: Gap = worst reached p99 − best at the budget: 11.15 − 7.20 = 3.95 s on rounded values (post: 3.96, 95% interval 3.52–4.56). Arm A's step: 0.082 s, so H3's halving fails.
 - Axes: x is replica-seconds per spike (median of 30); y is per-run p99 latency, median of 30 (s)
 - queue depth (19): 640: 11.2, 640: 11.3, 640: 11.4 ×2, 640: 11.5 ×7, 640: 11.6 ×3, 640: 11.7 ×2, 640: 11.8, 640: 11.9, 640: 12.0
