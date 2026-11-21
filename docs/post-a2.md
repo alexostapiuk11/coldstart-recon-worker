@@ -13,7 +13,7 @@ the date there. The same check refuses a SPEND-PENDING line and an analysis whos
 
 # An autoscaling simulator that failed its own test
 
-**Oleksii Ostapiuk** · PUBLICATION-DATE · `/experiments/autoscaling-signal-and-cold-start`
+**Oleksii Ostapiuk** · 2026-11-20 · `/experiments/autoscaling-signal-and-cold-start`
 
 I set out to measure which autoscaling signal suits an LLM server whose replicas
 take tens of seconds to over a minute to start. The simulator built to answer it
