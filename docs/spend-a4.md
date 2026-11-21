@@ -3,7 +3,8 @@
 **Drafted 2026-10-07; the owner confirmed the total ($25.23 over 22.77 billed hours) against the RunPod console on 2026-11-20.** Every dollar figure comes from
 RunPod's billing API (`GET /v1/billing/endpoints` for endpoint `nnypnh9drkq5ux`,
 hourly buckets, last read 2026-10-07 08:16 UTC, two hours after the final job), not
-from the console (the 2026-11-20 confirmation is the owner's check against it). Job counts and execution times come
+from the console; the owner confirms the total against the console before
+publication. Job counts and execution times come
 from the committed stores. Scope amendment section 12 requires this artifact's own
 spend recorded.
 
