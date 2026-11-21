@@ -3265,5 +3265,43 @@
    "models": 3,
    "gpus": 1
   }
+ },
+ "spend": {
+  "source": "RunPod billing API, GET /v1/billing/endpoints for endpoint nnypnh9drkq5ux, hourly buckets summed to UTC days; recorded in docs/spend-a4.md",
+  "read_on": "2026-10-07",
+  "console_confirmed_on": "2026-11-20",
+  "console_confirmation": "the owner confirmed $25.23 over 22.77 billed hours against the RunPod console on 2026-11-20",
+  "rows": [
+   {
+    "endpoint_id": "nnypnh9drkq5ux",
+    "day": "2026-10-05",
+    "hours_billed": 5.7,
+    "usd": 6.32
+   },
+   {
+    "endpoint_id": "nnypnh9drkq5ux",
+    "day": "2026-10-06",
+    "hours_billed": 14.42,
+    "usd": 15.98
+   },
+   {
+    "endpoint_id": "nnypnh9drkq5ux",
+    "day": "2026-10-07",
+    "hours_billed": 2.64,
+    "usd": 2.93
+   }
+  ],
+  "per_endpoint": {
+   "nnypnh9drkq5ux": {
+    "hours_billed": 22.77,
+    "usd": 25.23,
+    "what": "artifact 4's endpoint (all of its paid runs)"
+   }
+  },
+  "total_usd": 25.23,
+  "total_hours_billed": 22.77,
+  "billed_rate_hourly": 1.108,
+  "billed_rate_definition": "total amount over total time billed, per hour",
+  "provenance_note": "written by hand from docs/spend-a4.md: no raw billing-rows store exists for artifact 4 (artifact 2 has data/a2/billing-endpoints.json), so rows carry the day totals only"
  }
 }

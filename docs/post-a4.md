@@ -16,34 +16,35 @@ drifted.
 
 **Oleksii Ostapiuk** · 2026-11-20 · `/experiments/multi-model-placement`
 
-For twenty small models on rented RTX 4090s, at the latency target and swap time I
-measured, the cheapest placement depends on how the traffic arrives, not on how skewed
-it is. When each model's requests are spread
-across time, **co-locate two models per GPU**. When each model's requests come in
-bursts with long gaps between them, **swap models in and out of a GPU**. As a rule over
-the Zipf skew s that I swept, it reads: spread arrivals, s = 0.6–2.0: colocate; bursty
-arrivals, s = 0.8–2.0: swap. **Dedicating a GPU to each model was never the cheapest**
-in either regime. At the reference point (bursty arrivals, Zipf skew
-s = 1.0), dedicating needs 21 GPUs and costs $850.43 per tenant per month, which is
-$2.84 per million tokens; swapping needs 10 GPUs, $404.97 per tenant per month, $1.35
-per million tokens; co-locating needs 12 GPUs, $485.96, $1.62. For twenty tenants,
-dedicating costs $8,909.28 more per month than the cheapest option. The price of a
-GPU-hour is $1.11, derived from RunPod's billing API for a serverless RTX 4090 worker.
-Dollars assume every GPU runs all month (730 hours); per million tokens counts output
-tokens only, 256 per request, at the offered load. Substitute your own rate and
-utilisation: cost scales with both.
+**The simulator behind this comparison failed its own validation test, so read
+everything below as a simulator's answer, not a measured one.** It was to be trusted
+only after it reproduced a real one-GPU, three-model replay under a pre-registered
+test. It did not: the validation outcome is failed, with 10 of 13 judged bins outside
+the band of three real repeats, and one of two held-out interference cells missed. The
+ordering is wide (dedicating costs about twice the cheapest option), but the gate
+measures latency, and I did not test whether the model's error is small enough to
+leave the ordering unchanged; the exact GPU counts are not validated. The gate replays
+one GPU with the swap strategy; it never exercises co-location, which is checked only
+by two held-out interference cells.
 
-**Read those numbers as a simulator's, because the simulator failed its test.** The
-placement comparison runs in a simulator fed with measured inputs, and it was to be
-trusted only after it reproduced a real one-GPU, three-model replay under a
-pre-registered test. It did not: the validation outcome is failed, with 10 of 13
-judged bins outside the band of three real repeats, and one of two held-out
-interference cells missed. The ordering is wide (dedicating costs about twice
-the cheapest option), but the gate measures latency, and I did not test whether the
-model's error is small enough to leave the ordering unchanged; the exact GPU counts
-are not validated. The gate replays one GPU with the swap strategy; it never exercises
-co-location, which is checked only by two held-out interference cells. Below: the answer, then what was measured, then the failure and what
-I know about it.
+With that caveat: for twenty small models on rented RTX 4090s, at the latency target
+and swap time I measured, the cheapest placement depends on how the traffic arrives,
+not on how skewed it is. When each model's requests are spread across time,
+**co-locate two models per GPU**. When each model's requests come in bursts with long
+gaps between them, **swap models in and out of a GPU**. As a rule over the Zipf skew s
+that I swept, it reads: spread arrivals, s = 0.6–2.0: colocate; bursty arrivals,
+s = 0.8–2.0: swap. **Dedicating a GPU to each model was never the cheapest** in either
+regime. At the reference point (bursty arrivals, Zipf skew s = 1.0), dedicating needs
+21 GPUs and costs $850.43 per tenant per month, which is $2.84 per million tokens;
+swapping needs 10 GPUs, $404.97 per tenant per month, $1.35 per million tokens;
+co-locating needs 12 GPUs, $485.96, $1.62. For twenty tenants, dedicating costs
+$8,909.28 more per month than the cheapest option. The price of a GPU-hour is $1.11,
+derived from RunPod's billing API for a serverless RTX 4090 worker. Dollars assume
+every GPU runs all month (730 hours); per million tokens counts output tokens only,
+256 per request, at the offered load. Substitute your own rate and utilisation: cost
+scales with both.
+
+Below: the answer, then what was measured, then the failure and what I know about it.
 
 Harness, raw data, analysis and figure code:
 [github.com/alexostapiuk11/coldstart-recon-worker](https://github.com/alexostapiuk11/coldstart-recon-worker)
