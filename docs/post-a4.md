@@ -4,18 +4,17 @@ Never changes, per the portfolio contract. It names the question the experiment
 asked (where to place many models on GPUs), not the headline it ended with, so the
 title can be reworded at publication without breaking the URL.
 
-The byline date is the publication date. PUBLICATION-DATE is a placeholder the
-owner sets at publication. The spend is recorded, from RunPod's billing API, in
-`docs/spend-a4.md`.
+The byline date is the publication date. The spend is recorded, from RunPod's
+billing API, in `docs/spend-a4.md`.
 
-DRAFT for the owner's review. Every headline number below is rendered by
-`placement/post_numbers.py` from `data/a4/analysis.json`, and
-`tests/test_a4_post.py` fails if one is missing or has drifted.
+Every headline number below is rendered by `placement/post_numbers.py` from
+`data/a4/analysis.json`, and `tests/test_a4_post.py` fails if one is missing or has
+drifted.
 -->
 
 # Dedicate, swap or share: placing twenty small models on GPUs, and a simulator that missed its own test
 
-**Oleksii Ostapiuk** · PUBLICATION-DATE · `/experiments/multi-model-placement`
+**Oleksii Ostapiuk** · 2026-11-20 · `/experiments/multi-model-placement`
 
 For twenty small models on rented RTX 4090s, at the latency target and swap time I
 measured, the cheapest placement depends on how the traffic arrives, not on how skewed
